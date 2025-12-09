@@ -53,6 +53,9 @@ class LAS {
 public:
     static LAS& get() noexcept { static LAS instance; return instance; }
 
+    Handle<VkAccelerationStructureKHR> blas_;
+    VkDeviceSize blasSize_ = 0;
+
     LAS(const LAS&) = delete;
     LAS& operator=(const LAS&) = delete;
     LAS(LAS&&) = delete;
@@ -121,7 +124,6 @@ private:
     ~LAS() = default;
 
     mutable std::mutex mutex_;
-    Handle<VkAccelerationStructureKHR> blas_;
     Handle<VkAccelerationStructureKHR> tlas_;
     uint64_t instanceBufferId_ = 0;
     VkDeviceSize tlasSize_ = 0;

@@ -2,16 +2,6 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
-// THE ONE TRUE SWAPCHAIN — COMPILES CLEAN, NO 60FPS DEADLOCK, NO const ON STATICS
-// =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/LAS.hpp"
@@ -43,9 +33,9 @@ namespace RTX {
 static std::string_view presentModeToString(VkPresentModeKHR mode) noexcept {
     switch (mode) {
         case VK_PRESENT_MODE_IMMEDIATE_KHR: return "IMMEDIATE (uncapped)";
-        case VK_PRESENT_MODE_MAILBOX_KHR: return "MAILBOX (tearing-free)";
-        case VK_PRESENT_MODE_FIFO_KHR: return "FIFO (vsync)";
-        default: return "UNKNOWN";
+        case VK_PRESENT_MODE_MAILBOX_KHR:   return "MAILBOX (tearing-free)";
+        case VK_PRESENT_MODE_FIFO_KHR:      return "FIFO (vsync)";
+        default:                            return "UNKNOWN";
     }
 }
 
@@ -188,7 +178,7 @@ void SwapchainManager::createImageViews() noexcept
                   "               \"...and they see us.\"");
 }
 
-// ── PUBLIC ACCESSORS FOR DIRECT SWAPCHAIN OUTPUT (OPTION 1) ──────────────────
+// ── PUBLIC ACCESSORS FOR DIRECT SWAPCHAIN OUTPUT (OPTION 1) ───────────────
 const std::vector<VkImageView>& SwapchainManager::getImageViews() const noexcept
 {
     return swapchainImageViews_;
@@ -201,6 +191,7 @@ VkImageView SwapchainManager::getImageView(uint32_t index) const noexcept
     return swapchainImageViews_[index];
 }
 
+// ── CLEANUP ────────────────────────────────────────────────────────────────
 void SwapchainManager::cleanup() noexcept
 {
     for (auto v : swapchainImageViews_)
@@ -239,7 +230,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
 
-    // ── SURFACE FORMATS — THE EMPIRE CHOOSES ITS COLORS ──
+    // ── SURFACE FORMATS
     uint32_t formatCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr));
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
@@ -247,7 +238,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data()));
     }
 
-    // ── PRESENT MODES — THE EMPIRE CHOOSES ITS SPEED ──
+    // ── PRESENT MODES
     uint32_t presentCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr));
     std::vector<VkPresentModeKHR> presentModes(presentCount);
@@ -255,7 +246,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data()));
     }
 
-    // ── EXTENT — THE EMPIRE CLAIMS ITS TERRITORY ──
+    // ── EXTENT
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == std::numeric_limits<uint32_t>::max())
     {
@@ -265,7 +256,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
 
     LOG_AMOURANTH("Swapchain territory claimed: {}×{}", extent.width, extent.height);
 
-    // ── IMAGE COUNT — THE EMPIRE DEMANDS FRAMES ──
+    // ── IMAGE COUNT
     uint32_t imageCount = caps.minImageCount + 1;
     if (Options::Performance::MAX_FRAMES_IN_FLIGHT > 0) {
         imageCount = std::min(imageCount, Options::Performance::MAX_FRAMES_IN_FLIGHT);
@@ -274,7 +265,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         imageCount = std::min(imageCount, caps.maxImageCount);
     }
 
-    // ── PRESENT MODE — THE EMPIRE CHOOSES ITS VELOCITY ──
+    // ── PRESENT MODE
     VkPresentModeKHR desired = VK_PRESENT_MODE_FIFO_KHR;
     if (Options::Display::UNCAPPED_MODE_ACTIVE)
         desired = VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -295,7 +286,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         presentModeToString(presentMode),
         presentModeToString(desired));
 
-    // ── HDR OR SRGB — THE EMPIRE CHOOSES ITS LIGHT ──
+    // ── HDR OR SRGB
     VkSurfaceFormatKHR chosen = formats[0];
     if (supportsHDR())
     {
@@ -325,7 +316,7 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         chosen.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ? "HDR10" : "sRGB",
         chosen.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10_ST2084" : "sRGB");
 
-    // ── QUEUE OWNERSHIP — THE EMPIRE OWNS ALL PATHS ──
+    // ── QUEUE OWNERSHIP
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
@@ -357,11 +348,10 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
 
-    // ── FORGE THE CANVAS ──
+    // ── FORGE THE CANVAS
     VkSwapchainKHR raw = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
 
-    // Destroy old swapchain AFTER new one is created (Vulkan spec compliant)
     if (old && old != raw) {
         vkDestroySwapchainKHR(stone_device(), old, nullptr);
     }
@@ -416,10 +406,9 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
                                  fence,
                                  pImageIndex);
 
-    // Dynamic recovery
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || result == VK_TIMEOUT) {
         recreate(swapchainExtent_.width, swapchainExtent_.height);
-        return VK_ERROR_OUT_OF_DATE_KHR;  // Signal to retry
+        return VK_ERROR_OUT_OF_DATE_KHR;
     }
 
     return result;
@@ -428,7 +417,7 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
 // ── PRESENT (robust, handles SUBOPTIMAL) ───────────────────────────────────
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
-    VkSwapchainKHR rawSwapchain = swapchain_.get();  // Valid lvalue
+    VkSwapchainKHR rawSwapchain = swapchain_.get();
 
     VkPresentInfoKHR pi{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -487,14 +476,14 @@ void SwapchainManager::injectHdrMetadata(VkCommandBuffer, uint32_t) noexcept
 
     if (!swapchain_.valid()) return;
 
-    VkSwapchainKHR rawSwapchain = swapchain_.get();  // Valid lvalue
+    VkSwapchainKHR rawSwapchain = swapchain_.get();
 
     VkHdrMetadataEXT m{
         .sType                     = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,
         .displayPrimaryRed         = {0.708f, 0.292f},
-        .displayPrimaryGreen       = {0.170f, 0.797f},
-        .displayPrimaryBlue        = {0.131f, 0.046f},
-        .whitePoint                = {0.3127f, 0.3290f},
+        .displayPrimaryGreen       {0.170f, 0.797f},
+        .displayPrimaryBlue        {0.131f, 0.046f},
+        .whitePoint                {0.3127f, 0.3290f},
         .maxLuminance              = Options::Display::TARGET_BRIGHTNESS_NITS,
         .minLuminance              = 0.001f,
         .maxContentLightLevel      = Options::Display::TARGET_BRIGHTNESS_NITS,

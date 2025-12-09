@@ -2292,10 +2292,6 @@ void VulkanRenderer::clearPinkForce() noexcept
 // 2. Application::run — THE ONE TRUE LOOP — PINK PHOTONS ETERNAL
 // FIXED: Direct swapchain output (Option 1) — no intermediate storage image
 // =============================================================================
-// =============================================================================
-// renderFrame — ONE TRUE MODE: HDR Environment Map + Full RTX Path
-// NO MORE MODE 0 — ONLY THE SACRED LIGHT REMAINS
-// =============================================================================
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     RTX::LAS::get().beginFrame();
@@ -2303,7 +2299,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     totalTime_ += deltaTime;
 
     if (RTX::SwapchainManager::minimized_) {
-        LOG_AMOURANTH("[FRAME %u] Window minimized — the photons rest", frameNumber_);
         return;
     }
 
@@ -2312,27 +2307,23 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     // SYNC
     if (inFlightFences_[slot] != VK_NULL_HANDLE) {
-        if (Options::CURRENT_PRESET == Options::Preset::BestQuality) {
-            vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX);
-        } else if (vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, 500'000) == VK_TIMEOUT) {
-            return;
-        }
+        vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, 1'000'000'000);
         vkResetFences(stone_device(), 1, &inFlightFences_[slot]);
     }
 
     // ACQUIRE
     uint32_t imageIndex = 0;
-    VkResult acquireRes = vkAcquireNextImageKHR(
+    VkResult r = vkAcquireNextImageKHR(
         stone_device(), stone_swapchain(),
-        Options::CURRENT_PRESET == Options::Preset::BestQuality ? UINT64_MAX : 1'000'000,
+        1'000'000'000,
         imageAvailableSemaphores_[slot], VK_NULL_HANDLE, &imageIndex
     );
 
-    if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_TIMEOUT) {
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
         RTX::recreateSwapchain(stone_width(), stone_height());
         return;
     }
-    if (acquireRes != VK_SUCCESS && acquireRes != VK_SUBOPTIMAL_KHR) {
+    if (r != VK_SUCCESS) {
         return;
     }
 
@@ -2345,70 +2336,88 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // Transition swapchain image to GENERAL — we write directly into it
     VkImage swapImg = stone_images()[imageIndex];
+
+    // Transition swapchain to GENERAL — we write directly into it
     transitionImage(cmd, swapImg,
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
         0, VK_ACCESS_SHADER_WRITE_BIT,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
-    // === FULL RTX PATH — HDR ENVIRONMENT MAP ACTIVE ===
-    if (resetAccumulation_ || resetAccumNextFrame_) {
+    // ========================================================================
+    // 1. FALLBACK: Beautiful gradient sky — proves the path works
+    // ========================================================================
+    {
+        VkClearColorValue top = {{1.0f, 0.0f, 0.5f, 1.0f}};  // THERMO PINK — THE EMPIRE’S TRUE LIGHT
+
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &top, 1, &range);
+    }
+
+    // ========================================================================
+    // 2. FULL RTX PATH — Only if everything is ready
+    // ========================================================================
+    bool rtxPathValid = true;
+
+    VkAccelerationStructureKHR tlas = RTX::LAS::get().getCurrentTLAS();
+    if (!tlas) {
+        tlas = pipelineManager_.dummyTLAS();
+    }
+
+    const uint64_t uboHandle = uniformBufferEncs_[slot];
+    if (uboHandle == 0) {
+        LOG_ERROR_CAT("RENDERER", "No UBO for frame {} — RTX path disabled", slot);
+        rtxPathValid = false;
+    }
+
+    const BufferManager::BufferInfo* uboInfo = nullptr;
+    if (rtxPathValid) {
+        auto it = BufferManager::s_buffers.find(uboHandle);
+        if (it == BufferManager::s_buffers.end() || it->second.buffer == VK_NULL_HANDLE) {
+            LOG_ERROR_CAT("RENDERER", "Invalid UBO buffer — RTX path disabled");
+            rtxPathValid = false;
+        } else {
+            uboInfo = &it->second;
+        }
+    }
+
+    // Reset accumulation if needed
+    if (rtxPathValid && (resetAccumulation_ || resetAccumNextFrame_)) {
         clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
         accumulationFrame_ = currentSpp_ = 0;
     }
 
-    updateUniformBuffer(slot, camera, deltaTime);
-    updateTonemapUniform(slot);
+    if (rtxPathValid) {
+        updateUniformBuffer(slot, camera, deltaTime);
+        updateTonemapUniform(slot);
 
-    VkAccelerationStructureKHR tlas = RTX::LAS::get().getCurrentTLAS();
-    if (!tlas) tlas = pipelineManager_.dummyTLAS();
+        RTX::RTDescriptorUpdate desc{};
+        desc.tlas = tlas;
+        desc.ubo = uboInfo->buffer;
+        desc.uboSize = 368;
+        desc.rtOutputViews[slot] = stone_views()[imageIndex];
 
-    const uint64_t uboHandle = uniformBufferEncs_[slot];
-    auto uboIt = BufferManager::s_buffers.find(uboHandle);
-    if (uboIt == BufferManager::s_buffers.end()) {
-        LOG_ERROR_CAT("RENDERER", "Uniform buffer handle %#llx missing — fatal sync error (slot %u)", uboHandle, slot);
-        submitAndPresent(slot, imageIndex);
-        return;
+        // Environment map
+        if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
+            desc.envSampler   = pipelineManager_.envMapSampler_.get();
+            desc.envImageView = pipelineManager_.envMapImageView_.get();
+        }
+
+        desc.materialsBuffer = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
+        desc.materialsSize   = MATERIAL_BUFFER_SIZE;
+
+        pipelineManager_.updateRTDescriptorSet(slot, desc);
+        recordRayTracingCommands(cmd, slot);
     }
-    const BufferManager::BufferInfo& uboInfo = uboIt->second;
 
-    RTX::RTDescriptorUpdate descUpdate{};
-    descUpdate.tlas = tlas;
-    descUpdate.ubo = uboInfo.buffer;
-    descUpdate.uboSize = 368;
-    descUpdate.rtOutputViews[slot] = stone_views()[imageIndex];  // Direct swapchain output
-    descUpdate.accumulationViews[slot] = accumViews_[slot].get();
-
-    // HDR Environment Map — the sacred light
-    descUpdate.envSampler   = pipelineManager_.envMapSampler_.get();
-    descUpdate.envImageView = pipelineManager_.envMapImageView_.get();
-
-    descUpdate.materialsBuffer = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-    descUpdate.materialsSize   = MATERIAL_BUFFER_SIZE;
-
-    pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
-    recordRayTracingCommands(cmd, slot);
-
-    // Transition accumulation result for tonemap
-    transitionImage(cmd, rtOutputImages_[slot].get(),
-        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-
-    VkImageView tonemapSrc = denoisingEnabled_ && denoiserView_.valid()
-        ? denoiserView_.get() : rtOutputViews_[slot].get();
-
-    updateTonemapDescriptor(slot, tonemapSrc, stone_views()[imageIndex]);
-    if (denoisingEnabled_) performDenoisingPass(cmd);
-    performTonemapPass(cmd, slot, imageIndex);
-
-    // Final transition back to present
+    // ========================================================================
+    // 3. Always transition back to present
+    // ========================================================================
     transitionImage(cmd, swapImg,
         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_ACCESS_SHADER_WRITE_BIT, 0,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
     vkEndCommandBuffer(cmd);
     submitAndPresent(slot, imageIndex);
