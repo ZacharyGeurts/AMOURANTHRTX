@@ -120,12 +120,16 @@ public:
     void initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue);
     void cleanup() noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue);
+	VkImageView loadEnvironmentMap(const std::string& hdrPath) noexcept;
 
 	VkBuffer       vertexBuffer = VK_NULL_HANDLE;
     VkDeviceSize   vertexBufferSize = 0;
     VkBuffer       indexBuffer = VK_NULL_HANDLE;
     VkDeviceSize   indexBufferSize = 0;
 	
+    Handle<VkImageView> envMapImageView_;
+    Handle<VkSampler>   envMapSampler_;
+
 	[[nodiscard]] VkResult recordCommandBuffer(uint32_t frame) const noexcept;
 
     static std::atomic<bool>     g_pipelineNeedsRebuild;

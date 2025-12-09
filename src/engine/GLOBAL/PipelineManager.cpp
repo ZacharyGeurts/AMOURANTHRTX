@@ -28,6 +28,7 @@
 #include <vector>
 #include <array>
 #include <unordered_map>
+#include <stb/stb_image.h>
 #include <unistd.h> // for getcwd
 
 using namespace Logging::Color;
@@ -216,6 +217,142 @@ void PipelineManager::allocateDescriptorSets()
     }
 
     LOG_SUCCESS_CAT("PIPELINE", "Allocated {} descriptor sets", TOTAL_SETS_TO_ALLOCATE);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// loadEnvironmentMap — Load HDR equirectangular envmap from assets/textures/envmap.hdr
+// ──────────────────────────────────────────────────────────────────────────────
+VkImageView PipelineManager::loadEnvironmentMap(const std::string& hdrPath) noexcept
+{
+    LOG_AMOURANTH("Loading HDR environment map: {}", hdrPath);
+
+    // stb_image with HDR-only support
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_HDR
+#define STBI_NO_STDIO
+#define STBI_FAILURE_USERMSG
+
+    int width, height, channels;
+    float* data = stbi_loadf(hdrPath.c_str(), &width, &height, &channels, 4);
+    if (!data) {
+        LOG_FATAL_CAT("ENV", "Failed to load HDR envmap {} — {}", hdrPath, stbi_failure_reason());
+        return VK_NULL_HANDLE;
+    }
+
+    const VkDeviceSize imageSize = width * height * 4 * sizeof(float);
+
+    // Staging buffer
+    uint64_t stagingHandle = BufferManager::createHostVisible(imageSize, "EnvMap_Staging");
+    void* mapped = BufferManager::getMappedStagingPtr(stagingHandle);
+    std::memcpy(mapped, data, imageSize);
+    stbi_image_free(data);
+
+    // Final device-local image
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+
+    VkImageCreateInfo imageInfo{
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType     = VK_IMAGE_TYPE_2D,
+        .format        = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent        = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 },
+        .mipLevels     = 1,
+        .arrayLayers   = 1,
+        .samples       = VK_SAMPLE_COUNT_1_BIT,
+        .tiling        = VK_IMAGE_TILING_OPTIMAL,
+        .usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &image));
+
+    VkMemoryRequirements memReqs{};
+    vkGetImageMemoryRequirements(stone_device(), image, &memReqs);
+
+    VkMemoryAllocateInfo allocInfo{
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = memReqs.size,
+        .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &memory));
+    VK_CHECK(vkBindImageMemory(stone_device(), image, memory, 0));
+
+    // Copy staging → device image using one-time submit
+    VkCommandBuffer cmd = RTX::beginOneTimeSubmit();
+
+    // Manual image barriers (since transitionImage not in scope)
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = image,
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    VkBufferImageCopy copy{
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent      = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 }
+    };
+    vkCmdCopyBufferToImage(cmd,
+        BufferManager::get(stagingHandle)->buffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &copy);
+
+    // Transition to shader read
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Use the unambiguous 2-argument version
+    RTX::endOneTimeSubmit(cmd, stone_graphics_queue());
+
+    BufferManager::destroy(stagingHandle);
+
+    // Create image view
+    VkImageView view = VK_NULL_HANDLE;
+    VkImageViewCreateInfo viewInfo{
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image            = image,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+        .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &view));
+
+    // Create sampler
+    VkSampler sampler = VK_NULL_HANDLE;
+    VkSamplerCreateInfo samplerInfo{
+        .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter               = VK_FILTER_LINEAR,
+        .minFilter               = VK_FILTER_LINEAR,
+        .mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .anisotropyEnable        = VK_FALSE,
+        .maxLod                  = 0.0f,
+        .borderColor             = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
+    };
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
+
+    // Store in member handles for automatic cleanup
+    envMapImageView_ = Handle<VkImageView>(view, stone_device(), vkDestroyImageView);
+    envMapSampler_   = Handle<VkSampler>(sampler, stone_device(), vkDestroySampler);
+
+    LOG_SUCCESS_CAT("ENV", "HDR environment map loaded — {}×{} — ready for pink photon illumination", width, height);
+
+    return view;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
