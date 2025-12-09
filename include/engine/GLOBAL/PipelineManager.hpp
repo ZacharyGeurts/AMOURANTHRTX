@@ -126,6 +126,19 @@ public:
     VkDeviceSize   vertexBufferSize = 0;
     VkBuffer       indexBuffer = VK_NULL_HANDLE;
     VkDeviceSize   indexBufferSize = 0;
+
+	void createEnvMapDisplayComputePipeline(VkImageView envMapView, VkSampler envMapSampler);
+
+    // Public handles — used by VulkanRenderer::recordEnvMapOnlyPass
+    VkPipeline               envMapDisplayPipeline_       = VK_NULL_HANDLE;
+    VkPipelineLayout         envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSet          envMapDisplayDescriptorSet_  = VK_NULL_HANDLE;
+    VkDescriptorSetLayout    envMapDisplayDescSetLayout_  = VK_NULL_HANDLE;
+
+    // Accessors (optional, but clean)
+    [[nodiscard]] bool hasEnvMapDisplayPipeline() const noexcept {
+        return envMapDisplayPipeline_ != VK_NULL_HANDLE;
+    }
 	
     Handle<VkImageView> envMapImageView_;
     Handle<VkSampler>   envMapSampler_;

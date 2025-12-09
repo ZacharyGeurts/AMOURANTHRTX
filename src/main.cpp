@@ -100,6 +100,7 @@ using StoneKey::stone_seal_instance;
 // GLOBALS — THE EMPIRE'S HEARTBEATS
 // =============================================================================
 std::unique_ptr<Application> g_app_ptr = nullptr;
+VulkanRenderer* g_renderer_ptr = nullptr;
 float g_deltaTime = 0.0f;
 // =============================================================================
 // TRUTH ACCESSORS
@@ -278,58 +279,6 @@ void Application::setRenderMode(int mode)
 inline std::unique_ptr<MeshLoader::Mesh> g_mesh = nullptr;
 static SDL_Surface* g_base_icon = nullptr;
 static SDL_Surface* g_hdpi_icon = nullptr;
-
-inline void AdvanceEternalRing() noexcept
-{
-    static constexpr uint32_t FRAMES = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    static std::array<VkCommandPool,   FRAMES> g_pools   = {};
-    static std::array<VkCommandBuffer, FRAMES> g_cmds    = {};
-    static std::array<VkFence,         FRAMES> g_fences  = {};
-    static uint32_t                           g_current = 0;
-    static bool                               g_initialized = false;
-
-    if (!g_initialized) {
-        const VkDevice dev = stone_device();
-
-        VkCommandPoolCreateInfo poolInfo{
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-        };
-
-        VkFenceCreateInfo fenceInfo{
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .flags = VK_FENCE_CREATE_SIGNALED_BIT
-        };
-
-        for (uint32_t i = 0; i < FRAMES; ++i) {
-            VK_CHECK(vkCreateCommandPool(dev, &poolInfo, nullptr, &g_pools[i]));
-            VkCommandBufferAllocateInfo allocInfo{
-                .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                .commandPool        = g_pools[i],
-                .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = 1
-            };
-            VK_CHECK(vkAllocateCommandBuffers(dev, &allocInfo, &g_cmds[i]));
-            VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &g_fences[i]));
-        }
-
-        RTX::g_ctx().commandPool_ = g_pools[0];
-        g_initialized = true;
-
-        LOG_AMOURANTH("ETERNAL COMMAND RING FORGED — {} SLOTS — g_ctx().commandPool_ = IMMORTAL", FRAMES);
-    }
-
-    // Advance to next frame
-    vkWaitForFences(stone_device(), 1, &g_fences[g_current], VK_TRUE, UINT64_MAX);
-    vkResetFences(stone_device(), 1, &g_fences[g_current]);
-    vkResetCommandPool(stone_device(), g_pools[g_current], 0);
-
-    g_current = (g_current + 1) % FRAMES;
-    RTX::g_ctx().commandPool_ = g_pools[g_current];  // ← Keeps all old code working
-}
 
 static void createRealFinalWindow() noexcept
 {
@@ -642,15 +591,16 @@ static void phase1_preInitialization() noexcept
 {
     LOG_MAIN(
         "\n"
-        "         ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n"
-        "         ★                                            ★\n"
-        "         ★       PHASE 1 — PRE-INITIALIZATION         ★\n"
-        "         ★    JIMMY EAT WORLD LIVE STATUS — 2025      ★\n"
-        "         ★      SPECIAL GUEST Good Charlotte          ★\n"
-        "         ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n");
+        "             ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n"
+        "             ★                                            ★\n"
+        "             ★       PHASE 1 — PRE-INITIALIZATION         ★\n"
+        "             ★    JIMMY EAT WORLD LIVE STATUS — 2025      ★\n"
+        "             ★      SPECIAL GUEST Good Charlotte          ★\n"
+		"             ★                                            ★\n"
+        "             ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n");
 
     LOG_BLONDIE("\n"
-        "                ★                  Opener     ...             ★\n"
+        "                ★      ...      Opener     ...                 ★\n"
         "          ★         ★         ★               ★         ★         ★\n"
         "        ★    ★   ★       ★         ★       ★       ★       ★   ★    ★\n"
         "      ★           ★   ★       ★         ★       ★         ★   ★       ★\n"
@@ -662,35 +612,35 @@ static void phase1_preInitialization() noexcept
         "      ★           ★   ★       ★         ★       ★         ★   ★       ★\n"
         "        ★    ★   ★       ★         ★       ★       ★       ★   ★    ★\n"
         "          ★         ★         ★               ★         ★         ★\n"
-        "                ★             Third Eye Blind                  ★\n"
+        "                ★     ...    Third Eye Blind    ...             ★\n"
         "\n"
-        "┌─────────────────────────────────────\n"
-        "│ JIMMY EAT WORLD LIVE STATUS — 2025  │\n"
-        "├─────────────────────────────────────\n"
-        "│ Denoising            : {}   \n"
-        "│ Temporal AA          : {}   \n"
-        "│ Bloom                : {}   \n"
-        "│ SSAO                 : {}   \n"
-        "│ Volumetric Fog       : {}   \n"
-        "│ God Rays             : {}   \n"
-        "│ Tonemapping          : {}   \n"
-        "│ VSync                : {}   \n"
-        "│ Max Ray Bounces      : {}   \n"
-        "│ Adaptive Sampling    : {}   \n"
-        "│ HyperTrace           : {}   \n"
-        "│ Perfect Frame Pacing : {}   \n"
-        "│ Direct Display       : {}   \n"
-        "│ HDR Auto-Ignition    : {}   \n"
-        "│ Quantum Resize Pred  : {}   \n"
-        "│ Shading Rate         : {}   \n"
-        "│ Present Mode         : {}   \n"
-        "│ Environment Map      : {}   \n"
-        "│ IBL Active           : {}   \n"
-        "│ Sky Atmosphere       : {}   \n"
-        "│ Blue Noise           : {}   \n"
-        "└──────────────────────────────────────\n"
-        "\"Are you listening?\"\n"
-        "          — Jimmy Eat World, Sweetness\n",
+        "                 ┌─────────────────────────────────────\n"
+        "                 │ JIMMY EAT WORLD LIVE STATUS — 2025  │\n"
+        "                 ├─────────────────────────────────────\n"
+        "                 │ Denoising            : {}   \n"
+        "                 │ Temporal AA          : {}   \n"
+        "                 │ Bloom                : {}   \n"
+        "                 │ SSAO                 : {}   \n"
+        "                 │ Volumetric Fog       : {}   \n"
+        "                 │ God Rays             : {}   \n"
+        "                 │ Tonemapping          : {}   \n"
+        "                 │ VSync                : {}   \n"
+        "                 │ Max Ray Bounces      : {}   \n"
+        "                 │ Adaptive Sampling    : {}   \n"
+        "                 │ HyperTrace           : {}   \n"
+        "                 │ Perfect Frame Pacing : {}   \n"
+        "                 │ Direct Display       : {}   \n"
+        "                 │ HDR Auto-Ignition    : {}   \n"
+        "                 │ Quantum Resize Pred  : {}   \n"
+        "                 │ Shading Rate         : {}   \n"
+        "                 │ Present Mode         : {}   \n"
+        "                 │ Environment Map      : {}   \n"
+        "                 │ IBL Active           : {}   \n"
+        "                 │ Sky Atmosphere       : {}   \n"
+        "                 │ Blue Noise           : {}   \n"
+        "                 └──────────────────────────────────────\n"
+        "                       \"Are you listening?\"\n"
+        "                   — Jimmy Eat World, Sweetness\n",
         
         // Feature states — perfectly matched to OptionsMenu.hpp
         Options::OptionsRTX::ENABLE_DENOISING             ? "ON  " : "OFF ",
@@ -780,7 +730,7 @@ static void phase6_sceneAndAccelerationStructures()
         phase9_ballerina("MESH VERTICES EMPTY", std::source_location::current());
     }
     if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
-        LOG_FATAL_CAT("MESH", "MESH BUFFERS NOT ALLOCATED — vertexBuffer=0x{:X} indexBuffer=0x{:X}",
+        LOG_FATAL_CAT("MESH", "MESH BUFFERS NOT ALLOCATED — vertexBuffer=0x{} indexBuffer=0x{}",
                       g_mesh->vertexBuffer, g_mesh->indexBuffer);
         phase9_ballerina("MESH BUFFERS ZERO", std::source_location::current());
     }
@@ -810,7 +760,7 @@ static void phase7_forgeTheRTX()
     LOG_MAIN(
         "\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                          PHASE 7 — FORGING THE RTX CROWN                     ║\n"
+        "║                         PHASE 7 — FORGING THE RTX CROWN                      ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
     auto& pipe = RTX::pipeline();
@@ -889,13 +839,6 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
         std::_Exit(1);
     }
     already_running = true;
-
-    fprintf(stderr,
-            "\nFATAL ERROR — %s:%d\n"
-            "REASON: %.*s\n\n",
-            loc.file_name(), loc.line(),
-            static_cast<int>(reason.size()), reason.data());
-
     auto& ctx = RTX::g_ctx();
 
     if (VkDevice device = stone_device(); device != VK_NULL_HANDLE) [[likely]] {
@@ -932,6 +875,8 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
 
+    LOG_FATAL_CAT("BALLERINA", "EMPIRE TERMINATED — GRACE WITHDRAWN — THE PHOTONS RETURN TO THE VOID");
+
     std::_Exit(1);
 }
 
@@ -945,24 +890,25 @@ void Application::run() noexcept
 
     int frameCount = 0;
     float fpsTimer = 0.0f;
-    float currentFPS = 60.0f;
+    float currentFPS = 0.0f;
 
-    // MODE 0: HDR SKY — FORGED ONCE
-    static bool envMapReady = false;
-    if (!envMapReady && renderer_)
-    {
-        EnvironmentMap sky = renderer_->createEnvironmentMap();
-        if (sky) {
-            LOG_SUCCESS_CAT("SKY", "HDR CUBEMAP SKY FORGED — Mode 0 ready");
-            envMapReady = true;
-        }
-    }
+    LOG_AMOURANTH("APPLICATION::run() — THE EMPIRE AWAKENS — THE CURRENT BEGINS");
 
     while (!quit_)
     {
         const auto frameStart = std::chrono::steady_clock::now();
         g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
+
+        // RESUME FROM MINIMIZE/ALT-TAB — CLAMP THE INSANE SPIKE
+        if (g_deltaTime > 0.1f)  // >100ms = we were paused
+        {
+            LOG_AMOURANTH("RESUME DETECTED — clamping deltaTime from {:.1f}ms → 16.67ms", g_deltaTime * 1000.0f);
+            g_deltaTime = 1.0f / 60.0f;  // smooth as silk
+        }
+
         lastTime = frameStart;
+
+        LOG_TRACE_CAT("FRAME", "=== FRAME START === deltaTime: {:.4f}ms", g_deltaTime * 1000.0f);
 
         // INPUT
         bool toggleFS = false;
@@ -970,12 +916,18 @@ void Application::run() noexcept
         SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
 
         if (winW > 0 && winH > 0) {
-            width_  = winW;
-            height_ = winH;
-            proj_ = glm::perspective(glm::radians(75.0f), float(width_)/std::max(height_,1), 0.1f, 1000.0f);
+            if (width_ != winW || height_ != winH) {
+                LOG_AMOURANTH("WINDOW SIZE CHANGE: {}x{} → {}x{}", width_, height_, winW, winH);
+                width_  = winW;
+                height_ = winH;
+                proj_ = glm::perspective(glm::radians(75.0f), float(width_) / std::max(height_, 1), 0.1f, 1000.0f);
+            }
         }
 
-        if (toggleFS) SDL3Window::toggleFullscreen();
+        if (toggleFS) {
+            LOG_AMOURANTH("FULLSCREEN TOGGLE");
+            SDL3Window::toggleFullscreen();
+        }
 
         // RESIZE — THE EMPIRE REBUILDS
         if (g_resizeRequested.exchange(false))
@@ -984,27 +936,20 @@ void Application::run() noexcept
             uint32_t h = g_resizeHeight.exchange(0);
             if (w && h)
             {
-                LOG_AMOURANTH("[RESIZE] Empire rebuilds: {}×{}", w, h);
-
+                LOG_AMOURANTH("RESIZE EVENT — REBUILDING EMPIRE: {}×{}", w, h);
                 vkDeviceWaitIdle(stone_device());
-
                 RTX::las().notifyResize();
                 RTX::SwapchainManager::get().recreate(w, h);
-
-                RTX::pipeline().forgeRTXPipeline(
-                    RTX::g_ctx().commandPool(),
-                    stone_graphics_queue()
-                );
-
+                RTX::pipeline().forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
                 if (renderer_) renderer_->resetAccumulation_;
-
                 LOG_SUCCESS_CAT("RESIZE", "Empire restored — rendering resumes");
             }
         }
 
+        // INPUT SYSTEM
         INPUT.pumpEvents(g_deltaTime, [this](int mode) { setRenderMode(mode); }, stone_window());
 
-        // RENDER — SAFE AGAINST SWAPCHAIN DEATH — EMPIRE NEVER DIES
+        // RENDER
         bool swapchainValid = (stone_swapchain() != VK_NULL_HANDLE);
 
         if (renderer_ && renderer_->isAlive() && swapchainValid)
@@ -1021,20 +966,22 @@ void Application::run() noexcept
             }
             else if (!swapchainValid)
             {
-                LOG_WARNING_CAT("RENDER", "Swapchain temporarily invalid (minimized/resizing) — skipping frame gracefully — PHOTONS PAUSED");
+                LOG_WARNING_CAT("RENDER", "Swapchain invalid — skipping frame — PHOTONS PAUSED");
             }
         }
 
-        // TITLE BAR — ALWAYS UPDATE (keeps window responsive even when minimized)
+        // TITLE BAR — BULLETPROOF
         titleTimer += g_deltaTime;
         if (titleTimer >= TITLE_UPDATE_INTERVAL)
         {
             titleTimer -= TITLE_UPDATE_INTERVAL;
             dotPhase = (dotPhase + 1) % 4;
 
-            const char* modeName = [this]() -> const char* {
+            const char* modeName = []() -> const char* {
+                if (g_renderer_ptr && g_renderer_ptr->debugShowEnvMapOnly_)
+                    return "PURE HDR ENVMAP";
                 switch (currentRenderMode_) {
-                    case 0:  return "PURE HDR SKY";
+                    case 0:  return "VOID";
                     case 1:  return "PURE PINK DREAM";
                     case 2:  return "PATH TRACED ACCUMULATION";
                     case 3:  return "REALTIME HYBRID DENOISED";
@@ -1044,30 +991,36 @@ void Application::run() noexcept
                     case 7:  return "SBT DEBUG";
                     case 8:  return "PERFORMANCE METRICS";
                     case 9:  return "SHADER HOT RELOAD";
-                    default: return "VOID";
+                    default: return "UNKNOWN";
                 }
             }();
 
-            std::string title = std::format(
-                "AMOURANTH RTX | {:.1f} FPS | {}×{} | Mode {}: {}{}",
-                currentFPS, stone_width(), stone_height(),
-                currentRenderMode_, modeName, dots[dotPhase]
-            );
+            char fpsStr[16];
+            if (std::isfinite(currentFPS) && currentFPS >= 0.0f && currentFPS <= 9999.0f)
+                snprintf(fpsStr, sizeof(fpsStr), "%.1f", currentFPS);
+            else
+                strcpy(fpsStr, currentFPS < 0.0f ? "0.0" : "INF");
 
-            SDL_SetWindowTitle(stone_window(), title.c_str());
+            char title[256];
+            snprintf(title, sizeof(title),
+                "AMOURANTH RTX | %s FPS | %dx%d | MODE 1: %s%s",
+                fpsStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
+
+            SDL_SetWindowTitle(stone_window(), title);
         }
 
-        // FPS COUNTER — KEEP RUNNING (accurate resumption after minimize)
+        // FPS COUNTER
         ++frameCount;
         fpsTimer += g_deltaTime;
         if (fpsTimer >= 1.0f)
         {
-            currentFPS = frameCount / fpsTimer;
+            currentFPS = frameCount / std::max(fpsTimer, 0.001f);
+            LOG_TRACE_CAT("FPS", "FPS: {:.1f}", currentFPS);
             frameCount = 0;
             fpsTimer = 0.0f;
         }
 
-        // FRAME PACING — ONLY WHEN WE'RE ACTUALLY RENDERING
+        // FRAME PACING
         if (Options::Performance::ENABLE_FRAME_PREDICTION && swapchainValid)
         {
             const auto elapsed = std::chrono::steady_clock::now() - frameStart;
@@ -1075,121 +1028,32 @@ void Application::run() noexcept
             if (elapsed < target)
                 std::this_thread::sleep_for(target - elapsed);
         }
+
+        LOG_TRACE_CAT("FRAME", "=== FRAME END === {:.4f}ms", g_deltaTime * 1000.0f);
     }
 
     vkDeviceWaitIdle(stone_device());
-    LOG_AMOURANTH("[SHUTDOWN] The empire rests. The photons return to the void.");
+    LOG_AMOURANTH("[SHUTDOWN] The empire rests. The pink photons return to the void.");
 }
 
 // =============================================================================
 // MAIN — THE EMPIRE AWAKENS — DECEMBER 01, 2025
 // ONE CALL. ONE TRUTH. ONE RUN.
 // =============================================================================
-int main(int, char**)
-{
+int main(int, char**) {
     install_apocalypse_handler();
+    phase1_preInitialization(); phase3_sacrificialSplash(); phase4_merchantShip();
+    phase6_sceneAndAccelerationStructures(); phase7_forgeTheRTX();
+    vkDeviceWaitIdle(stone_device());
 
-    phase1_preInitialization();
-    phase3_sacrificialSplash();
-    phase4_merchantShip();
-    phase6_sceneAndAccelerationStructures();
-    phase7_forgeTheRTX();
-
-    vkDeviceWaitIdle(stone_device()); 
-
-    auto renderer = phase7_5_Renderer();
-    stone_seal_final();
-
-    AdvanceEternalRing();
-
-    // ========================================================================
-    // ETERNAL COMMAND RING — FORGED WITH PURE STATIC MAGIC
-    // g_ctx().commandPool_ IS NOW ETERNAL AND ALWAYS VALID
-    // NO LOCAL CLASSES. NO STATIC MEMBERS. NO ERRORS.
-    // ========================================================================
-
-    static constexpr uint32_t FRAMES = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    static std::array<VkCommandPool,   FRAMES> g_pools   = {};
-    static std::array<VkCommandBuffer, FRAMES> g_cmds    = {};
-    static std::array<VkFence,         FRAMES> g_fences  = {};
-    static uint32_t                            g_current = 0;
-    static bool                                g_ringInitialized = false;
-
-    if (!g_ringInitialized) {
-        const VkDevice dev = stone_device();
-
-        const VkCommandPoolCreateInfo poolInfo{
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = stone_graphics_family()
-        };
-
-        const VkFenceCreateInfo fenceInfo{
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .flags = VK_FENCE_CREATE_SIGNALED_BIT
-        };
-
-        for (uint32_t i = 0; i < FRAMES; ++i) {
-            VK_CHECK(vkCreateCommandPool(dev, &poolInfo, nullptr, &g_pools[i]));
-
-            VkCommandBufferAllocateInfo allocInfo{
-                .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                .commandPool        = g_pools[i],
-                .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = 1
-            };
-            VK_CHECK(vkAllocateCommandBuffers(dev, &allocInfo, &g_cmds[i]));
-            VK_CHECK(vkCreateFence(dev, &fenceInfo, nullptr, &g_fences[i]));
-        }
-
-        // SACRED PATCH — g_ctx().commandPool_ NOW POINTS TO ETERNAL RING
-        RTX::g_ctx().commandPool_ = g_pools[0];
-
-        LOG_AMOURANTH("ETERNAL COMMAND RING FORGED — {} SLOTS — g_ctx().commandPool_ = ETERNAL", FRAMES);
-        g_ringInitialized = true;
-    }
-
-    // ========================================================================
-    // HELPER: Advance ring and keep g_ctx().commandPool_ in sync
-    // Call this at the start of each frame if you want perfect sync
-    // ========================================================================
-    [[maybe_unused]] static const auto advanceEternalRing = []() {
-        vkWaitForFences(stone_device(), 1, &g_fences[g_current], VK_TRUE, UINT64_MAX);
-        vkResetFences(stone_device(), 1, &g_fences[g_current]);
-        vkResetCommandPool(stone_device(), g_pools[g_current], 0);
-
-        g_current = (g_current + 1) % FRAMES;
-        RTX::g_ctx().commandPool_ = g_pools[g_current];  // Keep legacy code happy forever
-    };
-
-    // Optional: call once per frame
-    advanceEternalRing();
-
-    // ========================================================================
-    // ASCENSION — NOW GO FULL ROBOT HEAVY
-    // ========================================================================
-    g_app_ptr = std::make_unique<Application>(
-        "AMOURANTH RTX — VALHALLA v∞ TURBO",
-        Options::Window::DEFAULT_WIDTH,
-        Options::Window::DEFAULT_HEIGHT
-    );
+    auto renderer = phase7_5_Renderer(); stone_seal_final();
+    g_app_ptr = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v∞ TURBO", 1920, 1080);
+    g_renderer_ptr = renderer.get();
     g_app_ptr->setRenderer(std::move(renderer));
 
     g_app_ptr->run();
 
-    phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
-
-    // Cleanup on exit
-    vkDeviceWaitIdle(stone_device());
-    for (uint32_t i = 0; i < FRAMES; ++i) {
-        if (g_cmds[i])   vkFreeCommandBuffers(stone_device(), g_pools[i], 1, &g_cmds[i]);
-        if (g_fences[i]) vkDestroyFence(stone_device(), g_fences[i], nullptr);
-        if (g_pools[i])  vkDestroyCommandPool(stone_device(), g_pools[i], nullptr);
-    }
-
-    LOG_AMOURANTH("ETERNAL COMMAND RING — RETURNED TO VALHALLA");
+    phase9_ballerina("FINAL GRACE", std::source_location::current());
 
     return 0;
 }

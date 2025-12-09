@@ -79,9 +79,14 @@ public:
     void createCommandBuffers() noexcept;
     bool isAlive() const noexcept;
 
+    static void forgeEternalCommandRing();
+    void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t imageIndex);
+
     VkFence  inFlightFence(uint32_t frame) const noexcept { return inFlightFences_[frame]; }
     VkFence* inFlightFencePtr(uint32_t frame) noexcept     { return &inFlightFences_[frame]; }
 	const BufferManager::BufferInfo* stagingInfoLocal_ = nullptr;
+
+	void ensureCommandPool() noexcept;
 
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
@@ -89,6 +94,8 @@ public:
     void toggleAdaptiveSampling() noexcept;
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
+
+	bool debugShowEnvMapOnly_ = false;
 
     void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
     void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
