@@ -37,7 +37,7 @@ struct StagingRing {
 
 static Pool        g_mainPool;
 static StagingRing g_stagingRingInstance;
-static uint64_t    g_nextHandle = 0xDEADBEEF;
+static uint64_t    g_nextHandle = 0x00000000ULL;
 
 StagingRing* g_stagingRing = nullptr;
 std::unordered_map<uint64_t, BufferInfo> s_buffers;

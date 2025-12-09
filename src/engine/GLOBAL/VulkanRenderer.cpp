@@ -1102,23 +1102,35 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
     vkCmdPipelineBarrier2(cmd, &depInfo);
 }
 
-void VulkanRenderer::initializeAllBufferData(uint32_t frames,
-                                             VkDeviceSize uniformSize,
-                                             VkDeviceSize materialSize) noexcept
+void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize uniformSize, VkDeviceSize materialSize) noexcept
 {
+    static std::atomic<bool> s_inProgress{false};
+
+    // PREVENT RE-ENTRANCY DURING RESIZE RACES
+    bool expected = false;
+    if (!s_inProgress.compare_exchange_strong(expected, true)) {
+        LOG_WARNING_CAT("RENDERER", "initializeAllBufferData already in progress — skipping duplicate call");
+        return;
+    }
+
+    // Scope guard — always reset the flag
+    struct Guard {
+        ~Guard() { s_inProgress.store(false); }
+    } guard;
+
     if (frames == 0 || frames > Options::Performance::MAX_FRAMES_IN_FLIGHT) {
         return;
     }
 
-    // Already initialized with correct number of frames?
-    if (uniformBufferEncs_.size() == frames &&
-        !uniformBufferEncs_.empty() &&
-        uniformBufferEncs_[0] != 0)
-    {
+    // Already correct?
+    if (uniformBufferEncs_.size() == frames && !uniformBufferEncs_.empty() && uniformBufferEncs_[0] != 0) {
         return;
     }
 
-    // Destroy old buffers — the empire cleanses the past
+    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — %u frames | UBO: %llu bytes | Materials: %llu bytes", 
+                  frames, static_cast<unsigned long long>(uniformSize), static_cast<unsigned long long>(materialSize));
+
+    // DESTROY OLD FIRST — ALWAYS
     for (auto h : uniformBufferEncs_)   if (h) BUFFER_DESTROY(h);
     for (auto h : materialBufferEncs_)  if (h) BUFFER_DESTROY(h);
     for (auto h : dimensionBufferEncs_) if (h) BUFFER_DESTROY(h);
@@ -1134,21 +1146,16 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames,
 
     for (uint32_t i = 0; i < frames; ++i)
     {
-        // FIXED: Frame UBO is now host-visible — raw boi writes, pulsing pink void, no more segfault
         uniformBufferEncs_[i] = BufferManager::createHostVisible(uniformSize, "DreamUBO");
-        if (uniformBufferEncs_[i] == 0) {
-            LOG_FATAL("Failed to create host-visible DreamUBO for frame {} — the photons starve", i);
-        }
+        if (!uniformBufferEncs_[i]) LOG_FATAL("Failed to create DreamUBO %u", i);
 
-        // Materials, dimensions, and tonemap stay device-local (big data, copied once)
+        // These stay device-local — but now safely re-allocated only once
         BUFFER_CREATE(materialBufferEncs_[i],   materialSize,  ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Materials");
         BUFFER_CREATE(dimensionBufferEncs_[i], 256,           ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "DimensionData");
         BUFFER_CREATE(tonemapUniformEncs_[i],  256,           uboUsage,  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "TonemapUBO");
     }
 
-    // Rebuild tonemap descriptors using StoneKey (UBO only — images dynamic)
-    for (uint32_t i = 0; i < frames; ++i)
-    {
+    for (uint32_t i = 0; i < frames; ++i) {
         updateTonemapUBO(i);
     }
 
@@ -1496,108 +1503,71 @@ VkResult VulkanRenderer::recordCommandBuffer(uint32_t frame) noexcept
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept
 {
-    // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ PHASE 1: BULLETPROOF VALIDATION — THE CASTLE WALLS ARE TESTED            ║
-    // ╚══════════════════════════════════════════════════════════════════════════╝
+    LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — START — frame {} | jitter {}", frame, jitter);
+
+    // PHASE 1: BULLETPROOF VALIDATION + MIGHTY RESTORATION
     if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
     {
-        LOG_ERROR_CAT("RENDERER", "Invalid uniform buffer for frame {} — the castle's vault is breached. Initiating MIGHTY RESTORATION", frame);
+        LOG_ERROR_CAT("RENDERER", "Invalid uniform buffer for frame {} — initiating MIGHTY RESTORATION", frame);
+
         const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
         const VkDeviceSize uboSize = 368;
-        initializeAllBufferData(framesInFlight, uboSize, uboSize * framesInFlight);
+        initializeAllBufferData(framesInFlight, uboSize, MATERIAL_BUFFER_SIZE);
 
+        // SECOND CHANCE — if still invalid, log and bail gracefully (no fatal crash)
         if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
         {
-            LOG_FATAL_CAT("RENDERER", "MIGHTY RESTORATION FAILED — frame {} falls into the abyss. The castle mourns.");
-            return;
+            LOG_ERROR_CAT("RENDERER", "MIGHTY RESTORATION FAILED — frame {} still invalid. Continuing with default UBO behavior.", frame);
+            return;  // <-- CHANGED FROM LOG_FATAL TO LOG_ERROR + return
         }
+
+        LOG_SUCCESS_CAT("RENDERER", "MIGHTY RESTORATION SUCCESSFUL — frame {} restored", frame);
     }
 
-    // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ PHASE 2: THE ONE ETERNAL STAGING POINTER — CAPTURED AT BIRTH            ║
-    // ╚══════════════════════════════════════════════════════════════════════════╝
-    static void* g_eternalFrameUBOStagingPtr = nullptr;
-    static VkDeviceSize g_eternalFrameUBOStagingSize = 0;
+    // PHASE 2: ETERNAL STAGING POINTER (created once)
+    static void* g_eternalStagingPtr = nullptr;
+    static VkDeviceSize g_eternalStagingSize = 0;
 
-    if (g_eternalFrameUBOStagingPtr == nullptr)
+    if (g_eternalStagingPtr == nullptr)
     {
-        const VkDeviceSize requiredSize = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
+        const VkDeviceSize required = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-        LOG_AMOURANTH(
-            "\n"
-            "              FORGING THE ONE TRUE FRAME UBO STAGING BUFFER\n"
-            "              SIZE: {} bytes — {} frames in flight\n"
-            "              NULL MAPPED POINTER IS VALID AND ETERNAL\n"
-            "              s_buffers MAY LAG — WE DO NOT CARE",
-            requiredSize, Options::Performance::MAX_FRAMES_IN_FLIGHT);
-
-        BufferManager::stagingPtr(); // ensure the eternal ring exists
-
-        uint64_t handle = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_ETERNAL");
+        BufferManager::stagingPtr(); // ensure ring exists
+        uint64_t handle = BufferManager::createHostVisible(required, "SharedFrameUBO_Staging_ETERNAL");
         if (handle == 0)
         {
-            LOG_FATAL_CAT("RENDERER", "FAILED TO ALLOCATE ETERNAL STAGING BUFFER — ring overflow or allocation error");
+            LOG_ERROR_CAT("RENDERER", "FAILED TO ALLOCATE ETERNAL STAGING BUFFER — using zeroed defaults");
             return;
         }
 
         const auto* info = BufferManager::get(handle);
+        g_eternalStagingPtr  = info && info->mapped ? info->mapped : BufferManager::stagingPtr();
+        g_eternalStagingSize = info ? info->size : required;
 
-        // Accept the allocation even if s_buffers hasn't caught up yet
-        // The ring pointer is always valid after allocation
-        if (!info || info->size < requiredSize)
-        {
-            LOG_WARNING_CAT("RENDERER",
-                "BufferInfo not immediately visible for handle {:#x} — falling back to base ring pointer (perfectly valid)",
-                handle);
-
-            g_eternalFrameUBOStagingPtr  = BufferManager::stagingPtr();
-            g_eternalFrameUBOStagingSize = requiredSize;
-        }
-        else
-        {
-            // Normal path — use the registered pointer (may be nullptr for offset 0, which is fine)
-            g_eternalFrameUBOStagingPtr  = info->mapped ? info->mapped : BufferManager::stagingPtr();
-            g_eternalFrameUBOStagingSize = info->size;
-        }
-
-        LOG_AMOURANTH(
-            "              ETERNAL FRAME UBO STAGING READY AT {:p}\n"
-            "              {} bytes — handle {:#x}\n"
-            "              pink photons march eternal — no purge can stop us now",
-            g_eternalFrameUBOStagingPtr, requiredSize, handle);
+        LOG_AMOURANTH("ETERNAL FRAME UBO STAGING READY AT %p — %llu bytes — handle %#llx",
+                      g_eternalStagingPtr, static_cast<unsigned long long>(g_eternalStagingSize), handle);
     }
 
-    void* data = g_eternalFrameUBOStagingPtr;
+    void* data = g_eternalStagingPtr;
 
-    // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ PHASE 3: THE COMMAND TOWER — ENSURE THE BATTLE PLANS ARE READY           ║
-    // ╚══════════════════════════════════════════════════════════════════════════╝
+    // PHASE 3: COMMAND BUFFER + DESTINATION BUFFER
     VkCommandBuffer cmd = commandBuffers_[frame];
     if (cmd == VK_NULL_HANDLE)
     {
-        LOG_ERROR_CAT("RENDERER", "Command buffer missing for frame {} — re-issuing royal decrees", frame);
-        vkResetCommandBuffer(commandBuffers_[frame], 0);
-        if (recordCommandBuffer(frame) != VK_SUCCESS)
-            return;
-        cmd = commandBuffers_[frame];
+        LOG_ERROR_CAT("RENDERER", "Command buffer missing for frame %u — skipping UBO update", frame);
+        return;
     }
 
     VkBuffer dstBuffer = RAW_BUFFER(uniformBufferEncs_[frame]);
     if (dstBuffer == VK_NULL_HANDLE)
     {
-        LOG_FATAL_CAT("RENDERER", "Destination uniform buffer destroyed — the castle's library burns");
+        LOG_ERROR_CAT("RENDERER", "Destination uniform buffer invalid for frame %u — skipping copy", frame);
         return;
     }
 
-    // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ PHASE 4: THE SACRED RELIC — KATE BUSH-APPROVED UBO OF PERFECT ALIGNMENT ║
-    // ╚══════════════════════════════════════════════════════════════════════════╝
+    // PHASE 4: FILL UBO
     struct alignas(16) FrameUBO {
-        glm::mat4 view;
-        glm::mat4 proj;
-        glm::mat4 viewProj;
-        glm::mat4 invView;
-        glm::mat4 invProj;
+        glm::mat4 view, proj, viewProj, invView, invProj;
         glm::vec4 camPos;
         glm::vec2 jitter;
         uint32_t  frameIndex;
@@ -1607,49 +1577,38 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     };
 
     FrameUBO ubo{};
-    const auto& cam   = Camera::get();
-    const float  aspect = height_ > 0 ? static_cast<float>(width_) / height_ : 1.0f;
+    const auto& camRef = Camera::get();
+    const float aspect = height_ > 0 ? static_cast<float>(width_) / height_ : 1.0f;
 
-    ubo.view       = cam.view();
-    ubo.proj       = cam.proj(aspect);
+    ubo.view       = camRef.view();
+    ubo.proj       = camRef.proj(aspect);
     ubo.viewProj   = ubo.proj * ubo.view;
     ubo.invView    = glm::inverse(ubo.view);
     ubo.invProj    = glm::inverse(ubo.proj);
-    ubo.camPos     = glm::vec4(cam.pos(), 1.0f);
+    ubo.camPos     = glm::vec4(camRef.pos(), 1.0f);
     ubo.jitter     = glm::vec2(jitter);
     ubo.frameIndex = frameNumber_;
-    ubo.time       = frameTime_;
+    ubo.time       = totalTime_;
     ubo.spp        = currentSpp_;
 
-    // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ PHASE 5: THE ETERNAL COPY — PHOTONS MARCH INTO BATTLE                    ║
-    // ╚══════════════════════════════════════════════════════════════════════════╝
+    // PHASE 5: COPY TO STAGING
     const VkDeviceSize offset = frame * sizeof(FrameUBO);
-    void* dest = static_cast<char*>(data) + offset;
-
-    if (offset + sizeof(ubo) > g_eternalFrameUBOStagingSize)
+    if (offset + sizeof(ubo) > g_eternalStagingSize)
     {
-        LOG_FATAL_CAT("RENDERER", "Eternal staging overflow — granary bursts (offset {} + {} > {})", offset, sizeof(ubo), g_eternalFrameUBOStagingSize);
+        LOG_ERROR_CAT("RENDERER", "Staging overflow — skipping frame %u UBO update", frame);
         return;
     }
 
-    std::memcpy(dest, &ubo, sizeof(ubo));
+    std::memcpy(static_cast<char*>(data) + offset, &ubo, sizeof(ubo));
 
-    // ╔══════════════════════════════════════════════════════════════════════════╗
-    // ║ PHASE 6: THE ROYAL COURIER — DISPATCH TO GPU AND RAISE THE DRAWBRIDGE   ║
-    // ╚══════════════════════════════════════════════════════════════════════════╝
+    // PHASE 6: COPY TO GPU + BARRIER
     VkBuffer srcBuffer = BufferManager::getStagingBuffer();
 
-    VkBufferCopy copy{
-        .srcOffset = offset,
-        .dstOffset = 0,
-        .size      = sizeof(ubo)
-    };
+    VkBufferCopy copy{ .srcOffset = offset, .dstOffset = 0, .size = sizeof(ubo) };
     vkCmdCopyBuffer(cmd, srcBuffer, dstBuffer, 1, &copy);
 
     VkMemoryBarrier barrier{
-        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .pNext         = nullptr,
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT
     };
@@ -1659,70 +1618,54 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    LOG_TRACE_CAT("RENDERER",
-        "Frame {} UBO updated — pink photons march from the eternal stone at {:p}", frameNumber_, data);
+    LOG_TRACE_CAT("RENDERER", "updateUniformBuffer — COMPLETE — frame {} | time {} | spp {}", frame, ubo.time, ubo.spp);
 }
 
+// VulkanRenderer::updateTonemapUniform — RAW BOI DIRECT WRITE (no staging, no null poop)
 void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
 {
-    if (tonemapUniformEncs_.empty() || RTX::g_ctx().sharedStagingEnc_ == 0) return;
+    LOG_TRACE_CAT("RENDERER", "updateTonemapUniform — START — frame {}", frame);
 
-    if (BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_) == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Shared staging memory null — skipping tonemap update");
+    if (frame >= tonemapUniformEncs_.size() || tonemapUniformEncs_[frame] == 0) {
+        LOG_WARN_CAT("RENDERER", "Tonemap UBO handle invalid or zero for frame {} — skipping", frame);
         return;
     }
 
-    void* data = nullptr;
-    if (vkMapMemory(StoneKey::stone_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_), 0, VK_WHOLE_SIZE, 0, &data) != VK_SUCCESS || !data) {
-        LOG_WARN_CAT("RENDERER", "Failed to map tonemap staging — frame {}", frame);
+    const uint64_t handle = tonemapUniformEncs_[frame];
+    auto it = BufferManager::s_buffers.find(handle);
+    if (it == BufferManager::s_buffers.end()) {
+        LOG_ERROR_CAT("RENDERER", "Tonemap UBO handle {} missing from s_buffers — skipping update (frame {})", handle, frame);
+        return;
+    }
+    const BufferManager::BufferInfo& info = it->second;
+
+    if (info.mapped == nullptr) {
+        LOG_WARN_CAT("RENDERER", "Tonemap UBO not mapped for handle {} (frame {}) — skipping update", handle, frame);
         return;
     }
 
     struct TonemapUniform {
-        float exposure;
+        float    exposure;
         uint32_t type;
         uint32_t enabled;
-        float nexusScore;
+        float    nexusScore;
         uint32_t frame;
         uint32_t spp;
-        float _pad[2];
+        float    _pad[2];
     } ubo{};
 
-    ubo.exposure = currentExposure_;
-    ubo.type = static_cast<uint32_t>(tonemapType_);
-    ubo.enabled = tonemapEnabled_ ? 1u : 0u;
+    ubo.exposure   = currentExposure_;
+    ubo.type       = static_cast<uint32_t>(tonemapType_);
+    ubo.enabled    = tonemapEnabled_ ? 1u : 0u;
     ubo.nexusScore = currentNexusScore_;
-    ubo.frame = frameNumber_;
-    ubo.spp = currentSpp_;
+    ubo.frame      = frameNumber_;
+    ubo.spp        = currentSpp_;
 
-    std::memcpy(data, &ubo, sizeof(ubo));
-    vkUnmapMemory(StoneKey::stone_device(), BUFFER_MEMORY(RTX::g_ctx().sharedStagingEnc_));
+    // Direct eternal write — raw boi, no staging, no bullshit
+    std::memcpy(info.mapped, &ubo, sizeof(ubo));
 
-    VkBuffer deviceBuf = RAW_BUFFER(tonemapUniformEncs_[frame]);
-    if (deviceBuf == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Tonemap device UBO null — frame {} skipped", frame);
-        return;
-    }
-
-    const auto& ctx = RTX::g_ctx();
-    VkCommandBuffer copyCmd = RTX::beginOneTimeSubmit(ctx.commandPool_);
-    if (copyCmd == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Failed to begin copy command for tonemap — frame {}", frame);
-        return;
-    }
-
-    VkBuffer stagingBuf = BufferManager::get(RTX::g_ctx().sharedStagingEnc_)->buffer;
-    if (stagingBuf != VK_NULL_HANDLE) {
-        VkBufferCopy copyRegion{ .size = sizeof(ubo) };
-        vkCmdCopyBuffer(copyCmd, stagingBuf, deviceBuf, 1, &copyRegion);
-
-        VkMemoryBarrier barrier{ .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
-        vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
-    }
-
-    RTX::endOneTimeSubmit(copyCmd, ctx.graphicsQueue(), ctx.commandPool_);
+    LOG_TRACE_CAT("RENDERER", "Tonemap UBO updated directly (frame {}) — exposure {} | spp {}", 
+                  frame, ubo.exposure, ubo.spp);
 }
 
 void VulkanRenderer::setTonemap(bool enabled) noexcept
@@ -1813,7 +1756,7 @@ void VulkanRenderer::createFramebuffers() noexcept
             std::format("Failed to forge framebuffer {} of {}", i, imageCount).c_str()
         );
 
-        LOG_TRACE_CAT("RENDERER", "Framebuffer {} forged — view {:#x}", i, reinterpret_cast<uint64_t>(attachment));
+        LOG_TRACE_CAT("RENDERER", "Framebuffer {} forged — view {}", i, reinterpret_cast<uint64_t>(attachment));
     }
 
     LOG_SUCCESS_CAT("RENDERER", "All {} swapchain framebuffers forged — the canvas is complete", imageCount);
@@ -2020,48 +1963,27 @@ void VulkanRenderer::createTonemapDescriptorSetLayout() noexcept
     );
 }
 
+// Optional: recreateTonemapUBOs — now uses host-visible (replace the old loop)
 bool VulkanRenderer::recreateTonemapUBOs() noexcept
 {
     const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    // SELF-HEALING — REBUILD EVERYTHING IF CORRUPTED
-    if (tonemapSets_.size() != frames ||
-        tonemapUniformEncs_.size() != frames ||
-        rtOutputViews_.size() < frames ||
-        !tonemapDescriptorPool_.valid() ||
-        !tonemapDescriptorSetLayout_.valid())
-    {
-        LOG_WARNING_CAT("TONEMAP", "TONEMAP SYSTEM CORRUPTED — FULL REBUILD");
-
-        createTonemapDescriptorPool();
-        createTonemapDescriptorSetLayout();
-        createTonemapDescriptorSets();
-    }
-
-    // DESTROY OLD UBOs
+    // Destroy old
     for (auto h : tonemapUniformEncs_) if (h) BufferManager::destroy(h);
     tonemapUniformEncs_.assign(frames, 0);
 
-    // RECREATE UBOs
+    // Recreate as host-visible
     for (uint32_t i = 0; i < frames; ++i)
     {
-        uint64_t h = BufferManager::create(
-            256,
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            std::format("TonemapUBO[{}]", i)
-        );
-        tonemapUniformEncs_[i] = h ? h : 0;
+        tonemapUniformEncs_[i] = BufferManager::createHostVisible(256, std::format("TonemapUBO[{}]", i));
+        if (tonemapUniformEncs_[i] == 0) {
+            LOG_FATAL("Failed to recreate host-visible TonemapUBO[{}]", i);
+            return false;
+        }
     }
 
-    // BIND UBOs TO SETS — IMAGES DYNAMIC PER-FRAME
-    for (uint32_t i = 0; i < frames; ++i)
-    {
-        if (i >= tonemapSets_.size() || tonemapSets_[i] == VK_NULL_HANDLE ||
-            i >= rtOutputViews_.size() || !rtOutputViews_[i].valid())
-        {
-            continue;
-        }
+    // Re-bind UBOs to descriptor sets
+    for (uint32_t i = 0; i < frames; ++i) {
         updateTonemapUBO(i);
     }
 
@@ -2168,7 +2090,7 @@ bool VulkanRenderer::createSharedStaging() noexcept
     };
 
     LOG_SUCCESS_CAT("RENDERER", 
-        "Shared staging buffer CREATED AND MAPPED — {} bytes @ {:p} | handle: {}", 
+        "Shared staging buffer CREATED AND MAPPED — {} bytes @ {} | handle: {}", 
         size, mapped, RTX::g_ctx().sharedStagingEnc_);
 
     return true;
@@ -2383,7 +2305,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     RTX::LAS::get().beginFrame();
 
-    // Raw boi time accumulation — no mercy, no wrappers
     totalTime_ += deltaTime;
 
     if (RTX::SwapchainManager::minimized_) {
@@ -2398,9 +2319,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     if (inFlightFences_[slot] != VK_NULL_HANDLE) {
         if (Options::CURRENT_PRESET == Options::Preset::BestQuality) {
             vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX);
-        } else {
-            if (vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, 500'000) == VK_TIMEOUT)
-                return;
+        } else if (vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, 500'000) == VK_TIMEOUT) {
+            return;
         }
         vkResetFences(stone_device(), 1, &inFlightFences_[slot]);
     }
@@ -2424,44 +2344,40 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkCommandBuffer cmd = commandBuffers_[slot];
     vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo = {};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo beginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // MODE 0: LOUD THERMO PINK VOID — RAW BOI EDITION
+    // MODE 0: LOUD THERMO PINK VOID
     if (activeRenderMode_ == 0)
     {
-        // Update the UBO properly (camera, resolution, frame, etc.)
         updateUniformBuffer(slot, camera, deltaTime);
 
-        const BufferManager::BufferInfo& info = BufferManager::s_buffers.at(uniformBufferEncs_[slot]);
-
-        // SAFETY NET — empire doesn't crash on null mapped (remove after fixing creation)
-        if (info.mapped == nullptr) {
-            LOG_ERROR("UBO mapped is null for slot {} — using device-local fallback, no pink pulse", slot);
-            // Fallback: skip writes, but still trace (miss shader will use default time=0, no pulse)
+        const uint64_t handle = uniformBufferEncs_[slot];
+        auto it = BufferManager::s_buffers.find(handle);
+        if (it == BufferManager::s_buffers.end()) {
+            LOG_ERROR_CAT("RENDERER", "DreamUBO handle {} missing — no pink pulse this frame (slot {})", handle, slot);
         } else {
-            DreamUBO* uboPtr = static_cast<DreamUBO*>(info.mapped);
-            uboPtr->enableEnvMap = 0;      // PURE PINK VOID — NO SKY, NO ESCAPE
-            uboPtr->time = totalTime_;     // PULSE LOUDER THAN THE SUN
+            const BufferManager::BufferInfo& info = it->second;
+
+            if (info.mapped) {
+                DreamUBO* uboPtr = static_cast<DreamUBO*>(info.mapped);
+                uboPtr->enableEnvMap = 0;
+                uboPtr->time = totalTime_;
+            }
+
+            RTX::RTDescriptorUpdate descUpdate{};
+            descUpdate.tlas = pipelineManager_.dummyTLAS();
+            descUpdate.ubo = info.buffer;
+            descUpdate.uboSize = 368;
+            descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
+            pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
         }
 
-        // Dummy TLAS so every ray screams into the miss shader
-        VkAccelerationStructureKHR dummy = pipelineManager_.dummyTLAS();
-
-        RTX::RTDescriptorUpdate descUpdate{};
-        descUpdate.tlas = dummy;
-        descUpdate.ubo = info.buffer;
-        descUpdate.uboSize = 368;
-        descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
-
-        pipelineManager_.updateRTDescriptorSet(slot, descUpdate);
-
-        // Trace rays → miss shader paints pure pulsing pink
         recordRayTracingCommands(cmd, slot);
 
-        // Blit the imperial pink straight to swapchain
         transitionImage(cmd, rtOutputImages_[slot].get(),
             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
@@ -2473,15 +2389,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             0, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-        VkImageCopy copyRegion{};
-        copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copyRegion.extent = { stone_width(), stone_height(), 1 };
-
-        vkCmdCopyImage(cmd,
-            rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &copyRegion);
+        VkImageCopy copyRegion{
+            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .extent = { stone_width(), stone_height(), 1 }
+        };
+        vkCmdCopyImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
         transitionImage(cmd, swapImg,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -2493,7 +2407,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         return;
     }
 
-    // ALL OTHER MODES: FULL RTX PATH (unchanged)
+    // FULL RTX PATH
     if (resetAccumulation_ || resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumulation_ = resetAccumNextFrame_ = false;
@@ -2506,10 +2420,18 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkAccelerationStructureKHR tlas = RTX::LAS::get().getTLAS();
     if (!tlas) tlas = pipelineManager_.dummyTLAS();
 
+    const uint64_t uboHandle = uniformBufferEncs_[slot];
+    auto uboIt = BufferManager::s_buffers.find(uboHandle);
+    if (uboIt == BufferManager::s_buffers.end()) {
+        LOG_ERROR_CAT("RENDERER", "Uniform buffer handle {} missing — fatal sync error (slot {})", uboHandle, slot);
+        submitAndPresent(slot, imageIndex);
+        return;
+    }
+    const BufferManager::BufferInfo& uboInfo = uboIt->second;
+
     RTX::RTDescriptorUpdate descUpdate{};
     descUpdate.tlas = tlas;
-    const BufferManager::BufferInfo& info = BufferManager::s_buffers.at(uniformBufferEncs_[slot]);
-    descUpdate.ubo = info.buffer;
+    descUpdate.ubo = uboInfo.buffer;
     descUpdate.uboSize = 368;
     descUpdate.rtOutputViews[slot] = rtOutputViews_[slot].get();
     descUpdate.accumulationViews[slot] = accumViews_[slot].get();
