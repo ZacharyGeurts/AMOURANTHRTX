@@ -54,17 +54,19 @@ void PipelineManager::createDescriptorPool()
     LOG_INFO_CAT("PIPELINE", "Creating descriptor pool");
 
     const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    // Allocate generously to prevent exhaustion
     const uint32_t TOTAL_SETS = framesInFlight * 16;
 
-    // Count descriptors per set
     std::unordered_map<VkDescriptorType, uint32_t> typeCount;
     for (const auto& b : RT_PIPELINE_BINDINGS) {
         typeCount[b.type] += b.count;
     }
 
-    // Over-allocate each type
+    // EMPIRE SAFEGUARD — always reserve space for binding 11 (index buffer)
+    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += 1;
+
+    // Future-proof padding
+    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += 4;
+
     std::vector<VkDescriptorPoolSize> poolSizes;
     poolSizes.reserve(typeCount.size());
 
@@ -74,7 +76,7 @@ void PipelineManager::createDescriptorPool()
 
     VkDescriptorPoolCreateInfo info{};
     info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Allow individual frees
+    info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     info.maxSets       = TOTAL_SETS;
     info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     info.pPoolSizes    = poolSizes.data();
@@ -85,14 +87,12 @@ void PipelineManager::createDescriptorPool()
     if (result == VK_SUCCESS) [[likely]]
     {
         rtDescriptorPool_ = Handle<VkDescriptorPool>(
-            pool,
-            stone_device(),
+            pool, stone_device(),
             [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); },
-            0,
-            "EMPIRE_DESCRIPTOR_POOL_ETERNAL"
+            0, "EMPIRE_DESCRIPTOR_POOL_ETERNAL"
         );
 
-        LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — {} sets allocated", TOTAL_SETS);
+        LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — {} sets (binding 11 eternally safeguarded)", TOTAL_SETS);
     }
     else [[unlikely]]
     {
@@ -221,12 +221,14 @@ void PipelineManager::allocateDescriptorSets()
 // ──────────────────────────────────────────────────────────────────────────────
 // updateRTDescriptorSet — Writes All Bindings (Dummy for Nulls) — VUID-Safe
 // ──────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// updateRTDescriptorSet — Safe & Compiling (uses existing additionalStorageBuffer)
+// ──────────────────────────────────────────────────────────────────────────────
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
     // Validate set exists and is valid
     if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE)
     {
-        // Trigger full rebuild — only once per frame
         if (!g_pipelineNeedsRebuild.exchange(true))
         {
             LOG_WARNING_CAT("PIPELINE", "Invalid descriptor set at index {} — scheduling rebuild", frameIndex);
@@ -236,10 +238,10 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     }
 
     VkDescriptorSet dstSet = rtDescriptorSets_[frameIndex];
-    std::array<VkWriteDescriptorSet, 16> writes{};
+    std::array<VkWriteDescriptorSet, 17> writes{};
     uint32_t writeCount = 0;
 
-    // LAMBDA HELPERS
+    // LAMBDA HELPERS (unchanged)
     const auto writeAccel = [&](VkAccelerationStructureKHR tlas) {
         const VkWriteDescriptorSetAccelerationStructureKHR accelInfo{
             .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
@@ -285,12 +287,10 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 
     const auto writeSampler = [&](uint32_t binding, VkSampler sampler, VkImageView view) {
         if (sampler == VK_NULL_HANDLE || view == VK_NULL_HANDLE) return;
-
         VkDescriptorImageInfo info{};
         info.sampler     = sampler;
         info.imageView   = view;
         info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
         writes[writeCount++] = VkWriteDescriptorSet{
             .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet          = dstSet,
@@ -301,28 +301,23 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         };
     };
 
-    // Cubemap binding (fixed to 5 to avoid overlap)
     const auto writeCubemap = [&]() {
         if (!updateInfo.envSampler || !updateInfo.envImageView) return;
-
-        const uint32_t cubemapBinding = 5;
-
         VkDescriptorImageInfo info{};
         info.sampler     = updateInfo.envSampler;
         info.imageView   = updateInfo.envImageView;
         info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
         writes[writeCount++] = VkWriteDescriptorSet{
             .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet          = dstSet,
-            .dstBinding      = cubemapBinding,
+            .dstBinding      = 5,
             .descriptorCount = 1,
             .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo      = &info
         };
     };
 
-    // Bindings in order (fixed to avoid overlaps)
+    // === BINDINGS ===
     writeAccel(updateInfo.tlas ? updateInfo.tlas : dummyTLAS_.get());
 
     writeImage(1, updateInfo.rtOutputViews[frameIndex]);
@@ -333,27 +328,29 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     writeBuffer(3, updateInfo.ubo, updateInfo.uboSize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     writeBuffer(4, updateInfo.materialsBuffer, updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
-    // Cubemap
     writeCubemap();
 
     if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
         writeImage(6, updateInfo.nexusScoreViews[frameIndex]);
 
-    // Additional storage (moved to 10 to avoid overlap with cubemap)
+    // === GEOMETRY BUFFER — STILL USING BINDING 10 (existing field) ===
+    // This is the original line — keeps everything compiling
     writeBuffer(10, updateInfo.additionalStorageBuffer, updateInfo.additionalStorageSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    // Binding 11 is reserved for the future split (vertex @ 10, index @ 11)
+    // No write yet — will be activated when you add the new fields to RTDescriptorUpdate
 
     writeSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
     writeSampler(9, updateInfo.densitySampler, updateInfo.densityView);
 
-    // Binding 31 — StoneKey
+    // Binding 31 — StoneKey eternal
     writeBuffer(31, updateInfo.stoneKeyBuffer, updateInfo.stoneKeySize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
-    // Update if any writes
     if (writeCount > 0) {
         vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
     }
 
-    LOG_TRACE_CAT("PIPELINE", "Updated descriptor set {} with {} bindings", frameIndex, writeCount);
+    LOG_TRACE_CAT("PIPELINE", "Updated descriptor set {} with {} bindings (geometry on binding 10)", frameIndex, writeCount);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

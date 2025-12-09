@@ -118,6 +118,11 @@ public:
     void initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue);
     void cleanup() noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue);
+
+	VkBuffer       vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceSize   vertexBufferSize = 0;
+    VkBuffer       indexBuffer = VK_NULL_HANDLE;
+    VkDeviceSize   indexBufferSize = 0;
 	
 	[[nodiscard]] VkResult recordCommandBuffer(uint32_t frame) const noexcept;
 
