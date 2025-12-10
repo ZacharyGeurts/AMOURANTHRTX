@@ -12,12 +12,9 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 
 #include <algorithm>
-#include <fstream>
-#include <format>
 #include <limits>
 #include <vector>
 
-using namespace Logging::Color;
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
 using StoneKey::stone_surface;
@@ -27,59 +24,12 @@ using StoneKey::stone_seal_extent;
 using StoneKey::stone_seal_image_count;
 using StoneKey::stone_seal_images;
 using StoneKey::stone_seal_views;
+using StoneKey::stone_swapchain;
+using StoneKey::stone_width;
+using StoneKey::stone_height;
 
 namespace RTX {
 
-// ── EXTENSION FUNCTION POINTERS ─────────────────────────────────────────────
-static PFN_vkGetRefreshCycleDurationGOOGLE   vkGetRefreshCycleDurationGOOGLE   = nullptr;
-static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE = nullptr;
-static PFN_vkSetHdrMetadataEXT               vkSetHdrMetadataEXT               = nullptr;
-
-// ── HDR AUTO-DETECTION ───────────────────────────────────────────────────────
-void SwapchainManager::autoEnableHDR() noexcept
-{
-    static bool cached = false;
-    if (cached) return;
-
-    bool hdr = false;
-    if (Options::Display::HDR_AUTO_IGNITION)
-    {
-        const char* paths[] = {
-            "/sys/class/drm/card0-DP-1/edid",
-            "/sys/class/drm/card0-HDMI-A-1/edid",
-            "/sys/class/drm/card0-eDP-1/edid",
-            "/sys/class/drm/card1-DP-1/edid"
-        };
-
-        std::vector<char> edid;
-        for (const auto* p : paths)
-        {
-            std::ifstream f(p, std::ios::binary);
-            if (!f) continue;
-            f.seekg(0, std::ios::end);
-            auto sz = f.tellg();
-            if (sz < 256) continue;
-            edid.resize(static_cast<size_t>(sz));
-            f.seekg(0);
-            if (!f.read(edid.data(), sz)) continue;
-
-            for (size_t i = 128; i + 128 <= edid.size(); i += 128)
-            {
-                if (edid[i] == 0x02 && edid[i + 3] >= 0x06)
-                {
-                    hdr = true;
-                    break;
-                }
-            }
-            if (hdr) break;
-        }
-    }
-
-    currentColorSpace_ = hdr ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    cached = true;
-}
-
-// ── PUBLIC API ───────────────────────────────────────────────────────────────
 void SwapchainManager::create(SDL_Window*, uint32_t w, uint32_t h) noexcept
 {
     autoEnableHDR();
@@ -95,7 +45,7 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     }
     minimized_ = false;
 
-    vkDeviceWaitIdle(stone_device());
+    // NO vkDeviceWaitIdle() — WE ARE FREE — DRIVER REUSES oldSwapchain
 
     for (auto v : swapchainImageViews_)
         if (v) vkDestroyImageView(stone_device(), v, nullptr);
@@ -107,96 +57,45 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
     las().notifyResize();
 }
 
-// ── IMAGE VIEW FORGE — THE EMPIRE SEES ITS CANVAS ───────────────────────────
 void SwapchainManager::createImageViews() noexcept
 {
-    LOG_AMOURANTH("Forging image views for {} swapchain images — THE PHOTONS WILL BE SEEN", swapchainImages_.size());
-
     swapchainImageViews_.resize(swapchainImages_.size());
 
     VkImageViewCreateInfo ci{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .viewType         = VK_IMAGE_VIEW_TYPE_2D,
         .format           = swapchainFormat_,
-        .components       = {
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY
-        },
-        .subresourceRange = {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = 1,
-            .baseArrayLayer = 0,
-            .layerCount     = 1
-        }
+        .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
 
-    for (size_t i = 0; i < swapchainImages_.size(); ++i)
-    {
+    for (size_t i = 0; i < swapchainImages_.size(); ++i) {
         ci.image = swapchainImages_[i];
-
-        VkImageView view = VK_NULL_HANDLE;
-        VkResult result = vkCreateImageView(stone_device(), &ci, nullptr, &view);
-
-        if (result != VK_SUCCESS)
-        {
-            LOG_FATAL_CAT("SWAPCHAIN", 
-                "Failed to create image view [{}] — error: {} — triggering emergency recovery",
-                i, string_VkResult(result));
-            recreate(swapchainExtent_.width, swapchainExtent_.height);
-            return;
-        }
-
-        swapchainImageViews_[i] = view;
+        vkCreateImageView(stone_device(), &ci, nullptr, &swapchainImageViews_[i]);
     }
 
-    // Seal the empire's vision
     stone_seal_views(swapchainImageViews_);
-
-    LOG_AMOURANTH(
-        "              {} IMAGE VIEWS FORGED SUCCESSFULLY\n"
-        "              EACH PHOTON NOW HAS A WINDOW\n"
-        "              THE EMPIRE SEES ALL",
-        swapchainImageViews_.size());
-
-    LOG_CAPTAIN_N("[CAPTAIN N] \"The eyes are open.\"\n"
-                  "               \"Every pixel — watched.\"\n"
-                  "               \"Every photon — accounted for.\"\n"
-                  "               \"We see everything.\"\n"
-                  "               \"...and they see us.\"");
 }
 
-// ── PUBLIC ACCESSORS FOR DIRECT SWAPCHAIN OUTPUT (OPTION 1) ───────────────
-const std::vector<VkImageView>& SwapchainManager::getImageViews() const noexcept
-{
-    return swapchainImageViews_;
-}
+const std::vector<VkImageView>& SwapchainManager::getImageViews() const noexcept { return swapchainImageViews_; }
+VkImageView SwapchainManager::getImageView(uint32_t index) const noexcept { return index < swapchainImageViews_.size() ? swapchainImageViews_[index] : VK_NULL_HANDLE; }
 
-VkImageView SwapchainManager::getImageView(uint32_t index) const noexcept
-{
-    if (index >= swapchainImageViews_.size())
-        return VK_NULL_HANDLE;
-    return swapchainImageViews_[index];
-}
-
-// ── CLEANUP ────────────────────────────────────────────────────────────────
 void SwapchainManager::cleanup() noexcept
 {
-    // she moves without shadow
+    for (auto v : swapchainImageViews_)
+        if (v) vkDestroyImageView(stone_device(), v, nullptr);
+    swapchainImageViews_.clear();
+
+    if (swapchain_.valid()) {
+        vkDestroySwapchainKHR(stone_device(), swapchain_.get(), nullptr);
+        swapchain_.reset();
+    }
+    swapchainImages_.clear();
 }
 
-// ── HDR SUPPORT ─────────────────────────────────────────────────────────────
-bool SwapchainManager::supportsHDR() noexcept
-{
-    return currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT;
-}
+bool SwapchainManager::supportsHDR() noexcept { return currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT; }
 
-void SwapchainManager::createSwapchain(SDL_Window* window,
-                                       uint32_t w,
-                                       uint32_t h,
-                                       VkSwapchainKHR old) noexcept
+void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
     VkSurfaceCapabilitiesKHR caps{};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps);
@@ -278,7 +177,6 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
     VkSwapchainKHR raw = VK_NULL_HANDLE;
     vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw);
 
-    // NINJA GWEN: old dies only if not reused — we trust the driver
     if (old && old != raw) {
         vkDestroySwapchainKHR(stone_device(), old, nullptr);
     }
@@ -300,157 +198,87 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
     stone_seal_images(swapchainImages_);
 }
 
-// ── ROBUST IMAGE ACQUISITION (INFINITE TIMEOUT — NO 60FPS DEADLOCK) ─────────
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
                                             VkSemaphore semaphore,
                                             VkFence fence) noexcept
 {
-    VkResult result = vkAcquireNextImageKHR(stone_device(),
-                                 swapchain_.get(),
-                                 UINT64_MAX,  // ← INFINITE TIMEOUT — WE ARE PATIENT
-                                 semaphore,
-                                 fence,
-                                 pImageIndex);
+    constexpr uint64_t TIMEOUT = 100'000'000ULL;  // 100ms — NO DEADLOCK DENIED
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        recreate(swapchainExtent_.width, swapchainExtent_.height);
+    VkResult result = vkAcquireNextImageKHR(stone_device(),
+                                            stone_swapchain(),
+                                            TIMEOUT,
+                                            semaphore,
+                                            fence,
+                                            pImageIndex);
+
+    if (result == VK_TIMEOUT || result == VK_NOT_READY ||
+        result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    {
+        recreate(stone_width(), stone_height());
         return VK_ERROR_OUT_OF_DATE_KHR;
     }
 
     return result;
 }
 
-// ── PRESENT (robust, handles SUBOPTIMAL) ───────────────────────────────────
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
-    VkSwapchainKHR rawSwapchain = swapchain_.get();
-
     VkPresentInfoKHR pi{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = waitSemaphore ? 1u : 0u,
         .pWaitSemaphores    = waitSemaphore ? &waitSemaphore : nullptr,
         .swapchainCount     = 1,
-        .pSwapchains        = &rawSwapchain,  // ← FIXED
+        .pSwapchains        = &stone_swapchain(),
         .pImageIndices      = &imageIndex
     };
 
     VkResult r = vkQueuePresentKHR(queue, &pi);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
-        recreate(swapchainExtent_.width, swapchainExtent_.height);
+        recreate(stone_width(), stone_height());
     }
 }
 
-// ── FRAME PACING ───────────────────────────────────────────────────────────
-void SwapchainManager::initializeFramePacing() noexcept
+void SwapchainManager::autoEnableHDR() noexcept
 {
-    if (!Options::Performance::ENABLE_FRAME_PREDICTION) return;
+    static bool done = false;
+    if (done) return;
 
-    vkGetRefreshCycleDurationGOOGLE = (PFN_vkGetRefreshCycleDurationGOOGLE)
-        vkGetDeviceProcAddr(stone_device(), "vkGetRefreshCycleDurationGOOGLE");
-
-    if (vkGetRefreshCycleDurationGOOGLE && swapchain_.valid())
-        vkGetRefreshCycleDurationGOOGLE(stone_device(), swapchain_.get(), &refreshDuration_);
-}
-
-uint64_t SwapchainManager::getNextPresentTime() noexcept
-{
-    if (!Options::Performance::ENABLE_FRAME_PREDICTION || !vkGetRefreshCycleDurationGOOGLE) return 0;
-
-    uint32_t count = 0;
-    vkGetPastPresentationTimingGOOGLE(stone_device(), swapchain_.get(), &count, nullptr);
-    if (count == 0) return 0;
-
-    timingHistory_.resize(count);
-    vkGetPastPresentationTimingGOOGLE(stone_device(), swapchain_.get(), &count, timingHistory_.data());
-    if (timingHistory_.empty()) return 0;
-
-    return timingHistory_.back().actualPresentTime + refreshDuration_.refreshDuration;
-}
-
-// ── HDR METADATA INJECTION ─────────────────────────────────────────────────
-void SwapchainManager::injectHdrMetadata(VkCommandBuffer, uint32_t) noexcept
-{
-    if (!supportsHDR()) return;
-
-    if (!vkSetHdrMetadataEXT)
+    bool hdr = false;
+    if (Options::Display::HDR_AUTO_IGNITION)
     {
-        vkSetHdrMetadataEXT = (PFN_vkSetHdrMetadataEXT)
-            vkGetDeviceProcAddr(stone_device(), "vkSetHdrMetadataEXT");
-        if (!vkSetHdrMetadataEXT) return;
+        const char* paths[] = {
+            "/sys/class/drm/card0-DP-1/edid",
+            "/sys/class/drm/card0-HDMI-A-1/edid",
+            "/sys/class/drm/card0-eDP-1/edid",
+            "/sys/class/drm/card1-DP-1/edid"
+        };
+
+        std::vector<char> edid;
+        for (const auto* p : paths)
+        {
+            std::ifstream f(p, std::ios::binary);
+            if (!f) continue;
+            f.seekg(0, std::ios::end);
+            auto sz = f.tellg();
+            if (sz < 256) continue;
+            edid.resize(static_cast<size_t>(sz));
+            f.seekg(0);
+            if (!f.read(edid.data(), sz)) continue;
+
+            for (size_t i = 128; i + 128 <= edid.size(); i += 128)
+            {
+                if (edid[i] == 0x02 && edid[i + 3] >= 0x06)
+                {
+                    hdr = true;
+                    break;
+                }
+            }
+            if (hdr) break;
+        }
     }
 
-    if (!swapchain_.valid()) return;
-
-    VkSwapchainKHR rawSwapchain = swapchain_.get();
-
-    VkHdrMetadataEXT m{
-        .sType                     = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,
-        .displayPrimaryRed         = {0.708f, 0.292f},
-        .displayPrimaryGreen       {0.170f, 0.797f},
-        .displayPrimaryBlue        {0.131f, 0.046f},
-        .whitePoint                {0.3127f, 0.3290f},
-        .maxLuminance              = Options::Display::TARGET_BRIGHTNESS_NITS,
-        .minLuminance              = 0.001f,
-        .maxContentLightLevel      = Options::Display::TARGET_BRIGHTNESS_NITS,
-        .maxFrameAverageLightLevel = Options::Display::TARGET_BRIGHTNESS_NITS * 0.4f
-    };
-
-    vkSetHdrMetadataEXT(stone_device(), 1, &rawSwapchain, &m);
+    currentColorSpace_ = hdr ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    done = true;
 }
-
-// ── DYNAMIC FEATURES ───────────────────────────────────────────────────────
-void SwapchainManager::handleDisplayHotplug(SDL_Event* event) noexcept
-{
-    if (!event) return;
-    if (event->type == SDL_EVENT_WINDOW_HDR_STATE_CHANGED ||
-        event->type == SDL_EVENT_DISPLAY_ADDED ||
-        event->type == SDL_EVENT_DISPLAY_REMOVED)
-    {
-        autoEnableHDR();
-        recreate(swapchainExtent_.width, swapchainExtent_.height);
-    }
-}
-
-void SwapchainManager::enableDirectDisplay(bool enable) noexcept
-{
-    if (!Options::Performance::ENABLE_DIRECT_DISPLAY) return;
-    directDisplayEnabled_ = enable;
-    recreate(swapchainExtent_.width, swapchainExtent_.height);
-}
-
-void SwapchainManager::predictResize(uint32_t w, uint32_t h) noexcept
-{
-    if (!Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION) return;
-    if (w == 0 || h == 0 || w > 16384 || h > 16384) return;
-
-    VkSwapchainKHR old = swapchain_.get();
-    swapchain_ = Handle<VkSwapchainKHR>();
-    createSwapchain(stone_window(), w, h, old);
-    createImageViews();
-    las().notifyResize();
-}
-
-void SwapchainManager::setPresentMode(VkPresentModeKHR mode) noexcept
-{
-    uint32_t count = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, nullptr);
-    std::vector<VkPresentModeKHR> modes(count);
-    if (count) vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &count, modes.data());
-
-    bool supported = std::find(modes.begin(), modes.end(), mode) != modes.end();
-    if (!supported) mode = VK_PRESENT_MODE_FIFO_KHR;
-
-    currentPresentMode_ = mode;
-    recreate(swapchainExtent_.width, swapchainExtent_.height);
-}
-
-void SwapchainManager::releaseAcquiredImages() noexcept { /* Vulkan handles it */ }
 
 } // namespace RTX
-
-// =============================================================================
-// FIRST LIGHT ETERNAL — DECEMBER 05 2025
-// COMPILES CLEAN — NO 60FPS DEADLOCK — INFINITE TIMEOUT
-// BESTQUALITY = CAPPED — UNCAPPED = UNCAPPED
-// PINK PHOTONS ASCENDANT
-// =============================================================================

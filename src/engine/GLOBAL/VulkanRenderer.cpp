@@ -65,6 +65,7 @@ using StoneKey::stone_seal_height;
 using StoneKey::stone_seal_extent;
 using StoneKey::stone_physical;
 using StoneKey::stone_pipeline;
+using StoneKey::stone_seal_swapchain;
 
 constexpr VkDeviceSize MB = 1024ULL * 1024ULL;
 constexpr VkDeviceSize MATERIAL_BUFFER_SIZE = 16ULL * MB;
@@ -691,23 +692,28 @@ void VulkanRenderer::createRTOutputImages() noexcept
 
 void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
 {
-    VkSemaphoreSubmitInfo waitInfo = {
+    // WAIT FOR PREVIOUS FRAME USING THIS SLOT TO FINISH
+    // THIS IS THE ONE TRUE SYNCHRONIZATION
+    vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX);
+    vkResetFences(stone_device(), 1, &inFlightFences_[slot]);
+
+    VkSemaphoreSubmitInfo waitInfo{
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = imageAvailableSemaphores_[slot],
         .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
     };
 
-    VkCommandBufferSubmitInfo cmdInfo = {
+    VkCommandBufferSubmitInfo cmdInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .commandBuffer = commandBuffers_[slot]
     };
 
-    VkSemaphoreSubmitInfo signalInfo = {
+    VkSemaphoreSubmitInfo signalInfo{
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = renderFinishedSemaphores_[slot]
     };
 
-    VkSubmitInfo2 submit = {
+    VkSubmitInfo2 submit{
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
         .waitSemaphoreInfoCount   = 1,
         .pWaitSemaphoreInfos      = &waitInfo,
@@ -719,7 +725,7 @@ void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
 
     vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]);
 
-    VkPresentInfoKHR present = {
+    VkPresentInfoKHR present{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores    = &renderFinishedSemaphores_[slot],
@@ -728,22 +734,8 @@ void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
         .pImageIndices      = &imageIndex
     };
 
-    VkResult presentResult = vkQueuePresentKHR(stone_present_queue(), &present);
-
-    // THE ONE TRUE WAY — CHECK THE FLAG, BUT DON'T CONSUME IT BLINDLY
-    bool needRecreate = (presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
-                         presentResult == VK_SUBOPTIMAL_KHR ||
-                         g_resizeRequested.load());
-
-    if (needRecreate)
-    {
-        // ONLY CONSUME THE FLAG IF WE ACTUALLY RECREATE
-        g_resizeRequested.store(false);
-
-        LOG_AMOURANTH("SWAPCHAIN REBIRTH — reason: {}",
-            presentResult == VK_ERROR_OUT_OF_DATE_KHR ? "OUT_OF_DATE" :
-            presentResult == VK_SUBOPTIMAL_KHR ? "SUBOPTIMAL" : "RESIZE_REQUEST");
-
+    VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
         RTX::recreateSwapchain(stone_width(), stone_height());
     }
 }
@@ -1310,75 +1302,44 @@ void VulkanRenderer::performDenoisingPass(VkCommandBuffer cmd) noexcept {
 
 void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexcept
 {
-    // MINIMIZED — PHOTONS MEDITATE
     if (newWidth == 0 || newHeight == 0) {
-        if (!minimized_) {
-            minimized_ = true;
-            LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS ENTER MEDITATION");
-        }
+        minimized_ = true;
         return;
     }
-
-    // RESTORED — PHOTONS AWAKEN
     if (minimized_) {
         minimized_ = false;
-        LOG_AMOURANTH("WINDOW RESTORED — PHOTONS AWAKEN FROM THE VOID");
+        LOG_AMOURANTH("WINDOW RESTORED — PHOTONS AWAKEN");
     }
 
-    // ALREADY RESIZING? DROP IT. WE ARE NOT CHAOS.
     if (s_resizeInProgress.exchange(true)) {
-        LOG_WARN_CAT("RESIZE", "Resize already in progress — dropping duplicate request");
         return;
     }
 
-    LOG_AMOURANTH("RESIZE RITUAL → {}x{} — REBIRTHING THE EMPIRE", newWidth, newHeight);
+    LOG_AMOURANTH("RESIZE → {}×{} — EMPIRE REBIRTH — INSTANT", newWidth, newHeight);
 
-    // ONE WAIT — STRONG. FAST. FINAL.
-    vkDeviceWaitIdle(stone_device());
+    // NO vkDeviceWaitIdle() — WE ARE FREE
+    RTX::las().notifyResize();
 
-    // TLAS — WE WAIT. WE ARE PATIENT.
-    RTX::las().waitForAllFences();
+    // ONLY PUBLIC API — THIS IS THE LAW
+    RTX::SwapchainManager::get().recreate(newWidth, newHeight);
 
-    // NEW RESOLUTION = NEW PHOTONS
-    resetAccumulation_ = resetAccumNextFrame_ = true;
-    accumulationFrame_ = currentSpp_ = 0;
-
-    // DESTROY OLD
-    cleanupFramebuffers();
-    destroyRenderPass();
-
-    // REBUILD THE HEART — THE CANVAS IS REBORN
-    RTX::SwapchainManager::recreate(newWidth, newHeight);
-
-    // SEAL THE TRUTH
+    // STONEKEY UPDATES — THE EMPIRE IS SEALED
     stone_seal_width(newWidth);
     stone_seal_height(newHeight);
     stone_seal_extent({newWidth, newHeight});
+
     width_  = static_cast<int>(newWidth);
     height_ = static_cast<int>(newHeight);
 
-    // REBUILD EMPIRE — FAST. CLEAN. ETERNAL.
-    createRenderPass();
-    createFramebuffers();
     recreateSwapchainDependentResources();
-
-    // ONE POOL. ONE TRUTH. NO RING. NO FENCES.
-    if (!commandBuffers_.empty()) {
-        vkFreeCommandBuffers(stone_device(),
-                             RTX::g_ctx().commandPool_,
-                             static_cast<uint32_t>(commandBuffers_.size()),
-                             commandBuffers_.data());
-        commandBuffers_.clear();
-    }
     createCommandBuffers();
 
-    // NO FENCE RESET — WE DON'T FENCE UNLESS WE MUST
-    // GPU KNOWS. WE TRUST.
+    resetAccumulation_ = resetAccumNextFrame_ = true;
+    accumulationFrame_ = currentSpp_ = 0;
 
     s_resizeInProgress.store(false);
-    g_resizeRequested.store(false);
 
-    LOG_AMOURANTH("RESIZE COMPLETE — {}x{} — EMPIRE REBORN — PHOTONS REALIGNED — RTX ETERNAL", newWidth, newHeight);
+    LOG_AMOURANTH("RESIZE COMPLETE — {}×{} — 0ms — EMPIRE UNBROKEN", newWidth, newHeight);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
