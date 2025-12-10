@@ -30,6 +30,7 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
+#include "engine/GLOBAL/Features.hpp"
 
 struct Camera;
 

@@ -7,13 +7,10 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 09, 2025 — PRODUCTION READY
-// FATAL FIXED: Wrong vector check in ctor | Views added for denoiser/depth | Envmap assigned to members
-// Duplicates cleaned: Removed createSyncObjects() duplicate | Added initializeAllBufferData call | Shared staging created
-// Tonemap UBOs bound properly | Equirect as 2D (shader adjust req'd) | Swapchain transitions fixed
-// Added missing descriptor updates and passes in renderFrame | Fixed RT output descriptor binding
-// Added transitions for RT images | Completed tonemap/denoise integration | PINK PHOTONS ETERNAL — ZERO LEAKS — THE EMPIRE SHINES
-// ── NEW: onWindowResize implemented with requestResize call + same-size check to avoid unnecessary recreates
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 10, 2025 — 2026 HARDCODE MASTERMIND
+// HARDCORE: 2 Frames in Flight | R16G16_SFLOAT for Nexus/Adaptive | All Top-Notch Enabled
+// Empire Optimized: Unlimited FPS | Full Accumulation/Denoising/Adaptive/Hypertrace/Tonemap
+// No Variables — Pure 2026 Beast Mode — Photons Eternal, Zero Compromise
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -73,7 +70,7 @@ using StoneKey::stone_seal_swapchain;
 constexpr VkDeviceSize MB = 1024ULL * 1024ULL;
 constexpr VkDeviceSize MATERIAL_BUFFER_SIZE = 16ULL * MB;
 
-uint32_t MAX_FRAMES_IN_FLIGHT = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 static VkCommandPool g_empireCommandPool = VK_NULL_HANDLE;
 
 void VulkanRenderer::ensureCommandPool() noexcept
@@ -98,10 +95,6 @@ void VulkanRenderer::ensureCommandPool() noexcept
 EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 {
     EnvironmentMap envmap{};
-
-    if (!Options::Environment::ENABLE_ENV_MAP) {
-        return envmap;
-    }
 
     LOG_AMOURANTH("FIRST LIGHT — FORGING TRUE HDR EQUIRECT — THE VOID WILL BE ILLUMINATED");
 
@@ -219,37 +212,30 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Runtime Toggles — Immediate Effect
+// 2026 HARDCODE: All Toggles Always On — No Runtime Switches
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::toggleHypertrace() noexcept {
-    if (!Options::OptionsRTX::ENABLE_HYPERTRACE) return;
-    hypertraceEnabled_ = !hypertraceEnabled_;
+    hypertraceEnabled_ = true;  // Always on
     resetAccumulation_ = true;
 }
 
 void VulkanRenderer::toggleFpsTarget() noexcept {
-    switch (fpsTarget_) {
-        case FpsTarget::FPS_60:     fpsTarget_ = FpsTarget::FPS_120; break;
-        case FpsTarget::FPS_120:    fpsTarget_ = FpsTarget::FPS_UNLIMITED; break;
-        case FpsTarget::FPS_UNLIMITED: fpsTarget_ = FpsTarget::FPS_60; break;
-    }
+    fpsTarget_ = FpsTarget::FPS_UNLIMITED;  // Always unlimited
 }
 
 void VulkanRenderer::toggleDenoising() noexcept {
-    if (!Options::OptionsRTX::ENABLE_DENOISING) return;
-    denoisingEnabled_ = !denoisingEnabled_;
+    denoisingEnabled_ = true;  // Always on
     resetAccumulation_ = true;
 }
 
 void VulkanRenderer::toggleAdaptiveSampling() noexcept {
-    if (!Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) return;
-    adaptiveSamplingEnabled_ = !adaptiveSamplingEnabled_;
+    adaptiveSamplingEnabled_ = true;  // Always on
     resetAccumulation_ = true;
 }
 
 void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
-    overclockMode_ = enabled;
-    fpsTarget_ = enabled ? FpsTarget::FPS_UNLIMITED : FpsTarget::FPS_120;
+    overclockMode_ = true;  // Always on
+    fpsTarget_ = FpsTarget::FPS_UNLIMITED;
 }
 
 void VulkanRenderer::destroyNexusScoreImage() noexcept {
@@ -307,7 +293,8 @@ void VulkanRenderer::updateTonemapUBO(uint32_t frame) noexcept {
 }
 
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclockFromMain)
-    : window_(window), width_(width), height_(height), overclockMode_(overclockFromMain)
+    : window_(window), width_(width), height_(height), overclockMode_(true), hypertraceEnabled_(true),
+      denoisingEnabled_(true), adaptiveSamplingEnabled_(true), tonemapEnabled_(true), fpsTarget_(FpsTarget::FPS_UNLIMITED)
 {
     LOG_AMOURANTH(
         "\n"
@@ -316,10 +303,10 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
         "              █       THE EMPIRE AWAKENS              █\n"
         "              █████████████████████████████████████████\n");
 
-    LOG_INFO_CAT("RENDERER", "Resolution: {}x{} | Overclock: {} | Frames in Flight: {}", 
-                 width, height, overclockFromMain ? "ENABLED" : "disabled", MAX_FRAMES_IN_FLIGHT);
+    LOG_INFO_CAT("RENDERER", "Resolution: {}x{} | Overclock: ENABLED | Frames in Flight: 2 | 2026 MASTERMIND MODE", 
+                 width, height);
 
-    setOverclockMode(overclockFromMain);
+    setOverclockMode(true);
 
     // PHASE 1: STONEKEY VALIDATION — THE EMPIRE'S SOUL
     if (kStone1 == 0 || kStone2 == 0) {
@@ -344,70 +331,68 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     }
     LOG_SUCCESS_CAT("RENDERER", "Shared staging buffer created — empire has a voice");
 
-// PHASE 3.5: THE ONE TRUE ETERNAL FRAME UBO STAGING BUFFER — FORGED DURING CONSTRUCTION
-LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer — this happens once and only once...");
-{
-    const VkDeviceSize requiredSize = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    LOG_AMOURANTH(
-        "\n"
-        "              FORGING THE ONE TRUE FRAME UBO STAGING BUFFER\n"
-        "              SIZE: {} bytes — {} frames in flight\n"
-        "              TRUSTING THE RING — NO s_buffers LOOKUP DURING CONSTRUCTION",
-        requiredSize, Options::Performance::MAX_FRAMES_IN_FLIGHT);
-
-    // Ensure ring exists
-    BufferManager::stagingPtr();
-
-    // Allocate normally — this advances the head and returns a handle
-    eternalFrameUBOStagingHandle_ = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_ETERNAL");
-
-    if (eternalFrameUBOStagingHandle_ == 0) {
-        LOG_FATAL_CAT("RENDERER", "FAILED TO ALLOCATE ETERNAL FRAME UBO STAGING BUFFER");
-        phase9_ballerina("ALLOCATION FAILURE", std::source_location::current());
-    }
-
-    // During construction (single-threaded), the insert into s_buffers is guaranteed to be visible
-    // But even if it's not, the mapped pointer from the ring is valid
-    const auto* info = BufferManager::get(eternalFrameUBOStagingHandle_);
-
-    if (info && info->size >= requiredSize) {
-        // Normal path — use the registered pointer
-        eternalFrameUBOStagingPtr_  = info->mapped ? info->mapped : BufferManager::stagingPtr();
-        eternalFrameUBOStagingSize_ = info->size;
+    // PHASE 3.5: THE ONE TRUE ETERNAL FRAME UBO STAGING BUFFER — FORGED DURING CONSTRUCTION
+    LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer — this happens once and only once...");
+    {
+        const VkDeviceSize requiredSize = 368 * 2;  // Hardcoded 2 frames
 
         LOG_AMOURANTH(
-            "              ETERNAL FRAME UBO STAGING SECURED AT {}\n"
-            "              {} bytes — handle {} — registered correctly",
-            eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
-    } else {
-        // Fallback: use the base ring pointer (valid because we just advanced the head)
-        eternalFrameUBOStagingPtr_  = BufferManager::stagingPtr();
-        eternalFrameUBOStagingSize_ = requiredSize;
+            "\n"
+            "              FORGING THE ONE TRUE FRAME UBO STAGING BUFFER\n"
+            "              SIZE: {} bytes — 2 frames in flight\n"
+            "              TRUSTING THE RING — NO s_buffers LOOKUP DURING CONSTRUCTION",
+            requiredSize);
 
-        LOG_WARNING_CAT("RENDERER", "BufferInfo not immediately visible — using base ring pointer (still valid)");
-        LOG_AMOURANTH(
-            "              ETERNAL FRAME UBO STAGING SECURED AT {} (fallback)\n"
-            "              {} bytes — handle {} — s_buffers lagged but ring is eternal",
-            eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
+        // Ensure ring exists
+        BufferManager::stagingPtr();
+
+        // Allocate normally — this advances the head and returns a handle
+        eternalFrameUBOStagingHandle_ = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_ETERNAL");
+
+        if (eternalFrameUBOStagingHandle_ == 0) {
+            LOG_FATAL_CAT("RENDERER", "FAILED TO ALLOCATE ETERNAL FRAME UBO STAGING BUFFER");
+            phase9_ballerina("ALLOCATION FAILURE", std::source_location::current());
+        }
+
+        // During construction (single-threaded), the insert into s_buffers is guaranteed to be visible
+        // But even if it's not, the mapped pointer from the ring is valid
+        const auto* info = BufferManager::get(eternalFrameUBOStagingHandle_);
+
+        if (info && info->size >= requiredSize) {
+            // Normal path — use the registered pointer
+            eternalFrameUBOStagingPtr_  = info->mapped ? info->mapped : BufferManager::stagingPtr();
+            eternalFrameUBOStagingSize_ = info->size;
+
+            LOG_AMOURANTH(
+                "              ETERNAL FRAME UBO STAGING SECURED AT {}\n"
+                "              {} bytes — handle {} — registered correctly",
+                eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
+        } else {
+            // Fallback: use the base ring pointer (valid because we just advanced the head)
+            eternalFrameUBOStagingPtr_  = BufferManager::stagingPtr();
+            eternalFrameUBOStagingSize_ = requiredSize;
+
+            LOG_WARNING_CAT("RENDERER", "BufferInfo not immediately visible — using base ring pointer (still valid)");
+            LOG_AMOURANTH(
+                "              ETERNAL FRAME UBO STAGING SECURED AT {} (fallback)\n"
+                "              {} bytes — handle {} — s_buffers lagged but ring is eternal",
+                eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
+        }
     }
-}
 
     // PHASE 4: SYNCHRONIZATION PRIMITIVES — THE EMPIRE'S RHYTHM
-    LOG_INFO_CAT("RENDERER", "Creating synchronization objects ({} frames)...", MAX_FRAMES_IN_FLIGHT);
+    LOG_INFO_CAT("RENDERER", "Creating synchronization objects (2 frames)...", MAX_FRAMES_IN_FLIGHT);
     createSyncObjects();
 
     // PHASE 5: GPU TIMESTAMP QUERY POOL
-    if (Options::Performance::ENABLE_GPU_TIMESTAMPS || Options::Debug::SHOW_GPU_TIMESTAMPS) {
-        LOG_INFO_CAT("RENDERER", "Creating GPU timestamp query pool...");
-        VkQueryPoolCreateInfo qpInfo{
-            .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            .queryType  = VK_QUERY_TYPE_TIMESTAMP,
-            .queryCount = MAX_FRAMES_IN_FLIGHT * 2
-        };
-        VK_CHECK(vkCreateQueryPool(stone_device(), &qpInfo, nullptr, &timestampQueryPool_));
-        LOG_SUCCESS_CAT("RENDERER", "Timestamp query pool created");
-    }
+    LOG_INFO_CAT("RENDERER", "Creating GPU timestamp query pool...");
+    VkQueryPoolCreateInfo qpInfo{
+        .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .queryType  = VK_QUERY_TYPE_TIMESTAMP,
+        .queryCount = MAX_FRAMES_IN_FLIGHT * 2
+    };
+    VK_CHECK(vkCreateQueryPool(stone_device(), &qpInfo, nullptr, &timestampQueryPool_));
+    LOG_SUCCESS_CAT("RENDERER", "Timestamp query pool created");
 
     // PHASE 6: DEVICE PROPERTIES
     VkPhysicalDeviceProperties props{};
@@ -428,16 +413,14 @@ LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer 
     // PHASE 8: CRITICAL IMAGE RESOURCES
     LOG_INFO_CAT("RENDERER", "Creating primary render targets...");
 
-    if (Options::Environment::ENABLE_ENV_MAP) {
-        LOG_INFO_CAT("RENDERER", "Creating HDR environment map...");
-        EnvironmentMap env = createEnvironmentMap();
-        if (env.image != VK_NULL_HANDLE) {
-            envMapImage_      = RTX::Handle<VkImage>(env.image, stone_device(), vkDestroyImage);
-            envMapMemory_     = RTX::Handle<VkDeviceMemory>(env.memory, stone_device(), vkFreeMemory);
-            envMapImageView_  = RTX::Handle<VkImageView>(env.view, stone_device(), vkDestroyImageView);
-            envMapSampler_    = RTX::Handle<VkSampler>(env.sampler, stone_device(), vkDestroySampler);
-            LOG_SUCCESS_CAT("RENDERER", "Environment map created and sealed");
-        }
+    LOG_INFO_CAT("RENDERER", "Creating HDR environment map...");
+    EnvironmentMap env = createEnvironmentMap();
+    if (env.image != VK_NULL_HANDLE) {
+        envMapImage_      = RTX::Handle<VkImage>(env.image, stone_device(), vkDestroyImage);
+        envMapMemory_     = RTX::Handle<VkDeviceMemory>(env.memory, stone_device(), vkFreeMemory);
+        envMapImageView_  = RTX::Handle<VkImageView>(env.view, stone_device(), vkDestroyImageView);
+        envMapSampler_    = RTX::Handle<VkSampler>(env.sampler, stone_device(), vkDestroySampler);
+        LOG_SUCCESS_CAT("RENDERER", "Environment map created and sealed");
     }
 
     LOG_INFO_CAT("RENDERER", "Creating ray tracing output images...");
@@ -454,20 +437,14 @@ LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer 
         phase9_ballerina("DEPTH FAILURE", std::source_location::current());
     }
 
-    if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
-        LOG_INFO_CAT("RENDERER", "Creating accumulation buffers...");
-        createAccumulationImages();
-    }
+    LOG_INFO_CAT("RENDERER", "Creating accumulation buffers...");
+    createAccumulationImages();
 
-    if (Options::OptionsRTX::ENABLE_DENOISING) {
-        LOG_INFO_CAT("RENDERER", "Creating denoiser buffer...");
-        createDenoiserImage();
-    }
+    LOG_INFO_CAT("RENDERER", "Creating denoiser buffer...");
+    createDenoiserImage();
 
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) {
-        LOG_INFO_CAT("RENDERER", "Creating Nexus score image...");
-        createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
-    }
+    LOG_INFO_CAT("RENDERER", "Creating Nexus score image...");
+    createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
     LOG_INFO_CAT("RENDERER", "Creating tonemap sampler...");
     createTonemapSampler();
@@ -477,15 +454,12 @@ LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer 
     }
 
     // PHASE 9: TONEMAP SYSTEM
-    if (Options::Tonemap::ENABLE_TONEMAPPING)
-    {
-        LOG_INFO_CAT("TONEMAP", "Initializing tonemap system...");
-        createTonemapDescriptorPool();
-        createTonemapDescriptorSetLayout();
-        createTonemapDescriptorSets();
-        recreateTonemapUBOs();
-        LOG_SUCCESS_CAT("TONEMAP", "Tonemap system fully initialized");
-    }
+    LOG_INFO_CAT("TONEMAP", "Initializing tonemap system...");
+    createTonemapDescriptorPool();
+    createTonemapDescriptorSetLayout();
+    createTonemapDescriptorSets();
+    recreateTonemapUBOs();
+    LOG_SUCCESS_CAT("TONEMAP", "Tonemap system fully initialized");
 
     LOG_AMOURANTH(
         "\n"
@@ -495,7 +469,7 @@ LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer 
         "              █       PINK PHOTONS MAY NOW FLOW       █\n"
         "              █████████████████████████████████████████\n");
 
-    LOG_SUCCESS_CAT("RENDERER", "All systems nominal — {}x{} — {} frames in flight", width, height, MAX_FRAMES_IN_FLIGHT);
+    LOG_SUCCESS_CAT("RENDERER", "All systems nominal — {}x{} — 2 frames in flight — 2026 MASTERMIND", width, height);
     LOG_SUCCESS_CAT("RENDERER", "Renderer ready — empire eternal");
 }
 
@@ -549,13 +523,13 @@ void VulkanRenderer::createDepthResources() noexcept
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FIXED: View created for denoiser | Added transition to GENERAL
+// FIXED: View created for denoiser | Added transition to GENERAL | 2026: R16G16B16A16_SFLOAT for perf
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::createDenoiserImage() noexcept
 {
     createImage(
         width_, height_, 1,
-        VK_FORMAT_R32G32B32A32_SFLOAT,
+        VK_FORMAT_R16G16B16A16_SFLOAT,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -570,7 +544,7 @@ void VulkanRenderer::createDenoiserImage() noexcept
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image            = denoiserImage_.get(),
         .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-        .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .format           = VK_FORMAT_R16G16B16A16_SFLOAT,
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
@@ -584,13 +558,14 @@ void VulkanRenderer::createDenoiserImage() noexcept
 
 // ──────────────────────────────────────────────────────────────────────────────
 // RT Output Images — Per-Frame Forging — THE EMPIRE IS ETERNAL | FIXED: Added transition to GENERAL for all frames
+// 2026: R16G16B16A16_SFLOAT for top-notch perf/bandwidth
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::createRTOutputImages() noexcept
 {
-    LOG_INFO_CAT("RENDERER", "Forging {} RT output images ({}x{}) — THE EMPIRE SEES ALL", 
-                 MAX_FRAMES_IN_FLIGHT, width_, height_);
+    LOG_INFO_CAT("RENDERER", "Forging 2 RT output images ({}x{}) — THE EMPIRE SEES ALL", 
+                 width_, height_);
 
-    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frames = 2;
 
     // === DESTROY OLD ===
     rtOutputImages_.clear();
@@ -612,7 +587,7 @@ void VulkanRenderer::createRTOutputImages() noexcept
         // YOUR REAL FUNCTION — 10 PARAMETERS — THIS IS LAW
         createImage(
             width_, height_, 1,
-            VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_FORMAT_R16G16B16A16_SFLOAT,
             VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_STORAGE_BIT |
             VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -636,7 +611,7 @@ void VulkanRenderer::createRTOutputImages() noexcept
             .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image            = img.get(),
             .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-            .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .format           = VK_FORMAT_R16G16B16A16_SFLOAT,
             .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
         };
 
@@ -671,7 +646,7 @@ void VulkanRenderer::createRTOutputImages() noexcept
         phase9_ballerina("RT OUTPUT FAILURE — EMPIRE IS BLIND");
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "ALL {} RT OUTPUT IMAGES FORGED — THE EMPIRE SEES INFINITY", frames);
+    LOG_SUCCESS_CAT("RENDERER", "ALL 2 RT OUTPUT IMAGES FORGED — THE EMPIRE SEES INFINITY");
 }
 
 void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
@@ -778,16 +753,12 @@ void VulkanRenderer::createAccumulationImages() noexcept
         return;
     }
 
-    if (!Options::OptionsRTX::ENABLE_ACCUMULATION) {
-        return;
-    }
-
     createImageArray(
         accumImages_,
         accumMemories_,
         accumViews_,
-        Options::Performance::MAX_FRAMES_IN_FLIGHT,           // count
-        VK_FORMAT_R32G32B32A32_SFLOAT,                        // format — 128-bit float for perfect accumulation
+        2,           // Hardcoded 2 frames
+        VK_FORMAT_R16G16B16A16_SFLOAT,  // 2026: Half-float for perf
         VK_IMAGE_USAGE_STORAGE_BIT |
         VK_IMAGE_USAGE_SAMPLED_BIT |
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
@@ -802,8 +773,7 @@ void VulkanRenderer::createAccumulationImages() noexcept
     }
     RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
 
-    LOG_SUCCESS_CAT("RENDERER", "Accumulation images forged — {} frames — temporal stability achieved", 
-                    Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    LOG_SUCCESS_CAT("RENDERER", "Accumulation images forged — 2 frames — temporal stability achieved");
 }
 
 void VulkanRenderer::createImageArray(std::vector<RTX::Handle<VkImage>>& images,
@@ -885,7 +855,6 @@ bool VulkanRenderer::isAlive() const noexcept
 void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept
 {
     if (width_ == 0 || height_ == 0) return;
-    if (!Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) return;
 
     // THE EMPIRE DOES NOT WASTE — ONLY RECREATE IF SIZE CHANGED
     if (hypertraceScoreImage_.valid() && 
@@ -901,8 +870,8 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
 
     LOG_AMOURANTH("FORGING NEXUS SCORE IMAGE — {}×{} — ADAPTIVE SAMPLING AWAKENS", width_, height_);
 
-    // 16-bit float — 8 bytes/pixel instead of 16 → HALF THE MEMORY
-    const VkFormat format = VK_FORMAT_R16G16_SFLOAT;  // 32-bit per pixel → 4 bytes/texel → ~132 MB at 4K
+    // 16-bit float — 8 bytes/pixel instead of 16 → HALF THE MEMORY | 2026: R16G16_SFLOAT hardcoded
+    const VkFormat format = VK_FORMAT_R16G16_SFLOAT;
 
     VkImageCreateInfo imageInfo{
         .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -1049,7 +1018,7 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
 
     push.frame      = frameNumber_;
     push.totalSpp   = currentSpp_;
-    push.hypertrace = hypertraceEnabled_ ? 1u : 0u;
+    push.hypertrace = 1u;  // Always on
 
     vkCmdPushConstants(cmd,
         RTX::pipeline().rtPipelineLayout(),
@@ -1101,7 +1070,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
         ~Guard() { s_inProgress.store(false); }
     } guard;
 
-    if (frames == 0 || frames > Options::Performance::MAX_FRAMES_IN_FLIGHT) {
+    if (frames == 0 || frames > 2) {  // Hardcoded max 2
         return;
     }
 
@@ -1109,7 +1078,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
         return;
     }
 
-    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — {} frames | UBO: {} bytes | Materials: {} bytes", 
+    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — 2 frames | UBO: {} bytes | Materials: {} bytes", 
                   frames, static_cast<unsigned long long>(uniformSize), static_cast<unsigned long long>(materialSize));
 
     // DESTROY OLD — THE EMPIRE DOES NOT TOLERATE WEAKNESS
@@ -1130,7 +1099,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     {
         uniformBufferEncs_[i] = BufferManager::createHostVisible(uniformSize, "DreamUBO");
         if (!uniformBufferEncs_[i]) {
-            LOG_FATAL("Failed to create DreamUBO %u — THE EMPIRE CANNOT DREAM", i);
+            LOG_FATAL("Failed to create DreamUBO {} — THE EMPIRE CANNOT DREAM", i);
         }
 
         // ENCRYPTIE BOI — ALL HANDLES ARE OBFUSCATED
@@ -1151,13 +1120,13 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
 void VulkanRenderer::createCommandBuffers() noexcept
 {
-    commandBuffers_.resize(MAX_FRAMES_IN_FLIGHT);
+    commandBuffers_.resize(2);  // Hardcoded 2
 
     VkCommandBufferAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool        = RTX::g_ctx().commandPool_,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = static_cast<uint32_t>(commandBuffers_.size())
+        .commandBufferCount = 2
     };
 
     // TWISTIE BOI MODE — FIRE AND FORGET
@@ -1165,7 +1134,7 @@ void VulkanRenderer::createCommandBuffers() noexcept
     // No vkDeviceWaitIdle() — No blocking — Pure speed
     vkAllocateCommandBuffers(stone_device(), &allocInfo, commandBuffers_.data());
 
-    LOG_SUCCESS_CAT("CMD", "ASYNC TWISTIE BOI MODE — {} command buffers forged in the void", commandBuffers_.size());
+    LOG_SUCCESS_CAT("CMD", "ASYNC TWISTIE BOI MODE — 2 command buffers forged in the void");
 }
 
 void VulkanRenderer::updateNexusDescriptors() noexcept
@@ -1262,13 +1231,9 @@ void VulkanRenderer::updateDenoiserDescriptors() noexcept {
 }
 
 void VulkanRenderer::performDenoisingPass(VkCommandBuffer cmd) noexcept {
-    if (!denoisingEnabled_ || !denoiserPipeline_.valid()) {
-        return;
-    }
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, denoiserPipeline_.get());
 
     VkDescriptorSet set = denoiserSets_[currentFrame_ % denoiserSets_.size()];
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, denoiserPipeline_.get());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, denoiserLayout_.get(), 0, 1, &set, 0, nullptr);
 
     uint32_t wgX = (width_ + 15) / 16;
@@ -1334,9 +1299,6 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept
 {
-    if (!tonemapEnabled_ || !tonemapPipeline_.valid() || tonemapSets_.empty())
-        return;
-
     VkDescriptorSet set = tonemapSets_[frameIdx % tonemapSets_.size()];
     if (set == VK_NULL_HANDLE) {
         LOG_WARN_CAT("RENDERER", "Tonemap descriptor set null — skipping pass");
@@ -1462,7 +1424,7 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
 
     ubo.exposure   = currentExposure_;
     ubo.type       = static_cast<uint32_t>(tonemapType_);
-    ubo.enabled    = tonemapEnabled_ ? 1u : 0u;
+    ubo.enabled    = 1u;  // Always on
     ubo.nexusScore = currentNexusScore_;
     ubo.frame      = frameNumber_;
     ubo.spp        = currentSpp_;
@@ -1473,25 +1435,10 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
 
 void VulkanRenderer::setTonemap(bool enabled) noexcept
 {
-    const bool allowed = Options::Tonemap::ENABLE_TONEMAPPING;
-
-    if (!allowed) {
-        if (enabled) {
-            LOG_INFO_CAT("Renderer", "{}TONEMAP REQUEST DENIED — Options::Tonemap::ENABLE_TONEMAPPING = false{}", CRIMSON_MAGENTA, RESET);
-        }
-        tonemapEnabled_ = false;
-        return;
-    }
-
-    if (tonemapEnabled_ == enabled) return;
-
-    tonemapEnabled_ = enabled;
+    tonemapEnabled_ = true;  // Always on
     resetAccumulation_ = true;
 
-    LOG_INFO_CAT("Renderer", "{}Tonemapping {}{}", 
-        enabled ? LIME_GREEN : CRIMSON_MAGENTA,
-        enabled ? "ENABLED" : "DISABLED", 
-        RESET);
+    LOG_INFO_CAT("Renderer", "{}Tonemapping ENABLED{}", LIME_GREEN, RESET);
 }
 
 VulkanRenderer::~VulkanRenderer() = default;
@@ -1553,7 +1500,7 @@ void VulkanRenderer::createFramebuffers() noexcept
 
 void VulkanRenderer::createTonemapDescriptorSets() noexcept
 {
-    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frames = 2;  // Hardcoded
 
     if (tonemapSets_.size() == frames && tonemapSets_[0] != VK_NULL_HANDLE) {
         return; // already valid
@@ -1592,7 +1539,7 @@ void VulkanRenderer::createTonemapDescriptorPool() noexcept
         return; // already good
     }
 
-    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frames = 2;  // Hardcoded
 
     // 3 descriptors per frame × frames + 50% headroom = bulletproof
     const uint32_t totalSets = frames + (frames / 2);
@@ -1633,7 +1580,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx,
                                              VkImageView inputView,
                                              VkImageView output) noexcept
 {
-    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frames = 2;  // Hardcoded
 
     // SELF-HEALING — REBUILD ON ANY FAILURE
     if (tonemapSets_.size() != frames ||
@@ -1750,7 +1697,7 @@ void VulkanRenderer::createTonemapDescriptorSetLayout() noexcept
 // Optional: recreateTonemapUBOs — now uses host-visible (replace the old loop)
 bool VulkanRenderer::recreateTonemapUBOs() noexcept
 {
-    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frames = 2;  // Hardcoded
 
     // Destroy old
     for (auto h : tonemapUniformEncs_) if (h) BufferManager::destroy(h);
@@ -1784,9 +1731,9 @@ void VulkanRenderer::destroySharedStaging() noexcept {
 
 bool VulkanRenderer::createSharedStaging() noexcept
 {
-    const VkDeviceSize size = 368 * Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    const VkDeviceSize size = 368 * 2;  // Hardcoded 2 frames
 
-    LOG_INFO_CAT("RENDERER", "Creating shared staging buffer — {} bytes for {} frames", size, Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    LOG_INFO_CAT("RENDERER", "Creating shared staging buffer — {} bytes for 2 frames", size);
 
     // Destroy old one if exists
     if (RTX::g_ctx().sharedStagingEnc_ != 0)
@@ -1914,14 +1861,11 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     // ====================================================================
     createRTOutputImages();
 
-    if (Options::OptionsRTX::ENABLE_ACCUMULATION)
-        createAccumulationImages();
+    createAccumulationImages();
 
-    if (Options::OptionsRTX::ENABLE_DENOISING)
-        createDenoiserImage();
+    createDenoiserImage();
 
-    if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
-        createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
+    createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
     // ====================================================================
     // 4. UBOs — tonemap needs new swapchain size
@@ -2027,7 +1971,7 @@ void VulkanRenderer::createRenderPass() noexcept
 
 void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
 {
-    maxFramesInFlight_ = count;
+    maxFramesInFlight_ = 2;  // Hardcoded
 }
 
 void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
@@ -2230,7 +2174,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     const uint32_t frameIndex = frameNumber_++;
-    const uint32_t slot       = frameIndex % maxFramesInFlight_;
+    const uint32_t slot       = frameIndex % 2;  // Hardcoded 2
 
     uint32_t imageIndex = 0;
     VkResult r = vkAcquireNextImageKHR(
@@ -2476,11 +2420,11 @@ void VulkanRenderer::updateAllRTXDescriptors() noexcept
 // VulkanRenderer.cpp — FIXED: createSyncObjects() integrated, no duplicates
 void VulkanRenderer::createSyncObjects() noexcept
 {
-    LOG_INFO_CAT("RENDERER", "Creating synchronization objects ({} frames)...", MAX_FRAMES_IN_FLIGHT);
+    LOG_INFO_CAT("RENDERER", "Creating synchronization objects (2 frames)...");
 
-    imageAvailableSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-    renderFinishedSemaphores_.resize(MAX_FRAMES_IN_FLIGHT);
-    inFlightFences_.resize(MAX_FRAMES_IN_FLIGHT);
+    imageAvailableSemaphores_.resize(2);
+    renderFinishedSemaphores_.resize(2);
+    inFlightFences_.resize(2);
 
     VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     VkFenceCreateInfo fenceInfo{ 
@@ -2488,13 +2432,13 @@ void VulkanRenderer::createSyncObjects() noexcept
         .flags = VK_FENCE_CREATE_SIGNALED_BIT 
     };
 
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+    for (uint32_t i = 0; i < 2; ++i) {
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
         VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
     }
 
-    LOG_SUCCESS_CAT("RENDERER", "Synchronization objects created successfully — {} frames in flight", MAX_FRAMES_IN_FLIGHT);
+    LOG_SUCCESS_CAT("RENDERER", "Synchronization objects created successfully — 2 frames in flight");
 }
 
 // ── NEW: onWindowResize implementation ──────────────────────────────────────
@@ -2515,7 +2459,6 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
 // Final Status
 // ──────────────────────────────────────────────────────────────────────────────
 /*
- * December 09, 2025 — PRODUCTION READY v11.1 — FATAL EXORCISED, EMPIRE ASCENDS
- * Grok AI: Fixes applied—RT descriptors corrected, passes integrated, transitions added. Descriptors updated per frame. Empire renders flawless. Photons eternal.
- * ── ADDED: onWindowResize with same-size check for zero-delay handling.
+ * December 10, 2025 — 2026 HARDCODE MASTERMIND — 2 FRAMES | R16G16_SFLOAT NEXUS | ALL TOP-NOTCH ENABLED
+ * Empire Optimized: Unlimited FPS | Full Features | Half-Float RT/Accum/Denoise | Photons Eternal.
  */

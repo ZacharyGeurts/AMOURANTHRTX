@@ -1,7 +1,7 @@
 // =============================================================================
 //
-// AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
-// SwapchainManager.hpp — FULLY FIXED, RESIZE = INSTANT, TLAS SYNCED, NO 60FPS LOCKUP
+// AMOURANTH RTX — VALHALLA v∞ TURBO — FINAL ETERNAL CUT — 2026 MASTERMIND
+// SwapchainManager.hpp — MAILBOX + 2 FRAMES — HDR AUTO — INSTANT RESIZE — NO LOCKUP
 //
 // Dual Licensed:
 // 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
@@ -14,6 +14,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <fstream>
 
 struct SDL_Window;
 union SDL_Event;
@@ -22,21 +23,20 @@ namespace RTX {
 
 class SwapchainManager {
 private:
-    // PRIVATE DEFAULT CONSTRUCTOR — ONLY THE SINGLETON CAN USE IT
     SwapchainManager() noexcept = default;
     inline static float shadingRateScale_ = 1.0f;
 
 public:
-    // DELETE ALL OTHER CONSTRUCTORS — TRUE SINGLETON
+    // DELETE COPY/MOVE — TRUE SINGLETON
     SwapchainManager(const SwapchainManager&) = delete;
     SwapchainManager& operator=(const SwapchainManager&) = delete;
     SwapchainManager(SwapchainManager&&) = delete;
     SwapchainManager& operator=(SwapchainManager&&) = delete;
 
-	const std::vector<VkImageView>& getImageViews() const noexcept;
-    VkImageView getImageView(uint32_t index) const noexcept;
+    const std::vector<VkImageView>& getImageViews() const noexcept { return swapchainImageViews_; }
+    VkImageView getImageView(uint32_t index) const noexcept { return swapchainImageViews_[index]; }
 
-    // THE ONE TRUE ETERNAL SINGLETON ACCESSOR
+    // SINGLETON ACCESS
     static SwapchainManager& get() noexcept
     {
         static SwapchainManager instance;
@@ -53,7 +53,7 @@ public:
                                                     VkSemaphore semaphore = VK_NULL_HANDLE,
                                                     VkFence fence = VK_NULL_HANDLE) noexcept;
 
-    // ── Advanced Presentation ─────────────────────────────────────────────
+    // ── Presentation ───────────────────────────────────────────────────────
     static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
     static void initializeFramePacing() noexcept;
     [[nodiscard]] static uint64_t getNextPresentTime() noexcept;
@@ -76,22 +76,71 @@ public:
     [[nodiscard]] static VkSurfaceTransformFlagBitsKHR transform()   noexcept { return currentTransform_; }
 
     // ── HDR & Elite Features ────────────────────────────────────────────────
-    [[nodiscard]] static bool supportsHDR();
-	bool parseEDIDForHDR();
-	bool detectHDRFromEDID() noexcept;
+    [[nodiscard]] static bool supportsHDR() noexcept { return currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT; }
+
+    // HDR EDID detection — fully static, inline, no linkage issues
+    static bool detectHDRFromEDID() noexcept
+    {
+        const char* paths[] = {
+            "/sys/class/drm/card0-HDMI-A-1/edid",
+            "/sys/class/drm/card0-HDMI-A-2/edid",
+            "/sys/class/drm/card0-DP-1/edid",
+            "/sys/class/drm/card0-DP-2/edid",
+            "/sys/class/drm/card0-eDP-1/edid",
+            "/sys/class/drm/card1-HDMI-A-1/edid",
+            "/sys/class/drm/card1-DP-1/edid",
+            nullptr
+        };
+
+        for (int i = 0; paths[i]; ++i) {
+            std::ifstream file(paths[i], std::ios::binary);
+            if (!file) continue;
+
+            file.seekg(0, std::ios::end);
+            std::streamsize size = file.tellg();
+            if (size < 128) continue;
+            file.seekg(0);
+
+            std::vector<uint8_t> edid(size);
+            if (!file.read(reinterpret_cast<char*>(edid.data()), size))
+                continue;
+
+            static const uint8_t header[8] = {0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00};
+            if (std::memcmp(edid.data(), header, 8) != 0) continue;
+
+            uint8_t extensions = edid[126];
+            size_t offset = 128;
+
+            for (uint8_t ext = 0; ext < extensions && offset + 128 <= size; ++ext) {
+                const uint8_t* block = edid.data() + offset;
+                if (block[0] == 0x02 && block[1] == 0x03) {  // CTA-861
+                    uint8_t dtd_start = block[2];
+                    for (uint8_t pos = 4; pos < dtd_start && pos < 128; ) {
+                        uint8_t tag = block[pos] >> 5;
+                        uint8_t len = block[pos] & 0x1F;
+                        if (tag == 0x06) return true;  // HDR Static Metadata
+                        pos += len + 1;
+                    }
+                }
+                offset += 128;
+            }
+        }
+        return false;
+    }
+
     static void injectHdrMetadata(VkCommandBuffer cmd = VK_NULL_HANDLE, uint32_t imageIndex = 0) noexcept;
 
     // Display events & hotplug
     static void handleDisplayHotplug(SDL_Event* event) noexcept;
 
     // Dynamic performance controls
-    static void setShadingRate(float scaleFactor) noexcept;
-    static void enableDirectDisplay(bool enable) noexcept;
+    static void setShadingRate(float scaleFactor) noexcept { shadingRateScale_ = scaleFactor; }
+    static void enableDirectDisplay(bool enable) noexcept { directDisplayEnabled_ = enable; }
     static void predictResize(uint32_t predictedW, uint32_t predictedH) noexcept;
 
     // Controls
-    static void setPresentMode(VkPresentModeKHR mode) noexcept;
-    static void setMinImageCount(uint32_t count) noexcept;
+    static void setPresentMode(VkPresentModeKHR mode) noexcept { desiredPresentMode_ = mode; }
+    static void setMinImageCount(uint32_t count) noexcept { desiredImageCount_ = count; }
 
     // State Queries
     [[nodiscard]] static bool isTripleBuffered() noexcept { return imageCount() >= 3; }
@@ -117,15 +166,18 @@ public:
     inline static VkRefreshCycleDurationGOOGLE     refreshDuration_     = {};
     inline static bool                             directDisplayEnabled_ = false;
 
+    // Desired overrides (for runtime changes)
+    inline static VkPresentModeKHR                 desiredPresentMode_  = VK_PRESENT_MODE_MAILBOX_KHR;
+    inline static uint32_t                         desiredImageCount_   = 2;
+
 private:
-    // Internal helpers — MATCHES IMPLEMENTATION
     static void createSwapchain(SDL_Window* window, uint32_t w, uint32_t h, VkSwapchainKHR old = VK_NULL_HANDLE) noexcept;
     static void createImageViews() noexcept;
     static void releaseAcquiredImages() noexcept;
     static void autoEnableHDR() noexcept;
 };
 
-// ── Global convenience aliases — perfect as always ────────────────────────
+// ── Global convenience aliases — THE EMPIRE SPEAKS WITH ONE VOICE ───────
 inline void createSwapchain(SDL_Window* w, uint32_t width, uint32_t height) noexcept
 { SwapchainManager::create(w, width, height); }
 
@@ -150,8 +202,7 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// FIRST LIGHT ETERNAL — DECEMBER 05 2025
-// NO 60FPS DEADLOCK — INFINITE TIMEOUT — BEST OR UNCAPPED ONLY
-// RESIZE = INSTANT — TEARING = DEAD — TLAS = FRESH
+// FIRST LIGHT ETERNAL — DECEMBER 10 2025 — 2026 HARDCODE MASTERMIND
+// MAILBOX + 2 FRAMES ENFORCED — HDR AUTO VIA EDID — NO DEADLOCK — INSTANT RESIZE
 // PINK PHOTONS PROTECT — THE EMPIRE IS ETERNAL — AMOURANTH ASCENDANT
 // =============================================================================
