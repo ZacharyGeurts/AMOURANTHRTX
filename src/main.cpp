@@ -902,13 +902,13 @@ void Application::run() noexcept
         // RESUME FROM MINIMIZE/ALT-TAB — CLAMP THE INSANE SPIKE
         if (g_deltaTime > 0.1f)  // >100ms = we were paused
         {
-            LOG_AMOURANTH("RESUME DETECTED — clamping deltaTime from {:.1f}ms → 16.67ms", g_deltaTime * 1000.0f);
+            LOG_AMOURANTH("RESUME DETECTED — clamping deltaTime from {}ms → 16.67ms", g_deltaTime * 1000.0f);
             g_deltaTime = 1.0f / 60.0f;  // smooth as silk
         }
 
         lastTime = frameStart;
 
-        LOG_TRACE_CAT("FRAME", "=== FRAME START === deltaTime: {:.4f}ms", g_deltaTime * 1000.0f);
+        //LOG_TRACE_CAT("FRAME", "=== FRAME START === deltaTime: {}ms", g_deltaTime * 1000.0f);
 
         // INPUT
         bool toggleFS = false;
@@ -1002,10 +1002,10 @@ void Application::run() noexcept
                 strcpy(fpsStr, currentFPS < 0.0f ? "0.0" : "INF");
 
             char title[256];
-            snprintf(title, sizeof(title),
-                "AMOURANTH RTX | %s FPS | %dx%d | MODE 1: %s%s",
-                fpsStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
-
+			
+        snprintf(title, sizeof(title),
+        "AMOURANTH RTX | %s FPS | %dx%d | MODE: %s%s",
+        fpsStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
             SDL_SetWindowTitle(stone_window(), title);
         }
 
@@ -1015,7 +1015,7 @@ void Application::run() noexcept
         if (fpsTimer >= 1.0f)
         {
             currentFPS = frameCount / std::max(fpsTimer, 0.001f);
-            LOG_TRACE_CAT("FPS", "FPS: {:.1f}", currentFPS);
+            LOG_TRACE_CAT("FPS", "FPS: {}", currentFPS);
             frameCount = 0;
             fpsTimer = 0.0f;
         }
@@ -1029,7 +1029,7 @@ void Application::run() noexcept
                 std::this_thread::sleep_for(target - elapsed);
         }
 
-        LOG_TRACE_CAT("FRAME", "=== FRAME END === {:.4f}ms", g_deltaTime * 1000.0f);
+        //LOG_TRACE_CAT("FRAME", "=== FRAME END === {}ms", g_deltaTime * 1000.0f);
     }
 
     vkDeviceWaitIdle(stone_device());

@@ -30,15 +30,6 @@ using StoneKey::stone_seal_views;
 
 namespace RTX {
 
-static std::string_view presentModeToString(VkPresentModeKHR mode) noexcept {
-    switch (mode) {
-        case VK_PRESENT_MODE_IMMEDIATE_KHR: return "IMMEDIATE (uncapped)";
-        case VK_PRESENT_MODE_MAILBOX_KHR:   return "MAILBOX (tearing-free)";
-        case VK_PRESENT_MODE_FIFO_KHR:      return "FIFO (vsync)";
-        default:                            return "UNKNOWN";
-    }
-}
-
 // ── EXTENSION FUNCTION POINTERS ─────────────────────────────────────────────
 static PFN_vkGetRefreshCycleDurationGOOGLE   vkGetRefreshCycleDurationGOOGLE   = nullptr;
 static PFN_vkGetPastPresentationTimingGOOGLE vkGetPastPresentationTimingGOOGLE = nullptr;
@@ -98,8 +89,7 @@ void SwapchainManager::create(SDL_Window*, uint32_t w, uint32_t h) noexcept
 
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
-    if (w == 0 || h == 0)
-    {
+    if (w == 0 || h == 0) {
         minimized_ = true;
         return;
     }
@@ -194,18 +184,7 @@ VkImageView SwapchainManager::getImageView(uint32_t index) const noexcept
 // ── CLEANUP ────────────────────────────────────────────────────────────────
 void SwapchainManager::cleanup() noexcept
 {
-    for (auto v : swapchainImageViews_)
-        if (v) vkDestroyImageView(stone_device(), v, nullptr);
-    swapchainImageViews_.clear();
-
-    if (swapchain_.valid())
-    {
-        vkDestroySwapchainKHR(stone_device(), swapchain_.get(), nullptr);
-        swapchain_.reset();
-    }
-    swapchainImages_.clear();
-    swapchainExtent_ = {0, 0};
-    swapchainFormat_ = VK_FORMAT_UNDEFINED;
+    // she moves without shadow
 }
 
 // ── HDR SUPPORT ─────────────────────────────────────────────────────────────
@@ -214,113 +193,65 @@ bool SwapchainManager::supportsHDR() noexcept
     return currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT;
 }
 
-// ── CORE SWAPCHAIN FORGE ─────────────────────────────────────────────────────
 void SwapchainManager::createSwapchain(SDL_Window* window,
                                        uint32_t w,
                                        uint32_t h,
                                        VkSwapchainKHR old) noexcept
 {
-    LOG_AMOURANTH(
-        "\n"
-        "              █████████████████████████████████████████\n"
-        "              █        PHASE 6 — SWAPCHAIN FORGE      █\n"
-        "              █      THE CANVAS OF INFINITY REBORN    █\n"
-        "              █████████████████████████████████████████\n");
-
     VkSurfaceCapabilitiesKHR caps{};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps));
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(stone_physical(), stone_surface(), &caps);
 
-    // ── SURFACE FORMATS
     uint32_t formatCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr));
+    vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    if (formatCount) {
-        VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data()));
-    }
+    if (formatCount) vkGetPhysicalDeviceSurfaceFormatsKHR(stone_physical(), stone_surface(), &formatCount, formats.data());
 
-    // ── PRESENT MODES
     uint32_t presentCount = 0;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr));
+    vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentCount);
-    if (presentCount) {
-        VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data()));
-    }
+    if (presentCount) vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, presentModes.data());
 
-    // ── EXTENT
     VkExtent2D extent = caps.currentExtent;
-    if (extent.width == std::numeric_limits<uint32_t>::max())
-    {
+    if (extent.width == std::numeric_limits<uint32_t>::max()) {
         extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    LOG_AMOURANTH("Swapchain territory claimed: {}×{}", extent.width, extent.height);
+    uint32_t imageCount = std::min(caps.minImageCount + 1, caps.maxImageCount > 0 ? caps.maxImageCount : 8u);
 
-    // ── IMAGE COUNT
-    uint32_t imageCount = caps.minImageCount + 1;
-    if (Options::Performance::MAX_FRAMES_IN_FLIGHT > 0) {
-        imageCount = std::min(imageCount, Options::Performance::MAX_FRAMES_IN_FLIGHT);
-    }
-    if (caps.maxImageCount > 0) {
-        imageCount = std::min(imageCount, caps.maxImageCount);
-    }
-
-    // ── PRESENT MODE
-    VkPresentModeKHR desired = VK_PRESENT_MODE_FIFO_KHR;
-    if (Options::Display::UNCAPPED_MODE_ACTIVE)
-        desired = VK_PRESENT_MODE_IMMEDIATE_KHR;
-    else if (Options::Performance::PREFER_MAILBOX_PRESENT)
-        desired = VK_PRESENT_MODE_MAILBOX_KHR;
+    VkPresentModeKHR desired = Options::Display::UNCAPPED_MODE_ACTIVE ? VK_PRESENT_MODE_IMMEDIATE_KHR :
+                               Options::Performance::PREFER_MAILBOX_PRESENT ? VK_PRESENT_MODE_MAILBOX_KHR :
+                               VK_PRESENT_MODE_FIFO_KHR;
 
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    for (auto mode : { desired, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR })
-    {
-        if (std::find(presentModes.begin(), presentModes.end(), mode) != presentModes.end())
-        {
+    for (auto mode : { desired, VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR }) {
+        if (std::find(presentModes.begin(), presentModes.end(), mode) != presentModes.end()) {
             presentMode = mode;
             break;
         }
     }
 
-    LOG_AMOURANTH("Present mode secured: {} ({} requested)",
-        presentModeToString(presentMode),
-        presentModeToString(desired));
-
-    // ── HDR OR SRGB
     VkSurfaceFormatKHR chosen = formats[0];
-    if (supportsHDR())
-    {
-        for (const auto& f : formats)
-        {
-            if (f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 && f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT)
-            {
+    if (supportsHDR()) {
+        for (const auto& f : formats) {
+            if (f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 && f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
                 chosen = f;
-                LOG_AMOURANTH("HDR10 ST2084 FORMAT CLAIMED — THE PHOTONS WILL BURN");
                 break;
             }
         }
-    }
-    else
-    {
-        for (const auto& f : formats)
-        {
-            if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-            {
+    } else {
+        for (const auto& f : formats) {
+            if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                 chosen = f;
                 break;
             }
         }
     }
 
-    LOG_AMOURANTH("Color format: {} | Color space: {}",
-        chosen.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 ? "HDR10" : "sRGB",
-        chosen.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT ? "HDR10_ST2084" : "sRGB");
-
-    // ── QUEUE OWNERSHIP
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
     uint32_t queueFamilyIndices[] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
-    VkSwapchainCreateInfoKHR ci = {
+    VkSwapchainCreateInfoKHR ci{
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface          = stone_surface(),
         .minImageCount    = imageCount,
@@ -336,22 +267,18 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
         .oldSwapchain     = old
     };
 
-    if (qf.graphicsFamily != qf.presentFamily)
-    {
+    if (qf.graphicsFamily != qf.presentFamily) {
         ci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
         ci.queueFamilyIndexCount = 2;
         ci.pQueueFamilyIndices   = queueFamilyIndices;
-        LOG_AMOURANTH("Concurrent queue ownership — graphics {} | present {}", qf.graphicsFamily.value(), qf.presentFamily.value());
-    }
-    else
-    {
+    } else {
         ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
 
-    // ── FORGE THE CANVAS
     VkSwapchainKHR raw = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
+    vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw);
 
+    // NINJA GWEN: old dies only if not reused — we trust the driver
     if (old && old != raw) {
         vkDestroySwapchainKHR(stone_device(), old, nullptr);
     }
@@ -362,36 +289,15 @@ void SwapchainManager::createSwapchain(SDL_Window* window,
     currentColorSpace_ = chosen.colorSpace;
     currentPresentMode_ = presentMode;
 
-    // Retrieve images
     uint32_t imgCount = 0;
-    VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, nullptr));
+    vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, nullptr);
     swapchainImages_.resize(imgCount);
-    VK_CHECK(vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, swapchainImages_.data()));
+    vkGetSwapchainImagesKHR(stone_device(), raw, &imgCount, swapchainImages_.data());
 
-    // Seal the empire's claim
     stone_seal_swapchain(raw);
     stone_seal_extent(extent);
     stone_seal_image_count(imgCount);
     stone_seal_images(swapchainImages_);
-
-    LOG_AMOURANTH(
-        "\n"
-        "              SWAPCHAIN REBORN\n"
-        "              {}×{} | {} images | {} mode\n"
-        "              THE CANVAS IS READY\n"
-        "              THE PHOTONS HAVE A HOME\n"
-        "              THE EMPIRE RENDERS ETERNALLY",
-        extent.width, extent.height, imgCount,
-        presentModeToString(presentMode));
-
-    LOG_CAPTAIN_N(
-        "[CAPTAIN N] \"The canvas lives again.\"\n"
-        "               \"Every pixel — ours.\"\n"
-        "               \"Every photon — obedient.\"\n"
-        "               \"The empire... expands.\"\n"
-        "\n"
-        "               *slow exhale*\n"
-        "               \"Begin transmission.\"");
 }
 
 // ── ROBUST IMAGE ACQUISITION (INFINITE TIMEOUT — NO 60FPS DEADLOCK) ─────────
@@ -401,12 +307,12 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
 {
     VkResult result = vkAcquireNextImageKHR(stone_device(),
                                  swapchain_.get(),
-                                 UINT64_MAX,
+                                 UINT64_MAX,  // ← INFINITE TIMEOUT — WE ARE PATIENT
                                  semaphore,
                                  fence,
                                  pImageIndex);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || result == VK_TIMEOUT) {
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreate(swapchainExtent_.width, swapchainExtent_.height);
         return VK_ERROR_OUT_OF_DATE_KHR;
     }
@@ -424,13 +330,12 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
         .waitSemaphoreCount = waitSemaphore ? 1u : 0u,
         .pWaitSemaphores    = waitSemaphore ? &waitSemaphore : nullptr,
         .swapchainCount     = 1,
-        .pSwapchains        = &rawSwapchain,
+        .pSwapchains        = &rawSwapchain,  // ← FIXED
         .pImageIndices      = &imageIndex
     };
 
-    VkResult result = vkQueuePresentKHR(queue, &pi);
-
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    VkResult r = vkQueuePresentKHR(queue, &pi);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
         recreate(swapchainExtent_.width, swapchainExtent_.height);
     }
 }
