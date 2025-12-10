@@ -47,8 +47,8 @@ namespace Splash {
 // ── PERFORMANCE ───────────────────────────────────────────────────────────────
 namespace Performance {
     // Maximum number of frames that can be in flight simultaneously
-    // 3 = triple buffering — optimal for low latency + tear-free presentation
-    constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 3;
+    // 2 and Mailbox is optimal (CDRED FROSTBYTE)
+    constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 2;
 
     // GPU query timestamps for precise timing of render passes
     constexpr bool     ENABLE_GPU_TIMESTAMPS       = true;
@@ -105,9 +105,6 @@ namespace Window {
 
     // Enable high-DPI (Retina / 4K+) scaling
     constexpr bool     HIGH_DPI                    = true;
-
-    // Pre-create swapchain at predicted size during resize — eliminates perceived lag
-    constexpr bool     ENABLE_QUANTUM_RESIZE_PREDICTION = true;
 }
 
 // ── AUDIO ─────────────────────────────────────────────────────────────────────
@@ -329,24 +326,6 @@ namespace AutoExposure {
 
     // Key value for key-to-middle-gray mapping (alternative metering mode)
     constexpr float  KEY_VALUE                    = 0.18f;   // Classic photographic key
-}
-
-// ── MEMORY & ALLOCATION ───────────────────────────────────────────────────────
-namespace Memory {
-    // ── MEMORY ALLOCATION — THE EMPIRE'S RESERVES ─────────────────────────────
-    // All sizes are maximum expected usage per frame or for the entire scene
-    // Values are generous but bounded — prevents runaway allocation
-
-    constexpr size_t UNIFORM_BUFFER_SIZE_PER_FRAME = 64 * 1024 * 1024;   // 64 MiB per frame (UBO + storage buffers)
-    constexpr size_t MATERIAL_BUFFER_SIZE          = 16 * 1024 * 1024;   // 16 MiB total for all materials (GPU-only)
-    constexpr size_t RESERVOIR_BUFFER_SIZE         = 512 * 1024 * 1024;  // 512 MiB for Best, 128 MiB for Uncapped
-    constexpr size_t FRAME_DATA_BUFFER_SIZE        = 128 * 1024 * 1024;  // 128 MiB for per-frame structured data
-
-    // Custom allocator pooling — reduces fragmentation and allocation overhead
-    constexpr bool   ENABLE_MEMORY_POOLING         = true;
-
-    // Zero-initialize all allocations — useful for debugging, harmful to performance
-    constexpr bool   ENABLE_ZERO_INIT              = false;
 }
 
 // ── SHADER & PIPELINE ─────────────────────────────────────────────────────────

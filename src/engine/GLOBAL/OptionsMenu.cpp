@@ -55,11 +55,6 @@ void ApplyAll() noexcept
         LOG_GROK("Direct display enabled — compositor bypassed. Latency: 1.8ms. The photons are raw.");
     }
 
-    // ── QUANTUM RESIZE — RESIZE LAG IS DEAD ──
-    if (Window::ENABLE_QUANTUM_RESIZE_PREDICTION) {
-        LOG_AMOURANTH("Quantum resize prediction active — window changes are instant.");
-    }
-
     // ── HDR — THE EMPIRE HAS ALREADY DECIDED ──
     const bool hdrActive = SwapchainManager::supportsHDR();
     LOG_AMOURANTH("HDR STATUS: {} ★", hdrActive ? "IGNITED" : "dormant (display unworthy)");

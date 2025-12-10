@@ -1,15 +1,10 @@
 // include/engine/GLOBAL/VulkanRenderer.hpp
 // =============================================================================
 //
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
+// Dual Licensed: CC BY-NC 4.0 + Commercial (gzac5314@gmail.com)
 //
-// =============================================================================
 // AMOURANTH RTX Engine (C) 2025 — SLIPSTREAM v∞ — WARPZONE BREACH IMMINENT
-// The Good Ship VulkanRTX screams through the void — pink wake eternal
-// First light achieved. The renderer is alive. The photons obey.
+// Pink wake eternal. First light restored. Photons now obey without rebellion.
 // =============================================================================
 
 #pragma once
@@ -25,11 +20,12 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <cstdint>
-#include <cstddef> 
+#include <cstddef>
+#include <atomic>
 
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/LAS.hpp"           // ← LAS::get() used in .cpp
+#include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
@@ -46,19 +42,14 @@ enum class FpsTarget : uint32_t {
     FPS_UNLIMITED = 0
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Environment Map — returned from createEnvironmentMap()
-// ──────────────────────────────────────────────────────────────────────────────
 struct EnvironmentMap {
     VkImage        image   = VK_NULL_HANDLE;
     VkDeviceMemory memory  = VK_NULL_HANDLE;
     VkImageView    view    = VK_NULL_HANDLE;
     VkSampler      sampler = VK_NULL_HANDLE;
 
-    // True if the map was successfully created
     explicit operator bool() const noexcept { return view != VK_NULL_HANDLE; }
 
-    // Optional: auto-cleanup on destruction (RAII)
     ~EnvironmentMap() {
         if (view)    vkDestroyImageView(stone_device(), view, nullptr);
         if (sampler) vkDestroySampler(stone_device(), sampler, nullptr);
@@ -76,7 +67,11 @@ public:
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
     void cleanup() noexcept;
     void createCommandPool() noexcept;
+
+    // FIXED: Now properly resets + reuses command buffers instead of leaking
     void createCommandBuffers() noexcept;
+    void resetCommandBuffers() noexcept;          // ← NEW: called every frame
+
     bool isAlive() const noexcept;
 
     static void forgeEternalCommandRing();
@@ -84,9 +79,10 @@ public:
 
     VkFence  inFlightFence(uint32_t frame) const noexcept { return inFlightFences_[frame]; }
     VkFence* inFlightFencePtr(uint32_t frame) noexcept     { return &inFlightFences_[frame]; }
-	const BufferManager::BufferInfo* stagingInfoLocal_ = nullptr;
 
-	void ensureCommandPool() noexcept;
+    const BufferManager::BufferInfo* stagingInfoLocal_ = nullptr;
+
+    void ensureCommandPool() noexcept;
 
     void toggleHypertrace() noexcept;
     void toggleFpsTarget() noexcept;
@@ -95,7 +91,7 @@ public:
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
 
-	bool debugShowEnvMapOnly_ = false;
+    bool debugShowEnvMapOnly_ = false;
 
     void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
     void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
@@ -127,9 +123,10 @@ public:
     [[nodiscard]] int       tonemapType()       const noexcept { return tonemapType_; }
     [[nodiscard]] FpsTarget fpsTarget()         const noexcept { return fpsTarget_; }
     [[nodiscard]] int       currentRenderMode() const noexcept { return activeRenderMode_; }
-    [[nodiscard]] bool minimized() const noexcept { return minimized_; }
-    [[nodiscard]] int  width()     const noexcept { return width_; }
-    [[nodiscard]] int  height()    const noexcept { return height_; }
+    [[nodiscard]] bool      minimized() const noexcept { return minimized_; }
+    [[nodiscard]] int       width() const noexcept { return width_; }
+    [[nodiscard]] int       height() const noexcept { return height_; }
+
     void recordPinkScreen(VkCommandBuffer cmd, VkImage swapImage);
     void onSwapchainRebuilt(uint32_t width, uint32_t height) noexcept;
     void recordRayTrace(VkCommandBuffer cmd, const VkExtent2D& extent) noexcept;
@@ -144,40 +141,33 @@ public:
     bool     resetAccumulation_ = true;
     void clearPinkForce() noexcept;
     EnvironmentMap createEnvironmentMap() noexcept;
-    // Command buffers
-    std::vector<VkCommandBuffer> commandBuffers_;
+
+    // ── FIXED COMMAND POOL & BUFFERS ────────────────────────────────────────
+    VkCommandPool                commandPool_            = VK_NULL_HANDLE;      // Persistent primary pool
+    VkCommandPool                transientCommandPool_   = VK_NULL_HANDLE;      // For one-time ops (reset every frame)
+    std::vector<VkCommandBuffer> commandBuffers_;           // Size = maxFramesInFlight_ — reused
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
-    // Descriptor pools
-    RTX::Handle<VkDescriptorPool> descriptorPool_;
-    RTX::Handle<VkDescriptorPool> tonemapDescriptorPool_;
-
-    // Environment map
-    RTX::Handle<VkImage>        envMapImage_;
-    RTX::Handle<VkDeviceMemory> envMapMemory_;
-    RTX::Handle<VkImageView>    envMapImageView_;
-    RTX::Handle<VkSampler>      envMapSampler_;
-
     void submitAndPresent(uint32_t slot, uint32_t imageIndex);
+    
     void transitionImage(
         VkCommandBuffer       cmd,
         VkImage               image,
         VkImageLayout         oldLayout,
         VkImageLayout         newLayout,
         VkAccessFlags         srcAccess        = 0,
-        VkAccessFlags         dstAccess      = 0,
-        VkPipelineStageFlags  srcStage       = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VkPipelineStageFlags  dstStage       = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
+        VkAccessFlags         dstAccess        = 0,
+        VkPipelineStageFlags  srcStage         = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VkPipelineStageFlags  dstStage         = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
     ) noexcept;
 
-    // Pipeline manager
     RTX::PipelineManager pipelineManager_;
 
-	uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    uint32_t maxFramesInFlight_ = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    std::vector<RTX::Handle<VkImageView>>   rtOutputViews_;
+    std::vector<RTX::Handle<VkImageView>> rtOutputViews_;
 
-	// Core state
+    // Core state
     SDL_Window* window_ = nullptr;
     int width_ = 0, height_ = 0;
     bool minimized_ = false;
@@ -189,9 +179,9 @@ public:
     void clearResizeFlag() noexcept;
     static inline std::atomic<bool> g_forcePink{false};
 
-	float totalTime_ = 0.0f;
+    float totalTime_ = 0.0f;
 
-	uint64_t     eternalFrameUBOStagingHandle_ = 0;
+    uint64_t     eternalFrameUBOStagingHandle_ = 0;
     void*        eternalFrameUBOStagingPtr_    = nullptr;
     VkDeviceSize eternalFrameUBOStagingSize_   = 0;
 
@@ -204,12 +194,10 @@ public:
     RTX::Handle<VkImage>         depthImage_;
     RTX::Handle<VkDeviceMemory>  depthImageMemory_;
 
-    // Tonemap render targets (created during swapchain rebuild)
     std::vector<RTX::Handle<VkImage>>        tonemapImages_;
     std::vector<RTX::Handle<VkImageView>>    tonemapImageViews_;
-    RTX::Handle<VkImageView>                 depthImageView_;        // Single depth view (or per-frame if you want)
+    RTX::Handle<VkImageView>               depthImageView_;
 
-    // Optional: if you have a separate tonemap framebuffer
     std::vector<RTX::Handle<VkFramebuffer>>  tonemapFramebuffers_;
 
     int  activeRenderMode_ = 0;
@@ -217,7 +205,7 @@ public:
 
     void clearAccumulationImages(VkCommandBuffer cmd);
 
-    bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
+    bool hypertraceEnabled_     = Options::OptionsRTX::ENABLE_HYPERTRACE;
     bool denoisingEnabled_      = Options::OptionsRTX::ENABLE_DENOISING;
     bool adaptiveSamplingEnabled_ = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
     bool overclockMode_         = false;
@@ -230,9 +218,12 @@ public:
     uint32_t currentSpp_        = 0;
     float frameTime_            = 0.0f;
 
+	uint32_t hypertraceScoreWidth_  = 0;
+    uint32_t hypertraceScoreHeight_ = 0;
+
     VkRenderPass renderPass_{ VK_NULL_HANDLE };
 
-    // Sync
+    // Sync objects
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
     std::vector<VkSemaphore> computeFinishedSemaphores_;
@@ -248,7 +239,7 @@ public:
     std::vector<uint64_t> dimensionBufferEncs_;
     std::vector<uint64_t> tonemapUniformEncs_;
 
-    // HDR targets
+    // HDR/RT targets
     std::vector<RTX::Handle<VkImage>>       rtOutputImages_;
     std::vector<RTX::Handle<VkDeviceMemory>>rtOutputMemories_;
 
@@ -279,13 +270,24 @@ public:
     RTX::Handle<VkPipelineLayout> denoiserLayout_;
     std::vector<VkDescriptorSet>  denoiserSets_;
 
-    // Framebuffers
     std::vector<VkFramebuffer> framebuffers_;
-
-    // RT descriptors
     std::vector<VkDescriptorSet> rtDescriptorSets_;
 
-    // ── PRIVATE METHODS (all used in .cpp) ─────────────────────────────────────
+    // Descriptor pools
+    RTX::Handle<VkDescriptorPool> descriptorPool_;
+    RTX::Handle<VkDescriptorPool> tonemapDescriptorPool_;
+
+    // Environment map
+    RTX::Handle<VkImage>        envMapImage_;
+    RTX::Handle<VkDeviceMemory>    envMapMemory_;
+    RTX::Handle<VkImageView>    envMapImageView_;
+    RTX::Handle<VkSampler>      envMapSampler_;
+
+    std::vector<uint64_t> rtOutputHandles_;
+
+    VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
+
+    // ── PRIVATE METHODS ─────────────────────────────────────────────────────
     void createRenderPass() noexcept;
     void destroyRenderPass() noexcept;
     void createFramebuffers() noexcept;
@@ -321,25 +323,20 @@ public:
     bool recreateTonemapUBOs() noexcept;
     void waitForGPU() noexcept;
 
-    std::vector<uint64_t>                 rtOutputHandles_;     // BufferManager handles
-
-    VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
-
-// VulkanRenderer.hpp — ONLY THIS
     void createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
-                 VkFormat format, VkImageTiling tiling,
-                 VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
-                 RTX::Handle<VkImage>& image,
-                 RTX::Handle<VkDeviceMemory>& memory,
-                 const std::string& tag = "") noexcept;
+                     VkFormat format, VkImageTiling tiling,
+                     VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
+                     RTX::Handle<VkImage>& image,
+                     RTX::Handle<VkDeviceMemory>& memory,
+                     const std::string& tag = "") noexcept;
 
     void createImageArray(std::vector<RTX::Handle<VkImage>>& images,
-                                      std::vector<RTX::Handle<VkDeviceMemory>>& memories,
-                                      std::vector<RTX::Handle<VkImageView>>& views,
-                                      uint32_t count,
-                                      VkFormat format,
-                                      VkImageUsageFlags usage,
-                                      const std::string& baseTag) noexcept;
+                          std::vector<RTX::Handle<VkDeviceMemory>>& memories,
+                          std::vector<RTX::Handle<VkImageView>>& views,
+                          uint32_t count,
+                          VkFormat format,
+                          VkImageUsageFlags usage,
+                          const std::string& baseTag) noexcept;
 
     void updateTonemapDescriptorsInitial() noexcept;
     void destroySharedStaging() noexcept;
@@ -350,41 +347,6 @@ public:
     [[nodiscard]] constexpr VkExtent2D currentExtent() const noexcept {
         return { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_) };
     }
-
-struct DreamUBO
-{
-    float    time;          // offset 0,  size 4
-    uint32_t frame;         // offset 4,  size 4
-    float    resolution[2]; // offset 8,  size 8
-    float    exposure;      // offset 16, size 4
-    uint32_t enableEnvMap;  // offset 20, size 4
-
-    // MODE 1: GREEN MATRIX RAIN — custom parameters (placed in original padding area)
-    glm::vec3 baseColor;    // offset 24, size 12
-    float    intensity;     // offset 36, size 4
-
-    // Padding keeps original offset 24 start and total 368 bytes
-    // Original padding started at 24 — we use first 16 bytes for baseColor+intensity
-    // Remaining padding: 368 - 40 = 328 bytes → 82 × uint32_t, starting at offset 40
-    uint32_t padding[82];   // offset 40 → total 368 bytes
-};
-
-// ALL static_asserts OUTSIDE the struct — fixes "incomplete type" + keeps old checks
-static_assert(sizeof(DreamUBO) == 368, "DreamUBO must be exactly 368 bytes — the shaders demand it");
-static_assert(offsetof(DreamUBO, time)         == 0,   "time must be at offset 0");
-static_assert(offsetof(DreamUBO, frame)        == 4,   "frame must be at offset 4");
-static_assert(offsetof(DreamUBO, resolution)   == 8,   "resolution must be at offset 8");
-static_assert(offsetof(DreamUBO, exposure)     == 16,  "exposure must be at offset 16");
-static_assert(offsetof(DreamUBO, enableEnvMap) == 20,  "enableEnvMap must be at offset 20");
-
-// Keep original assertion happy — padding field still "starts" at 24 in the layout sense
-// (even though we use the space before it — the field itself is at offset 40)
-static_assert(offsetof(DreamUBO, padding) == 40, "padding field starts at offset 40 (after custom params)");
-
-// New members are exactly where we want them
-static_assert(offsetof(DreamUBO, baseColor) == 24, "baseColor must be at offset 24");
-static_assert(offsetof(DreamUBO, intensity) == 36, "intensity must be at offset 36");
-
 };
 
 // =============================================================================
@@ -400,5 +362,5 @@ static_assert(offsetof(DreamUBO, intensity) == 36, "intensity must be at offset 
     return *ptr;
 }
 
-// FIRST LIGHT RESTORED — DECEMBER 02, 2025
-// THE EMPIRE IS WHOLE — PINK PHOTONS ETERNAL
+// FIRST LIGHT RESTORED — DECEMBER 09, 2025
+// COMMAND POOL REBELLION CRUSHED — PINK PHOTONS FLOW ETERNALLY AGAIN

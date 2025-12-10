@@ -112,7 +112,7 @@ public:
     PipelineManager& operator=(PipelineManager&&) noexcept = default;
 
     void createPipelineLayout();
-    void createRayTracingPipeline(const std::vector<std::string>& shaderPaths);
+    void createRayTracingPipeline();
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
     void createDescriptorPool();
     void allocateDescriptorSets();
@@ -187,7 +187,8 @@ public:
 
 	VkShaderModule loadShader(const std::string& path) const;
 
-private:
+	static inline bool s_crownForged = false;
+
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_                    = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_       = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR_ = nullptr;

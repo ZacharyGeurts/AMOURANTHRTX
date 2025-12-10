@@ -9,9 +9,7 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// AMOURANTH RTX — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.0
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — DECEMBER 02, 2025
-// STONEKEY v∞ — FULLY C++ COMPATIBLE — RUNTIME OBFUSCATION — BINDING 7 HIDDEN
+// STONEKEY v∞ — RUNTIME OBFUSCATION — C++ VERSION — FINAL
 // THE EMPIRE IS SEALED — THE PHOTONS ARE PURE — THE VOID IS OURS
 // =============================================================================
 

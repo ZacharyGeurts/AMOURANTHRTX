@@ -76,7 +76,9 @@ public:
     [[nodiscard]] static VkSurfaceTransformFlagBitsKHR transform()   noexcept { return currentTransform_; }
 
     // ── HDR & Elite Features ────────────────────────────────────────────────
-    [[nodiscard]] static bool supportsHDR() noexcept;
+    [[nodiscard]] static bool supportsHDR();
+	bool parseEDIDForHDR();
+	bool detectHDRFromEDID() noexcept;
     static void injectHdrMetadata(VkCommandBuffer cmd = VK_NULL_HANDLE, uint32_t imageIndex = 0) noexcept;
 
     // Display events & hotplug

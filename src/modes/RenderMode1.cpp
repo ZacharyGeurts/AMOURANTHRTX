@@ -72,7 +72,6 @@ void RenderMode1::renderFrame(VkCommandBuffer cmd, uint32_t frameIndex, float de
     desc.rtOutputViews[frameIndex % g_rtx().maxFramesInFlight_] = 
         g_rtx().rtOutputViews_[frameIndex % g_rtx().maxFramesInFlight_].get();
 
-    g_rtx().pipelineManager_.updateRTDescriptorSet(frameIndex % g_rtx().maxFramesInFlight_, desc);
     g_rtx().recordRayTracingCommands(cmd, frameIndex % g_rtx().maxFramesInFlight_);
 
     LOG_TRACE_CAT("RENDERER", "Green Matrix rendered — frame %u | intensity %.2f", frameCount_, ubo.intensity);

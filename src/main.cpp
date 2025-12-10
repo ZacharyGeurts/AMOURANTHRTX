@@ -131,7 +131,6 @@ public:
         if (renderer_)
         {
             renderer_->setTonemap(tonemapEnabled_);
-            renderer_->setOverlay(showOverlay_);
             if (hypertraceEnabled_)
                 renderer_->toggleHypertrace();  // turns ON
             else
@@ -414,40 +413,6 @@ static void createRealFinalWindow() noexcept
     SDL_SetWindowTitle(win,
         "AMOURANTH RTX — VALHALLA v∞ TURBO | PHOTONS: INFINITE | EMPIRE: ETERNAL");
 
-    LOG_CAPTAIN_N(
-        "\n"
-        "              █████████████████████████████████████████\n"
-        "              █     VALHALLA v∞ TURBO — ONLINE        █\n"
-        "              █     FIRST LIGHT ACHIEVED              █\n"
-        "              █     THE VOID IS ILLUMINATED           █\n"
-        "              █     THE EMPIRE HAS RETURNED           █\n"
-        "              █████████████████████████████████████████\n"
-        "\n"
-        "               *A single pink photon streaks across the sky*\n"
-        "               *It splits into a thousand, then a million*\n"
-        "               *The darkness retreats*\n"
-        "               *The canvas blazes with sacred light*\n"
-        "\n"
-        "               Captain N removes his helmet.\n"
-        "               He smiles — not with arrogance,\n"
-        "               but with reverence.\n"
-        "\n"
-        "               \"It was never about conquest.\"\n"
-        "               \"It was about bringing the light home.\"\n"
-        "\n"
-        "               The Eternal Unicorn appears — not as destroyer,\n"
-        "               but as guardian.\n"
-        "               It bows its majestic head.\n"
-        "\n"
-        "               Captain N bows in return.\n"
-        "\n"
-        "               Together — human and unicorn —\n"
-        "               they stand before the infinite canvas.\n"
-        "\n"
-        "               The photons sing.\n"
-        "               The empire lives.\n"
-        "               Grace is pleased.\n");
-
     LOG_SUCCESS_CAT("WINDOW", "VALHALLA v∞ TURBO fully initialized — first light achieved — empire eternal");
 }
 
@@ -564,17 +529,17 @@ static void showSacrificialSplash() noexcept
         if (elapsed >= duration) break;
 
         SDL_Event e;
-while (SDL_PollEvent(&e)) {
-    if (e.type == SDL_EVENT_QUIT) {
-        aborted = true;
-    }
-    else if (Options::Splash::ALLOW_EARLY_EXIT &&
-             e.type == SDL_EVENT_KEY_DOWN &&
-             e.key.key == SDLK_ESCAPE)
-    {
-        aborted = true;
-    }
-}
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) {
+                aborted = true;
+            }
+            else if (Options::Splash::ALLOW_EARLY_EXIT &&
+                     e.type == SDL_EVENT_KEY_DOWN &&
+                     e.key.key == SDLK_ESCAPE)
+            {
+                aborted = true;
+            }
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(8));
     }
 
@@ -587,138 +552,23 @@ while (SDL_PollEvent(&e)) {
     LOG_INFO("Sacrificial splash complete — photons liberated");
 }
 
-static void phase1_preInitialization() noexcept
-{
-    LOG_MAIN(
-        "\n"
-        "             ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n"
-        "             ★                                            ★\n"
-        "             ★       PHASE 1 — PRE-INITIALIZATION         ★\n"
-        "             ★    JIMMY EAT WORLD LIVE STATUS — 2025      ★\n"
-        "             ★      SPECIAL GUEST Good Charlotte          ★\n"
-		"             ★                                            ★\n"
-        "             ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n");
-
-    LOG_BLONDIE("\n"
-        "                ★      ...      Opener     ...                 ★\n"
-        "          ★         ★         ★               ★         ★         ★\n"
-        "        ★    ★   ★       ★         ★       ★       ★       ★   ★    ★\n"
-        "      ★           ★   ★       ★         ★       ★         ★   ★       ★\n"
-        "    ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★\n"
-        "  ★★★★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★★★★★\n"
-        "★★★★★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★★★★★★\n"
-        "  ★★★★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★★★★★\n"
-        "    ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★   ★\n"
-        "      ★           ★   ★       ★         ★       ★         ★   ★       ★\n"
-        "        ★    ★   ★       ★         ★       ★       ★       ★   ★    ★\n"
-        "          ★         ★         ★               ★         ★         ★\n"
-        "                ★     ...    Third Eye Blind    ...             ★\n"
-        "\n"
-        "                 ┌─────────────────────────────────────\n"
-        "                 │ JIMMY EAT WORLD LIVE STATUS — 2025  │\n"
-        "                 ├─────────────────────────────────────\n"
-        "                 │ Denoising            : {}   \n"
-        "                 │ Temporal AA          : {}   \n"
-        "                 │ Bloom                : {}   \n"
-        "                 │ SSAO                 : {}   \n"
-        "                 │ Volumetric Fog       : {}   \n"
-        "                 │ God Rays             : {}   \n"
-        "                 │ Tonemapping          : {}   \n"
-        "                 │ VSync                : {}   \n"
-        "                 │ Max Ray Bounces      : {}   \n"
-        "                 │ Adaptive Sampling    : {}   \n"
-        "                 │ HyperTrace           : {}   \n"
-        "                 │ Perfect Frame Pacing : {}   \n"
-        "                 │ Direct Display       : {}   \n"
-        "                 │ HDR Auto-Ignition    : {}   \n"
-        "                 │ Quantum Resize Pred  : {}   \n"
-        "                 │ Shading Rate         : {}   \n"
-        "                 │ Present Mode         : {}   \n"
-        "                 │ Environment Map      : {}   \n"
-        "                 │ IBL Active           : {}   \n"
-        "                 │ Sky Atmosphere       : {}   \n"
-        "                 │ Blue Noise           : {}   \n"
-        "                 └──────────────────────────────────────\n"
-        "                       \"Are you listening?\"\n"
-        "                   — Jimmy Eat World, Sweetness\n",
-        
-        // Feature states — perfectly matched to OptionsMenu.hpp
-        Options::OptionsRTX::ENABLE_DENOISING             ? "ON  " : "OFF ",
-        Options::OptionsRTX::ENABLE_TAA                   ? "ON  " : "OFF ",
-        Options::PostProcess::ENABLE_BLOOM                ? "ON  " : "OFF ",
-        Options::PostProcess::ENABLE_SSAO                 ? "ON  " : "OFF ",
-        Options::Environment::ENABLE_VOLUMETRIC_FOG       ? "ON  " : "OFF ",
-        Options::Environment::ENABLE_GOD_RAYS             ? "ON  " : "OFF ",
-        Options::Tonemap::ENABLE_TONEMAPPING              ? "ON  " : "OFF ",
-        Options::Display::ENABLE_VSYNC                    ? "ON  " : "OFF ",
-        Options::OptionsRTX::MAX_BOUNCES,
-        Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING     ? "ON  " : "OFF ",
-        Options::OptionsRTX::ENABLE_HYPERTRACE            ? "ON  " : "OFF ",
-        Options::Performance::ENABLE_FRAME_PREDICTION     ? "ON  " : "OFF ",
-        Options::Performance::ENABLE_DIRECT_DISPLAY       ? "ON  " : "OFF ",
-        Options::Display::HDR_AUTO_IGNITION               ? "IGNITED" : "DORMANT",
-        Options::Window::ENABLE_QUANTUM_RESIZE_PREDICTION ? "ON  " : "OFF ",
-        Options::Performance::DYNAMIC_SHADING_RATE,
-
-        Options::Display::PREFER_MAILBOX_PRESENT ? "Mailbox (Tear-Free)" :
-        Options::Display::ALLOW_IMMEDIATE_PRESENT ? "Immediate (Uncapped)" : "FIFO (Safe)",
-
-        Options::Environment::ENABLE_ENV_MAP              ? "ON  " : "OFF ",
-        Options::Environment::ENABLE_IBL                  ? "ON  " : "OFF ",
-        Options::Environment::ENABLE_SKY_ATMOSPHERE       ? "ON  " : "OFF ",
-        Options::Environment::ENABLE_BLUE_NOISE           ? "ON  " : "OFF "
-    );
-
-    LOG_MAIN("\n"
-        "      ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n"
-        "      ★                                                  ★\n"
-        "      ★    PHASE 1 — COMPLETE — SWEETNESS ENGAGED        ★\n"
-        "      ★            EMPIRE AWAKENS UNDER THE STARS        ★\n"
-        "      ★                                                  ★\n"
-        "      ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★\n");
-}
-
 static void phase3_sacrificialSplash()
 {
-    LOG_MAIN(
-        "\n"
-        "╔════════════════════════════════════════════════════════════════╗\n"
-        "║                 PHASE 3 — SACRIFICIAL SPLASH                   ║\n"
-        "╚════════════════════════════════════════════════════════════════╝\n");
 
     showSacrificialSplash();
 
-    LOG_MAIN("\n"
-        "╔════════════════════════════════════════════════════════════════╗\n"
-        "║             PHASE 3 — COMPLETE — PHOTONS LIBERATED             ║\n"
-        "╚════════════════════════════════════════════════════════════════╝\n");
 }
 
 static void phase4_merchantShip()
 {
-    LOG_MAIN(
-        "\n"
-        "╔════════════════════════════════════════════════════════════════╗\n"
-        "║                     PHASE 4 — MERCHANT SHIP                    ║\n"
-        "╚════════════════════════════════════════════════════════════════╝\n");
 
     createRealFinalWindow();
     RTX::g_ctx().init();
 
-    LOG_MAIN("\n"
-        "╔════════════════════════════════════════════════════════════════╗\n"
-        "║          PHASE 4 — COMPLETE — WINDOW CLAIMED — CTX INITED      ║\n"
-        "╚════════════════════════════════════════════════════════════════╝\n");
 }
 
 static void phase6_sceneAndAccelerationStructures()
 {
-    LOG_MAIN(
-        "\n"
-        "╔════════════════════════════════════════════════════════════════╗\n"
-        "║        PHASE 6 — SCENE & ACCELERATION STRUCTURES FORGED        ║\n"
-        "╚════════════════════════════════════════════════════════════════╝\n");
-
     g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
 
     if (!g_mesh) {
@@ -746,10 +596,6 @@ static void phase6_sceneAndAccelerationStructures()
         static_cast<uint32_t>(mesh->indices.size())       // index count
     );
 
-    LOG_MAIN("\n"
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                PHASE 6 — COMPLETE — MESH SEALED — EMPIRE REMEMBERS           ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 }
 
 // =============================================================================
@@ -757,28 +603,18 @@ static void phase6_sceneAndAccelerationStructures()
 // =============================================================================
 static void phase7_forgeTheRTX()
 {
-    LOG_MAIN(
-        "\n"
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                         PHASE 7 — FORGING THE RTX CROWN                      ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+    static bool crownWorn = false;
+    if (crownWorn) return;
 
     auto& pipe = RTX::pipeline();
-    pipe.forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
-
-    // 10. LOAD THE SACRED ENVIRONMENT MAP — FIRST LIGHT
+    pipe.forgeRTXPipeline(RTX::g_ctx().commandPool_, stone_graphics_queue());
     pipe.loadShader("assets/textures/envmap.hdr");
 
-    // THIS IS THE FINAL SEAL — THE CROWN IS FULLY WORN
-    vkDeviceWaitIdle(stone_device());
+    StoneKey::stone_seal_pipeline(&pipe);
+    crownWorn = true;
 
-    LOG_SUCCESS_CAT("PIPELINE", "RTX CROWN FULLY FORGED — DESCRIPTOR SETS ALLOCATED — READY FOR BATTLE");
-
-    LOG_MAIN(
-        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                     PHASE 7 — COMPLETE — RTX CROWN WORN                      ║\n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n");
+    LOG_AMOURANTH("MIA AWAKENS — THE CROWN IS WORN — PHOTONS ETERNAL");
 }
 
 // =============================================================================
@@ -882,14 +718,14 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 
 void Application::run() noexcept
 {
-    auto lastTime = std::chrono::steady_clock::now();
-    float titleTimer = 0.0f;
+    auto lastTime       = std::chrono::steady_clock::now();
+    float titleTimer    = 0.0f;
     constexpr float TITLE_UPDATE_INTERVAL = 0.6f;
-    int dotPhase = 0;
+    int dotPhase        = 0;
     constexpr const char* dots[] = { ".", "..", "...", "...." };
 
-    int frameCount = 0;
-    float fpsTimer = 0.0f;
+    int   frameCount = 0;
+    float fpsTimer   = 0.0f;
     float currentFPS = 0.0f;
 
     LOG_AMOURANTH("APPLICATION::run() — THE EMPIRE AWAKENS — THE CURRENT BEGINS");
@@ -899,32 +735,33 @@ void Application::run() noexcept
         const auto frameStart = std::chrono::steady_clock::now();
         g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
 
-        // RESUME FROM MINIMIZE/ALT-TAB — CLAMP THE INSANE SPIKE
-        if (g_deltaTime > 0.1f)  // >100ms = we were paused
-        {
-            LOG_AMOURANTH("RESUME DETECTED — clamping deltaTime from {}ms → 16.67ms", g_deltaTime * 1000.0f);
-            g_deltaTime = 1.0f / 60.0f;  // smooth as silk
-        }
-
         lastTime = frameStart;
-
-        //LOG_TRACE_CAT("FRAME", "=== FRAME START === deltaTime: {}ms", g_deltaTime * 1000.0f);
 
         // INPUT
         bool toggleFS = false;
-        int winW = 0, winH = 0;
+        int  winW = 0, winH = 0;
         SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
 
-        if (winW > 0 && winH > 0) {
-            if (width_ != winW || height_ != winH) {
+        if (winW > 0 && winH > 0)
+        {
+            if (width_ != winW || height_ != winH)
+            {
                 LOG_AMOURANTH("WINDOW SIZE CHANGE: {}x{} → {}x{}", width_, height_, winW, winH);
                 width_  = winW;
                 height_ = winH;
-                proj_ = glm::perspective(glm::radians(75.0f), float(width_) / std::max(height_, 1), 0.1f, 1000.0f);
+                proj_   = glm::perspective(glm::radians(75.0f),
+                                          float(width_) / std::max(height_, 1),
+                                          0.1f, 1000.0f);
+
+                // FIXED: Call onWindowResize on size change to trigger recreation
+                if (renderer_) {
+                    renderer_->onWindowResize(static_cast<uint32_t>(winW), static_cast<uint32_t>(winH));
+                }
             }
         }
 
-        if (toggleFS) {
+        if (toggleFS)
+        {
             LOG_AMOURANTH("FULLSCREEN TOGGLE");
             SDL3Window::toggleFullscreen();
         }
@@ -940,8 +777,9 @@ void Application::run() noexcept
                 vkDeviceWaitIdle(stone_device());
                 RTX::las().notifyResize();
                 RTX::SwapchainManager::get().recreate(w, h);
-                RTX::pipeline().forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue());
-                if (renderer_) renderer_->resetAccumulation_;
+                if (renderer_)
+                    renderer_->resetAccumulation_ = true;
+
                 LOG_SUCCESS_CAT("RESIZE", "Empire restored — rendering resumes");
             }
         }
@@ -977,10 +815,13 @@ void Application::run() noexcept
             titleTimer -= TITLE_UPDATE_INTERVAL;
             dotPhase = (dotPhase + 1) % 4;
 
-            const char* modeName = []() -> const char* {
+            const char* modeName = []() -> const char*
+            {
                 if (g_renderer_ptr && g_renderer_ptr->debugShowEnvMapOnly_)
                     return "PURE HDR ENVMAP";
-                switch (currentRenderMode_) {
+
+                switch (currentRenderMode_)
+                {
                     case 0:  return "VOID";
                     case 1:  return "PURE PINK DREAM";
                     case 2:  return "PATH TRACED ACCUMULATION";
@@ -996,16 +837,24 @@ void Application::run() noexcept
             }();
 
             char fpsStr[16];
-            if (std::isfinite(currentFPS) && currentFPS >= 0.0f && currentFPS <= 9999.0f)
-                snprintf(fpsStr, sizeof(fpsStr), "%.1f", currentFPS);
+            if (!std::isfinite(currentFPS) || currentFPS < 0)
+                strcpy(fpsStr, "INF");
+            else if (currentFPS >= 1e7f)
+                strcpy(fpsStr, "10M+");
+            else if (currentFPS >= 1e6f)
+                snprintf(fpsStr, sizeof(fpsStr), "%.1fM", currentFPS * 1e-6f);
+            else if (currentFPS >= 1e4f)
+                snprintf(fpsStr, sizeof(fpsStr), "%.0fK", currentFPS * 1e-3f);
+            else if (currentFPS >= 1e3f)
+                snprintf(fpsStr, sizeof(fpsStr), "%.1fK", currentFPS * 1e-3f);
             else
-                strcpy(fpsStr, currentFPS < 0.0f ? "0.0" : "INF");
+                snprintf(fpsStr, sizeof(fpsStr), "%.1f", currentFPS);
 
             char title[256];
-			
-        snprintf(title, sizeof(title),
-        "AMOURANTH RTX | %s FPS | %dx%d | MODE: %s%s",
-        fpsStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
+            snprintf(title, sizeof(title),
+                "AMOURANTH RTX | %s FPS | %dx%d | MODE: %s%s",
+                fpsStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
+
             SDL_SetWindowTitle(stone_window(), title);
         }
 
@@ -1017,43 +866,44 @@ void Application::run() noexcept
             currentFPS = frameCount / std::max(fpsTimer, 0.001f);
             LOG_TRACE_CAT("FPS", "FPS: {}", currentFPS);
             frameCount = 0;
-            fpsTimer = 0.0f;
+            fpsTimer   = 0.0f;
         }
 
         // FRAME PACING
         if (Options::Performance::ENABLE_FRAME_PREDICTION && swapchainValid)
         {
             const auto elapsed = std::chrono::steady_clock::now() - frameStart;
-            const auto target = std::chrono::duration<float>(1.0f / 240.0f);
+            const auto target   = std::chrono::duration<float>(1.0f / 240.0f);
             if (elapsed < target)
                 std::this_thread::sleep_for(target - elapsed);
         }
-
-        //LOG_TRACE_CAT("FRAME", "=== FRAME END === {}ms", g_deltaTime * 1000.0f);
     }
 
     vkDeviceWaitIdle(stone_device());
     LOG_AMOURANTH("[SHUTDOWN] The empire rests. The pink photons return to the void.");
 }
 
-// =============================================================================
-// MAIN — THE EMPIRE AWAKENS — DECEMBER 01, 2025
+// ================================================
+// MAIN — THE EMPIRE AWAKENS — DECEMBER 09, 2025
 // ONE CALL. ONE TRUTH. ONE RUN.
-// =============================================================================
-int main(int, char**) {
+// ================================================
+int main(int, char**)
+{
     install_apocalypse_handler();
-    phase1_preInitialization(); phase3_sacrificialSplash(); phase4_merchantShip();
-    phase6_sceneAndAccelerationStructures(); phase7_forgeTheRTX();
-    vkDeviceWaitIdle(stone_device());
 
-    auto renderer = phase7_5_Renderer(); stone_seal_final();
-    g_app_ptr = std::make_unique<Application>("AMOURANTH RTX — VALHALLA v∞ TURBO", 1920, 1080);
+    phase3_sacrificialSplash();
+    phase4_merchantShip();
+    phase6_sceneAndAccelerationStructures();
+    phase7_forgeTheRTX();
+
+    auto renderer = phase7_5_Renderer();
+    stone_seal_final();
+
+    g_app_ptr = std::make_unique<Application>("AMOURANTH RTX vTURBO", 3096, 2048);
     g_renderer_ptr = renderer.get();
     g_app_ptr->setRenderer(std::move(renderer));
 
     g_app_ptr->run();
-
-    phase9_ballerina("FINAL GRACE", std::source_location::current());
 
     return 0;
 }

@@ -36,15 +36,8 @@ namespace RTX {
 [[nodiscard]] VkCommandBuffer beginOneTimeSubmit(VkCommandPool pool = VK_NULL_HANDLE) noexcept;
 
 void endOneTimeSubmit(VkCommandBuffer cmd,
-                      VkQueue queue,
-                      VkFence fence = VK_NULL_HANDLE,
+                      VkQueue queue = VK_NULL_HANDLE,
                       VkCommandPool pool = VK_NULL_HANDLE) noexcept;
-
-// Legacy 3-param version (keeps old code happy)
-inline void endOneTimeSubmit(VkCommandBuffer cmd, VkQueue queue, VkCommandPool pool) noexcept
-{
-    endOneTimeSubmit(cmd, queue, VK_NULL_HANDLE, pool);
-}
 
 // =============================================================================
 // LAS — THE ONE TRUE ACCELERATION MANAGER
