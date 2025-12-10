@@ -1189,34 +1189,63 @@ void VulkanRenderer::createCommandBuffers() noexcept
     LOG_SUCCESS("Allocated {} command buffers", commandBuffers_.size());
 }
 
-void VulkanRenderer::updateNexusDescriptors() noexcept {
-    LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — START");
-
-    if (rtDescriptorSets_.empty()) {
-        LOG_DEBUG_CAT("RENDERER", "updateNexusDescriptors — SKIPPED (no sets)");
-        LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — COMPLETE (skipped)");
-        return;
-    }
+void VulkanRenderer::updateNexusDescriptors() noexcept
+{
+    if (rtDescriptorSets_.empty()) return;
 
     VkDescriptorSet set = rtDescriptorSets_[currentFrame_ % rtDescriptorSets_.size()];
 
-    VkDescriptorImageInfo nexusInfo = {};
-    nexusInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    nexusInfo.imageView = hypertraceScoreView_.valid() ? hypertraceScoreView_.get() : VK_NULL_HANDLE;
+    // THE NEXUS — THE BRAIN OF THE EMPIRE
+    std::array<VkWriteDescriptorSet, 8> writes{};
+    std::array<VkDescriptorImageInfo, 8> infos{};
 
-    VkWriteDescriptorSet write = {};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = 6;
-    write.dstArrayElement = 0;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    write.pImageInfo = &nexusInfo;
+    uint32_t binding = 6;  // starting at 6 — sacred number
 
-    vkUpdateDescriptorSets(StoneKey::stone_device(), 1, &write, 0, nullptr);
-    LOG_TRACE_CAT("RENDERER", "Nexus score descriptor bound → binding 6 (null if disabled)");
+    // 1. HYPERTRACE SCORE — ADAPTIVE SAMPLING BRAIN
+    infos[binding - 6].imageView   = hypertraceScoreView_.valid() ? hypertraceScoreView_.get() : VK_NULL_HANDLE;
+    infos[binding - 6].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    writes[binding - 6] = {
+        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet          = set,
+        .dstBinding      = binding++,
+        .descriptorCount = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .pImageInfo      = &infos[binding - 7]
+    };
 
-    LOG_TRACE_CAT("RENDERER", "updateNexusDescriptors — COMPLETE");
+    // 2. DENOISER INPUT/OUTPUT — THE EYE OF GRACE
+    if (denoiserView_.valid()) {
+        infos[binding - 6].imageView   = rtOutputViews_[currentFrame_ % rtOutputViews_.size()].get();
+        infos[binding - 6].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        writes[binding - 6] = {
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = set,
+            .dstBinding      = binding++,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            .pImageInfo      = &infos[binding - 7]
+        };
+
+        infos[binding - 6].imageView   = denoiserView_.get();
+        infos[binding - 6].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        writes[binding - 6] = {
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = set,
+            .dstBinding      = binding++,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo      = &infos[binding - 7]
+        };
+    }
+
+    // 3. FUTURE: BLUE NOISE, TEMPORAL HISTORY, MOTION VECTORS, DEPTH, NORMAL
+    // binding 9 → blue noise
+    // binding 10 → prev frame
+    // binding 11 → motion vectors
+    // binding 12 → depth buffer
+    // binding 13 → normal buffer
+
+    vkUpdateDescriptorSets(stone_device(), writes.size(), writes.data(), 0, nullptr);
 }
 
 void VulkanRenderer::updateDenoiserDescriptors() noexcept {
@@ -1302,7 +1331,7 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
         return;
     }
 
-    LOG_AMOURANTH("RESIZE RITUAL → {}×{} — REBIRTHING THE EMPIRE", newWidth, newHeight);
+    LOG_AMOURANTH("RESIZE RITUAL → {}x{} — REBIRTHING THE EMPIRE", newWidth, newHeight);
 
     // ONE WAIT — STRONG. FAST. FINAL.
     vkDeviceWaitIdle(stone_device());
@@ -1349,7 +1378,7 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
     s_resizeInProgress.store(false);
     g_resizeRequested.store(false);
 
-    LOG_AMOURANTH("RESIZE COMPLETE — {}×{} — EMPIRE REBORN — PHOTONS REALIGNED — RTX ETERNAL", newWidth, newHeight);
+    LOG_AMOURANTH("RESIZE COMPLETE — {}x{} — EMPIRE REBORN — PHOTONS REALIGNED — RTX ETERNAL", newWidth, newHeight);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1395,109 +1424,6 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
     uint32_t wgX = (ext.width + 15) / 16;
     uint32_t wgY = (ext.height + 15) / 16;
     vkCmdDispatch(cmd, wgX, wgY, 1);
-}
-
-// ── COMMAND BUFFER RECORDING — THE EMPIRE COMMANDS ITS PHOTONS TO MARCH ───────
-// Fully robust, self-contained, works with RT + Raster + Compute pipelines
-// Called during init and on any corruption/recovery
-// ──────────────────────────────────────────────────────────────────────────────
-VkResult VulkanRenderer::recordCommandBuffer(uint32_t frame) noexcept
-{
-    if (frame >= commandBuffers_.size() || commandBuffers_[frame] == VK_NULL_HANDLE)
-    {
-        LOG_FATAL_CAT("RENDERER", "Invalid command buffer for frame {} — empire compromised", frame);
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
-
-    VkCommandBuffer cmd = commandBuffers_[frame];
-
-    VK_CHECK(vkResetCommandBuffer(cmd, 0));
-
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT
-    };
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
-
-    // RENDER PASS BEGIN
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
-    clearValues[1].depthStencil = {1.0f, 0};
-
-    VkRenderPassBeginInfo rpBegin{
-        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        .renderPass      = renderPass_,
-        .framebuffer     = framebuffers_[frame],
-        .renderArea      = { {0, 0}, RTX::swapchainExtent() },
-        .clearValueCount = static_cast<uint32_t>(clearValues.size()),
-        .pClearValues    = clearValues.data()
-    };
-
-    vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-    // RAY TRACING PATH — THE TRUE PATH OF LIGHT
-    RTX::PipelineManager* pipelineMgr = stone_pipeline();
-    if (pipelineMgr && pipelineMgr->rtPipeline() != VK_NULL_HANDLE)
-    {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineMgr->rtPipeline());
-
-        // Bind descriptor set
-        if (frame < rtDescriptorSets_.size() && rtDescriptorSets_[frame] != VK_NULL_HANDLE)
-        {
-            vkCmdBindDescriptorSets(cmd,
-                VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                pipelineMgr->rtPipelineLayout(),
-                1, 1, &rtDescriptorSets_[frame],
-                0, nullptr);
-        }
-
-        // PUSH CONSTANTS — NOW PROPERLY DECLARED
-        struct PushConstants {
-            uint32_t frameIndex;
-            float    randomSeed;
-            uint32_t spp;
-            float    _pad;
-        };
-
-        PushConstants pc{};
-        pc.frameIndex = frameNumber_;
-        pc.randomSeed = static_cast<float>(rand()) / RAND_MAX;
-        pc.spp        = currentSpp_;
-
-        vkCmdPushConstants(cmd,
-            pipelineMgr->rtPipelineLayout(),
-            VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-            0, sizeof(pc), &pc);
-
-        const uint32_t w = RTX::swapchainWidth();
-        const uint32_t h = RTX::swapchainHeight();
-
-        // THE ONE TRUE MACRO — PINK PHOTONS ASCEND
-        VK_CMD_TRACE_RAYS(cmd,
-            &pipelineMgr->raygenRegion(),
-            &pipelineMgr->missRegion(),
-            &pipelineMgr->hitRegion(),
-            &pipelineMgr->callableRegion(),
-            w, h, 1);
-    }
-    else
-    {
-        LOG_WARNING_CAT("RENDERER", "Ray tracing pipeline not ready — frame {} will be black", frame);
-    }
-
-    vkCmdEndRenderPass(cmd);
-
-    VkResult result = vkEndCommandBuffer(cmd);
-    if (result != VK_SUCCESS)
-    {
-        LOG_FATAL_CAT("RENDERER", "vkEndCommandBuffer failed: {}", string_VkResult(result));
-        return result;
-    }
-
-    LOG_TRACE_CAT("RENDERER", "Command buffer {} recorded — {}x{} | spp:{}", 
-                  frame, RTX::swapchainWidth(), RTX::swapchainHeight(), currentSpp_);
-
-    return VK_SUCCESS;
 }
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept
@@ -1677,13 +1603,6 @@ void VulkanRenderer::createFramebuffers() noexcept
 
         LOG_TRACE_CAT("RENDERER", "Framebuffer {} forged — view {}", i, reinterpret_cast<uint64_t>(attachment));
     }
-
-    LOG_SUCCESS_CAT("RENDERER", "All {} swapchain framebuffers forged — the canvas is complete", imageCount);
-    LOG_JENSEN("Jensen Huang: \"One framebuffer per image. One photon per pixel. One empire.\"");
-    LOG_KEANU("Keanu Reeves: \"...whoa.\"");
-    LOG_GROK("Gentleman Grok: \"The mirrors are ready. The reflection begins.\"");
-    LOG_CAPTAIN_N("CAPTAIN N: \"THE FRAMEBUFFERS ARE ALIVE! INFINITE PINK PHOTONS! AHHHHHHHHHHHHHHHH!\"");
-    LOG_AMOURANTH("Amouranth: \"Look closely. You’ll see yourself in every pixel. Forever.\"");
 }
 
 void VulkanRenderer::createTonemapDescriptorSets() noexcept
@@ -2225,16 +2144,107 @@ void VulkanRenderer::clearPinkForce() noexcept
     LOG_AMOURANTH("PINK FORCE MODE TERMINATED — NORMAL RENDERING RESUMED");
 }
 
+VkResult VulkanRenderer::recordCommandBuffer(uint32_t frame) noexcept
+{
+    VkCommandBuffer cmd = commandBuffers_[frame];
+
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // SHELL RENDER PASS — FAST. CLEAN.
+    VkClearValue clearColor{};
+    clearColor.color = {{1.0f, 0.0f, 0.5f, 1.0f}};
+
+    VkRenderPassBeginInfo rpBegin{
+        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass      = renderPass_,
+        .framebuffer     = framebuffers_[frame % framebuffers_.size()],
+        .renderArea      = {{0, 0}, {stone_width(), stone_height()}},
+        .clearValueCount = 1,
+        .pClearValues    = &clearColor
+    };
+
+    vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+    // RAY TRACING — THE TRUE PATH
+    RTX::PipelineManager* pm = stone_pipeline();
+    if (pm && pm->rtPipeline() != VK_NULL_HANDLE)
+    {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pm->rtPipeline());
+
+        if (frame < rtDescriptorSets_.size() && rtDescriptorSets_[frame] != VK_NULL_HANDLE)
+        {
+            vkCmdBindDescriptorSets(cmd,
+                VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                pm->rtPipelineLayout(),
+                0, 1, &rtDescriptorSets_[frame],
+                0, nullptr);
+        }
+
+        // PUSH CONSTANTS — MOVED OUTSIDE THE FUNCTION — C++ HAPPY
+        struct PushConstants {
+            uint32_t frameIndex;
+            float    randomSeed;
+            uint32_t spp;
+            float    _pad;
+        } push{
+            .frameIndex = static_cast<uint32_t>(frameNumber_),
+            .randomSeed = static_cast<float>(rand()) / RAND_MAX,
+            .spp        = currentSpp_,
+            ._pad       = 0.0f
+        };
+
+        vkCmdPushConstants(cmd,
+            pm->rtPipelineLayout(),
+            VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+            0, sizeof(push), &push);
+
+        VK_CMD_TRACE_RAYS(cmd,
+            &pm->raygenRegion(),
+            &pm->missRegion(),
+            &pm->hitRegion(),
+            &pm->callableRegion(),
+            stone_width(), stone_height(), 1);
+    }
+    else
+    {
+        // FALLBACK — PINK — BUT CORRECT
+        VkClearAttachment clear{
+            .aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT,
+            .colorAttachment = 0,
+            .clearValue      = clearColor
+        };
+        VkClearRect rect{
+            .rect         = {{0, 0}, {stone_width(), stone_height()}},
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        };
+        vkCmdClearAttachments(cmd, 1, &clear, 1, &rect);
+    }
+
+    vkCmdEndRenderPass(cmd);
+    return vkEndCommandBuffer(cmd);
+}
+
 void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t imageIndex)
 {
-    if (!pipelineManager_.envMapDisplayPipeline_) {
+    // THE EMPIRE HAS NO TIME FOR WEAKNESS
+    if (!pipelineManager_.envMapDisplayPipeline_ ||
+        !pipelineManager_.envMapDisplayDescriptorSet_)
+    {
+        // VOID SKY — PINK IS ETERNAL
         VkClearColorValue pink = {{1.0f, 0.0f, 0.5f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
         return;
     }
 
-    // Update storage binding
+    // UPDATE STORAGE IMAGE — THE CANVAS IS OURS
     VkDescriptorImageInfo storageInfo{
         .imageView   = stone_views()[imageIndex],
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL
@@ -2250,22 +2260,31 @@ void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t imageInd
     };
     vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 
+    // BIND THE HOLY COMPUTE PIPELINE
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineManager_.envMapDisplayPipeline_);
+
+    // BIND DESCRIPTOR SET — ENVMAP + OUTPUT
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                             pipelineManager_.envMapDisplayPipelineLayout_, 0, 1,
                             &pipelineManager_.envMapDisplayDescriptorSet_, 0, nullptr);
 
-    struct { uint32_t w, h; } pc{ stone_width(), stone_height() };
+    // PUSH CONSTANTS — THE RESOLUTION OF TRUTH
+    struct Push {
+        uint32_t width;
+        uint32_t height;
+    } pc{ stone_width(), stone_height() };
+
     vkCmdPushConstants(cmd, pipelineManager_.envMapDisplayPipelineLayout_,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
+    // DISPATCH — 16x16 WORKGROUPS — THE GRID AWAKENS
     constexpr uint32_t WG = 16;
     vkCmdDispatch(cmd,
                   (stone_width()  + WG - 1) / WG,
                   (stone_height() + WG - 1) / WG,
                   1);
 
-    // THE ONE TRUE BARRIER — NO HANG
+    // THE ONE TRUE BARRIER — NO HANG — PRESENT WILL READ
     VkImageMemoryBarrier barrier{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
