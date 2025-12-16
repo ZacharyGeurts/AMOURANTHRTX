@@ -77,27 +77,26 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 
     vkDeviceWaitIdle(stone_device());
 
-    LOG_AMOURANTH("SWAPCHAIN REBORN — {}×{} — STABLE RESIZE PATH", w, h);
+    LOG_AMOURANTH("SWAPCHAIN REBORN — {}×{} — NASTY DRIVER WORKAROUND ENGAGED", w, h);
 
     cleanupImageViews();
 
-    // FULLY STABLE RESIZE:
-    // 1. Always pass current swapchain as old — driver treats as "update"
-    // 2. This bypasses 580.xx Linux recreate crash at high resolution
-    // 3. Old swapchain destroyed only after new one is ready
+    // NASTY BOI DRIVER BYPASS:
+    // Always pass current swapchain as "old" — forces driver to treat it as update instead of destroy+create
+    // This avoids the 580.xx Linux Vulkan recreate crash at high resolution
     VkSwapchainKHR old = swapchain_.get();
-    createSwapchain(stone_window(), w, h, old);
+    createSwapchain(stone_window(), w, h, old);  // Driver thinks it's just updating
 
     createImageViews();
 
-    // Safe destroy of old after new is confirmed
-    if (old && old != swapchain_.get()) {
+    // Destroy old only after new is successfully created — safe and no leak
+    if (old && old != swapchain_.get()) [[likely]] {
         vkDestroySwapchainKHR(stone_device(), old, nullptr);
     }
 
     las().notifyResize();
 
-    LOG_AMOURANTH("SWAPCHAIN REBORN SUCCESSFUL — EMPIRE UNBROKEN");
+    LOG_AMOURANTH("SWAPCHAIN REBORN COMPLETE — EMPIRE UNBROKEN — DRIVER DEFEATED");
 }
 
 void SwapchainManager::cleanup() noexcept

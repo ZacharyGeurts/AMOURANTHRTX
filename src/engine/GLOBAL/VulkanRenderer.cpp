@@ -67,9 +67,6 @@ using StoneKey::stone_physical;
 using StoneKey::stone_pipeline;
 using StoneKey::stone_seal_swapchain;
 
-constexpr VkDeviceSize MB = 1024ULL * 1024ULL;
-constexpr VkDeviceSize MATERIAL_BUFFER_SIZE = 16ULL * MB;
-
 uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 static VkCommandPool g_empireCommandPool = VK_NULL_HANDLE;
 
@@ -230,6 +227,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
+    // === GPU TIMESTAMP START — SAFE AFTER BEGIN ===
+    if (timestampQueryPool_ != VK_NULL_HANDLE) {
+        const uint32_t queryIndex = frameIndex % 2;
+        vkCmdResetQueryPool(cmd, timestampQueryPool_, queryIndex * 2, 2);
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool_, queryIndex * 2);
+    }
+
     VkImage swapImg = stone_images()[imageIndex];
     VkImageView swapView = stone_views()[imageIndex];
 
@@ -316,6 +320,19 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         nexusScoreNeedsInit_ = false;
     }
 
+    // === SWAPCHAIN PRESENT TRANSITION — AFTER RECREATE ===
+    if (swapchainNeedsPresentTransition_) {
+        for (uint32_t i = 0; i < stone_image_count(); ++i) {
+            transitionImage(cmd, stone_images()[i],
+                            VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                            0, 0,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        }
+        swapchainNeedsPresentTransition_ = false;
+    }
+
     // === RENDER MODE DISPATCH — THE EMPIRE IS FLEXIBLE ===
     switch (activeRenderMode_) {
         case 1: {  // Pure Pink Void — sacred fallback
@@ -370,7 +387,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                     RTX::RTDescriptorUpdate desc{};
                     desc.tlas = tlas;
                     desc.ubo = uboInfo->buffer;
-                    desc.uboSize = 368;
+                    desc.uboSize = sizeof(DreamUBO);  // Use actual size from UBO.hpp
                     desc.swapchainImageView = rtOutputViews_[slot].get();
 
                     if (!accumViews_.empty()) {
@@ -386,7 +403,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                         const auto* matBuf = BufferManager::get(matHandle);
                         if (matBuf) {
                             desc.materialsBuffer = matBuf->buffer;
-                            desc.materialsSize = MATERIAL_BUFFER_SIZE;
+                            desc.materialsSize = materialBufferSize();  // Use helper from UBO.hpp
                         }
                     }
 
@@ -471,6 +488,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                         0,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    }
+
+    // === GPU TIMESTAMP END — BEFORE END ===
+    if (timestampQueryPool_ != VK_NULL_HANDLE) {
+        const uint32_t queryIndex = frameIndex % 2;
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, queryIndex * 2 + 1);
     }
 
     VK_CHECK(vkEndCommandBuffer(cmd));
@@ -2518,6 +2541,9 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     depthNeedsTransition_        = true;
     accumulationNeedsTransition_ = true;
     nexusScoreNeedsInit_         = true;
+
+    // NEW: Mark swapchain images for first-frame present transition
+    swapchainNeedsPresentTransition_ = true;
 
     LOG_SUCCESS_CAT("SWAPCHAIN", "Dependent resources reborn — command buffers refreshed — EMPIRE UNBROKEN — PHOTONS ETERNAL");
 }

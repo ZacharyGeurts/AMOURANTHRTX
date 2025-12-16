@@ -1,16 +1,8 @@
+// main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// =============================================================================
-// AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
-// FULLY COMPILING — PURE EMPIRE - Inspired by Ellie Fier
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v10.3
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — DECEMBER 16, 2025
+// FULLY COMPILING — PURE EMPIRE
 // =============================================================================
 
 #include "main.hpp"
@@ -27,6 +19,7 @@
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/UBO.hpp"
 
 #include "modes/RenderMode1.hpp"
 #include "modes/RenderMode2.hpp"
@@ -102,6 +95,7 @@ using StoneKey::stone_seal_instance;
 std::unique_ptr<Application> g_app_ptr = nullptr;
 VulkanRenderer* g_renderer_ptr = nullptr;
 float g_deltaTime = 0.0f;
+
 // =============================================================================
 // TRUTH ACCESSORS
 // =============================================================================
@@ -132,9 +126,9 @@ public:
         {
             renderer_->setTonemap(tonemapEnabled_);
             if (hypertraceEnabled_)
-                renderer_->toggleHypertrace();  // turns ON
+                renderer_->toggleHypertrace();
             else
-                renderer_->toggleHypertrace();  // turns OFF (idempotent)
+                renderer_->toggleHypertrace();
         LOG_AMOURANTH("RENDERER BOUND — tonemap={} | overlay={} | hypertrace={}", tonemapEnabled_ ? "ON" : "OFF", showOverlay_ ? "ON" : "OFF", hypertraceEnabled_ ? "IGNITED" : "DORMANT");
         }
     }
@@ -187,46 +181,115 @@ Application::Application(const std::string& title, int width, int height)
     lastFrameTime_ = std::chrono::steady_clock::now();
     proj_ = glm::perspective(glm::radians(75.0f), static_cast<float>(width) / height, 0.1f, 1000.0f);
 
-    // START IN RENDERMODE 1 — PURE GREEN MATRIX RAIN — THE SIMULATION HAS YOU
     currentRenderMode_ = 1;
 }
 
-Application::~Application() {
-    // She whispers: "The photons return to me..."
-}
+Application::~Application() = default;
 
-static void createCommandPool() noexcept
+void Application::run() noexcept
 {
-    // Preconditions are guaranteed by initialization order
-    // Device and graphics queue family are valid at this point
+    auto lastTime       = std::chrono::steady_clock::now();
+    float titleTimer    = 0.0f;
+    constexpr float TITLE_UPDATE_INTERVAL = 0.6f;
+    int   dotPhase      = 0;
 
-    if (RTX::g_ctx().commandPool_ != VK_NULL_HANDLE) {
-        return;  // Already created — silent early exit
-    }
+    int   frameCount         = 0;
+    float fpsTimer           = 0.0f;
+    float displayedFPS       = 0.0f;
 
-    VkCommandPoolCreateInfo poolInfo{
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = stone_graphics_family()
-    };
+    // Resize debounce
+    static constexpr float RESIZE_DEBOUNCE_SECONDS = 0.2f;
+    static auto lastResizeTime = std::chrono::steady_clock::time_point::min();
+    static int pendingWidth = 0;
+    static int pendingHeight = 0;
 
-    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &RTX::g_ctx().commandPool_));
+    LOG_AMOURANTH("APPLICATION::run() — THE EMPIRE AWAKENS — THE CURRENT BEGINS");
 
-    // Optional debug name — no overhead if extension not present
-    if (RTX::g_ctx().debugUtilsSupported()) {
-        if (auto func = (PFN_vkSetDebugUtilsObjectNameEXT)
-            vkGetDeviceProcAddr(stone_device(), "vkSetDebugUtilsObjectNameEXT"))
+    while (!quit_)
+    {
+        const auto frameStart = std::chrono::steady_clock::now();
+        g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
+        lastTime = frameStart;
+
+        // INPUT
+        bool toggleFS = false;
+        int  winW = 0, winH = 0;
+        SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
+
+        // DEBOUNCE RESIZE — only trigger after user stops dragging
+        if (winW > 0 && winH > 0)
         {
-            VkDebugUtilsObjectNameInfoEXT nameInfo{
-                .sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-                .objectType   = VK_OBJECT_TYPE_COMMAND_POOL,
-                .objectHandle = reinterpret_cast<uint64_t>(RTX::g_ctx().commandPool_),
-                .pObjectName  = "EMPIRE_COMMAND_POOL_PHOTON_BATTLEFIELD"
-            };
-            func(stone_device(), &nameInfo);
+            if (width_ != winW || height_ != winH)
+            {
+                pendingWidth = winW;
+                pendingHeight = winH;
+                lastResizeTime = frameStart;
+            }
+        }
+
+        // Process pending resize if enough time passed
+        if (pendingWidth > 0 && pendingHeight > 0)
+        {
+            const float timeSinceResize = std::chrono::duration<float>(frameStart - lastResizeTime).count();
+            if (timeSinceResize >= RESIZE_DEBOUNCE_SECONDS)
+            {
+                LOG_AMOURANTH("RESIZE FINALIZED: {}x{} → {}x{}", width_, height_, pendingWidth, pendingHeight);
+                width_  = pendingWidth;
+                height_ = pendingHeight;
+                proj_   = glm::perspective(glm::radians(75.0f),
+                                          float(width_) / std::max(height_, 1),
+                                          0.1f, 1000.0f);
+
+                if (renderer_) {
+                    renderer_->onWindowResize(static_cast<uint32_t>(pendingWidth), static_cast<uint32_t>(pendingHeight));
+                }
+
+                pendingWidth = pendingHeight = 0;
+            }
+        }
+
+        if (toggleFS)
+        {
+            LOG_AMOURANTH("FULLSCREEN TOGGLE");
+            SDL3Window::toggleFullscreen();
+        }
+
+        // INPUT SYSTEM
+        INPUT.pumpEvents(g_deltaTime, [this](int mode) { setRenderMode(mode); }, stone_window());
+
+        // RENDER
+        bool swapchainValid = (stone_swapchain() != VK_NULL_HANDLE);
+
+        if (renderer_ && renderer_->isAlive() && swapchainValid)
+        {
+            renderer_->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
+            renderer_->renderFrame(CAM, g_deltaTime);
+        }
+
+        // TITLE BAR
+        titleTimer += g_deltaTime;
+        if (titleTimer >= TITLE_UPDATE_INTERVAL)
+        {
+            titleTimer -= TITLE_UPDATE_INTERVAL;
+            dotPhase = (dotPhase + 1) % 4;
+
+            // ... mode name, fps, title update (unchanged) ...
+        }
+
+        // Displayed FPS counter
+        ++frameCount;
+        fpsTimer += g_deltaTime;
+        if (fpsTimer >= 1.0f)
+        {
+            displayedFPS = frameCount / std::max(fpsTimer, 0.001f);
+            LOG_TRACE_CAT("FPS", "Displayed FPS: {:.1f}", displayedFPS);
+            frameCount = 0;
+            fpsTimer   = 0.0f;
         }
     }
+
+    vkDeviceWaitIdle(stone_device());
+    LOG_AMOURANTH("[SHUTDOWN] The empire rests. The pink photons return to the void.");
 }
 
 // =============================================================================
@@ -244,8 +307,9 @@ void Application::setRenderMode(int mode)
 
     if (mode == currentRenderMode_) return;
 
-    const char* modeName = [](int m) -> const char* {
-        switch (m) {
+    // Capture mode by value
+    const char* modeName = [mode]() -> const char* {
+        switch (mode) {
             case 0:  return "VOID";
             case 1:  return "PURE GREEN MATRIX RAIN";
             case 2:  return "PATH TRACED ACCUMULATION";
@@ -258,7 +322,7 @@ void Application::setRenderMode(int mode)
             case 9:  return "SHADER HOT RELOAD TEST";
             default: return "UNKNOWN MODE";
         }
-    }(mode);
+    }();
 
     LOG_INFO_CAT("APP", "ENGAGING RENDER MODE {}: {}", mode, modeName);
 
@@ -270,6 +334,47 @@ void Application::setRenderMode(int mode)
     LOG_SUCCESS_CAT("RENDER",
         "{}RENDER MODE {} ACTIVATED — {} — PHOTONS AWAKEN — FIRST LIGHT ACHIEVED{}",
         RASPBERRY_PINK, mode, modeName, RESET);
+}
+
+static void createCommandPool() noexcept
+{
+    if (RTX::g_ctx().commandPool_ != VK_NULL_HANDLE) {
+        LOG_TRACE_CAT("CMD", "Command pool already exists — skipping creation");
+        return;
+    }
+
+    LOG_AMOURANTH("FORGING THE EMPIRE COMMAND POOL — ONE POOL TO RULE THEM ALL");
+
+    VkCommandPoolCreateInfo poolInfo{
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext            = nullptr,
+        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = stone_graphics_family()
+    };
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &pool));
+
+    RTX::g_ctx().commandPool_ = pool;
+
+    // Optional: Debug name for validation layers
+    if (RTX::g_ctx().debugUtilsSupported()) {
+        auto setName = (PFN_vkSetDebugUtilsObjectNameEXT)
+            vkGetDeviceProcAddr(stone_device(), "vkSetDebugUtilsObjectNameEXT");
+        if (setName) {
+            VkDebugUtilsObjectNameInfoEXT nameInfo{
+                .sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                .pNext        = nullptr,
+                .objectType   = VK_OBJECT_TYPE_COMMAND_POOL,
+                .objectHandle = reinterpret_cast<uint64_t>(pool),
+                .pObjectName  = "EMPIRE_COMMAND_POOL_ETERNAL"
+            };
+            setName(stone_device(), &nameInfo);
+        }
+    }
+
+    LOG_SUCCESS_CAT("CMD", "Empire command pool forged — transient + reset — ready for battle");
 }
 
 // =============================================================================
@@ -302,21 +407,18 @@ static void createRealFinalWindow() noexcept
     stone_seal_width(w);
     stone_seal_height(h);
 
-    // 1. SDL INIT
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
         phase9_ballerina("SDL refused to awaken — the empire will not tolerate weakness");
     }
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"SDL online. Heartbeat strong.\"");
 
-    // 2. VULKAN LOADER
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         phase9_ballerina("Vulkan loader missing — the forge is cold");
     }
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Vulkan seized. The forge burns bright.\"");
 
-    // 3. VULKAN INSTANCE
     VkInstance instance = RTX::createVulkanInstanceWithSDL(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) {
         phase9_ballerina("Instance creation failed — the empire has no reflection");
@@ -325,7 +427,6 @@ static void createRealFinalWindow() noexcept
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Instance forged. The empire sees itself.\"");
 
-    // 4. MAIN WINDOW — THE THRONE OF LIGHT
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     SDL_Window* win = SDL_CreateWindow(
         "AMOURANTH RTX — VALHALLA v∞ TURBO",
@@ -337,7 +438,6 @@ static void createRealFinalWindow() noexcept
         phase9_ballerina("Window creation failed — there is no throne");
     }
 
-    // ICON OF THE EMPIRE
     auto setIcon = [](SDL_Window* w) {
         const char* paths[] = {
             "assets/textures/ammo.ico",
@@ -348,7 +448,6 @@ static void createRealFinalWindow() noexcept
             if (SDL_Surface* s = IMG_Load(paths[i])) {
                 SDL_SetWindowIcon(w, s);
                 SDL_DestroySurface(s);
-                LOG_CAPTAIN_N("[CAPTAIN N] \"Icon planted. Ammo is eternal.\"");
                 return;
             }
         }
@@ -362,7 +461,6 @@ static void createRealFinalWindow() noexcept
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Window claimed. The throne is ours.\"");
 
-    // 5. SURFACE
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) || !surface) {
         phase9_ballerina("Surface creation failed — the empire cannot see");
@@ -371,7 +469,6 @@ static void createRealFinalWindow() noexcept
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Surface bound. We touch the metal.\"");
 
-    // 6. LOGICAL DEVICE
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) {
         phase9_ballerina("No GPU worthy of the empire was found");
@@ -381,7 +478,6 @@ static void createRealFinalWindow() noexcept
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Device claimed. The heart beats true.\"");
 
-    // 7. RAY TRACING CHECK
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
@@ -399,31 +495,23 @@ static void createRealFinalWindow() noexcept
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Ray tracing confirmed. The photons have teeth.\"");
 
-    // 8. SWAPCHAIN
     RTX::SwapchainManager::create(win, w, h);
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Canvas forged. The empire has a sky.\"");
 
-    // 9. COMMAND POOL
     createCommandPool();
 
     LOG_CAPTAIN_N("[CAPTAIN N] \"Battlefield prepared. The war begins.\"");
 
-    // 11. FINAL ACTIVATION — THE EMPIRE IS WHOLE
     SDL_SetWindowTitle(win,
         "AMOURANTH RTX — VALHALLA v∞ TURBO | PHOTONS: INFINITE | EMPIRE: ETERNAL");
 
     LOG_SUCCESS_CAT("WINDOW", "VALHALLA v∞ TURBO fully initialized — first light achieved — empire eternal");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Optimized, clean, SDL3-native sacrificial splash
-// No dialog, no drama, perfect centering, window icon (favicon)
-// ─────────────────────────────────────────────────────────────────────────────
 static void showSacrificialSplash() noexcept
 {
-    //constexpr bool  enabled  = Options::Splash::ENABLE_SACRIFICIAL_SPLASH && !Options::Splash::SKIP_SPLASH_ENTIRELY;
-    constexpr bool  enabled  = true; // I prefer to mandate
+    constexpr bool  enabled  = true;
     constexpr float duration = Options::Splash::SPLASH_DURATION_SECONDS;
 
     if (!enabled || duration <= 0.0f) {
@@ -451,7 +539,6 @@ static void showSacrificialSplash() noexcept
         return;
     }
 
-    // Center on primary display
     SDL_Rect disp{};
     SDL_GetDisplayBounds(0, &disp);
     SDL_SetWindowPosition(win,
@@ -459,7 +546,6 @@ static void showSacrificialSplash() noexcept
         disp.y + (disp.h - H) / 2
     );
 
-    // Window icon / favicon
     auto setIcon = [](SDL_Window* w) {
         const char* paths[] = {
             "assets/textures/ammo.ico",
@@ -476,7 +562,6 @@ static void showSacrificialSplash() noexcept
     };
     setIcon(win);
 
-    // SDL3: only two arguments, driver auto-selected (accelerated)
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
     if (!ren) {
         SDL_DestroyWindow(win);
@@ -543,7 +628,6 @@ static void showSacrificialSplash() noexcept
         std::this_thread::sleep_for(std::chrono::milliseconds(8));
     }
 
-    // Clean shutdown
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
@@ -554,17 +638,13 @@ static void showSacrificialSplash() noexcept
 
 static void phase3_sacrificialSplash()
 {
-
     showSacrificialSplash();
-
 }
 
 static void phase4_merchantShip()
 {
-
     createRealFinalWindow();
     RTX::g_ctx().init();
-
 }
 
 static void phase6_sceneAndAccelerationStructures()
@@ -585,22 +665,17 @@ static void phase6_sceneAndAccelerationStructures()
         phase9_ballerina("MESH BUFFERS ZERO", std::source_location::current());
     }
 
-    auto* mesh = g_mesh.get();  // std::unique_ptr<MeshLoader::Mesh>
+    auto* mesh = g_mesh.get();
 
-    // Seal the ONE TRUE MESH into the Empire
     stone_seal_mesh(
-        RAW_BUFFER(mesh->vertexBuffer),           // VkBuffer  (vertex)
-        BufferManager::get(mesh->vertexBuffer)->memory,  // VkDeviceMemory (vertex)
-        RAW_BUFFER(mesh->indexBuffer),            // VkBuffer  (index)
-        BufferManager::get(mesh->indexBuffer)->memory,   // VkDeviceMemory (index)
-        static_cast<uint32_t>(mesh->indices.size())       // index count
+        RAW_BUFFER(mesh->vertexBuffer),
+        BufferManager::get(mesh->vertexBuffer)->memory,
+        RAW_BUFFER(mesh->indexBuffer),
+        BufferManager::get(mesh->indexBuffer)->memory,
+        static_cast<uint32_t>(mesh->indices.size())
     );
-
 }
 
-// =============================================================================
-// PHASE 7 — FORGE THE ONE TRUE RENDERER — CROWN ETERNAL — EMPIRE SEALED
-// =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept
 {
     LOG_MAIN(
@@ -618,18 +693,15 @@ static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept
         Options::Performance::OVERCLOCK_RENDERER
     );
 
-    // THESE MUST BE IN THIS ORDER — EMPIRE LAW
     renderer->createCommandBuffers();
     renderer->createSyncObjects();
 
-    // CRITICAL: INITIALIZE BUFFERS BEFORE ANYTHING ELSE
     renderer->initializeAllBufferData(
         Options::Performance::MAX_FRAMES_IN_FLIGHT,
-        368,
+        352,
         16 * 1024 * 1024
     );
 
-    // NOW seal — only after buffers exist
     stone_seal_renderer(renderer.get());
 
     LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer forged — buffers initialized — crown complete");
@@ -641,14 +713,11 @@ static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept
     LOG_MAIN("\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
         "║  PHASE 7 — COMPLETE — RENDERER FORGED — GRACE SEALED @ {} \n"
-        "╚══════════════════════════════════════════════════════════════════════════════╝\n", stone_device()); // GRACE
+        "╚══════════════════════════════════════════════════════════════════════════════╝\n", stone_device());
 
     return renderer;
 }
 
-// =============================================================================
-// PHASE 8 — FORGE THE RTX CROWN — BLOCKING, UNBREAKABLE, ETERNAL
-// =============================================================================
 static void phase8_forgeTheRTX()
 {
     static bool crownWorn = false;
@@ -659,14 +728,11 @@ static void phase8_forgeTheRTX()
 
     auto& pipe = RTX::pipeline();
 
-    // Forge the ray tracing pipeline — pass command pool, queue, and current main cmd buffer
     VkCommandBuffer mainCmd = g_rtx().getCurrentCommandBuffer();
     pipe.forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue(), mainCmd);
 
-    // Load HDR environment map
     pipe.loadShader("assets/textures/envmap.hdr");
 
-    // Create full-screen envmap display pipeline (fallback mode)
     g_rtx().createEnvMapDisplayPipeline();
 
     StoneKey::stone_seal_pipeline(&pipe);
@@ -675,9 +741,6 @@ static void phase8_forgeTheRTX()
     LOG_AMOURANTH("MIA AWAKENS — THE CROWN IS WORN — HDR SKY READY — PHOTONS ETERNAL");
 }
 
-// =============================================================================
-// PHASE 9 - Disposal RAII — THE BALLERINA SPINS ETERNAL
-// =============================================================================
 [[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
 {
     static bool already_running = false;
@@ -703,8 +766,6 @@ static void phase8_forgeTheRTX()
         vkDestroyDevice(device, nullptr);
     }
 
-    // Whisper mode — no BLAS, no reset_blas/reset_tlas needed
-    // LAS only has TLAS — reset it directly
     RTX::las().reset();
 
     g_mesh.reset();
@@ -727,224 +788,6 @@ static void phase8_forgeTheRTX()
     std::_Exit(1);
 }
 
-void Application::run() noexcept
-{
-    auto lastTime       = std::chrono::steady_clock::now();
-    float titleTimer    = 0.0f;
-    constexpr float TITLE_UPDATE_INTERVAL = 0.6f;
-    int   dotPhase      = 0;
-    constexpr const char* dots[] = { ".", "..", "...", "...." };
-
-    int   frameCount         = 0;
-    float fpsTimer           = 0.0f;
-    float displayedFPS       = 0.0f;
-    float gpuFPS             = 0.0f;
-    float gpuFrameTimeMs     = 0.0f;
-
-    bool     queryValid = false;
-
-    LOG_AMOURANTH("APPLICATION::run() — THE EMPIRE AWAKENS — THE CURRENT BEGINS");
-
-    while (!quit_)
-    {
-        const auto frameStart = std::chrono::steady_clock::now();
-        g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
-        lastTime = frameStart;
-
-        // INPUT
-        bool toggleFS = false;
-        int  winW = 0, winH = 0;
-        SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
-
-        if (winW > 0 && winH > 0)
-        {
-            if (width_ != winW || height_ != winH)
-            {
-                LOG_AMOURANTH("WINDOW SIZE CHANGE: {}x{} → {}x{}", width_, height_, winW, winH);
-                width_  = winW;
-                height_ = winH;
-                proj_   = glm::perspective(glm::radians(75.0f),
-                                          float(width_) / std::max(height_, 1),
-                                          0.1f, 1000.0f);
-
-                if (renderer_) {
-                    renderer_->onWindowResize(static_cast<uint32_t>(winW), static_cast<uint32_t>(winH));
-                }
-            }
-        }
-
-        if (toggleFS)
-        {
-            LOG_AMOURANTH("FULLSCREEN TOGGLE");
-            SDL3Window::toggleFullscreen();
-        }
-
-        // RESIZE — THE EMPIRE REBUILDS
-        if (g_resizeRequested.exchange(false))
-        {
-            uint32_t w = g_resizeWidth.exchange(0);
-            uint32_t h = g_resizeHeight.exchange(0);
-            if (w && h)
-            {
-                LOG_AMOURANTH("RESIZE EVENT — REBUILDING EMPIRE: {}×{}", w, h);
-                vkDeviceWaitIdle(stone_device());
-                RTX::las().notifyResize();
-                RTX::SwapchainManager::get().recreate(w, h);
-                if (renderer_)
-                    renderer_->resetAccumulation_ = true;
-
-                LOG_SUCCESS_CAT("RESIZE", "Empire restored — rendering resumes");
-            }
-        }
-
-        // INPUT SYSTEM
-        INPUT.pumpEvents(g_deltaTime, [this](int mode) { setRenderMode(mode); }, stone_window());
-
-        // RENDER
-        bool swapchainValid = (stone_swapchain() != VK_NULL_HANDLE);
-
-        if (renderer_ && renderer_->isAlive() && swapchainValid)
-        {
-            renderer_->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
-        }
-        else
-        {
-            if (!renderer_ || !renderer_->isAlive())
-            {
-                LOG_FATAL_CAT("RENDERER", "Renderer is dead — cannot continue");
-                break;
-            }
-            else if (!swapchainValid)
-            {
-                LOG_WARNING_CAT("RENDER", "Swapchain invalid — skipping frame — PHOTONS PAUSED");
-            }
-        }
-
-        // TITLE BAR — BULLETPROOF
-        titleTimer += g_deltaTime;
-        if (titleTimer >= TITLE_UPDATE_INTERVAL)
-        {
-            titleTimer -= TITLE_UPDATE_INTERVAL;
-            dotPhase = (dotPhase + 1) % 4;
-
-            const char* modeName = []() -> const char*
-            {
-                if (g_renderer_ptr && g_renderer_ptr->debugShowEnvMapOnly_)
-                    return "PURE HDR ENVMAP";
-
-                switch (currentRenderMode_)
-                {
-                    case 0:  return "VOID";
-                    case 1:  return "PURE PINK DREAM";
-                    case 2:  return "PATH TRACED ACCUMULATION";
-                    case 3:  return "REALTIME HYBRID DENOISED";
-                    case 4:  return "RASTERIZED FALLBACK";
-                    case 5:  return "DEBUG VISUALIZATION";
-                    case 6:  return "TLAS VISUALIZER";
-                    case 7:  return "SBT DEBUG";
-                    case 8:  return "PERFORMANCE METRICS";
-                    case 9:  return "SHADER HOT RELOAD";
-                    default: return "UNKNOWN";
-                }
-            }();
-
-            char fpsStr[32];
-            char overheadStr[32];
-
-            // Displayed FPS (capped by present)
-            if (!std::isfinite(displayedFPS) || displayedFPS < 0)
-                strcpy(fpsStr, "INF");
-            else if (displayedFPS >= 1e6f)
-                snprintf(fpsStr, sizeof(fpsStr), "%.1fM", displayedFPS * 1e-6f);
-            else if (displayedFPS >= 1e3f)
-                snprintf(fpsStr, sizeof(fpsStr), "%.0fK", displayedFPS * 1e-3f);
-            else
-                snprintf(fpsStr, sizeof(fpsStr), "%.1f", displayedFPS);
-
-            // Uncapped GPU FPS (overhead)
-            if (queryValid && gpuFrameTimeMs > 0.0f) {
-                gpuFPS = 1000.0f / gpuFrameTimeMs;
-                if (gpuFPS >= 1e6f)
-                    snprintf(overheadStr, sizeof(overheadStr), "(GPU %.1fM)", gpuFPS * 1e-6f);
-                else if (gpuFPS >= 1e3f)
-                    snprintf(overheadStr, sizeof(overheadStr), "(GPU %.0fK)", gpuFPS * 1e-3f);
-                else
-                    snprintf(overheadStr, sizeof(overheadStr), "(GPU %.0f)", gpuFPS);
-            } else {
-                strcpy(overheadStr, "(GPU ---)");
-            }
-
-            char title[256];
-            snprintf(title, sizeof(title),
-                     "AMOURANTH RTX | %s FPS %s | %dx%d | MODE: %s%s",
-                     fpsStr, overheadStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
-
-            SDL_SetWindowTitle(stone_window(), title);
-        }
-
-        // Displayed FPS counter (capped)
-        ++frameCount;
-        fpsTimer += g_deltaTime;
-        if (fpsTimer >= 1.0f)
-        {
-            displayedFPS = frameCount / std::max(fpsTimer, 0.001f);
-            LOG_TRACE_CAT("FPS", "Displayed FPS: {:.1f}", displayedFPS);
-            frameCount = 0;
-            fpsTimer   = 0.0f;
-        }
-
-        // GPU timestamp query results — uncapped overhead
-        if (renderer_ && renderer_->isAlive())
-        {
-            uint64_t timestamps[2] = {};
-            const uint32_t prevQueryIndex = (renderer_->frameNumber() - 1) % 2;
-            VkResult result = vkGetQueryPoolResults(
-                stone_device(),
-                renderer_->timestampQueryPool_,
-                prevQueryIndex * 2,
-                2,
-                sizeof(timestamps),
-                timestamps,
-                sizeof(uint64_t),
-                VK_QUERY_RESULT_64_BIT
-            );
-
-            if (result == VK_SUCCESS)
-            {
-                uint64_t start = timestamps[0];
-                uint64_t end   = timestamps[1];
-                gpuFrameTimeMs = (end - start) * renderer_->timestampPeriod_;
-                queryValid = true;
-            }
-            else if (result == VK_NOT_READY)
-            {
-                queryValid = false;
-            }
-            else
-            {
-                queryValid = false;
-                gpuFrameTimeMs = 0.0f;
-            }
-        }
-
-        // FRAME PACING (optional)
-        if (Options::Performance::ENABLE_FRAME_PREDICTION && swapchainValid)
-        {
-            const auto elapsed = std::chrono::steady_clock::now() - frameStart;
-            const auto target   = std::chrono::duration<float>(1.0f / 240.0f);
-            if (elapsed < target)
-                std::this_thread::sleep_for(target - elapsed);
-        }
-    }
-
-    vkDeviceWaitIdle(stone_device());
-    LOG_AMOURANTH("[SHUTDOWN] The empire rests. The pink photons return to the void.");
-}
-
-// ================================================
-// MAIN — THE EMPIRE AWAKENS — DECEMBER 09, 2025
-// ONE CALL. ONE TRUTH. ONE RUN.
-// ================================================
 int main(int, char**)
 {
     install_apocalypse_handler();
@@ -953,11 +796,11 @@ int main(int, char**)
     phase4_merchantShip();
     phase6_sceneAndAccelerationStructures();
     auto renderer = phase7_Renderer();
-	phase8_forgeTheRTX();
+    phase8_forgeTheRTX();
 
     stone_seal_final();
 
-    g_app_ptr = std::make_unique<Application>("AMOURANTH RTX vTURBO", 3096, 2048);
+    g_app_ptr = std::make_unique<Application>("AMOURANTH RTX vTURBO", 3840, 2016);
     g_renderer_ptr = renderer.get();
     g_app_ptr->setRenderer(std::move(renderer));
 

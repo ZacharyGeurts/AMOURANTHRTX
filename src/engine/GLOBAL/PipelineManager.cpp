@@ -144,16 +144,23 @@ PipelineManager::~PipelineManager() = default;
 // ──────────────────────────────────────────────────────────────────────────────
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    cacheDeviceProperties();
-    // Add dummy TLAS creation if needed
-    // For example:
-    // dummyTlas = createDummyTLAS();
-}
+    LOG_AMOURANTH("PIPELINE MANAGER CONSTRUCTION — THE CROWN BEGINS TO FORM");
 
-// Example dummy TLAS (stub, implement as needed)
-VkAccelerationStructureKHR PipelineManager::createDummyTLAS() {
-    // Implement dummy top-level acceleration structure
-    return VK_NULL_HANDLE; // Placeholder
+    // Cache device properties — critical for RT and SBT
+    cacheDeviceProperties();
+
+    // Load ray tracing extension function pointers
+    loadRayTracingExtensions();
+
+    // Create dummy TLAS (fallback when scene empty)
+    dummyTLAS_ = Handle<VkAccelerationStructureKHR>(
+        createDummyTLAS(), stone_device(), vkDestroyAccelerationStructureKHR);
+
+    if (dummyTLAS_.get() == VK_NULL_HANDLE) {
+        LOG_WARNING_CAT("PIPELINE", "Dummy TLAS creation failed — using null fallback");
+    }
+
+    LOG_SUCCESS_CAT("PIPELINE", "PipelineManager constructed — device properties cached — extensions loaded — dummy TLAS ready");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -499,6 +506,70 @@ void PipelineManager::createPipelineLayout()
     );
 
     LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created — 4 descriptor sets (0: RTX, 3: AnyHit Textures)");
+}
+
+VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
+{
+    // Minimal dummy TLAS — single empty instance
+    VkAccelerationStructureGeometryKHR geometry{
+        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry     = { .instances = {
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+            .data  = { .deviceAddress = 0 }
+        }}
+    };
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+        .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+        .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .mode          = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .geometryCount = 1,
+        .pGeometries   = &geometry
+    };
+
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+    };
+
+    const uint32_t primitiveCount = 1;
+    vkGetAccelerationStructureBuildSizesKHR(
+        stone_device(),
+        VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+        &buildInfo,
+        &primitiveCount,
+        &sizeInfo);
+
+    // Create buffer for AS
+    uint64_t bufferHandle = BufferManager::create(
+        sizeInfo.accelerationStructureSize,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        "DummyTLAS_Buffer");
+
+    if (bufferHandle == 0) {
+        LOG_ERROR_CAT("PIPELINE", "Failed to create buffer for dummy TLAS");
+        return VK_NULL_HANDLE;
+    }
+
+    const auto* bufInfo = BufferManager::get(bufferHandle);
+
+    VkAccelerationStructureCreateInfoKHR createInfo{
+        .sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = bufInfo->buffer,
+        .size   = sizeInfo.accelerationStructureSize,
+        .type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
+    };
+
+    VkAccelerationStructureKHR as = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateAccelerationStructureKHR(stone_device(), &createInfo, nullptr, &as));
+
+    // Store buffer handle for cleanup
+    dummyAccelBuffer_ = Handle<VkBuffer>(bufInfo->buffer, stone_device(), [](auto...) {});
+    dummyAccelMemory_ = Handle<VkDeviceMemory>(bufInfo->memory, stone_device(), [](auto...) {});
+
+    return as;
 }
 
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)

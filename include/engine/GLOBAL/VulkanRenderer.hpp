@@ -74,6 +74,7 @@ public:
     void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept;
 
     bool isAlive() const noexcept;
+	bool swapchainNeedsPresentTransition_ = false;
 
     static void forgeEternalCommandRing();
 
