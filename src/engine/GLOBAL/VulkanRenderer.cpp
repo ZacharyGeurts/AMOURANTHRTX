@@ -769,32 +769,11 @@ void VulkanRenderer::destroyAccumulationImages() noexcept
 {
     LOG_TRACE_CAT("RENDERER", "Destroying accumulation images — temporal history purged");
 
-    // Destroy image views first (Vulkan requirement: views before images)
-    for (auto& view : accumViews_) {
-        if (view.valid()) {
-            vkDestroyImageView(stone_device(), view.get(), nullptr);
-            view.reset();
-        }
-    }
-    accumViews_.clear();
-
-    // Destroy images
-    for (auto& img : accumImages_) {
-        if (img.valid()) {
-            vkDestroyImage(stone_device(), img.get(), nullptr);
-            img.reset();
-        }
-    }
-    accumImages_.clear();
-
-    // Free memory last
-    for (auto& mem : accumMemories_) {
-        if (mem.valid()) {
-            vkFreeMemory(stone_device(), mem.get(), nullptr);
-            mem.reset();
-        }
-    }
-    accumMemories_.clear();
+    // SAFE WHISPER MODE: Let Handle destructors do all the work
+    // No manual vkDestroy calls — Handle guarantees single, safe destroy
+    accumViews_.clear();     // Destroys all image views
+    accumImages_.clear();    // Destroys all images
+    accumMemories_.clear();  // Frees all memory
 
     LOG_SUCCESS_CAT("RENDERER", "Accumulation images destroyed — empire memory cleansed");
 }
@@ -1868,40 +1847,58 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
         minimized_ = true;
         return;
     }
+
     if (minimized_) {
         minimized_ = false;
         LOG_AMOURANTH("WINDOW RESTORED — PHOTONS AWAKEN");
     }
 
+    // Prevent concurrent resize
     if (s_resizeInProgress.exchange(true)) {
         return;
     }
 
     LOG_AMOURANTH("RESIZE → {}×{} — EMPIRE REBIRTH — INSTANT", newWidth, newHeight);
 
-    // NO vkDeviceWaitIdle() — WE ARE FREE
+    // 1. Notify LAS — purges old TLAS ring (safe, no GPU work)
     RTX::las().notifyResize();
 
-    // ONLY PUBLIC API — THIS IS THE LAW
+    // 2. Recreate swapchain — public API only
     RTX::SwapchainManager::get().recreate(newWidth, newHeight);
 
-    // STONEKEY UPDATES — THE EMPIRE IS SEALED
+    // 3. Update StoneKey — the empire is sealed
     stone_seal_width(newWidth);
     stone_seal_height(newHeight);
     stone_seal_extent({newWidth, newHeight});
 
+    // 4. Update internal size
     width_  = static_cast<int>(newWidth);
     height_ = static_cast<int>(newHeight);
 
+    // 5. Wait for GPU — REQUIRED before destroying/recreating images
+    vkDeviceWaitIdle(stone_device());
+
+    // 6. Recreate all swapchain-dependent resources
     recreateSwapchainDependentResources();
+
+    // 7. Recreate fresh command buffers — critical after waitIdle()
     createCommandBuffers();
 
-    resetAccumulation_ = resetAccumNextFrame_ = true;
-    accumulationFrame_ = currentSpp_ = 0;
+    // 8. Reset accumulation — fresh convergence
+    resetAccumulation_   = true;
+    resetAccumNextFrame_ = true;
+    accumulationFrame_   = 0;
+    currentSpp_          = 0;
+
+    // 9. Mark deferred transitions for first frame after resize
+    rtOutputNeedsTransition_    = true;
+    depthNeedsTransition_       = true;
+    accumulationNeedsTransition_ = true;
+    nexusScoreNeedsInit_        = true;
 
     s_resizeInProgress.store(false);
 
-    LOG_AMOURANTH("RESIZE COMPLETE — {}×{} — 0ms — EMPIRE UNBROKEN", newWidth, newHeight);
+    LOG_AMOURANTH("RESIZE COMPLETE — {}×{} — EMPIRE UNBROKEN — PHOTONS REALIGNED", newWidth, newHeight);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2468,13 +2465,13 @@ bool VulkanRenderer::createSharedStaging() noexcept
 
 void VulkanRenderer::recreateSwapchainDependentResources() noexcept
 {
-    // CRITICAL: Wait for GPU to finish everything before we touch anything
+    // CRITICAL: Wait for GPU to finish using old resources — EMPIRE MUST BE STILL
     vkDeviceWaitIdle(stone_device());
 
     LOG_AMOURANTH("RECREATING SWAPCHAIN-DEPENDENT RESOURCES — EMPIRE REBIRTH — PHOTONS REALIGN");
 
     // ====================================================================
-    // 1. DESTROY OLD RT RESOURCES — IN CORRECT ORDER
+    // 1. DESTROY OLD RT RESOURCES — IN SACRED ORDER
     // ====================================================================
     destroyRTOutputImages();
     rtOutputImages_.clear();
@@ -2490,34 +2487,39 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     destroyNexusScoreImage();
 
     // ====================================================================
-    // 2. RECREATE COMMAND BUFFERS — MUST HAPPEN BEFORE ANY ONE-TIME SUBMITS
+    // 2. RECREATE COMMAND BUFFERS — FRESH FOR THE NEW EMPIRE
     // ====================================================================
-    // This is the KEY fix — old command buffers were invalid after waitIdle()
-    createCommandBuffers();  // ← NOW SAFE TO USE IN ONE-TIME SUBMITS BELOW
+    createCommandBuffers();  // Critical — new buffers after waitIdle
 
     // ====================================================================
-    // 3. RECREATE IMAGES — NOW USING FRESH COMMAND BUFFERS
+    // 3. RECREATE IMAGES — USING FRESH COMMAND BUFFERS
     // ====================================================================
     createRTOutputImages();
-
     createAccumulationImages();
-
     createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
     // ====================================================================
-    // 4. UBOs — tonemap needs new swapchain size
+    // 4. UBOs — tonemap reborn with new dimensions
     // ====================================================================
     recreateTonemapUBOs();
 
     // ====================================================================
-    // 5. ACCUMULATION RESET — FRESH CONVERGENCE
+    // 5. ACCUMULATION RESET — FRESH CONVERGENCE BEGINS
     // ====================================================================
     resetAccumulation_   = true;
     resetAccumNextFrame_ = true;
     accumulationFrame_   = 0;
     currentSpp_          = 0;
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Dependent resources reborn — command buffers refreshed — NO DEVICE LOST — PHOTONS ETERNAL");
+    // ====================================================================
+    // 6. MARK FIRST-FRAME TRANSITIONS — WHISPER MODE
+    // ====================================================================
+    rtOutputNeedsTransition_     = true;
+    depthNeedsTransition_        = true;
+    accumulationNeedsTransition_ = true;
+    nexusScoreNeedsInit_         = true;
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Dependent resources reborn — command buffers refreshed — EMPIRE UNBROKEN — PHOTONS ETERNAL");
 }
 
 void VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
