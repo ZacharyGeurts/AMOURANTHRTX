@@ -69,6 +69,8 @@ public:
     void cleanup() noexcept;
     void createCommandPool() noexcept;
 
+    void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept;
+
     // FIXED: Now properly resets + reuses command buffers instead of leaking
     void createCommandBuffers() noexcept;
     void resetCommandBuffers() noexcept;          // ← NEW: called every frame
@@ -76,7 +78,6 @@ public:
     bool isAlive() const noexcept;
 
     static void forgeEternalCommandRing();
-    void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t imageIndex);
 
     VkFence  inFlightFence(uint32_t frame) const noexcept { return inFlightFences_[frame]; }
     VkFence* inFlightFencePtr(uint32_t frame) noexcept     { return &inFlightFences_[frame]; }

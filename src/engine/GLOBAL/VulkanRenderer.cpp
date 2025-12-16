@@ -90,13 +90,13 @@ void VulkanRenderer::ensureCommandPool() noexcept
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FIXED: Now creates 2D equirect (cube proj via shader if needed) — no leak on return
+// FIXED: Full cubemap conversion with proper descriptor types + cleanup
 // ──────────────────────────────────────────────────────────────────────────────
 EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 {
     EnvironmentMap envmap{};
 
-    LOG_AMOURANTH("FIRST LIGHT — FORGING TRUE HDR EQUIRECT — THE VOID WILL BE ILLUMINATED");
+    LOG_AMOURANTH("FIRST LIGHT — FORGING TRUE HDR CUBEMAP — THE VOID WILL BE ILLUMINATED");
 
     int w = 0, h = 0, n = 0;
     float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &n, 4);
@@ -106,9 +106,10 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
         return envmap;
     }
 
-    const uint32_t texWidth  = static_cast<uint32_t>(w);
-    const uint32_t texHeight = static_cast<uint32_t>(h);
-    const VkDeviceSize imageSize = static_cast<VkDeviceSize>(texWidth) * texHeight * 4 * sizeof(float);
+    const uint32_t equiWidth  = static_cast<uint32_t>(w);
+    const uint32_t equiHeight = static_cast<uint32_t>(h);
+    const uint32_t cubeSize   = equiHeight; // Standard 2:1 equirect → cube face = height
+    const VkDeviceSize imageSize = static_cast<VkDeviceSize>(equiWidth) * equiHeight * 4 * sizeof(float);
 
     uint64_t staging = 0;
     BUFFER_CREATE(staging, imageSize,
@@ -121,23 +122,27 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     BufferManager::unmap(staging);
     stbi_image_free(data);
 
-    VkImageCreateInfo texInfo{
+    // === EQUIRECT IMAGE ===
+    VkImage equirectImage = VK_NULL_HANDLE;
+    VkDeviceMemory equirectMemory = VK_NULL_HANDLE;
+
+    VkImageCreateInfo equiInfo{
         .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType     = VK_IMAGE_TYPE_2D,
         .format        = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .extent        = { texWidth, texHeight, 1 },
+        .extent        = { equiWidth, equiHeight, 1 },
         .mipLevels     = 1,
         .arrayLayers   = 1,
         .samples       = VK_SAMPLE_COUNT_1_BIT,
         .tiling        = VK_IMAGE_TILING_OPTIMAL,
-        .usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+        .usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
 
-    vkCreateImage(stone_device(), &texInfo, nullptr, &envmap.image);
+    VK_CHECK(vkCreateImage(stone_device(), &equiInfo, nullptr, &equirectImage));
 
     VkMemoryRequirements memReqs{};
-    vkGetImageMemoryRequirements(stone_device(), envmap.image, &memReqs);
+    vkGetImageMemoryRequirements(stone_device(), equirectImage, &memReqs);
 
     VkMemoryAllocateInfo allocInfo{
         .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -145,70 +150,477 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
         .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
     };
 
-    vkAllocateMemory(stone_device(), &allocInfo, nullptr, &envmap.memory);
-    vkBindImageMemory(stone_device(), envmap.image, envmap.memory, 0);
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &equirectMemory));
+    VK_CHECK(vkBindImageMemory(stone_device(), equirectImage, equirectMemory, 0));
 
+    // === CUBE IMAGE ===
+    VkImage cubeImage = VK_NULL_HANDLE;
+    VkDeviceMemory cubeMemory = VK_NULL_HANDLE;
+
+    VkImageCreateInfo cubeInfo{
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .flags         = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+        .imageType     = VK_IMAGE_TYPE_2D,
+        .format        = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .extent        = { cubeSize, cubeSize, 1 },
+        .mipLevels     = 1,
+        .arrayLayers   = 6,
+        .samples       = VK_SAMPLE_COUNT_1_BIT,
+        .tiling        = VK_IMAGE_TILING_OPTIMAL,
+        .usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+
+    VK_CHECK(vkCreateImage(stone_device(), &cubeInfo, nullptr, &cubeImage));
+    vkGetImageMemoryRequirements(stone_device(), cubeImage, &memReqs);
+    allocInfo.allocationSize = memReqs.size;
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &cubeMemory));
+    VK_CHECK(vkBindImageMemory(stone_device(), cubeImage, cubeMemory, 0));
+
+    // === VIEWS ===
+    VkImageView equirectView = VK_NULL_HANDLE;
+    VkImageViewCreateInfo viewCreate{
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image            = equirectImage,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+        .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    VK_CHECK(vkCreateImageView(stone_device(), &viewCreate, nullptr, &equirectView));
+
+    VkImageView cubeArrayView = VK_NULL_HANDLE;
+    viewCreate.image = cubeImage;
+    viewCreate.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    viewCreate.subresourceRange.layerCount = 6;
+    VK_CHECK(vkCreateImageView(stone_device(), &viewCreate, nullptr, &cubeArrayView));
+
+    VkImageView cubeView = VK_NULL_HANDLE;
+    viewCreate.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    VK_CHECK(vkCreateImageView(stone_device(), &viewCreate, nullptr, &cubeView));
+
+    // === SAMPLERS ===
+    VkSampler equirectSampler = VK_NULL_HANDLE;
+    VkSamplerCreateInfo samplerCreate{
+        .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter               = VK_FILTER_LINEAR,
+        .minFilter               = VK_FILTER_LINEAR,
+        .addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW            = VK_SAMPLER_ADDRESS_MODE_REPEAT
+    };
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerCreate, nullptr, &equirectSampler));
+
+    VkSampler cubeSampler = VK_NULL_HANDLE;
+    samplerCreate.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCreate.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCreate.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerCreate, nullptr, &cubeSampler));
+
+    // === TRANSFER EQUIRECT ===
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(RTX::g_ctx().commandPool_);
 
-    // Transfer dst
     VkImageMemoryBarrier barrier{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = 0,
         .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
         .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
         .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = envmap.image,
+        .image               = equirectImage,
         .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkBufferImageCopy region{
+    VkBufferImageCopy copyRegion{
         .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .imageExtent      = { texWidth, texHeight, 1 }
+        .imageExtent      = { equiWidth, equiHeight, 1 }
     };
-    vkCmdCopyBufferToImage(cmd, RAW_BUFFER(staging), envmap.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    vkCmdCopyBufferToImage(cmd, RAW_BUFFER(staging), equirectImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
-    // Shader read
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Transition cube to GENERAL
+    barrier = {};
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask       = 0;
+    barrier.dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.image               = cubeImage;
+    barrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // === CONVERSION PIPELINE ===
+    VkShaderModule convertModule = pipelineManager_.loadShader("shaders/equirect_to_cube.comp.spv");
+    if (convertModule == VK_NULL_HANDLE) {
+        LOG_WARNING_CAT("RENDERER", "equirect_to_cube.comp.spv missing — using equirect projection in shader");
+        RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
+        BUFFER_DESTROY(staging);
+
+        // Cleanup cube resources
+        vkDestroyImageView(stone_device(), cubeArrayView, nullptr);
+        vkDestroyImageView(stone_device(), cubeView, nullptr);
+        vkDestroySampler(stone_device(), cubeSampler, nullptr);
+        vkDestroyImage(stone_device(), cubeImage, nullptr);
+        vkFreeMemory(stone_device(), cubeMemory, nullptr);
+
+        // Return equirect
+        envmap.image   = equirectImage;
+        envmap.memory  = equirectMemory;
+        envmap.view    = equirectView;
+        envmap.sampler = equirectSampler;
+
+        LOG_SUCCESS_CAT("RENDERER", "HDR equirect loaded — {}×{} — sky projection in shader", w, h);
+        return envmap;
+    }
+
+    // Descriptor layout
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{{
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
+    }};
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings    = bindings.data()
+    };
+
+    VkDescriptorSetLayout convertLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &convertLayout));
+
+    VkPipelineLayoutCreateInfo plInfo{
+        .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts    = &convertLayout
+    };
+
+    VkPipelineLayout convertPipelineLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &convertPipelineLayout));
+
+    VkDescriptorSetAllocateInfo dsAlloc{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = RTX::pipeline().rtDescriptorPool(),
+        .descriptorSetCount = 1,
+        .pSetLayouts        = &convertLayout
+    };
+
+    VkDescriptorSet convertSet = VK_NULL_HANDLE;
+    VK_CHECK(vkAllocateDescriptorSets(stone_device(), &dsAlloc, &convertSet));
+
+    // Proper VkDescriptorImageInfo structs
+    VkDescriptorImageInfo equiDescInfo{
+        .sampler     = equirectSampler,
+        .imageView   = equirectView,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkDescriptorImageInfo cubeDescInfo{
+        .imageView   = cubeArrayView,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    std::array<VkWriteDescriptorSet, 2> writes{{
+        {
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = convertSet,
+            .dstBinding      = 0,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo      = &equiDescInfo
+        },
+        {
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = convertSet,
+            .dstBinding      = 1,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo      = &cubeDescInfo
+        }
+    }};
+
+    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    // Compute pipeline
+    VkPipelineShaderStageCreateInfo stage{
+        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = convertModule,
+        .pName  = "main"
+    };
+
+    VkComputePipelineCreateInfo pipeInfo{
+        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage  = stage,
+        .layout = convertPipelineLayout
+    };
+
+    VkPipeline convertPipeline = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &convertPipeline));
+
+    // Dispatch conversion
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, convertPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, convertPipelineLayout, 0, 1, &convertSet, 0, nullptr);
+
+    uint32_t groupSize = (cubeSize + 31) / 32;
+    vkCmdDispatch(cmd, groupSize, groupSize, 6);
+
+    // Transition cube to shader read
+    barrier = {};
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout           = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.image               = cubeImage;
+    barrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
     BUFFER_DESTROY(staging);
 
-    // View + Sampler
-    VkImageViewCreateInfo viewInfo{
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image            = envmap.image,
-        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-        .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCreateImageView(stone_device(), &viewInfo, nullptr, &envmap.view);
+    // Cleanup temporaries
+    vkDestroyPipeline(stone_device(), convertPipeline, nullptr);
+    vkDestroyPipelineLayout(stone_device(), convertPipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(stone_device(), convertLayout, nullptr);
+    vkFreeDescriptorSets(stone_device(), RTX::pipeline().rtDescriptorPool(), 1, &convertSet);
+    vkDestroyShaderModule(stone_device(), convertModule, nullptr);
 
-    VkSamplerCreateInfo samplerInfo{
-        .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter               = VK_FILTER_LINEAR,
-        .minFilter               = VK_FILTER_LINEAR,
-        .mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .anisotropyEnable        = VK_TRUE,
-        .maxAnisotropy           = 16.0f,
-        .borderColor             = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
-    };
-    vkCreateSampler(stone_device(), &samplerInfo, nullptr, &envmap.sampler);
+    vkDestroyImageView(stone_device(), equirectView, nullptr);
+    vkDestroyImageView(stone_device(), cubeArrayView, nullptr);
+    vkDestroySampler(stone_device(), equirectSampler, nullptr);
+    vkDestroyImage(stone_device(), equirectImage, nullptr);
+    vkFreeMemory(stone_device(), equirectMemory, nullptr);
 
-    LOG_SUCCESS_CAT("RENDERER", "TRUE HDR EQUIRECT FORGED — {}×{} — THE SKY IS REAL", w, h);
+    envmap.image   = cubeImage;
+    envmap.memory  = cubeMemory;
+    envmap.view    = cubeView;
+    envmap.sampler = cubeSampler;
+
+    LOG_SUCCESS_CAT("RENDERER", "TRUE HDR CUBEMAP FORGED — {}×{}×6 — THE SKY IS REAL", cubeSize, cubeSize);
 
     return envmap;
+}
+
+void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
+{
+    RTX::LAS::get().beginFrame();
+    totalTime_ += deltaTime;
+
+    if (RTX::SwapchainManager::minimized_) {
+        return;
+    }
+
+    const uint32_t frameIndex = frameNumber_++;
+    const uint32_t slot       = frameIndex % 2;  // Hardcoded 2 frames in flight
+
+    uint32_t imageIndex = 0;
+    VkResult acquireResult = vkAcquireNextImageKHR(
+        stone_device(), stone_swapchain(),
+        1'000'000'000ULL,
+        imageAvailableSemaphores_[slot],
+        VK_NULL_HANDLE,
+        &imageIndex
+    );
+
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
+        RTX::recreateSwapchain(stone_width(), stone_height());
+        return;
+    }
+    if (acquireResult != VK_SUCCESS) {
+        LOG_ERROR_CAT("RENDERER", "Failed to acquire swapchain image: {}", string_VkResult(acquireResult));
+        return;
+    }
+
+    VkCommandBuffer cmd = commandBuffers_[slot];
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    VkImage swapImg = stone_images()[imageIndex];
+
+    // Transition swapchain image to GENERAL — direct RTX write target
+    transitionImage(cmd, swapImg,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL,
+        0,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+
+    // Pink fallback — always visible if RTX fails
+    {
+        VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
+    }
+
+    // === RTX PATH ===
+    VkAccelerationStructureKHR tlas = RTX::LAS::get().getCurrentTLAS();
+    if (!tlas) tlas = pipelineManager_.dummyTLAS();
+
+    const uint64_t uboHandle = uniformBufferEncs_[slot];
+    const BufferManager::BufferInfo* uboInfo = nullptr;
+    bool rtxValid = (uboHandle != 0);
+
+    if (rtxValid) {
+        auto it = BufferManager::s_buffers.find(uboHandle);
+        rtxValid = (it != BufferManager::s_buffers.end() && it->second.buffer != VK_NULL_HANDLE);
+        if (rtxValid) uboInfo = &it->second;
+    }
+
+    if (rtxValid && pipelineManager_.rtPipeline() != VK_NULL_HANDLE)
+    {
+        updateUniformBuffer(slot, camera, deltaTime);
+        currentFrame_.store(slot);
+
+        // Update RT descriptor set — direct write to swapchain
+        {
+            RTX::RTDescriptorUpdate desc{};
+            desc.tlas               = tlas;
+            desc.ubo                = uboInfo->buffer;
+            desc.uboSize            = 368;
+            desc.swapchainImageView = stone_views()[imageIndex];  // Direct to swapchain
+
+            if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
+                desc.envSampler   = pipelineManager_.envMapSampler_.get();
+                desc.envImageView = pipelineManager_.envMapImageView_.get();
+            }
+
+            if (!materialBufferEncs_.empty()) {
+                uint64_t matHandle = materialBufferEncs_[0];
+                const auto* matBuf = BufferManager::get(matHandle);
+                if (matBuf) {
+                    desc.materialsBuffer = matBuf->buffer;
+                    desc.materialsSize   = MATERIAL_BUFFER_SIZE;
+                }
+            }
+
+            pipelineManager_.updateRTDescriptorSet(slot, desc);
+        }
+
+        recordRayTracingCommands(cmd, slot);
+    }
+    else if (pipelineManager_.hasEnvMapDisplayPipeline())
+    {
+        // ENVMAP ONLY MODE — PRESS 1 BRO
+        recordEnvMapOnlyPass(cmd, imageIndex);
+    }
+
+    // Final transition to PRESENT
+    transitionImage(cmd, swapImg,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        0,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    submitAndPresent(slot, imageIndex);
+
+    currentSpp_++;
+    accumulationFrame_++;
+}
+
+void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept
+{
+    auto& pm = RTX::pipeline();
+
+    if (pm.envMapDisplayPipeline_ == VK_NULL_HANDLE || 
+        pm.envMapDisplayDescriptorSet_ == VK_NULL_HANDLE ||
+        !pm.envMapImageView_.valid() || 
+        !pm.envMapSampler_.valid())
+    {
+        // Fallback: clear to sacred pink
+        VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImage swapImage = StoneKey::stone_images()[swapchainImageIndex];
+
+        VkImageMemoryBarrier barrier{
+            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask       = 0,
+            .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+            .image               = swapImage,
+            .subresourceRange    = range
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
+
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = 0;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        LOG_WARN_CAT("RENDERER", "Envmap display pipeline not ready — showing sacred pink void");
+        return;
+    }
+
+    // Update storage image binding to current swapchain image
+    VkDescriptorImageInfo storageInfo{
+        .imageView   = StoneKey::stone_views()[swapchainImageIndex],
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    VkWriteDescriptorSet write{
+        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet          = pm.envMapDisplayDescriptorSet_,
+        .dstBinding      = 1,
+        .descriptorCount = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .pImageInfo      = &storageInfo
+    };
+    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
+
+    // Transition swapchain image to GENERAL
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .image               = StoneKey::stone_images()[swapchainImageIndex],
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // Bind and dispatch
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm.envMapDisplayPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm.envMapDisplayPipelineLayout_, 0, 1, &pm.envMapDisplayDescriptorSet_, 0, nullptr);
+
+    struct PushConstants {
+        uint32_t width;
+        uint32_t height;
+    } pc{ StoneKey::stone_width(), StoneKey::stone_height() };
+
+    vkCmdPushConstants(cmd, pm.envMapDisplayPipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+
+    constexpr uint32_t WG = 16;
+    vkCmdDispatch(cmd,
+                  (StoneKey::stone_width()  + WG - 1) / WG,
+                  (StoneKey::stone_height() + WG - 1) / WG,
+                  1);
+
+    // Transition back to PRESENT
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = 0;
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    LOG_TRACE_CAT("RENDERER", "Envmap-only pass complete — the empire beholds the true sky");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -273,17 +685,12 @@ void VulkanRenderer::updateTonemapUBO(uint32_t frame) noexcept {
     auto* buf = BufferManager::get(tonemapUniformEncs_[frame]);
     if (!buf || buf->buffer == VK_NULL_HANDLE) return;
 
-    VkDescriptorBufferInfo uboInfo = {
-        .buffer = buf->buffer,
-        .offset = 0,
-        .range  = VK_WHOLE_SIZE
-    };
+    VkDescriptorBufferInfo uboInfo{ .buffer = buf->buffer, .offset = 0, .range = VK_WHOLE_SIZE };
 
     VkWriteDescriptorSet write = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = tonemapSets_[frame],
         .dstBinding = 2,
-        .dstArrayElement = 0,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .pBufferInfo = &uboInfo
@@ -1145,55 +1552,23 @@ void VulkanRenderer::updateNexusDescriptors() noexcept
 
     // THE NEXUS — THE BRAIN OF THE EMPIRE
     std::array<VkWriteDescriptorSet, 8> writes{};
-    std::array<VkDescriptorImageInfo, 8> infos{};
+    uint32_t writeCount = 0;
 
-    uint32_t binding = 6;  // starting at 6 — sacred number
-
-    // 1. HYPERTRACE SCORE — ADAPTIVE SAMPLING BRAIN
-    infos[binding - 6].imageView   = hypertraceScoreView_.valid() ? hypertraceScoreView_.get() : VK_NULL_HANDLE;
-    infos[binding - 6].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    writes[binding - 6] = {
-        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet          = set,
-        .dstBinding      = binding++,
-        .descriptorCount = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo      = &infos[binding - 7]
-    };
-
-    // 2. DENOISER INPUT/OUTPUT — THE EYE OF GRACE
-    if (denoiserView_.valid()) {
-        infos[binding - 6].imageView   = rtOutputViews_[currentFrame_ % rtOutputViews_.size()].get();
-        infos[binding - 6].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        writes[binding - 6] = {
+    const auto addImageWrite = [&](uint32_t binding, VkImageView view, VkImageLayout layout) {
+        VkDescriptorImageInfo info{ .imageView = view, .imageLayout = layout };
+        writes[writeCount++] = VkWriteDescriptorSet{
             .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet          = set,
-            .dstBinding      = binding++,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            .pImageInfo      = &infos[binding - 7]
-        };
-
-        infos[binding - 6].imageView   = denoiserView_.get();
-        infos[binding - 6].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        writes[binding - 6] = {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = binding++,
+            .dstBinding      = binding,
             .descriptorCount = 1,
             .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .pImageInfo      = &infos[binding - 7]
+            .pImageInfo      = &info
         };
-    }
+    };
 
-    // 3. FUTURE: BLUE NOISE, TEMPORAL HISTORY, MOTION VECTORS, DEPTH, NORMAL
-    // binding 9 → blue noise
-    // binding 10 → prev frame
-    // binding 11 → motion vectors
-    // binding 12 → depth buffer
-    // binding 13 → normal buffer
+    addImageWrite(6, hypertraceScoreView_.get(), VK_IMAGE_LAYOUT_GENERAL);
 
-    vkUpdateDescriptorSets(stone_device(), writes.size(), writes.data(), 0, nullptr);
+    vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
 }
 
 void VulkanRenderer::updateDenoiserDescriptors() noexcept {
@@ -1337,7 +1712,7 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
     vkCmdDispatch(cmd, wgX, wgY, 1);
 }
 
-void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept
+void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept
 {
     // PHASE 1: TRUST THE EMPIRE — NO PANIC
     if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
@@ -1990,455 +2365,6 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     accumulationFrame_ = currentSpp_ = 0;
 
     LOG_AMOURANTH("ON SWAPCHAIN REBUILT — ALL SYSTEMS NOMINAL — RESUME RENDERING");
-}
-
-// ── CLEAN. MINIMAL. PERFECT.
-void VulkanRenderer::clearResizeFlag() noexcept
-{
-    g_resizeRequested.store(false);
-    LOG_AMOURANTH("RESIZE REQUEST CLEARED — EMPIRE STABLE");
-}
-
-void VulkanRenderer::clearPinkForce() noexcept
-{
-    g_forcePink.store(false);
-    LOG_AMOURANTH("PINK FORCE MODE TERMINATED — NORMAL RENDERING RESUMED");
-}
-
-VkResult VulkanRenderer::recordCommandBuffer(uint32_t frame) noexcept
-{
-    VkCommandBuffer cmd = commandBuffers_[frame];
-
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    // SHELL RENDER PASS — FAST. CLEAN.
-    VkClearValue clearColor{};
-    clearColor.color = {{1.0f, 0.0f, 0.5f, 1.0f}};
-
-    VkRenderPassBeginInfo rpBegin{
-        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        .renderPass      = renderPass_,
-        .framebuffer     = framebuffers_[frame % framebuffers_.size()],
-        .renderArea      = {{0, 0}, {stone_width(), stone_height()}},
-        .clearValueCount = 1,
-        .pClearValues    = &clearColor
-    };
-
-    vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-    // RAY TRACING — THE TRUE PATH
-    RTX::PipelineManager* pm = stone_pipeline();
-    if (pm && pm->rtPipeline() != VK_NULL_HANDLE)
-    {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pm->rtPipeline());
-
-        if (frame < rtDescriptorSets_.size() && rtDescriptorSets_[frame] != VK_NULL_HANDLE)
-        {
-            vkCmdBindDescriptorSets(cmd,
-                VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                pm->rtPipelineLayout(),
-                0, 1, &rtDescriptorSets_[frame],
-                0, nullptr);
-        }
-
-        // PUSH CONSTANTS — MOVED OUTSIDE THE FUNCTION — C++ HAPPY
-        struct PushConstants {
-            uint32_t frameIndex;
-            float    randomSeed;
-            uint32_t spp;
-            float    _pad;
-        } push{
-            .frameIndex = static_cast<uint32_t>(frameNumber_),
-            .randomSeed = static_cast<float>(rand()) / RAND_MAX,
-            .spp        = currentSpp_,
-            ._pad       = 0.0f
-        };
-
-        vkCmdPushConstants(cmd,
-            pm->rtPipelineLayout(),
-            VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-            0, sizeof(push), &push);
-
-        VK_CMD_TRACE_RAYS(cmd,
-            &pm->raygenRegion(),
-            &pm->missRegion(),
-            &pm->hitRegion(),
-            &pm->callableRegion(),
-            stone_width(), stone_height(), 1);
-    }
-    else
-    {
-        // FALLBACK — PINK — BUT CORRECT
-        VkClearAttachment clear{
-            .aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT,
-            .colorAttachment = 0,
-            .clearValue      = clearColor
-        };
-        VkClearRect rect{
-            .rect         = {{0, 0}, {stone_width(), stone_height()}},
-            .baseArrayLayer = 0,
-            .layerCount     = 1
-        };
-        vkCmdClearAttachments(cmd, 1, &clear, 1, &rect);
-    }
-
-    vkCmdEndRenderPass(cmd);
-    return vkEndCommandBuffer(cmd);
-}
-
-void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t imageIndex)
-{
-    // THE EMPIRE HAS NO TIME FOR WEAKNESS
-    if (!pipelineManager_.envMapDisplayPipeline_ ||
-        !pipelineManager_.envMapDisplayDescriptorSet_)
-    {
-        // VOID SKY — PINK IS ETERNAL
-        VkClearColorValue pink = {{1.0f, 0.0f, 0.5f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
-        return;
-    }
-
-    // UPDATE STORAGE IMAGE — THE CANVAS IS OURS
-    VkDescriptorImageInfo storageInfo{
-        .imageView   = stone_views()[imageIndex],
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-
-    VkWriteDescriptorSet write{
-        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet          = pipelineManager_.envMapDisplayDescriptorSet_,
-        .dstBinding      = 1,
-        .descriptorCount = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo      = &storageInfo
-    };
-    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
-
-    // BIND THE HOLY COMPUTE PIPELINE
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineManager_.envMapDisplayPipeline_);
-
-    // BIND DESCRIPTOR SET — ENVMAP + OUTPUT
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            pipelineManager_.envMapDisplayPipelineLayout_, 0, 1,
-                            &pipelineManager_.envMapDisplayDescriptorSet_, 0, nullptr);
-
-    // PUSH CONSTANTS — THE RESOLUTION OF TRUTH
-    struct Push {
-        uint32_t width;
-        uint32_t height;
-    } pc{ stone_width(), stone_height() };
-
-    vkCmdPushConstants(cmd, pipelineManager_.envMapDisplayPipelineLayout_,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
-
-    // DISPATCH — 16x16 WORKGROUPS — THE GRID AWAKENS
-    constexpr uint32_t WG = 16;
-    vkCmdDispatch(cmd,
-                  (stone_width()  + WG - 1) / WG,
-                  (stone_height() + WG - 1) / WG,
-                  1);
-
-    // THE ONE TRUE BARRIER — NO HANG — PRESENT WILL READ
-    VkImageMemoryBarrier barrier{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask       = 0,
-        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image               = stone_images()[imageIndex],
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
-}
-
-void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
-{
-    RTX::LAS::get().beginFrame();
-    totalTime_ += deltaTime;
-
-    if (RTX::SwapchainManager::minimized_) {
-        return;
-    }
-
-    const uint32_t frameIndex = frameNumber_++;
-    const uint32_t slot       = frameIndex % 2;  // Hardcoded 2
-
-    uint32_t imageIndex = 0;
-    VkResult r = vkAcquireNextImageKHR(
-        stone_device(), stone_swapchain(),
-        1'000'000'000,
-        imageAvailableSemaphores_[slot],
-        VK_NULL_HANDLE,
-        &imageIndex
-    );
-
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
-        RTX::recreateSwapchain(stone_width(), stone_height());
-        return;
-    }
-    if (r != VK_SUCCESS) {
-        return;
-    }
-
-    VkCommandBuffer cmd = commandBuffers_[slot];
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    VkImage swapImg = stone_images()[imageIndex];
-
-    // SWAPCHAIN → GENERAL — RTX WRITES DIRECTLY HERE
-    transitionImage(cmd, swapImg,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_GENERAL,
-        0, VK_ACCESS_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
-
-    // PINK FALLBACK — ALWAYS VISIBLE IF RTX FAILS
-    {
-        VkClearColorValue pink = {{1.0f, 0.0f, 0.5f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
-    }
-
-    // RTX PATH — ONLY IF VALID
-    VkAccelerationStructureKHR tlas = RTX::LAS::get().getCurrentTLAS();
-    if (!tlas) tlas = pipelineManager_.dummyTLAS();
-
-    const uint64_t uboHandle = uniformBufferEncs_[slot];
-    const BufferManager::BufferInfo* uboInfo = nullptr;
-
-    bool rtxValid = (uboHandle != 0);
-    if (rtxValid) {
-        auto it = BufferManager::s_buffers.find(uboHandle);
-        rtxValid = (it != BufferManager::s_buffers.end() && it->second.buffer != VK_NULL_HANDLE);
-        if (rtxValid) {
-            uboInfo = &it->second;
-        }
-    }
-
-    if (rtxValid)
-    {
-        updateUniformBuffer(slot, camera, deltaTime);
-        currentFrame_.store(slot);
-
-        // BIND SWAPCHAIN IMAGE DIRECTLY AS RT OUTPUT
-        {
-            RTX::RTDescriptorUpdate desc{};
-            desc.tlas = tlas;
-            desc.ubo = uboInfo->buffer;
-            desc.uboSize = 368;
-            desc.rtOutputViews[slot] = stone_views()[imageIndex];  // ← DIRECT TO SWAPCHAIN
-
-            if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
-                desc.envSampler   = pipelineManager_.envMapSampler_.get();
-                desc.envImageView = pipelineManager_.envMapImageView_.get();
-            }
-
-            desc.materialsBuffer = reinterpret_cast<VkBuffer>(materialBufferEncs_[0]);
-            desc.materialsSize   = MATERIAL_BUFFER_SIZE;
-
-            pipelineManager_.updateRTDescriptorSet(slot, desc);
-        }
-
-        recordRayTracingCommands(cmd, slot);
-    }
-
-    // FINAL TRANSITION — SHOW PINK OR RTX RESULT
-    transitionImage(cmd, swapImg,
-        VK_IMAGE_LAYOUT_GENERAL,
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        VK_ACCESS_SHADER_WRITE_BIT, 0,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-
-    vkEndCommandBuffer(cmd);
-    submitAndPresent(slot, imageIndex);
-
-    currentSpp_++;
-    accumulationFrame_++;
-}
-
-void VulkanRenderer::updateRTXDescriptors(uint32_t frame) noexcept
-{
-    if (rtDescriptorSets_.empty() || frame >= rtDescriptorSets_.size() || rtDescriptorSets_[frame] == VK_NULL_HANDLE) {
-        return;
-    }
-
-    VkDescriptorSet set = rtDescriptorSets_[frame];
-
-    // Reserve space to avoid reallocations
-    std::vector<VkWriteDescriptorSet>                  writes;
-    std::vector<VkDescriptorBufferInfo>                bufferInfos;
-    std::vector<VkDescriptorImageInfo>                 imageInfos;
-    std::vector<VkWriteDescriptorSetAccelerationStructureKHR> asInfos;
-
-    writes.reserve(8);
-    bufferInfos.reserve(4);
-    imageInfos.reserve(4);
-    asInfos.reserve(1);
-
-    // ── Binding 0: DreamUBO (per-frame uniform buffer) ───────────────────────
-    if (frame < uniformBufferEncs_.size() && uniformBufferEncs_[frame] != 0) {
-        const auto* ubo = BufferManager::get(uniformBufferEncs_[frame]);
-        if (ubo && ubo->buffer != VK_NULL_HANDLE) {
-            bufferInfos.push_back({ ubo->buffer, 0, VK_WHOLE_SIZE });
-
-            VkWriteDescriptorSet w{
-                .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet          = set,
-                .dstBinding      = 0,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .pBufferInfo     = &bufferInfos.back()
-            };
-            writes.push_back(w);
-        }
-    }
-
-    // ── Binding 1: TLAS (Top-Level Acceleration Structure) ───────────────────
-    VkAccelerationStructureKHR tlas = RTX::LAS::get().getCurrentTLAS();
-    if (!tlas) tlas = pipelineManager_.dummyTLAS();
-
-    if (tlas != VK_NULL_HANDLE) {
-        asInfos.push_back({
-            .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-            .accelerationStructureCount = 1,
-            .pAccelerationStructures    = &tlas
-        });
-
-        VkWriteDescriptorSet w{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext           = &asInfos.back(),
-            .dstSet          = set,
-            .dstBinding      = 1,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-        };
-        writes.push_back(w);
-    }
-
-    // ── Binding 2: Ray Tracing Output Image (storage image) ───────────────────
-    if (frame < rtOutputViews_.size() && rtOutputViews_[frame].valid()) {
-        imageInfos.push_back({
-            .imageView   = rtOutputViews_[frame].get(),
-            .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-        });
-
-        VkWriteDescriptorSet w{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = 2,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .pImageInfo      = &imageInfos.back()
-        };
-        writes.push_back(w);
-    }
-
-    // ── Binding 3: Materials SSBO (shared across all frames) ─────────────
-    if (!materialBufferEncs_.empty()) {
-        uint64_t matHandle = materialBufferEncs_[0]; // usually the first one is the master
-        const auto* matBuf = BufferManager::get(matHandle);
-        if (matBuf && matBuf->buffer != VK_NULL_HANDLE) {
-            bufferInfos.push_back({ matBuf->buffer, 0, MATERIAL_BUFFER_SIZE });
-
-            VkWriteDescriptorSet w{
-                .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet          = set,
-                .dstBinding      = 3,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .pBufferInfo     = &bufferInfos.back()
-            };
-            writes.push_back(w);
-        }
-    }
-
-    // ── Binding 4: HDR Environment Map (combined image sampler) ───────────────
-    if (envMapImageView_.valid() && envMapSampler_.valid()) {
-        imageInfos.push_back({
-            .sampler     = envMapSampler_.get(),
-            .imageView   = envMapImageView_.get(),
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        });
-
-        VkWriteDescriptorSet w{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = 4,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo      = &imageInfos.back()
-        };
-        writes.push_back(w);
-    }
-
-    // ── Binding 5+: Add more as needed (blue noise, prev frame, etc.) ──────────
-    // Example for future:
-    // if (blueNoiseTexture_) { ... }
-
-    // ── Submit all writes in one call ───────────────────────────────────────
-    if (!writes.empty()) {
-        vkUpdateDescriptorSets(
-            stone_device(),
-            static_cast<uint32_t>(writes.size()),
-            writes.data(),
-            0,
-            nullptr
-        );
-    }
-}
-
-void VulkanRenderer::updateAllRTXDescriptors() noexcept
-{
-    updateNexusDescriptors();
-    updateDenoiserDescriptors();
-}
-
-// VulkanRenderer.cpp — FIXED: createSyncObjects() integrated, no duplicates
-void VulkanRenderer::createSyncObjects() noexcept
-{
-    LOG_INFO_CAT("RENDERER", "Creating synchronization objects (2 frames)...");
-
-    imageAvailableSemaphores_.resize(2);
-    renderFinishedSemaphores_.resize(2);
-    inFlightFences_.resize(2);
-
-    VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    VkFenceCreateInfo fenceInfo{ 
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT 
-    };
-
-    for (uint32_t i = 0; i < 2; ++i) {
-        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
-        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
-        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "Synchronization objects created successfully — 2 frames in flight");
 }
 
 // ── NEW: onWindowResize implementation ──────────────────────────────────────

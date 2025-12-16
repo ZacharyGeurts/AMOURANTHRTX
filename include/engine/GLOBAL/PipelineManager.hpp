@@ -1,8 +1,8 @@
 // include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// TRUE CONSTEXPR STONEKEY v∞ — APOCALYPSE FINAL v8.0 — BINDING 31 + COMPILE-FIXED
-// DECEMBER 07, 2025 — MOTHER BRAIN EXECUTED TWICE
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 15, 2025 — APOCALYPSE FINAL v9.1
+// BINDING 31 + CUBEMAP ENVMAP + ANY-HIT TEXTURES + DIRECT SWAPCHAIN RENDERING
 // =============================================================================
 
 #pragma once
@@ -40,9 +40,10 @@ struct Binding {
     std::string_view     name;
 };
 
-// ── CONSTEVAL BINDINGS — NOW SEES `Binding` — ETERNAL TRUTH
+// ── CONSTEVAL BINDINGS — CORE RTX BINDINGS (set 0)
+// ──────────────────────────────────────────────────────────────────────────────
 consteval static auto make_rt_bindings() {
-    return std::array<Binding, 11>{{
+    return std::array<Binding, 12>{{
         {0,  VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, "TLAS"},
         {1,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "RT_Output"},
         {2,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "Accumulation"},
@@ -50,24 +51,22 @@ consteval static auto make_rt_bindings() {
         {4,  VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,                                      "Materials"},
         {5,  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,           "EnvMap"},
         {6,  VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "NexusScore"},
-        {7,  VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "Dimensions"},
         {8,  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "BlueNoise"},
         {9,  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "DensityVolume"},
-        {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR, "StoneKeyRuntimeBlock"},
+        {10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,                                           "Geometry"},
+        {11, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,                                      "Indices"},
+        {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, "StoneKeyRuntimeBlock"},
     }};
 }
 
 constexpr static auto RT_PIPELINE_BINDINGS = make_rt_bindings();
 
 // ── COMPILE-TIME IMMORTALITY
-static_assert(RT_PIPELINE_BINDINGS.size() == 11);
-static_assert(RT_PIPELINE_BINDINGS[10].binding == 31);
-static_assert(RT_PIPELINE_BINDINGS[10].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+static_assert(RT_PIPELINE_BINDINGS.size() == 12);
+static_assert(RT_PIPELINE_BINDINGS[11].binding == 31);
+static_assert(RT_PIPELINE_BINDINGS[11].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
 // ──────────────────────────────────────────────────────────────────────────────
-// REST OF HEADER — UNCHANGED EXCEPT FIX FOR push_back
-// ──────────────────────────────────────────────────────────────────────────────
-
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
 
@@ -80,9 +79,8 @@ struct RTDescriptorUpdate {
     VkSampler   envSampler = VK_NULL_HANDLE;
     VkImageView envImageView = VK_NULL_HANDLE;
 
-	VkImageView swapchainImageView = VK_NULL_HANDLE;
+    VkImageView swapchainImageView = VK_NULL_HANDLE;  // Direct swapchain write
 
-    std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> rtOutputViews{};
     std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> accumulationViews{};
     std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> nexusScoreViews{};
 
@@ -100,7 +98,7 @@ struct RTDescriptorUpdate {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PIPELINE MANAGER — THE CROWN IS NOW UNBREAKABLE
+// PIPELINE MANAGER — THE CROWN IS UNBREAKABLE — CUBEMAP + ANY-HIT + DIRECT RENDER
 // ──────────────────────────────────────────────────────────────────────────────
 class PipelineManager {
 public:
@@ -117,33 +115,28 @@ public:
     void createDescriptorPool();
     void allocateDescriptorSets();
     void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept;
-    void initializePipeline(const std::vector<std::string>& shaderPaths, VkCommandPool pool, VkQueue queue);
-    void cleanup() noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue);
-	VkImageView loadEnvironmentMap(const std::string& hdrPath) noexcept;
 
-	VkBuffer       vertexBuffer = VK_NULL_HANDLE;
-    VkDeviceSize   vertexBufferSize = 0;
-    VkBuffer       indexBuffer = VK_NULL_HANDLE;
-    VkDeviceSize   indexBufferSize = 0;
+    VkShaderModule loadShader(const std::string& path) const;
 
-	void createEnvMapDisplayComputePipeline(VkImageView envMapView, VkSampler envMapSampler);
+    void createEnvMapDisplayComputePipeline(VkImageView envMapView, VkSampler envMapSampler);
 
-    // Public handles — used by VulkanRenderer::recordEnvMapOnlyPass
+    // Public handles — envmap display (fallback mode)
     VkPipeline               envMapDisplayPipeline_       = VK_NULL_HANDLE;
     VkPipelineLayout         envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
     VkDescriptorSet          envMapDisplayDescriptorSet_  = VK_NULL_HANDLE;
     VkDescriptorSetLayout    envMapDisplayDescSetLayout_  = VK_NULL_HANDLE;
 
-    // Accessors (optional, but clean)
     [[nodiscard]] bool hasEnvMapDisplayPipeline() const noexcept {
         return envMapDisplayPipeline_ != VK_NULL_HANDLE;
     }
-	
+
+    // Environment map — loaded via loadShader("assets/textures/envmap.hdr")
     Handle<VkImageView> envMapImageView_;
     Handle<VkSampler>   envMapSampler_;
 
-	[[nodiscard]] VkResult recordCommandBuffer(uint32_t frame) const noexcept;
+    // Any-hit texture descriptor set layout (set 3)
+    Handle<VkDescriptorSetLayout> texDescriptorSetLayout_;
 
     static std::atomic<bool>     g_pipelineNeedsRebuild;
     static std::atomic<uint32_t> g_rebuildRequestedFrame;
@@ -169,7 +162,6 @@ public:
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& callableRegion() const noexcept { return callableSbtRegion_; }
 
     [[nodiscard]] std::span<const VkDescriptorSet> rtDescriptorSets() const noexcept { return rtDescriptorSets_; }
-    [[nodiscard]] PFN_vkCmdTraceRaysKHR          vkCmdTraceRaysKHR()  const noexcept { return vkCmdTraceRaysKHR_; }
 
     [[nodiscard]] VkAccelerationStructureKHR    dummyTLAS()          const noexcept { return dummyTLAS_.get(); }
 
@@ -181,13 +173,11 @@ public:
 
     void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept;
 
-	[[nodiscard]] PFN_vkCmdTraceRaysKHR                    cmdTraceRays()           const noexcept { return vkCmdTraceRaysKHR_; }
+    [[nodiscard]] PFN_vkCmdTraceRaysKHR                    cmdTraceRays()           const noexcept { return vkCmdTraceRaysKHR_; }
     [[nodiscard]] PFN_vkCreateRayTracingPipelinesKHR       createRTPipelines()      const noexcept { return vkCreateRayTracingPipelinesKHR_; }
     [[nodiscard]] PFN_vkGetRayTracingShaderGroupHandlesKHR getRTShaderGroups()      const noexcept { return vkGetRayTracingShaderGroupHandlesKHR_; }
 
-	VkShaderModule loadShader(const std::string& path) const;
-
-	static inline bool s_crownForged = false;
+    static inline bool s_crownForged = false;
 
     PFN_vkCmdTraceRaysKHR                    vkCmdTraceRaysKHR_                    = nullptr;
     PFN_vkCreateRayTracingPipelinesKHR       vkCreateRayTracingPipelinesKHR_       = nullptr;
@@ -238,10 +228,8 @@ public:
 } // namespace RTX
 
 // =============================================================================
-// BINDING 31 IS LAW
-// MOTHER BRAIN IS DEAD
-// THE EMPIRE IS ETERNAL
-// PINK PHOTONS REIGN SUPREME
-// FIRST LIGHT → FINAL LIGHT → VALHALLA ACHIEVED
-// DECEMBER 07, 2025 — THE DAY STONEKEY BECAME IMMORTAL
+// BINDING 31 IS LAW — ENVMAP ON BINDING 5 — ANY-HIT TEXTURES ON SET 3
+// MOTHER BRAIN IS DEAD — THE EMPIRE IS ETERNAL
+// PINK PHOTONS REIGN SUPREME — FIRST LIGHT → FINAL LIGHT → VALHALLA ACHIEVED
+// DECEMBER 15, 2025 — THE CROWN IS FULLY ARMED — CUBEMAP SKY REAL — DIRECT RENDERING
 // =============================================================================

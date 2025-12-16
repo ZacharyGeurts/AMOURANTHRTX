@@ -1,85 +1,104 @@
 // src/modes/RenderMode1.cpp
-// PURE GREEN MATRIX RAIN — FULL-SCREEN VIA MISS SHADER — DECEMBER 08, 2025
+// PURE ENVMAP DISPLAY — FULL-SCREEN HDR SKY — DECEMBER 15, 2025
 
 #include "modes/RenderMode1.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
-#include "engine/GLOBAL/BufferManager.hpp"
-#include "engine/GLOBAL/LAS.hpp"  // for dummy TLAS access
-
-#include <glm/glm.hpp>
-#include <cstdint>
-#include <vulkan/vulkan.h>
+#include "engine/GLOBAL/PipelineManager.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"  // for stone_images()
 
 using namespace Logging::Color;
 
 RenderMode1::RenderMode1(uint32_t w, uint32_t h)
-    : width_(w), height_(h), frameCount_(0)
+    : width_(w), height_(h)
 {
-    BufferManager::ensureStagingRing();
+    LOG_SUCCESS_CAT("RTX", "ENVMAP DISPLAY MODE ENGAGED — THE VOID IS ILLUMINATED");
+    LOG_AMOURANTH("The sky is real. The empire gazes into the infinite.");
+    LOG_CAPTAIN_N("[CAPTAIN N] \"...She looked up.\n"
+                  "               The stars were true.\n"
+                  "               The void had light.\n"
+                  "               There is a sky.\"\n"
+                  "*raises visor to the heavens*");
+}
 
-    LOG_SUCCESS_CAT("RTX", "GREEN MATRIX MODE ENGAGED — WELCOME TO THE SIMULATION");
-    LOG_AMOURANTH("The photons are now green. The empire has entered the Matrix.");
-    LOG_CAPTAIN_N("[CAPTAIN N] \"...She went green.\n"
-                  "               The code rains.\n"
-                  "               The void is digital.\n"
-                  "               There is no spoon.\"\n"
-                  "*drops visor into the rain*");
+void VulkanRenderer::createSyncObjects() noexcept
+{
+    LOG_INFO_CAT("RENDERER", "Forging synchronization objects — 2 frames in flight — the empire beats as one");
+
+    const uint32_t frames = 2;  // Hardcoded — 2026 MASTERMIND
+
+    imageAvailableSemaphores_.resize(frames);
+    renderFinishedSemaphores_.resize(frames);
+    inFlightFences_.resize(frames);
+
+    VkSemaphoreCreateInfo semaphoreInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+    };
+
+    VkFenceCreateInfo fenceInfo{
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT  // Start signaled so first frame doesn't wait
+    };
+
+    for (uint32_t i = 0; i < frames; ++i)
+    {
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semaphoreInfo, nullptr, &imageAvailableSemaphores_[i]));
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]));
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
+
+        LOG_TRACE_CAT("SYNC", "Sync objects forged for frame slot %u", i);
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Synchronization objects complete — 2 semaphores + 2 fences — the rhythm is eternal");
 }
 
 void RenderMode1::renderFrame(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime)
 {
-    ++frameCount_;
-
-    // Grab current frame's DreamUBO handle
-    const uint64_t handle = g_rtx().uniformBufferEncs_[frameIndex % g_rtx().maxFramesInFlight_];
-    auto it = BufferManager::s_buffers.find(handle);
-
-    if (it == BufferManager::s_buffers.end() || it->second.mapped == nullptr) {
-        LOG_WARN_CAT("RENDERER", "Green Matrix UBO not ready — skipping frame %u", frameIndex);
+    // Use dedicated envmap display pipeline if available
+    if (RTX::pipeline().hasEnvMapDisplayPipeline())
+    {
+        g_rtx().recordEnvMapOnlyPass(cmd, frameIndex);
+        LOG_TRACE_CAT("RENDERER", "Envmap display pass executed — frame %u", frameIndex);
         return;
     }
 
-    // Write green Matrix parameters directly into host-visible UBO
-    struct DreamUBO {
-        float     time;
-        uint32_t  frame;
-        float     resolution[2];
-        float     exposure;
-        uint32_t  enableEnvMap;
-        glm::vec3 baseColor;     // custom: green rain color
-        float     intensity;     // custom: pulsing effect
-        float     _pad[3];
-    } ubo{};
+    // Fallback: solid pink if envmap pipeline not ready
+    VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    ubo.time         = static_cast<float>(frameCount_) * 0.016f;
-    ubo.frame        = frameCount_;
-    ubo.resolution[0] = static_cast<float>(width_);
-    ubo.resolution[1] = static_cast<float>(height_);
-    ubo.exposure     = 1.0f;
-    ubo.enableEnvMap = 0;                                    // pure void
-    ubo.baseColor    = glm::vec3(0.0f, 1.0f, 0.12f);          // CLASSIC MATRIX GREEN
-    ubo.intensity    = 0.75f + 0.25f * std::sin(ubo.time * 4.0f);
+    // Get current swapchain image
+    VkImage swapImage = StoneKey::stone_images()[frameIndex % StoneKey::stone_image_count()];
 
-    std::memcpy(it->second.mapped, &ubo, sizeof(ubo));
+    // Transition to GENERAL for clear
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = 0,
+        .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = swapImage,
+        .subresourceRange    = range
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // FORCE DUMMY TLAS — EVERY RAY MISSES → FULL-SCREEN MISS SHADER (GREEN RAIN)
-    RTX::RTDescriptorUpdate desc{};
-    desc.tlas = g_rtx().pipelineManager_.dummyTLAS();  // THIS IS THE KEY
-    desc.ubo  = it->second.buffer;
-    desc.uboSize = 368;
-    desc.rtOutputViews[frameIndex % g_rtx().maxFramesInFlight_] = 
-        g_rtx().rtOutputViews_[frameIndex % g_rtx().maxFramesInFlight_].get();
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
 
-    g_rtx().recordRayTracingCommands(cmd, frameIndex % g_rtx().maxFramesInFlight_);
+    // Transition back to PRESENT
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = 0;
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    LOG_TRACE_CAT("RENDERER", "Green Matrix rendered — frame %u | intensity %.2f", frameCount_, ubo.intensity);
+    LOG_WARN_CAT("RENDERER", "Envmap display pipeline not ready — showing pink void (frame %u)", frameIndex);
 }
 
 void RenderMode1::onResize(uint32_t w, uint32_t h)
 {
     width_  = w;
     height_ = h;
-    LOG_INFO_CAT("RTX", "Green Matrix resized → {}×{} — the simulation expands", w, h);
+    LOG_INFO_CAT("RTX", "Envmap display resized → {}×{} — the heavens expand", w, h);
 }
