@@ -767,6 +767,7 @@ void PipelineManager::loadRayTracingExtensions() noexcept
 {
     LOG_INFO_CAT("PIPELINE", "Loading ray tracing extension functions...");
 
+    // Core ray tracing functions
     vkCmdTraceRaysKHR_ = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
         vkGetDeviceProcAddr(stone_device(), "vkCmdTraceRaysKHR"));
 
@@ -776,18 +777,46 @@ void PipelineManager::loadRayTracingExtensions() noexcept
     vkGetRayTracingShaderGroupHandlesKHR_ = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
         vkGetDeviceProcAddr(stone_device(), "vkGetRayTracingShaderGroupHandlesKHR"));
 
+    // Acceleration structure functions
+    vkCreateAccelerationStructureKHR_ = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(stone_device(), "vkCreateAccelerationStructureKHR"));
+
+    vkDestroyAccelerationStructureKHR_ = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(stone_device(), "vkDestroyAccelerationStructureKHR"));
+
+    vkGetAccelerationStructureBuildSizesKHR_ = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+        vkGetDeviceProcAddr(stone_device(), "vkGetAccelerationStructureBuildSizesKHR"));
+
+    vkCmdBuildAccelerationStructuresKHR_ = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+        vkGetDeviceProcAddr(stone_device(), "vkCmdBuildAccelerationStructuresKHR"));
+
+    vkGetAccelerationStructureDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+        vkGetDeviceProcAddr(stone_device(), "vkGetAccelerationStructureDeviceAddressKHR"));
+
+    // Device address function (required for SBT and AS)
+    vkGetBufferDeviceAddressKHR_ = reinterpret_cast<PFN_vkGetBufferDeviceAddressKHR>(
+        vkGetDeviceProcAddr(stone_device(), "vkGetBufferDeviceAddressKHR"));
+
     bool success = true;
-    if (!vkCmdTraceRaysKHR_)                    { LOG_ERROR_CAT("EXT", "vkCmdTraceRaysKHR not available"); success = false; }
-    if (!vkCreateRayTracingPipelinesKHR_)       { LOG_ERROR_CAT("EXT", "vkCreateRayTracingPipelinesKHR not available"); success = false; }
-    if (!vkGetRayTracingShaderGroupHandlesKHR_) { LOG_ERROR_CAT("EXT", "vkGetRayTracingShaderGroupHandlesKHR not available"); success = false; }
+
+    if (!vkCmdTraceRaysKHR_)                     { LOG_ERROR_CAT("EXT", "vkCmdTraceRaysKHR not available"); success = false; }
+    if (!vkCreateRayTracingPipelinesKHR_)        { LOG_ERROR_CAT("EXT", "vkCreateRayTracingPipelinesKHR not available"); success = false; }
+    if (!vkGetRayTracingShaderGroupHandlesKHR_)  { LOG_ERROR_CAT("EXT", "vkGetRayTracingShaderGroupHandlesKHR not available"); success = false; }
+    if (!vkCreateAccelerationStructureKHR_)      { LOG_ERROR_CAT("EXT", "vkCreateAccelerationStructureKHR not available"); success = false; }
+    if (!vkDestroyAccelerationStructureKHR_)     { LOG_ERROR_CAT("EXT", "vkDestroyAccelerationStructureKHR not available"); success = false; }
+    if (!vkGetAccelerationStructureBuildSizesKHR_) { LOG_ERROR_CAT("EXT", "vkGetAccelerationStructureBuildSizesKHR not available"); success = false; }
+    if (!vkCmdBuildAccelerationStructuresKHR_)   { LOG_ERROR_CAT("EXT", "vkCmdBuildAccelerationStructuresKHR not available"); success = false; }
+    if (!vkGetAccelerationStructureDeviceAddressKHR_) { LOG_ERROR_CAT("EXT", "vkGetAccelerationStructureDeviceAddressKHR not available"); success = false; }
+    if (!vkGetBufferDeviceAddressKHR_)           { LOG_ERROR_CAT("EXT", "vkGetBufferDeviceAddressKHR not available"); success = false; }
 
     if (success)
     {
-        LOG_SUCCESS_CAT("PIPELINE", "All ray tracing extensions loaded — PINK PHOTONS ARMED");
+        LOG_SUCCESS_CAT("PIPELINE", "All ray tracing extensions loaded — PINK PHOTONS ARMED — EMPIRE READY");
     }
     else
     {
-        LOG_FATAL_CAT("PIPELINE", "Ray tracing extensions failed — empire cannot render");
+        LOG_FATAL_CAT("PIPELINE", "Critical ray tracing extensions missing — empire cannot render");
+        phase9_ballerina("RAY TRACING EXTENSIONS FAILURE", std::source_location::current());
     }
 }
 

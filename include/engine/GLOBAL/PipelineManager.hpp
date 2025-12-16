@@ -209,6 +209,13 @@ private:
     void cacheDeviceProperties();
     void loadRayTracingExtensions() noexcept;
     VkAccelerationStructureKHR createDummyTLAS();
+
+PFN_vkCreateAccelerationStructureKHR          vkCreateAccelerationStructureKHR_           = nullptr;
+PFN_vkDestroyAccelerationStructureKHR         vkDestroyAccelerationStructureKHR_          = nullptr;
+PFN_vkGetAccelerationStructureBuildSizesKHR   vkGetAccelerationStructureBuildSizesKHR_    = nullptr;
+PFN_vkCmdBuildAccelerationStructuresKHR       vkCmdBuildAccelerationStructuresKHR_        = nullptr;
+PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR_ = nullptr;
+PFN_vkGetBufferDeviceAddressKHR               vkGetBufferDeviceAddressKHR_                = nullptr;
 };
 
 // ── GLOBAL ACCESS — CLEAN AND ETERNAL ───────────────────────────────────────

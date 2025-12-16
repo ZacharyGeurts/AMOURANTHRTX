@@ -387,7 +387,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                     RTX::RTDescriptorUpdate desc{};
                     desc.tlas = tlas;
                     desc.ubo = uboInfo->buffer;
-                    desc.uboSize = sizeof(DreamUBO);  // Use actual size from UBO.hpp
+                    desc.uboSize = sizeof(DreamUBO);
                     desc.swapchainImageView = rtOutputViews_[slot].get();
 
                     if (!accumViews_.empty()) {
@@ -403,7 +403,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                         const auto* matBuf = BufferManager::get(matHandle);
                         if (matBuf) {
                             desc.materialsBuffer = matBuf->buffer;
-                            desc.materialsSize = materialBufferSize();  // Use helper from UBO.hpp
+                            desc.materialsSize = materialBufferSize();
                         }
                     }
 

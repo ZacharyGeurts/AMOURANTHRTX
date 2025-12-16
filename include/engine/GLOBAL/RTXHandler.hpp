@@ -190,10 +190,10 @@ struct Context {
 public:
     // Core Vulkan objects
     VkInstance       instance_       = VK_NULL_HANDLE;
-    VkSurfaceKHR surface_        = VK_NULL_HANDLE;
+    VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice         device_         = VK_NULL_HANDLE;
-	Handle<VkDescriptorPool> descriptorPool_;
+    Handle<VkDescriptorPool> descriptorPool_;
 
     // Queues
     VkQueue graphicsQueue_  = VK_NULL_HANDLE;
@@ -202,14 +202,12 @@ public:
     VkQueue transferQueue_  = VK_NULL_HANDLE;
 
     // Command pools
-    VkCommandPool commandPool_ = VK_NULL_HANDLE;
-    VkCommandPool computeCommandPool_  = VK_NULL_HANDLE;
+    VkCommandPool commandPool_        = VK_NULL_HANDLE;
+    VkCommandPool computeCommandPool_ = VK_NULL_HANDLE;
     VkCommandPool transferCommandPool_ = VK_NULL_HANDLE;
-    VkPipelineCache pipelineCache_     = VK_NULL_HANDLE;
-    VkCommandPool commandPool() const noexcept { return commandPool_; }
-    VkCommandPool& commandPool() noexcept { return commandPool_; }
+    VkPipelineCache pipelineCache_    = VK_NULL_HANDLE;
 
-	VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE; 
+    VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
 
     // Queue family indices
     std::optional<uint32_t> graphicsFamily_;
@@ -217,15 +215,15 @@ public:
     std::optional<uint32_t> computeFamily_;
     std::optional<uint32_t> transferFamily_;
 
-    // Feature flags — THE EMPIRE DECIDES
-    bool bufferDeviceAddressEnabled_     = false;
-    bool accelerationStructureEnabled_   = false;
-    bool rayTracingPipelineEnabled_      = false;
-    bool rayQueryEnabled_                = false;
-    bool dynamicRenderingEnabled_        = false;
-    bool synchronization2Enabled_        = false;
-    bool debugUtilsEnabled_              = false;
-	bool pendingSharedStaging_          = false;
+    // Feature flags
+    bool bufferDeviceAddressEnabled_   = false;
+    bool accelerationStructureEnabled_ = false;
+    bool rayTracingPipelineEnabled_    = false;
+    bool rayQueryEnabled_              = false;
+    bool dynamicRenderingEnabled_      = false;
+    bool synchronization2Enabled_      = false;
+    bool debugUtilsEnabled_            = false;
+    bool rtxCapable_                   = false;
 
     // Device properties
     VkPhysicalDeviceProperties                        physicalDeviceProperties_{};
@@ -233,29 +231,30 @@ public:
     VkPhysicalDeviceMemoryProperties                  physicalDeviceMemoryProperties_{};
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR   rayTracingProps_{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
 
-    // HDR
-    VkFormat         hdr_format      = VK_FORMAT_UNDEFINED;
-    VkColorSpaceKHR  hdr_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-
     // Global resources
     Handle<VkImageView>  blueNoiseView_;
     Handle<VkRenderPass> renderPass_;
     uint64_t             sharedStagingEnc_ = 0;
-	[[nodiscard]] VkShaderModule loadShader(const std::string& filename) const noexcept;
 
     // Window
-    SDL_Window* window  = nullptr;
-    int         width   = 0;
-    int         height  = 0;
-    bool        valid_  = false;
+    SDL_Window* window = nullptr;
+    int         width  = 0;
+    int         height = 0;
+    bool        valid_ = false;
     mutable std::atomic<bool> ready_{false};
 
-    // ────────────────────── GETTERS ──────────────────────
+    // Shader loading
+    [[nodiscard]] VkShaderModule loadShader(const std::string& filename) const noexcept;
+
+    // Aggressive mode (optional performance tweak)
+    void enableHyperAggressiveMode() noexcept;
+
+    // Getters
     [[nodiscard]] constexpr VkInstance       instance()       const noexcept { return instance_; }
     [[nodiscard]] constexpr VkSurfaceKHR     surface()        const noexcept { return surface_; }
     [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
     [[nodiscard]] constexpr VkDevice         device()         const noexcept { return device_; }
-	
+
     [[nodiscard]] constexpr VkQueue graphicsQueue()  const noexcept { return graphicsQueue_; }
     [[nodiscard]] constexpr VkQueue presentQueue()   const noexcept { return presentQueue_; }
     [[nodiscard]] constexpr VkQueue computeQueue()   const noexcept { return computeQueue_; }
@@ -266,14 +265,15 @@ public:
     [[nodiscard]] constexpr uint32_t computeFamily()  const noexcept { return computeFamily_.value_or(graphicsFamily()); }
     [[nodiscard]] constexpr uint32_t transferFamily() const noexcept { return transferFamily_.value_or(graphicsFamily()); }
 
+    [[nodiscard]] constexpr VkCommandPool commandPool() const noexcept { return commandPool_; }
+
     [[nodiscard]] constexpr VkRenderPass renderPass() const noexcept { return renderPass_.valid() ? renderPass_.get() : VK_NULL_HANDLE; }
     [[nodiscard]] constexpr const auto& rayTracingProps() const noexcept { return rayTracingProps_; }
     [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
-
-    // THE RETURN OF THE KING
     [[nodiscard]] constexpr bool debugUtilsSupported() const noexcept { return debugUtilsEnabled_; }
+    [[nodiscard]] constexpr bool isRtxCapable() const noexcept { return rtxCapable_; }
 
-    // ────────────────────── SETTERS ──────────────────────
+    // Setters
     void setInstance(VkInstance i) noexcept       { instance_ = i; }
     void setSurface(VkSurfaceKHR s) noexcept      { surface_ = s; }
     void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physicalDevice_ = pd; }
@@ -290,16 +290,15 @@ public:
     void markReady() noexcept                     { ready_.store(true, std::memory_order_release); }
     void markInvalid() noexcept                   { valid_ = false; }
 
-	void enableHyperAggressiveMode() noexcept;
-
-    // Feature enables — the empire speaks
+    // Feature enables
     void enableBufferDeviceAddress(bool e = true) noexcept     { bufferDeviceAddressEnabled_ = e; }
     void enableAccelerationStructure(bool e = true) noexcept   { accelerationStructureEnabled_ = e; }
     void enableRayTracingPipeline(bool e = true) noexcept      { rayTracingPipelineEnabled_ = e; }
     void enableRayQuery(bool e = true) noexcept                { rayQueryEnabled_ = e; }
     void enableDynamicRendering(bool e = true) noexcept        { dynamicRenderingEnabled_ = e; }
     void enableSynchronization2(bool e = true) noexcept        { synchronization2Enabled_ = e; }
-    void enableDebugUtils(bool e = true) noexcept              { debugUtilsEnabled_ = e; }  // ← RESTORED
+    void enableDebugUtils(bool e = true) noexcept              { debugUtilsEnabled_ = e; }
+    void setRtxCapable(bool capable) noexcept                  { rtxCapable_ = capable; }
 
     // Core lifecycle
     void init();
