@@ -693,6 +693,40 @@ void VulkanRenderer::updateTonemapUBO(uint32_t frame) noexcept {
     vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 }
 
+void VulkanRenderer::createSyncObjects() noexcept
+{
+    LOG_INFO_CAT("RENDERER", "Forging synchronization objects — 2 frames in flight — the empire beats as one");
+
+    const uint32_t frames = 2;  // Hardcoded — 2026 MASTERMIND
+
+    imageAvailableSemaphores_.resize(frames);
+    renderFinishedSemaphores_.resize(frames);
+    inFlightFences_.resize(frames);
+
+    VkSemaphoreCreateInfo semaphoreInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0
+    };
+
+    VkFenceCreateInfo fenceInfo{
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT  // Start signaled so first frame doesn't wait
+    };
+
+    for (uint32_t i = 0; i < frames; ++i)
+    {
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semaphoreInfo, nullptr, &imageAvailableSemaphores_[i]));
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]));
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
+
+        LOG_TRACE_CAT("SYNC", "Sync objects forged for frame slot %u", i);
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Synchronization objects complete — 2 semaphores + 2 fences — the rhythm is eternal");
+}
+
 VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclockFromMain)
     : window_(window), width_(width), height_(height), overclockMode_(true), hypertraceEnabled_(true),
       denoisingEnabled_(true), adaptiveSamplingEnabled_(true), tonemapEnabled_(true), fpsTarget_(FpsTarget::FPS_UNLIMITED)
@@ -974,7 +1008,7 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
     vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 
     // Load shader
-    VkShaderModule shaderModule = pipelineManager_.loadShader("assets/shaders/envmap_display.spv");
+    VkShaderModule shaderModule = pipelineManager_.loadShader("assets/shaders/compute/envmap_display.spv");
     if (shaderModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "Failed to load envmap_display.spv");
         return;
