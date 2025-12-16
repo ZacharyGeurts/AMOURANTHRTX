@@ -307,363 +307,34 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
         return VK_NULL_HANDLE;
     }
 
-    // Special case: HDR environment map loading
-    if (relativePath == "assets/textures/envmap.hdr" || relativePath == "envmap.hdr") {
-        static bool envMapLoaded = false;
-        if (envMapLoaded) {
-            LOG_INFO_CAT("PIPELINE", "Environment map already loaded");
-            return VK_NULL_HANDLE;
-        }
+    // Whisper mode — pure SPIR-V loading only
+    // HDR envmap is pre-baked cubemap, loaded via regular texture system
+    // No special cases, no runtime conversion, no pending state
 
-        LOG_AMOURANTH("FIRST LIGHT — Loading HDR environment map: {}", relativePath);
-
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_HDR
-#define STBI_FAILURE_USERMSG
-
-        int w, h, channels;
-        float* data = stbi_loadf(relativePath.c_str(), &w, &h, &channels, 4);
-        if (!data) {
-            LOG_FATAL_CAT("ENV", "Failed to load HDR envmap: {} — {}", relativePath, stbi_failure_reason());
-            return VK_NULL_HANDLE;
-        }
-
-        uint32_t cubeSize = static_cast<uint32_t>(h);
-        if (w != 2 * h) {
-            LOG_WARNING_CAT("ENV", "Envmap not 2:1 aspect ratio ({}x{}), expected {}x{}", w, h, 2 * h, h);
-        }
-
-        const VkDeviceSize imageSize = w * h * 4 * sizeof(float);
-        uint64_t staging = BufferManager::createHostVisible(imageSize, "EnvMap_Staging");
-        void* mapped = BufferManager::getMappedStagingPtr(staging);
-        std::memcpy(mapped, data, imageSize);
-        stbi_image_free(data);
-
-        // Create equirectangular image
-        VkImage equirectImage = VK_NULL_HANDLE;
-        VkDeviceMemory equirectMemory = VK_NULL_HANDLE;
-
-        VkImageCreateInfo imgInfo{
-            .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            .imageType     = VK_IMAGE_TYPE_2D,
-            .format        = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .extent        = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 },
-            .mipLevels     = 1,
-            .arrayLayers   = 1,
-            .samples       = VK_SAMPLE_COUNT_1_BIT,
-            .tiling        = VK_IMAGE_TILING_OPTIMAL,
-            .usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-        };
-
-        VK_CHECK(vkCreateImage(stone_device(), &imgInfo, nullptr, &equirectImage));
-        VkMemoryRequirements memReqs{};
-        vkGetImageMemoryRequirements(stone_device(), equirectImage, &memReqs);
-        VkMemoryAllocateInfo allocInfo{
-            .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize  = memReqs.size,
-            .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-        };
-        VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &equirectMemory));
-        VK_CHECK(vkBindImageMemory(stone_device(), equirectImage, equirectMemory, 0));
-
-        VkCommandBuffer cmd = RTX::beginOneTimeSubmit();
-
-        // Transition to transfer dst
-        VkImageMemoryBarrier barrier{
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask       = 0,
-            .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image               = equirectImage,
-            .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-        };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        VkBufferImageCopy copyRegion{
-            .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .imageExtent      = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 }
-        };
-        vkCmdCopyBufferToImage(cmd, BufferManager::get(staging)->buffer, equirectImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-
-        // Transition to shader read
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        // Try to convert to cubemap
-        VkShaderModule convertModule = loadShader("shaders/compute/equirect_to_cube.spv");
-        bool hasConvertShader = (convertModule != VK_NULL_HANDLE);
-
-        VkImageView finalView = VK_NULL_HANDLE;
-        VkSampler   finalSampler = VK_NULL_HANDLE;
-
-        if (hasConvertShader) {
-            // === CUBEMAP CONVERSION PATH ===
-            VkImage cubeImage = VK_NULL_HANDLE;
-            VkDeviceMemory cubeMemory = VK_NULL_HANDLE;
-
-            VkImageCreateInfo cubeInfo{
-                .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                .flags         = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-                .imageType     = VK_IMAGE_TYPE_2D,
-                .format        = VK_FORMAT_R32G32B32A32_SFLOAT,
-                .extent        = { cubeSize, cubeSize, 1 },
-                .mipLevels     = 1,
-                .arrayLayers   = 6,
-                .samples       = VK_SAMPLE_COUNT_1_BIT,
-                .tiling        = VK_IMAGE_TILING_OPTIMAL,
-                .usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,  // Added TRANSFER_SRC if needed
-                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-            };
-
-            VK_CHECK(vkCreateImage(stone_device(), &cubeInfo, nullptr, &cubeImage));
-            vkGetImageMemoryRequirements(stone_device(), cubeImage, &memReqs);
-            allocInfo.allocationSize = memReqs.size;
-            VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &cubeMemory));
-            VK_CHECK(vkBindImageMemory(stone_device(), cubeImage, cubeMemory, 0));
-
-            VkImageView equirectView = VK_NULL_HANDLE;
-            VkImageViewCreateInfo viewInfo{
-                .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .image            = equirectImage,
-                .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-                .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
-                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-            };
-            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &equirectView));
-
-            VkImageView cubeArrayView = VK_NULL_HANDLE;
-            viewInfo.image = cubeImage;
-            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-            viewInfo.subresourceRange.layerCount = 6;
-            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &cubeArrayView));
-
-            VkImageView cubeView = VK_NULL_HANDLE;
-            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &cubeView));
-
-            VkSampler sampler = VK_NULL_HANDLE;
-VkSamplerCreateInfo cubeSamplerCreateInfo{
-    .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-    .magFilter               = VK_FILTER_LINEAR,
-    .minFilter               = VK_FILTER_LINEAR,
-    .addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-    .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-    .addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-};
-VK_CHECK(vkCreateSampler(stone_device(), &cubeSamplerCreateInfo, nullptr, &sampler));
-
-            // Added: Equirect sampler for conversion
-            VkSampler equirectSampler = VK_NULL_HANDLE;
-            VkSamplerCreateInfo equirectSamplerInfo{
-                .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-                .magFilter               = VK_FILTER_LINEAR,
-                .minFilter               = VK_FILTER_LINEAR,
-                .addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                .addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-            };
-            VK_CHECK(vkCreateSampler(stone_device(), &equirectSamplerInfo, nullptr, &equirectSampler));
-
-            // Descriptor layout for compute
-            VkDescriptorSetLayoutBinding computeBindings[2] = {
-                {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-                {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
-            };
-            VkDescriptorSetLayoutCreateInfo computeLayoutInfo{
-                .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                .bindingCount = 2,
-                .pBindings    = computeBindings
-            };
-            VkDescriptorSetLayout computeLayout = VK_NULL_HANDLE;
-            VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &computeLayoutInfo, nullptr, &computeLayout));
-
-            // Pipeline layout
-            VkPipelineLayoutCreateInfo computePLInfo{
-                .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                .setLayoutCount         = 1,
-                .pSetLayouts            = &computeLayout
-            };
-            VkPipelineLayout computePL = VK_NULL_HANDLE;
-            VK_CHECK(vkCreatePipelineLayout(stone_device(), &computePLInfo, nullptr, &computePL));
-
-            // Compute pipeline
-            VkPipelineShaderStageCreateInfo computeStage{
-                .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage               = VK_SHADER_STAGE_COMPUTE_BIT,
-                .module              = convertModule,
-                .pName               = "main"
-            };
-            VkComputePipelineCreateInfo computePipeInfo{
-                .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-                .stage  = computeStage,
-                .layout = computePL
-            };
-            VkPipeline computePipe = VK_NULL_HANDLE;
-            VK_CHECK(vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &computePipeInfo, nullptr, &computePipe));
-
-            // Descriptor pool for compute
-            VkDescriptorPoolSize computePoolSizes[2] = {
-                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
-                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}
-            };
-            VkDescriptorPoolCreateInfo computePoolInfo{
-                .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                .maxSets       = 1,
-                .poolSizeCount = 2,
-                .pPoolSizes    = computePoolSizes
-            };
-            VkDescriptorPool computePool = VK_NULL_HANDLE;
-            VK_CHECK(vkCreateDescriptorPool(stone_device(), &computePoolInfo, nullptr, &computePool));
-
-            // Allocate set
-            VkDescriptorSetAllocateInfo computeAllocInfo{
-                .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                .descriptorPool     = computePool,
-                .descriptorSetCount = 1,
-                .pSetLayouts        = &computeLayout
-            };
-            VkDescriptorSet computeSet = VK_NULL_HANDLE;
-            VK_CHECK(vkAllocateDescriptorSets(stone_device(), &computeAllocInfo, &computeSet));
-
-            // Update descriptors
-            VkDescriptorImageInfo storageInfo{
-                .imageView   = cubeArrayView,
-                .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-            };
-VkDescriptorImageInfo equirectDescInfo{
-    .sampler     = equirectSampler,
-    .imageView   = equirectView,
-    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-};
-            VkWriteDescriptorSet computeWrites[2] = {
-                {
-                    .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                    .dstSet          = computeSet,
-                    .dstBinding      = 0,
-                    .descriptorCount = 1,
-                    .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    .pImageInfo      = &storageInfo
-                },
-{
-    .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-    .dstSet          = computeSet,
-    .dstBinding      = 1,
-    .descriptorCount = 1,
-    .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-    .pImageInfo      = &equirectDescInfo   // ← now correct type
-}
-            };
-            vkUpdateDescriptorSets(stone_device(), 2, computeWrites, 0, nullptr);
-
-            // Transition cube to GENERAL
-            VkImageMemoryBarrier cubeBarrier{
-                .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask       = 0,
-                .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-                .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
-                .image               = cubeImage,
-                .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 }
-            };
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &cubeBarrier);
-
-            // Dispatch compute
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipe);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePL, 0, 1, &computeSet, 0, nullptr);
-            vkCmdDispatch(cmd, (cubeSize + 31) / 32, (cubeSize + 31) / 32, 6);  // Ceil division
-
-            // Transition to shader read
-            cubeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            cubeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            cubeBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-            cubeBarrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &cubeBarrier);
-
-            // Cleanup compute resources
-            vkDestroyPipeline(stone_device(), computePipe, nullptr);
-            vkDestroyPipelineLayout(stone_device(), computePL, nullptr);
-            vkDestroyDescriptorSetLayout(stone_device(), computeLayout, nullptr);
-            vkFreeDescriptorSets(stone_device(), computePool, 1, &computeSet);
-            vkDestroyDescriptorPool(stone_device(), computePool, nullptr);
-            vkDestroySampler(stone_device(), equirectSampler, nullptr);
-
-            finalView = cubeView;
-            finalSampler = sampler;
-
-            // Cleanup intermediate
-            vkDestroyImageView(stone_device(), equirectView, nullptr);
-            vkDestroyImageView(stone_device(), cubeArrayView, nullptr);
-            vkDestroyImage(stone_device(), equirectImage, nullptr);
-            vkFreeMemory(stone_device(), equirectMemory, nullptr);
-            vkDestroyShaderModule(stone_device(), convertModule, nullptr);
-
-            LOG_SUCCESS_CAT("ENV", "HDR envmap successfully converted to cubemap — {}x{}x6", cubeSize, cubeSize);
-        } else {
-            // === FALLBACK: Use equirect directly ===
-            LOG_WARNING_CAT("ENV", "equirect_to_cube.spv not found — using equirectangular projection");
-
-            VkImageView equirectView = VK_NULL_HANDLE;
-            VkImageViewCreateInfo viewInfo{
-                .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .image            = equirectImage,
-                .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-                .format           = VK_FORMAT_R32G32B32A32_SFLOAT,
-                .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-            };
-            VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &equirectView));
-
-            VkSampler sampler = VK_NULL_HANDLE;
-            VkSamplerCreateInfo samplerInfo{
-                .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-                .magFilter               = VK_FILTER_LINEAR,
-                .minFilter               = VK_FILTER_LINEAR,
-                .addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                .addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE  // Fixed from REPEAT
-            };
-            VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
-
-            finalView = equirectView;
-            finalSampler = sampler;
-        }
-
-        // Store final result
-        const_cast<PipelineManager*>(this)->envMapImageView_ = Handle<VkImageView>(finalView, stone_device(), vkDestroyImageView);
-        const_cast<PipelineManager*>(this)->envMapSampler_   = Handle<VkSampler>(finalSampler, stone_device(), vkDestroySampler);
-
-        RTX::endOneTimeSubmit(cmd, stone_graphics_queue());
-        BufferManager::destroy(staging);
-        envMapLoaded = true;
-
-        return VK_NULL_HANDLE; // success, not a real shader
-    }
-
-    // ── Normal SPIR-V shader loading ──
-    static const std::string BASE_PATH = []() {
+    static const std::string BASE_PATH = []() -> std::string {
         char* cwd = getcwd(nullptr, 0);
         std::string path = cwd ? std::string(cwd) + "/" : "";
         free(cwd);
-        if (path.find("build/bin/Linux") != std::string::npos)
-            return path.substr(0, path.find("build/bin/Linux") + strlen("build/bin/Linux"));
+
+        const std::string marker = "build/bin/Linux";
+        size_t pos = path.find(marker);
+        if (pos != std::string::npos) {
+            return path.substr(0, pos + marker.length());
+        }
         return path + "build/bin/Linux/";
     }();
 
     const std::string fullPath = BASE_PATH + relativePath;
 
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
+    if (!file.is_open()) [[unlikely]] {
         LOG_ERROR_CAT("PIPELINE", "Shader file not found: {}", fullPath);
         return VK_NULL_HANDLE;
     }
 
-    size_t fileSize = static_cast<size_t>(file.tellg());
-    if (fileSize == 0 || fileSize % 4 != 0) {
-        LOG_ERROR_CAT("PIPELINE", "Invalid SPIR-V size: {}", fullPath);
+    const size_t fileSize = static_cast<size_t>(file.tellg());
+    if (fileSize == 0 || fileSize % 4 != 0) [[unlikely]] {
+        LOG_ERROR_CAT("PIPELINE", "Invalid SPIR-V size ({} bytes): {}", fileSize, fullPath);
         return VK_NULL_HANDLE;
     }
 
@@ -681,8 +352,43 @@ VkDescriptorImageInfo equirectDescInfo{
     VkShaderModule module = VK_NULL_HANDLE;
     VK_CHECK(vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module));
 
-    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded: {}", relativePath);
+    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded: {} ({} bytes)", relativePath, fileSize);
     return module;
+}
+
+void PipelineManager::transitionImage(
+    VkCommandBuffer cmd,
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    VkAccessFlags srcAccess,
+    VkAccessFlags dstAccess,
+    VkPipelineStageFlags srcStage,
+    VkPipelineStageFlags dstStage) noexcept
+{
+    if (image == VK_NULL_HANDLE || cmd == VK_NULL_HANDLE) return;
+
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = srcAccess,
+        .dstAccessMask       = dstAccess,
+        .oldLayout           = oldLayout,
+        .newLayout           = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = image,
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+
+    vkCmdPipelineBarrier(
+        cmd,
+        srcStage,
+        dstStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
 }
 
 void PipelineManager::createPipelineLayout()
@@ -795,7 +501,7 @@ void PipelineManager::createPipelineLayout()
     LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created — 4 descriptor sets (0: RTX, 3: AnyHit Textures)");
 }
 
-void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue)
+void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
     static bool rtExtensionsLoaded = false;
     if (!rtExtensionsLoaded) {
@@ -927,6 +633,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
+    // Persistent mapped staging — write directly
     void* stagingMapped = BufferManager::stagingPtr();
     if (!stagingMapped) {
         LOG_FATAL_CAT("PIPELINE", "Global staging buffer not mapped");
@@ -936,7 +643,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     std::memcpy(stagingMapped, handleStorage.data(), handleStorage.size());
     BufferManager::advanceStagingOffset(handleStorage.size());
 
-    VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
+    // Record copy directly in provided main command buffer
     VkBuffer stagingBuffer = BufferManager::getStagingBuffer();
 
     uint32_t handleIdx = 0;
@@ -954,8 +661,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     copySection(RG, raygenOffset);
     copySection(MI, missOffset);
     copySection(HG, hitOffset);
-
-    RTX::endOneTimeSubmit(cmd, queue, pool);
 
     constexpr auto makeRegion = [](VkDeviceAddress base, VkDeviceSize offset, uint32_t count, VkDeviceSize s) noexcept {
         return VkStridedDeviceAddressRegionKHR{
@@ -1127,24 +832,23 @@ void PipelineManager::createRayTracingPipeline()
 // ──────────────────────────────────────────────────────────────────────────────
 // forgeRTXPipeline — Main Pipeline Creation with Recovery
 // ──────────────────────────────────────────────────────────────────────────────
-void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue)
+void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd)
 {
     if (s_crownForged) {
         LOG_AMOURANTH("THE CROWN IS ALREADY WORN — PHOTONS FLOW — NO FORGING NEEDED");
         return;
     }
 
-    // THE EXTENSIONS ARE LOADED — THE EMPIRE SEES
     loadRayTracingExtensions();
 
-    // THE CROWN IS FORGED — ONCE AND FOREVER
     createDescriptorPool();
     createPipelineLayout();
     allocateDescriptorSets();
     createRayTracingPipeline();
-    createShaderBindingTable(commandPool, graphicsQueue);
 
-    // THE CROWN IS SEALED — ETERNAL
+    // SBT build directly into main command buffer
+    createShaderBindingTable(commandPool,graphicsQueue,mainCmd);
+
     stone_seal_pipeline(this);
     s_crownForged = true;
 

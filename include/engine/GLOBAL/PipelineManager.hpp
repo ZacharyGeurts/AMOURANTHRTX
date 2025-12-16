@@ -31,6 +31,15 @@ inline PFN_vkCreateRayTracingPipelinesKHR       g_vkCreateRayTracingPipelinesKHR
 
 namespace RTX {
 
+struct PendingEnvMapUpload {
+        VkImage image = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        float* data = nullptr;  // owned, free after upload
+};
+extern PendingEnvMapUpload pendingEnvMapUpload_;
+
 // ──────────────────────────────────────────────────────────────────────────────
 // RTDescriptorUpdate — FULLY ALIGNED WITH updateRTDescriptorSet IN .cpp
 // ──────────────────────────────────────────────────────────────────────────────
@@ -80,11 +89,21 @@ public:
 
     void createPipelineLayout();
     void createRayTracingPipeline();
-    void createShaderBindingTable(VkCommandPool pool, VkQueue queue);
+    void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     void createDescriptorPool();
     void allocateDescriptorSets();
     void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept;
-    void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue);
+    void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd);
+
+	void transitionImage(
+        VkCommandBuffer cmd,
+        VkImage image,
+         VkImageLayout oldLayout,
+        VkImageLayout newLayout,
+        VkAccessFlags srcAccess = 0,
+        VkAccessFlags dstAccess = 0,
+        VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+     VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT) noexcept;
 
     VkShaderModule loadShader(const std::string& path) const;
 
@@ -148,9 +167,7 @@ public:
     void traceRays(VkCommandBuffer commandBuffer, uint32_t frameIndex, uint32_t width, uint32_t height, uint32_t depth = 1);
 
     [[nodiscard]] VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const;
-
     [[nodiscard]] VkPipeline getPipeline() const;
-
     [[nodiscard]] VkPipelineLayout getPipelineLayout() const;
 
     static inline bool s_crownForged = false;

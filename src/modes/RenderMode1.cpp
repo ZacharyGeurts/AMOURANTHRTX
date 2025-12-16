@@ -21,19 +21,17 @@ RenderMode1::RenderMode1(uint32_t w, uint32_t h)
 
 void RenderMode1::renderFrame(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime)
 {
-    // Always sacred pink — no envmap, no ray tracing, no compromise
     VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    // Current swapchain image
     VkImage swapImage = StoneKey::stone_images()[frameIndex % StoneKey::stone_image_count()];
 
-    // Transition to GENERAL for clear
+    // CORRECT: oldLayout = PRESENT_SRC_KHR (what it actually is after previous present)
     VkImageMemoryBarrier barrier{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = 0,
         .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+        .oldLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,  // ← FIXED
         .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

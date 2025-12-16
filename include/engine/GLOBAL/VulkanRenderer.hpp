@@ -114,6 +114,7 @@ public:
     bool swapchainRecreated_ = false;
 
     [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
+	[[nodiscard]] VkCommandBuffer getCurrentCommandBuffer() const noexcept { const uint32_t slot = currentFrame_.load() % 2; return commandBuffers_[slot]; }
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
     [[nodiscard]] uint64_t  frameNumber()       const noexcept { return frameNumber_; }
     [[nodiscard]] float     currentExposure()   const noexcept { return currentExposure_; }
@@ -194,6 +195,9 @@ public:
     std::atomic<bool> swapchainOutOfDate_ = false;
     void clearResizeFlag() noexcept;
     static inline std::atomic<bool> g_forcePink{false};
+
+	bool rtOutputNeedsTransition_ = false;
+    bool depthNeedsTransition_ = false;
 
     float totalTime_ = 0.0f;
 
@@ -297,6 +301,13 @@ public:
     RTX::Handle<VkImageView>    envMapImageView_;
     RTX::Handle<VkSampler>      envMapSampler_;
 	RTX::Handle<VkDescriptorPool> envMapDescriptorPool_;
+
+	bool     envMapNeedsUpload_ = false;
+    uint32_t envMapUploadWidth_ = 0;
+    uint32_t envMapUploadHeight_ = 0;
+
+	bool accumulationNeedsTransition_ = false;
+	bool nexusScoreNeedsInit_ = false;
 
     std::vector<uint64_t> rtOutputHandles_;
 

@@ -599,46 +599,17 @@ static void phase6_sceneAndAccelerationStructures()
 }
 
 // =============================================================================
-// PHASE 7 — FORGE THE RTX CROWN — BLOCKING, UNBREAKABLE, ETERNAL
+// PHASE 7 — FORGE THE ONE TRUE RENDERER — CROWN ETERNAL — EMPIRE SEALED
 // =============================================================================
-static void phase7_forgeTheRTX()
-{
-    static bool crownWorn = false;
-    if (crownWorn) return;
-
-    auto& pipe = RTX::pipeline();
-
-    pipe.forgeRTXPipeline(RTX::g_ctx().commandPool_, stone_graphics_queue());
-
-    // Load HDR envmap
-    pipe.loadShader("assets/textures/envmap.hdr");
-
-    // CRITICAL FIX: Create the full-screen envmap display pipeline
-    // Use the renderer instance (not static call)
-    if (g_renderer_ptr) {
-        g_renderer_ptr->createEnvMapDisplayPipeline();
-    } else {
-        LOG_WARNING_CAT("RENDERER", "Renderer not yet created — skipping envmap display pipeline");
-    }
-
-    StoneKey::stone_seal_pipeline(&pipe);
-    crownWorn = true;
-
-    LOG_AMOURANTH("MIA AWAKENS — THE CROWN IS WORN — HDR SKY READY — PHOTONS ETERNAL");
-}
-
-// =============================================================================
-// PHASE 7.5 — FORGE THE ONE TRUE RENDERER — CROWN ETERNAL — EMPIRE SEALED
-// =============================================================================
-static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
+static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept
 {
     LOG_MAIN(
         "\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                    PHASE 7.5 — FORGING THE ONE TRUE RENDERER                 ║\n"
+        "║                    PHASE 7 — FORGING THE ONE TRUE RENDERER                 ║\n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
-    LOG_ATTEMPT_CAT("RENDERER", "PHASE 7.5 — Forging the one true renderer...");
+    LOG_ATTEMPT_CAT("RENDERER", "PHASE 7 — Forging the one true renderer...");
 
     auto renderer = std::make_unique<VulkanRenderer>(
         stone_width(),
@@ -669,10 +640,39 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
 
     LOG_MAIN("\n"
         "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        "║  PHASE 7.5 — COMPLETE — RENDERER FORGED — GRACE SEALED @ {} \n"
+        "║  PHASE 7 — COMPLETE — RENDERER FORGED — GRACE SEALED @ {} \n"
         "╚══════════════════════════════════════════════════════════════════════════════╝\n", stone_device()); // GRACE
 
     return renderer;
+}
+
+// =============================================================================
+// PHASE 8 — FORGE THE RTX CROWN — BLOCKING, UNBREAKABLE, ETERNAL
+// =============================================================================
+static void phase8_forgeTheRTX()
+{
+    static bool crownWorn = false;
+    if (crownWorn) {
+        LOG_AMOURANTH("THE CROWN IS ALREADY WORN — PHOTONS FLOW — NO FORGING NEEDED");
+        return;
+    }
+
+    auto& pipe = RTX::pipeline();
+
+    // Forge the ray tracing pipeline — pass command pool, queue, and current main cmd buffer
+    VkCommandBuffer mainCmd = g_rtx().getCurrentCommandBuffer();
+    pipe.forgeRTXPipeline(RTX::g_ctx().commandPool(), stone_graphics_queue(), mainCmd);
+
+    // Load HDR environment map
+    pipe.loadShader("assets/textures/envmap.hdr");
+
+    // Create full-screen envmap display pipeline (fallback mode)
+    g_rtx().createEnvMapDisplayPipeline();
+
+    StoneKey::stone_seal_pipeline(&pipe);
+    crownWorn = true;
+
+    LOG_AMOURANTH("MIA AWAKENS — THE CROWN IS WORN — HDR SKY READY — PHOTONS ETERNAL");
 }
 
 // =============================================================================
@@ -703,8 +703,9 @@ static std::unique_ptr<VulkanRenderer> phase7_5_Renderer() noexcept
         vkDestroyDevice(device, nullptr);
     }
 
-    if (RTX::las().hasBLAS()) RTX::reset_blas();
-    if (RTX::las().hasTLAS()) RTX::reset_tlas();
+    // Whisper mode — no BLAS, no reset_blas/reset_tlas needed
+    // LAS only has TLAS — reset it directly
+    RTX::las().reset();
 
     g_mesh.reset();
     ctx.blueNoiseView_.reset();
@@ -731,12 +732,16 @@ void Application::run() noexcept
     auto lastTime       = std::chrono::steady_clock::now();
     float titleTimer    = 0.0f;
     constexpr float TITLE_UPDATE_INTERVAL = 0.6f;
-    int dotPhase        = 0;
+    int   dotPhase      = 0;
     constexpr const char* dots[] = { ".", "..", "...", "...." };
 
-    int   frameCount = 0;
-    float fpsTimer   = 0.0f;
-    float currentFPS = 0.0f;
+    int   frameCount         = 0;
+    float fpsTimer           = 0.0f;
+    float displayedFPS       = 0.0f;
+    float gpuFPS             = 0.0f;
+    float gpuFrameTimeMs     = 0.0f;
+
+    bool     queryValid = false;
 
     LOG_AMOURANTH("APPLICATION::run() — THE EMPIRE AWAKENS — THE CURRENT BEGINS");
 
@@ -744,7 +749,6 @@ void Application::run() noexcept
     {
         const auto frameStart = std::chrono::steady_clock::now();
         g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
-
         lastTime = frameStart;
 
         // INPUT
@@ -763,7 +767,6 @@ void Application::run() noexcept
                                           float(width_) / std::max(height_, 1),
                                           0.1f, 1000.0f);
 
-                // FIXED: Call onWindowResize on size change to trigger recreation
                 if (renderer_) {
                     renderer_->onWindowResize(static_cast<uint32_t>(winW), static_cast<uint32_t>(winH));
                 }
@@ -803,7 +806,6 @@ void Application::run() noexcept
         if (renderer_ && renderer_->isAlive() && swapchainValid)
         {
             renderer_->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
-            renderer_->renderFrame(CAM, g_deltaTime);
         }
         else
         {
@@ -846,40 +848,86 @@ void Application::run() noexcept
                 }
             }();
 
-            char fpsStr[16];
-            if (!std::isfinite(currentFPS) || currentFPS < 0)
+            char fpsStr[32];
+            char overheadStr[32];
+
+            // Displayed FPS (capped by present)
+            if (!std::isfinite(displayedFPS) || displayedFPS < 0)
                 strcpy(fpsStr, "INF");
-            else if (currentFPS >= 1e7f)
-                strcpy(fpsStr, "10M+");
-            else if (currentFPS >= 1e6f)
-                snprintf(fpsStr, sizeof(fpsStr), "%.1fM", currentFPS * 1e-6f);
-            else if (currentFPS >= 1e4f)
-                snprintf(fpsStr, sizeof(fpsStr), "%.0fK", currentFPS * 1e-3f);
-            else if (currentFPS >= 1e3f)
-                snprintf(fpsStr, sizeof(fpsStr), "%.1fK", currentFPS * 1e-3f);
+            else if (displayedFPS >= 1e6f)
+                snprintf(fpsStr, sizeof(fpsStr), "%.1fM", displayedFPS * 1e-6f);
+            else if (displayedFPS >= 1e3f)
+                snprintf(fpsStr, sizeof(fpsStr), "%.0fK", displayedFPS * 1e-3f);
             else
-                snprintf(fpsStr, sizeof(fpsStr), "%.1f", currentFPS);
+                snprintf(fpsStr, sizeof(fpsStr), "%.1f", displayedFPS);
+
+            // Uncapped GPU FPS (overhead)
+            if (queryValid && gpuFrameTimeMs > 0.0f) {
+                gpuFPS = 1000.0f / gpuFrameTimeMs;
+                if (gpuFPS >= 1e6f)
+                    snprintf(overheadStr, sizeof(overheadStr), "(GPU %.1fM)", gpuFPS * 1e-6f);
+                else if (gpuFPS >= 1e3f)
+                    snprintf(overheadStr, sizeof(overheadStr), "(GPU %.0fK)", gpuFPS * 1e-3f);
+                else
+                    snprintf(overheadStr, sizeof(overheadStr), "(GPU %.0f)", gpuFPS);
+            } else {
+                strcpy(overheadStr, "(GPU ---)");
+            }
 
             char title[256];
             snprintf(title, sizeof(title),
-                "AMOURANTH RTX | %s FPS | %dx%d | MODE: %s%s",
-                fpsStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
+                     "AMOURANTH RTX | %s FPS %s | %dx%d | MODE: %s%s",
+                     fpsStr, overheadStr, stone_width(), stone_height(), modeName, dots[dotPhase]);
 
             SDL_SetWindowTitle(stone_window(), title);
         }
 
-        // FPS COUNTER
+        // Displayed FPS counter (capped)
         ++frameCount;
         fpsTimer += g_deltaTime;
         if (fpsTimer >= 1.0f)
         {
-            currentFPS = frameCount / std::max(fpsTimer, 0.001f);
-            LOG_TRACE_CAT("FPS", "FPS: {}", currentFPS);
+            displayedFPS = frameCount / std::max(fpsTimer, 0.001f);
+            LOG_TRACE_CAT("FPS", "Displayed FPS: {:.1f}", displayedFPS);
             frameCount = 0;
             fpsTimer   = 0.0f;
         }
 
-        // FRAME PACING
+        // GPU timestamp query results — uncapped overhead
+        if (renderer_ && renderer_->isAlive())
+        {
+            uint64_t timestamps[2] = {};
+            const uint32_t prevQueryIndex = (renderer_->frameNumber() - 1) % 2;
+            VkResult result = vkGetQueryPoolResults(
+                stone_device(),
+                renderer_->timestampQueryPool_,
+                prevQueryIndex * 2,
+                2,
+                sizeof(timestamps),
+                timestamps,
+                sizeof(uint64_t),
+                VK_QUERY_RESULT_64_BIT
+            );
+
+            if (result == VK_SUCCESS)
+            {
+                uint64_t start = timestamps[0];
+                uint64_t end   = timestamps[1];
+                gpuFrameTimeMs = (end - start) * renderer_->timestampPeriod_;
+                queryValid = true;
+            }
+            else if (result == VK_NOT_READY)
+            {
+                queryValid = false;
+            }
+            else
+            {
+                queryValid = false;
+                gpuFrameTimeMs = 0.0f;
+            }
+        }
+
+        // FRAME PACING (optional)
         if (Options::Performance::ENABLE_FRAME_PREDICTION && swapchainValid)
         {
             const auto elapsed = std::chrono::steady_clock::now() - frameStart;
@@ -904,9 +952,9 @@ int main(int, char**)
     phase3_sacrificialSplash();
     phase4_merchantShip();
     phase6_sceneAndAccelerationStructures();
-    phase7_forgeTheRTX();
+    auto renderer = phase7_Renderer();
+	phase8_forgeTheRTX();
 
-    auto renderer = phase7_5_Renderer();
     stone_seal_final();
 
     g_app_ptr = std::make_unique<Application>("AMOURANTH RTX vTURBO", 3096, 2048);
