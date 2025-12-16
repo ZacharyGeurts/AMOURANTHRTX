@@ -97,6 +97,7 @@ public:
 
     void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
     void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
+	void recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept;
 
     void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
     void setRenderMode(int mode) noexcept;

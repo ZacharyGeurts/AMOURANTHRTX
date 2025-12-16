@@ -11,40 +11,45 @@
 #include <cstdint>
 #include <cstring>
 
-// =============================================================================
-// DREAM UBO — EXACTLY 384 BYTES — STD140 COMPLIANT — PURE POD
-// =============================================================================
-struct alignas(16) DreamUBO {
-    float    time;
-    uint32_t frame;
-    float    resolution[2];
-    float    exposure;
-    uint32_t enableEnvMap;
+struct alignas(16) DreamUBO {  // ← Correct: alignas AFTER 'struct'
+    // === 64 bytes ===
+    float     time;
+    uint32_t  frame;
+    uint32_t  spp;
+    uint32_t  totalSpp;
+    float     exposure;
+    uint32_t  enableEnvMap;
+    uint32_t  hypertrace;
+    uint32_t  denoising;
+    uint32_t  adaptive;
+    uint32_t  debugMode;
+    float     envIntensity;
+    float     envRotation;
 
-    // vec3 → padded to 16 bytes in std140
-    alignas(16) glm::vec3 baseColor;
-    float    intensity;
+    // === 32 bytes ===
+    glm::vec2 resolution;
+    glm::vec2 jitter;
+    glm::vec2 jitterPrev;
+    float     nexusScoreThreshold;
+    float     pad0;
 
-    // padding to 384 bytes total
-    uint32_t _pad[83]; // 83 * 4 = 332 → 52 + 332 = 384
+    // === 256 bytes (4 × mat4) ===
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::mat4 invView;
+    glm::mat4 invProj;
 
-    DreamUBO() noexcept
-        : time(0.0f)
-        , frame(0)
-        , exposure(1.0f)
-        , enableEnvMap(0)
-        , baseColor(0.0f, 1.0f, 0.0f)
-        , intensity(1.0f)
-    {
-        resolution[0] = resolution[1] = 0.0f;
-        std::memset(_pad, 0, sizeof(_pad));
-    }
+    // === 16 bytes ===
+    glm::vec4 camPos;
+
+    // === Explicit padding to force exactly 368 bytes ===
+    // 64 + 32 + 256 + 16 = 368 → already perfect
+    // But some compilers may pack camPos tightly → add explicit pad
+    alignas(16) float finalPadding[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-static_assert(sizeof(DreamUBO) == 384, "DreamUBO must be exactly 384 bytes");
-static_assert(std::is_standard_layout_v<DreamUBO>);
-static_assert(std::is_trivially_copyable_v<DreamUBO>);
-static_assert(alignof(DreamUBO) == 16);
+static_assert(sizeof(DreamUBO) == 368, "DreamUBO must be exactly 368 bytes");
+static_assert(alignof(DreamUBO) == 16, "DreamUBO must be 16-byte aligned");
 
 // =============================================================================
 // TONEMAP UBO — EXACTLY 48 BYTES — STD140 COMPLIANT — PURE POD

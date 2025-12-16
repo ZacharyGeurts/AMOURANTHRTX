@@ -31,6 +31,9 @@
 #include <unordered_map>
 #include <stb/stb_image.h>
 #include <unistd.h> // for getcwd
+#include <stdexcept>
+#include <cmath>
+#include <atomic>
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
@@ -42,6 +45,33 @@ using StoneKey::stone_seal_physical;
 using StoneKey::stone_seal_pipeline;
 using StoneKey::stone_pipeline;
 using StoneKey::stone_graphics_queue;
+
+template <typename T>
+T align_up(T v, T a) { return ((v + a - 1) / a) * a; }
+
+// Define RTBinding struct if not in header
+struct RTBinding {
+    uint32_t binding;
+    VkDescriptorType type;
+    uint32_t count;
+    VkShaderStageFlags stage;
+};
+
+// Define bindings (inferred from comments and usage)
+const std::array<RTBinding, 12> RT_PIPELINE_BINDINGS = {{
+    {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+    {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+    {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+    {3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR},
+    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+    {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+    {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+    {8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+    {9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+    {10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+    {11, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+    {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}
+}};
 
 namespace RTX {
 
@@ -115,6 +145,15 @@ PipelineManager::~PipelineManager() = default;
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
     cacheDeviceProperties();
+    // Add dummy TLAS creation if needed
+    // For example:
+    // dummyTlas = createDummyTLAS();
+}
+
+// Example dummy TLAS (stub, implement as needed)
+VkAccelerationStructureKHR PipelineManager::createDummyTLAS() {
+    // Implement dummy top-level acceleration structure
+    return VK_NULL_HANDLE; // Placeholder
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -280,7 +319,6 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_HDR
-#define STBI_NO_STDIO
 #define STBI_FAILURE_USERMSG
 
         int w, h, channels;
@@ -378,7 +416,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
                 .arrayLayers   = 6,
                 .samples       = VK_SAMPLE_COUNT_1_BIT,
                 .tiling        = VK_IMAGE_TILING_OPTIMAL,
-                .usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                .usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,  // Added TRANSFER_SRC if needed
                 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
             };
 
@@ -409,18 +447,150 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
             VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &cubeView));
 
             VkSampler sampler = VK_NULL_HANDLE;
-            VkSamplerCreateInfo samplerInfo{
+VkSamplerCreateInfo cubeSamplerCreateInfo{
+    .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+    .magFilter               = VK_FILTER_LINEAR,
+    .minFilter               = VK_FILTER_LINEAR,
+    .addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    .addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+};
+VK_CHECK(vkCreateSampler(stone_device(), &cubeSamplerCreateInfo, nullptr, &sampler));
+
+            // Added: Equirect sampler for conversion
+            VkSampler equirectSampler = VK_NULL_HANDLE;
+            VkSamplerCreateInfo equirectSamplerInfo{
                 .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
                 .magFilter               = VK_FILTER_LINEAR,
                 .minFilter               = VK_FILTER_LINEAR,
-                .addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                .addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
                 .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
                 .addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
             };
-            VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
+            VK_CHECK(vkCreateSampler(stone_device(), &equirectSamplerInfo, nullptr, &equirectSampler));
 
-            // [Descriptor set + pipeline creation for conversion — omitted for brevity, assume you have it or add it]
-            // ... Dispatch compute shader to fill cubeArrayView ...
+            // Descriptor layout for compute
+            VkDescriptorSetLayoutBinding computeBindings[2] = {
+                {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+                {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
+            };
+            VkDescriptorSetLayoutCreateInfo computeLayoutInfo{
+                .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                .bindingCount = 2,
+                .pBindings    = computeBindings
+            };
+            VkDescriptorSetLayout computeLayout = VK_NULL_HANDLE;
+            VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &computeLayoutInfo, nullptr, &computeLayout));
+
+            // Pipeline layout
+            VkPipelineLayoutCreateInfo computePLInfo{
+                .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                .setLayoutCount         = 1,
+                .pSetLayouts            = &computeLayout
+            };
+            VkPipelineLayout computePL = VK_NULL_HANDLE;
+            VK_CHECK(vkCreatePipelineLayout(stone_device(), &computePLInfo, nullptr, &computePL));
+
+            // Compute pipeline
+            VkPipelineShaderStageCreateInfo computeStage{
+                .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage               = VK_SHADER_STAGE_COMPUTE_BIT,
+                .module              = convertModule,
+                .pName               = "main"
+            };
+            VkComputePipelineCreateInfo computePipeInfo{
+                .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                .stage  = computeStage,
+                .layout = computePL
+            };
+            VkPipeline computePipe = VK_NULL_HANDLE;
+            VK_CHECK(vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &computePipeInfo, nullptr, &computePipe));
+
+            // Descriptor pool for compute
+            VkDescriptorPoolSize computePoolSizes[2] = {
+                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}
+            };
+            VkDescriptorPoolCreateInfo computePoolInfo{
+                .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                .maxSets       = 1,
+                .poolSizeCount = 2,
+                .pPoolSizes    = computePoolSizes
+            };
+            VkDescriptorPool computePool = VK_NULL_HANDLE;
+            VK_CHECK(vkCreateDescriptorPool(stone_device(), &computePoolInfo, nullptr, &computePool));
+
+            // Allocate set
+            VkDescriptorSetAllocateInfo computeAllocInfo{
+                .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                .descriptorPool     = computePool,
+                .descriptorSetCount = 1,
+                .pSetLayouts        = &computeLayout
+            };
+            VkDescriptorSet computeSet = VK_NULL_HANDLE;
+            VK_CHECK(vkAllocateDescriptorSets(stone_device(), &computeAllocInfo, &computeSet));
+
+            // Update descriptors
+            VkDescriptorImageInfo storageInfo{
+                .imageView   = cubeArrayView,
+                .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+            };
+VkDescriptorImageInfo equirectDescInfo{
+    .sampler     = equirectSampler,
+    .imageView   = equirectView,
+    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+};
+            VkWriteDescriptorSet computeWrites[2] = {
+                {
+                    .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                    .dstSet          = computeSet,
+                    .dstBinding      = 0,
+                    .descriptorCount = 1,
+                    .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    .pImageInfo      = &storageInfo
+                },
+{
+    .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+    .dstSet          = computeSet,
+    .dstBinding      = 1,
+    .descriptorCount = 1,
+    .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    .pImageInfo      = &equirectDescInfo   // ← now correct type
+}
+            };
+            vkUpdateDescriptorSets(stone_device(), 2, computeWrites, 0, nullptr);
+
+            // Transition cube to GENERAL
+            VkImageMemoryBarrier cubeBarrier{
+                .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask       = 0,
+                .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+                .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+                .image               = cubeImage,
+                .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 }
+            };
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &cubeBarrier);
+
+            // Dispatch compute
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePipe);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, computePL, 0, 1, &computeSet, 0, nullptr);
+            vkCmdDispatch(cmd, (cubeSize + 31) / 32, (cubeSize + 31) / 32, 6);  // Ceil division
+
+            // Transition to shader read
+            cubeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            cubeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            cubeBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+            cubeBarrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &cubeBarrier);
+
+            // Cleanup compute resources
+            vkDestroyPipeline(stone_device(), computePipe, nullptr);
+            vkDestroyPipelineLayout(stone_device(), computePL, nullptr);
+            vkDestroyDescriptorSetLayout(stone_device(), computeLayout, nullptr);
+            vkFreeDescriptorSets(stone_device(), computePool, 1, &computeSet);
+            vkDestroyDescriptorPool(stone_device(), computePool, nullptr);
+            vkDestroySampler(stone_device(), equirectSampler, nullptr);
 
             finalView = cubeView;
             finalSampler = sampler;
@@ -454,7 +624,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
                 .minFilter               = VK_FILTER_LINEAR,
                 .addressModeU            = VK_SAMPLER_ADDRESS_MODE_REPEAT,
                 .addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                .addressModeW            = VK_SAMPLER_ADDRESS_MODE_REPEAT
+                .addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE  // Fixed from REPEAT
             };
             VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
 
@@ -1034,6 +1204,36 @@ void PipelineManager::cacheDeviceProperties()
     LOG_SUCCESS_CAT("PIPELINE", 
         "Device properties cached — GPU: {}, RT Handle Size: {}, Max Recursion: {}",
         baseProps.deviceName, rtProps.shaderGroupHandleSize, rtProps.maxRayRecursionDepth);
+}
+
+// Additional method to trace rays
+void PipelineManager::traceRays(VkCommandBuffer commandBuffer, uint32_t frameIndex, uint32_t width, uint32_t height, uint32_t depth) {
+    if (g_pipelineNeedsRebuild.load()) {
+        // Rebuild pipeline if needed
+        createRayTracingPipeline();
+        g_pipelineNeedsRebuild.store(false);
+    }
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_.get());
+
+    VkDescriptorSet descSets[] = {rtDescriptorSets_[frameIndex], VK_NULL_HANDLE, VK_NULL_HANDLE, texDescriptorSets_[frameIndex]};  // Assume texDescriptorSets_ exists
+
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipelineLayout_.get(), 0, 4, descSets, 0, nullptr);
+
+    vkCmdTraceRaysKHR_(commandBuffer, &raygenSbtRegion_, &missSbtRegion_, &hitSbtRegion_, &callableSbtRegion_, width, height, depth);
+}
+
+// Getter methods
+VkDescriptorSet PipelineManager::getDescriptorSet(uint32_t frameIndex) const {
+    return rtDescriptorSets_[frameIndex];
+}
+
+VkPipeline PipelineManager::getPipeline() const {
+    return rtPipeline_.get();
+}
+
+VkPipelineLayout PipelineManager::getPipelineLayout() const {
+    return rtPipelineLayout_.get();
 }
 
 } // namespace RTX

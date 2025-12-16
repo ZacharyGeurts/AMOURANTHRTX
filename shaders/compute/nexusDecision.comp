@@ -1,54 +1,38 @@
-// shaders/compute/nexusDecision.comp
 #version 460
-#extension GL_KHR_shader_subgroup_basic : require
-#extension GL_ARB_gpu_shader_int64 : require
+#extension GL_EXT_scalar_block_layout : require
 
-#include "../StoneKey.glsl"
+layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D imgCurrent;   // Current noisy frame (RT output)
+layout(set = 0, binding = 1, rgba16f) uniform readonly image2D imgHistory;   // Previous denoised/accum frame
+layout(set = 0, binding = 2, rg16f)   uniform writeonly image2D imgScore;     // Output: R = variance, G = luminance
 
-layout(set = 0, binding = 2) uniform Stats {
-    uint   hitCount;
-    uint   totalRays;
-    float  variance;
-    float  entropy;
-    float  gradMag;
-    float  _pad[3];
-} stats;
-
-layout(set = 0, binding = 6, rgba32f) writeonly uniform image2D nexusScore;
-
-layout(push_constant, std430) uniform Push {
-    float w_variance;
-    float w_entropy;
-    float w_hitrates;
-    float w_gradient;
-    float w_resonance;
-    uint  targetFPS;
+layout(push_constant) uniform Push {
+    float varianceClip;     // Clip fireflies (e.g., 10.0)
+    float luminanceWeight;  // Boost score in dark areas (e.g., 3.0)
+    float minVariance;      // Floor to prevent zero sampling (e.g., 0.001)
 } pc;
 
-void main()
-{
-    if (gl_GlobalInvocationID.x != 0 || gl_GlobalInvocationID.y != 0) return;
+float luminance(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
 
-    float hitRate = stats.totalRays > 0 ? float(stats.hitCount) / float(stats.totalRays) : 0.0f;
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    if (pix.x >= imageSize(imgCurrent).x || pix.y >= imageSize(imgCurrent).y) return;
 
-    float w_var = pc.w_variance;
-    float w_ent = pc.w_entropy;
-    float w_hit = pc.w_hitrates;
-    float w_grad = pc.w_gradient;
+    vec3 curr = imageLoad(imgCurrent, pix).rgb;
+    vec3 hist = imageLoad(imgHistory, pix).rgb;
 
-    if (pc.targetFPS >= 120) {
-        w_var *= 0.7f;  w_ent *= 0.7f;  w_hit *= 1.35f;  w_grad *= 1.15f;
-    } else {
-        w_var *= 1.25f; w_ent *= 1.25f; w_hit *= 0.85f; w_grad *= 0.90f;
-    }
+    vec3 diff = curr - hist;
+    float variance = dot(diff, diff);
 
-    float score = clamp(w_var * stats.variance +
-                        w_ent * stats.entropy +
-                        w_hit * hitRate +
-                        w_grad * stats.gradMag, 0.0f, 1.0f);
+    variance = min(variance, pc.varianceClip);
 
-    imageStore(nexusScore, ivec2(0,0),
-               vec4(score, pc.w_resonance, float(pc.targetFPS)/60.0f, 0.0f));
+    float lum = luminance(hist);
+    float darkBoost = 1.0 + (1.0 - smoothstep(0.0, 0.2, lum)) * pc.luminanceWeight;
+
+    variance = max(variance * darkBoost, pc.minVariance);
+
+    imageStore(imgScore, pix, vec4(variance, lum, 0.0, 0.0));
 }

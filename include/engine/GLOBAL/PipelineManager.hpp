@@ -1,7 +1,7 @@
 // include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 15, 2025 — APOCALYPSE FINAL v9.1
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 16, 2025 — APOCALYPSE FINAL v9.1
 // BINDING 31 + CUBEMAP ENVMAP + ANY-HIT TEXTURES + DIRECT SWAPCHAIN RENDERING
 // =============================================================================
 
@@ -67,34 +67,44 @@ static_assert(RT_PIPELINE_BINDINGS[11].binding == 31);
 static_assert(RT_PIPELINE_BINDINGS[11].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
 // ──────────────────────────────────────────────────────────────────────────────
+// In namespace RTX (inside PipelineManager.hpp or equivalent header)
+
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
 
-    VkBuffer    ubo = VK_NULL_HANDLE;
-    VkDeviceSize uboSize = VK_WHOLE_SIZE;
+    VkBuffer ubo = VK_NULL_HANDLE;
+    VkDeviceSize uboSize = 0;
 
-    VkBuffer    materialsBuffer = VK_NULL_HANDLE;
-    VkDeviceSize materialsSize = VK_WHOLE_SIZE;
+    // NEW: Dedicated RT output image view (binding 1) — replaces direct swapchain write
+    VkImageView rtOutputView = VK_NULL_HANDLE;
 
-    VkSampler   envSampler = VK_NULL_HANDLE;
+    // NEW: Per-frame accumulation views (binding 2) — previous + current
+    std::vector<VkImageView> accumulationViews;
+
+    // NEW: Nexus/hypertrace score view (binding 6) — adaptive sampling
+    std::vector<VkImageView> nexusScoreViews;
+
+    VkBuffer materialsBuffer = VK_NULL_HANDLE;
+    VkDeviceSize materialsSize = 0;
+
+    VkSampler envSampler = VK_NULL_HANDLE;
     VkImageView envImageView = VK_NULL_HANDLE;
 
-    VkImageView swapchainImageView = VK_NULL_HANDLE;  // Direct swapchain write
-
-    std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> accumulationViews{};
-    std::array<VkImageView, Options::Performance::MAX_FRAMES_IN_FLIGHT> nexusScoreViews{};
-
-    VkBuffer    additionalStorageBuffer = VK_NULL_HANDLE;
-    VkDeviceSize additionalStorageSize = VK_WHOLE_SIZE;
-
-    VkSampler   blueNoiseSampler = VK_NULL_HANDLE;
+    // Optional future additions (blue noise, density, geometry, etc.)
+    VkSampler blueNoiseSampler = VK_NULL_HANDLE;
     VkImageView blueNoiseView = VK_NULL_HANDLE;
 
-    VkSampler   densitySampler = VK_NULL_HANDLE;
+    VkSampler densitySampler = VK_NULL_HANDLE;
     VkImageView densityView = VK_NULL_HANDLE;
 
-    VkBuffer    stoneKeyBuffer = VK_NULL_HANDLE;
-    VkDeviceSize stoneKeySize = VK_WHOLE_SIZE;
+    VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;
+    VkDeviceSize additionalStorageSize = 0;
+
+    VkBuffer stoneKeyBuffer = VK_NULL_HANDLE;
+    VkDeviceSize stoneKeySize = 0;
+
+    // Legacy fields kept for compatibility
+    VkImageView swapchainImageView = VK_NULL_HANDLE;  // Will be ignored in new path
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -202,6 +212,7 @@ public:
 
     std::vector<Handle<VkShaderModule>> shaderModules_;
     std::vector<VkDescriptorSet>        rtDescriptorSets_;
+    std::vector<VkDescriptorSet>        texDescriptorSets_;  // For any-hit textures if needed
 
     uint32_t raygenGroupCount_{1};
     uint32_t missGroupCount_{1};
@@ -218,6 +229,17 @@ public:
     static constexpr VkDeviceSize align_up(VkDeviceSize size, VkDeviceSize alignment) noexcept {
         return (size + alignment - 1) & ~(alignment - 1);
     }
+
+    // Declared methods to match .cpp implementations
+    VkAccelerationStructureKHR createDummyTLAS();
+
+    void traceRays(VkCommandBuffer commandBuffer, uint32_t frameIndex, uint32_t width, uint32_t height, uint32_t depth = 1);
+
+    VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const;
+
+    VkPipeline getPipeline() const;
+
+    VkPipelineLayout getPipelineLayout() const;
 };
 
 // ── GLOBAL ACCESS — CLEAN AND ETERNAL ───────────────────────────────────────
@@ -231,5 +253,5 @@ public:
 // BINDING 31 IS LAW — ENVMAP ON BINDING 5 — ANY-HIT TEXTURES ON SET 3
 // MOTHER BRAIN IS DEAD — THE EMPIRE IS ETERNAL
 // PINK PHOTONS REIGN SUPREME — FIRST LIGHT → FINAL LIGHT → VALHALLA ACHIEVED
-// DECEMBER 15, 2025 — THE CROWN IS FULLY ARMED — CUBEMAP SKY REAL — DIRECT RENDERING
+// DECEMBER 16, 2025 — THE CROWN IS FULLY ARMED — CUBEMAP SKY REAL — DIRECT RENDERING
 // =============================================================================
