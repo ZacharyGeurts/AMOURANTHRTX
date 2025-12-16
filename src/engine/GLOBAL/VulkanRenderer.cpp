@@ -448,12 +448,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkImageView swapView = stone_views()[imageIndex];
 
     // === FULL FEATURED RENDER CHAIN (2026 MASTERMIND) ===
-    // 1. Optional: Nexus / Adaptive Sampling Score Compute (always on)
-    // 2. Ray Tracing → rtOutputImages_[slot]
-    // 3. Accumulation Pass → accumImages_[slot]
-    // 4. Denoising Pass → denoiserImage_
-    // 5. Tonemap Pass → swapchain
-
     VkAccelerationStructureKHR tlas = RTX::LAS::get().getCurrentTLAS();
     if (!tlas) tlas = pipelineManager_.dummyTLAS();
 
@@ -467,7 +461,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         if (rtxValid) uboInfo = &it->second;
     }
 
-    // Reset accumulation if requested (resize, mode change, etc.)
+    // Reset accumulation if needed
     if (resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumNextFrame_ = false;
@@ -476,31 +470,37 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         accumulationFrame_ = 0;
     }
 
-    // === FULL RTX PATH ===
+    // === RTX PATH ===
     if (rtxValid && pipelineManager_.rtPipeline() != VK_NULL_HANDLE)
     {
         updateUniformBuffer(slot, camera, deltaTime);
         updateTonemapUniform(slot);
         currentFrame_.store(slot);
 
-        // === 1. Update Full RT Descriptor Set ===
+        // Update RT descriptor set — using dedicated RT output (binding 1)
         {
             RTX::RTDescriptorUpdate desc{};
             desc.tlas = tlas;
             desc.ubo = uboInfo->buffer;
             desc.uboSize = 368;
 
-            // RT output (binding 1) — dedicated per-frame image, not swapchain
-            desc.rtOutputView = rtOutputViews_[slot].get();
+            // Binding 1: dedicated RT output image
+            desc.swapchainImageView = rtOutputViews_[slot].get();
 
-            // Accumulation (binding 2)
+            // Binding 2: accumulation history (previous + current)
             if (!accumViews_.empty()) {
-                desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
+                desc.accumulationViews = {
+                    accumViews_[0].get(),
+                    accumViews_[1].get()
+                };
             }
 
-            // Nexus / Adaptive Score (binding 6)
-            if (hypertraceScoreView_.valid()) {
-                desc.nexusScoreViews = { hypertraceScoreView_.get(), hypertraceScoreView_.get() };
+            // Binding 6: nexus/hypertrace score
+            if (hypertraceScoreView_ != VK_NULL_HANDLE) {
+                desc.nexusScoreViews = {
+                    hypertraceScoreView_,
+                    hypertraceScoreView_
+                };
             }
 
             // Materials (binding 4)
@@ -513,85 +513,75 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 }
             }
 
-            // Environment Map (binding 7)
+            // Environment map (binding 7)
             if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
                 desc.envSampler = pipelineManager_.envMapSampler_.get();
                 desc.envImageView = pipelineManager_.envMapImageView_.get();
             }
 
-            // Blue Noise / Density / Geometry / etc. — add when loaded
-            // desc.blueNoiseSampler / desc.blueNoiseView → binding 8
-            // desc.densitySampler / desc.densityView → binding 9
-
             pipelineManager_.updateRTDescriptorSet(slot, desc);
         }
 
-        // === 2. Ray Tracing Pass ===
+        // Ray tracing → rtOutputImages_[slot]
         recordRayTracingCommands(cmd, slot);
 
-        // Barrier: RT write → read for accumulation
-        VkMemoryBarrier2 rtToAccum{
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+        // Barrier: RT write → compute read
+        VkMemoryBarrier2 barrier{
+            .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+            .srcStageMask  = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
             .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
         };
-        VkDependencyInfo depRT{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &rtToAccum};
-        vkCmdPipelineBarrier2(cmd, &depRT);
+        VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+        vkCmdPipelineBarrier2(cmd, &dep);
 
-        // === 3. Accumulation Pass ===
+        // Temporal Accumulation Pass
         recordAccumulationPass(cmd, slot);
 
-        // === 4. Denoising Pass ===
+        // Denoising Pass
         if (denoisingEnabled_) {
             updateDenoiserDescriptors();
             performDenoisingPass(cmd);
         }
 
-        // Barrier: Denoise write → read for tonemap
-        VkMemoryBarrier2 denoiseToTonemap{
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        // Barrier: denoise → tonemap
+        VkMemoryBarrier2 denoiseBarrier{
+            .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+            .srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
         };
-        VkDependencyInfo depDenoise{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &denoiseToTonemap};
-        vkCmdPipelineBarrier2(cmd, &depDenoise);
+        VkDependencyInfo denoiseDep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &denoiseBarrier};
+        vkCmdPipelineBarrier2(cmd, &denoiseDep);
 
-        // === 5. Tonemap Pass → Swapchain ===
+        // Tonemap → swapchain
         if (tonemapEnabled_) {
-            // Transition swapchain to GENERAL for storage write
             transitionImage(cmd, swapImg,
-                VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_GENERAL,
-                0,
-                VK_ACCESS_SHADER_WRITE_BIT,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+                            VK_IMAGE_LAYOUT_UNDEFINED,
+                            VK_IMAGE_LAYOUT_GENERAL,
+                            0,
+                            VK_ACCESS_SHADER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-            VkImageView tonemapInput = denoisingEnabled_ ? denoiserView_.get() : accumViews_[slot].get();
-
-            updateTonemapDescriptor(slot, tonemapInput, swapView);
+            VkImageView input = denoisingEnabled_ ? denoiserView_.get() : accumViews_[slot].get();
+            updateTonemapDescriptor(slot, input, swapView);
             performTonemapPass(cmd, slot, imageIndex);
-        } else {
-            // Fallback: copy denoised/accum to swapchain (or direct RT if no accum)
-            // Implement simple blit or compute copy if tonemap disabled
         }
     }
     else if (pipelineManager_.hasEnvMapDisplayPipeline())
     {
-        // ENVMAP ONLY → TONEMAP CHAIN
         transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_GENERAL,
-            0,
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_GENERAL,
+                        0,
+                        VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-        recordEnvMapOnlyPass(cmd, imageIndex);  // now writes to intermediate if needed
+        recordEnvMapOnlyPass(cmd, imageIndex);
 
         if (tonemapEnabled_) {
             updateTonemapDescriptor(slot, pipelineManager_.envMapImageView_.get(), swapView);
@@ -600,28 +590,28 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
     else
     {
-        // Ultimate fallback: pink void
+        // Pink void fallback
         transitionImage(cmd, swapImg,
-            VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_GENERAL,
-            0,
-            VK_ACCESS_TRANSFER_WRITE_BIT,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT);
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_GENERAL,
+                        0,
+                        VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT);
 
         VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
     }
 
-    // Final transition to PRESENT
+    // Final present transition
     transitionImage(cmd, swapImg,
-        VK_IMAGE_LAYOUT_GENERAL,
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        VK_ACCESS_SHADER_WRITE_BIT,
-        0,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+                    VK_IMAGE_LAYOUT_GENERAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_SHADER_WRITE_BIT,
+                    0,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -631,69 +621,153 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     accumulationFrame_++;
 }
 
-// Temporary stub — will be fully implemented in Step 2
-void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept
+void VulkanRenderer::createAccumulationPipeline() noexcept
 {
-    // TODO: Implement full temporal accumulation compute shader
-    // For now: simple copy from RT output to accumulation buffer
-
-    if (rtOutputViews_.empty() || accumViews_.empty() || slot >= rtOutputViews_.size()) {
+    if (accumulationPipeline_ != VK_NULL_HANDLE) {
         return;
     }
 
-    VkImage rtImage = rtOutputImages_[slot].get();
-    VkImage accumImage = accumImages_[slot].get();
+    LOG_INFO_CAT("RENDERER", "Forging accumulation compute pipeline — temporal stability awakens");
 
-    // Transition RT output to TRANSFER_SRC
-    transitionImage(cmd, rtImage,
-                    VK_IMAGE_LAYOUT_GENERAL,
-                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    VK_ACCESS_SHADER_WRITE_BIT,
-                    VK_ACCESS_TRANSFER_READ_BIT,
-                    VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+    // === 1. Descriptor Set Layout ===
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {{
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Current RT output
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // History accumulation
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Output (in-place)
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Depth buffer
+        {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}  // DreamUBO
+    }};
 
-    // Transition accum to TRANSFER_DST
-    transitionImage(cmd, accumImage,
-                    VK_IMAGE_LAYOUT_GENERAL,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    0,
-                    VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-    // Copy current frame into accumulation
-    VkImageCopy copyRegion{
-        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .srcOffset      = {0, 0, 0},
-        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .dstOffset      = {0, 0, 0},
-        .extent         = { stone_width(), stone_height(), 1 }
+    VkDescriptorSetLayoutCreateInfo layoutInfo{
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings    = bindings.data()
     };
 
-    vkCmdCopyImage(cmd,
-                   rtImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   accumImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                   1, &copyRegion);
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout));
+    accumulationDescSetLayout_ = layout;
 
-    // Transition back to GENERAL for future use
-    transitionImage(cmd, rtImage,
-                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    VK_IMAGE_LAYOUT_GENERAL,
-                    VK_ACCESS_TRANSFER_READ_BIT,
-                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+    // === 2. Pipeline Layout ===
+    VkPipelineLayoutCreateInfo plInfo{
+        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount         = 1,
+        .pSetLayouts            = &accumulationDescSetLayout_,
+        .pushConstantRangeCount = 0
+    };
 
-    transitionImage(cmd, accumImage,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_GENERAL,
-                    VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+    VkPipelineLayout pl = VK_NULL_HANDLE;
+    VK_CHECK(vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl));
+    accumulationPipelineLayout_ = pl;
 
-    LOG_TRACE_CAT("RENDERER", "Temporary accumulation: copied RT output to accum buffer (slot {})", slot);
+    // === 3. Load Shader ===
+    VkShaderModule module = pipelineManager_.loadShader("assets/shaders/compute/accumulation.spv");
+    if (module == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load accumulation.spv — temporal accumulation disabled");
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo stage{
+        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = module,
+        .pName  = "main"
+    };
+
+    VkComputePipelineCreateInfo pipeInfo{
+        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage  = stage,
+        .layout = accumulationPipelineLayout_
+    };
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline));
+    accumulationPipeline_ = pipeline;
+
+    vkDestroyShaderModule(stone_device(), module, nullptr);
+
+    // === 4. Dedicated Descriptor Pool ===
+    std::array<VkDescriptorPoolSize, 2> poolSizes = {{
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  8},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}
+    }};
+
+    VkDescriptorPoolCreateInfo poolInfo{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = 4,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool));
+    accumulationDescriptorPool_ = pool;
+
+    // === 5. Allocate Per-Frame Descriptor Sets ===
+    // accumulationSets_ is std::array<VkDescriptorSet, 2> — no resize(), initialize directly
+    std::array<VkDescriptorSetLayout, 2> layouts = {
+        accumulationDescSetLayout_,
+        accumulationDescSetLayout_
+    };
+
+    VkDescriptorSetAllocateInfo allocInfo{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = accumulationDescriptorPool_,
+        .descriptorSetCount = 2,
+        .pSetLayouts        = layouts.data()
+    };
+
+    VK_CHECK(vkAllocateDescriptorSets(stone_device(), &allocInfo, accumulationSets_.data()));
+
+    LOG_SUCCESS_CAT("RENDERER", "Accumulation pipeline forged — temporal convergence armed");
+}
+
+void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept
+{
+    if (accumulationPipeline_ == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RENDERER", "Accumulation pipeline not created — skipping pass");
+        return;
+    }
+
+    VkDescriptorSet set = accumulationSets_[slot];
+
+    VkDescriptorImageInfo currInfo{ {}, rtOutputViews_[slot].get(), VK_IMAGE_LAYOUT_GENERAL };
+    VkDescriptorImageInfo histInfo{ {}, accumViews_[slot].get(),    VK_IMAGE_LAYOUT_GENERAL };
+    VkDescriptorImageInfo outInfo { {}, accumViews_[slot].get(),    VK_IMAGE_LAYOUT_GENERAL };
+    VkDescriptorImageInfo depthInfo{ {}, depthImageView_.get(),     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+
+    VkDescriptorBufferInfo uboInfo{
+        uniformBufferEncs_[slot] ? RAW_BUFFER(uniformBufferEncs_[slot]) : VK_NULL_HANDLE,
+        0, VK_WHOLE_SIZE
+    };
+
+    std::array<VkWriteDescriptorSet, 5> writes = {{
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &currInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &histInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 2, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &outInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 3, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &depthInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 4, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &uboInfo}
+    }};
+
+    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulationPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulationPipelineLayout_, 0, 1, &set, 0, nullptr);
+
+    uint32_t wgX = (width_ + 15) / 16;
+    uint32_t wgY = (height_ + 15) / 16;
+    vkCmdDispatch(cmd, wgX, wgY, 1);
+
+    VkMemoryBarrier2 barrier{
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
+    };
+    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+    vkCmdPipelineBarrier2(cmd, &dep);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -809,10 +883,20 @@ void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
     fpsTarget_ = FpsTarget::FPS_UNLIMITED;
 }
 
-void VulkanRenderer::destroyNexusScoreImage() noexcept {
-    hypertraceScoreImage_.reset();
-    hypertraceScoreMemory_.reset();
-    hypertraceScoreView_.reset();
+void VulkanRenderer::destroyNexusScoreImage() noexcept
+{
+    if (hypertraceScoreView_) {
+        vkDestroyImageView(stone_device(), hypertraceScoreView_, nullptr);
+        hypertraceScoreView_ = VK_NULL_HANDLE;
+    }
+    if (hypertraceScoreImage_) {
+        vkDestroyImage(stone_device(), hypertraceScoreImage_, nullptr);
+        hypertraceScoreImage_ = VK_NULL_HANDLE;
+    }
+    if (hypertraceScoreMemory_) {
+        vkFreeMemory(stone_device(), hypertraceScoreMemory_, nullptr);
+        hypertraceScoreMemory_ = VK_NULL_HANDLE;
+    }
 }
 
 void VulkanRenderer::destroyDenoiserImage() noexcept {
@@ -923,7 +1007,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     }
     LOG_SUCCESS_CAT("RENDERER", "Vulkan device created — empire has a pulse");
 
-    // PHASE 3: SHARED STAGING BUFFER — THE VOICE OF THE EMPIRE — SECOND
+    // PHASE 3: SHARED STAGING BUFFER — THE VOICE OF THE EMPIRE
     LOG_INFO_CAT("RENDERER", "Creating shared staging buffer — the empire must speak...");
     if (!createSharedStaging()) {
         LOG_FATAL_CAT("RENDERER", "Shared staging creation failed — empire is mute");
@@ -931,22 +1015,11 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     }
     LOG_SUCCESS_CAT("RENDERER", "Shared staging buffer created — empire has a voice");
 
-    // PHASE 3.5: THE ONE TRUE ETERNAL FRAME UBO STAGING BUFFER — FORGED DURING CONSTRUCTION
-    LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer — this happens once and only once...");
+    // PHASE 3.5: ETERNAL FRAME UBO STAGING BUFFER
+    LOG_INFO_CAT("RENDERER", "Forging the ONE TRUE eternal frame UBO staging buffer...");
     {
-        const VkDeviceSize requiredSize = 368 * 2;  // Hardcoded 2 frames
+        const VkDeviceSize requiredSize = 368 * 2;
 
-        LOG_AMOURANTH(
-            "\n"
-            "              FORGING THE ONE TRUE FRAME UBO STAGING BUFFER\n"
-            "              SIZE: {} bytes — 2 frames in flight\n"
-            "              TRUSTING THE RING — NO s_buffers LOOKUP DURING CONSTRUCTION",
-            requiredSize);
-
-        // Ensure ring exists
-        BufferManager::stagingPtr();
-
-        // Allocate normally — this advances the head and returns a handle
         eternalFrameUBOStagingHandle_ = BufferManager::createHostVisible(requiredSize, "SharedFrameUBO_Staging_ETERNAL");
 
         if (eternalFrameUBOStagingHandle_ == 0) {
@@ -954,34 +1027,18 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
             phase9_ballerina("ALLOCATION FAILURE", std::source_location::current());
         }
 
-        // During construction (single-threaded), the insert into s_buffers is guaranteed to be visible
-        // But even if it's not, the mapped pointer from the ring is valid
         const auto* info = BufferManager::get(eternalFrameUBOStagingHandle_);
 
         if (info && info->size >= requiredSize) {
-            // Normal path — use the registered pointer
             eternalFrameUBOStagingPtr_  = info->mapped ? info->mapped : BufferManager::stagingPtr();
             eternalFrameUBOStagingSize_ = info->size;
-
-            LOG_AMOURANTH(
-                "              ETERNAL FRAME UBO STAGING SECURED AT {}\n"
-                "              {} bytes — handle {} — registered correctly",
-                eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
         } else {
-            // Fallback: use the base ring pointer (valid because we just advanced the head)
             eternalFrameUBOStagingPtr_  = BufferManager::stagingPtr();
             eternalFrameUBOStagingSize_ = requiredSize;
-
-            LOG_WARNING_CAT("RENDERER", "BufferInfo not immediately visible — using base ring pointer (still valid)");
-            LOG_AMOURANTH(
-                "              ETERNAL FRAME UBO STAGING SECURED AT {} (fallback)\n"
-                "              {} bytes — handle {} — s_buffers lagged but ring is eternal",
-                eternalFrameUBOStagingPtr_, requiredSize, eternalFrameUBOStagingHandle_);
         }
     }
 
-    // PHASE 4: SYNCHRONIZATION PRIMITIVES — THE EMPIRE'S RHYTHM
-    LOG_INFO_CAT("RENDERER", "Creating synchronization objects (2 frames)...", MAX_FRAMES_IN_FLIGHT);
+    // PHASE 4: SYNCHRONIZATION PRIMITIVES
     createSyncObjects();
 
     // PHASE 5: GPU TIMESTAMP QUERY POOL
@@ -1005,7 +1062,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
                  VK_VERSION_PATCH(props.apiVersion),
                  timestampPeriod_);
 
-    // PHASE 7: INITIALIZE ALL BUFFER DATA — NOW SAFE
+    // PHASE 7: INITIALIZE ALL BUFFER DATA
     LOG_INFO_CAT("RENDERER", "Initializing uniform and material buffers...");
     initializeAllBufferData(MAX_FRAMES_IN_FLIGHT, 368, MATERIAL_BUFFER_SIZE);
     LOG_SUCCESS_CAT("RENDERER", "Buffers initialized — UBOs and SSBOs ready");
@@ -1013,20 +1070,21 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // PHASE 8: CRITICAL IMAGE RESOURCES
     LOG_INFO_CAT("RENDERER", "Creating primary render targets...");
 
+    // HDR Environment Map
     LOG_INFO_CAT("RENDERER", "Creating HDR environment map...");
-EnvironmentMap env = createEnvironmentMap();
-if (env.image != VK_NULL_HANDLE) {
-    envMapImage_      = RTX::Handle<VkImage>(env.image, stone_device(), vkDestroyImage);
-    envMapMemory_     = RTX::Handle<VkDeviceMemory>(env.memory, stone_device(), vkFreeMemory);
-    envMapImageView_  = RTX::Handle<VkImageView>(env.view, stone_device(), vkDestroyImageView);
-    envMapSampler_    = RTX::Handle<VkSampler>(env.sampler, stone_device(), vkDestroySampler);
+    EnvironmentMap env = createEnvironmentMap();
+    if (env.image != VK_NULL_HANDLE) {
+        envMapImage_      = RTX::Handle<VkImage>(env.image, stone_device(), vkDestroyImage);
+        envMapMemory_     = RTX::Handle<VkDeviceMemory>(env.memory, stone_device(), vkFreeMemory);
+        envMapImageView_  = RTX::Handle<VkImageView>(env.view, stone_device(), vkDestroyImageView);
+        envMapSampler_    = RTX::Handle<VkSampler>(env.sampler, stone_device(), vkDestroySampler);
 
-    // THIS LINE IS REQUIRED
-    createEnvMapDisplayPipeline(); 
+        createEnvMapDisplayPipeline();
 
-    LOG_SUCCESS_CAT("RENDERER", "HDR sky loaded and display pipeline forged — ready for Mode 2");
-}
+        LOG_SUCCESS_CAT("RENDERER", "HDR sky loaded and display pipeline forged — ready for Mode 2");
+    }
 
+    // Ray Tracing Output Images
     LOG_INFO_CAT("RENDERER", "Creating ray tracing output images...");
     createRTOutputImages();
     if (rtOutputViews_.size() != MAX_FRAMES_IN_FLIGHT) {
@@ -1034,22 +1092,30 @@ if (env.image != VK_NULL_HANDLE) {
         phase9_ballerina("RT OUTPUT FAILURE", std::source_location::current());
     }
 
+    // Depth Buffer
     LOG_INFO_CAT("RENDERER", "Creating depth buffer...");
     createDepthResources();
-    if (!depthImageView_.valid()) {
+    if (!depthImageView_.valid()) {  // ← Fixed: use .valid()
         LOG_FATAL_CAT("RENDERER", "Depth buffer creation failed");
         phase9_ballerina("DEPTH FAILURE", std::source_location::current());
     }
 
+    // Accumulation Buffers
     LOG_INFO_CAT("RENDERER", "Creating accumulation buffers...");
     createAccumulationImages();
 
+    // Accumulation Pipeline
+    LOG_INFO_CAT("RENDERER", "Creating accumulation pipeline...");
+    createAccumulationPipeline();
+
+    // Nexus Score Image
     LOG_INFO_CAT("RENDERER", "Creating Nexus score image...");
     createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
+    // Tonemap Sampler
     LOG_INFO_CAT("RENDERER", "Creating tonemap sampler...");
     createTonemapSampler();
-    if (!tonemapSampler_.valid()) {
+    if (!tonemapSampler_.valid()) {  // ← Fixed: use .valid()
         LOG_FATAL_CAT("RENDERER", "Tonemap sampler creation failed");
         phase9_ballerina("SAMPLER FAILURE", std::source_location::current());
     }
@@ -1390,12 +1456,20 @@ void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
 
 void VulkanRenderer::clearAccumulationImages(VkCommandBuffer cmd)
 {
-    VkClearColorValue zero{{0,0,0,0}};
+    VkClearColorValue zero{{0.0f, 0.0f, 0.0f, 0.0f}};
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    for (auto& img : rtOutputImages_)  vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
-    for (auto& img : accumImages_)     vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
-    if (hypertraceScoreImage_.valid())
-        vkCmdClearColorImage(cmd, hypertraceScoreImage_.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+
+    for (auto& img : rtOutputImages_) {
+        vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    }
+    for (auto& img : accumImages_) {
+        vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    }
+
+    // Raw handle — no .valid() or .get()
+    if (hypertraceScoreImage_ != VK_NULL_HANDLE) {
+        vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    }
 }
 
 void VulkanRenderer::transitionImage(
@@ -1545,58 +1619,71 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
 {
     if (width_ == 0 || height_ == 0) return;
 
-    // THE EMPIRE DOES NOT WASTE — ONLY RECREATE IF SIZE CHANGED
-    if (hypertraceScoreImage_.valid() && 
+    if (hypertraceScoreImage_ != VK_NULL_HANDLE &&
         hypertraceScoreWidth_ == width_ && 
         hypertraceScoreHeight_ == height_) {
         return;
     }
 
-    // PURGE THE OLD — THE EMPIRE IS CLEAN
-    destroyNexusScoreImage();
-    hypertraceScoreWidth_  = width_;
+    // Destroy old
+    if (hypertraceScoreView_)    vkDestroyImageView(stone_device(), hypertraceScoreView_, nullptr);
+    if (hypertraceScoreImage_)   vkDestroyImage(stone_device(), hypertraceScoreImage_, nullptr);
+    if (hypertraceScoreMemory_)  vkFreeMemory(stone_device(), hypertraceScoreMemory_, nullptr);
+
+    hypertraceScoreWidth_ = width_;
     hypertraceScoreHeight_ = height_;
 
     LOG_AMOURANTH("FORGING NEXUS SCORE IMAGE — {}×{} — ADAPTIVE SAMPLING AWAKENS", width_, height_);
 
-    // SAFE & OPTIMIZED: R16G16_SFLOAT — fully supported on Ada (RTX 40-series)
     const VkFormat format = VK_FORMAT_R16G16_SFLOAT;
 
-    // Use the battle-tested createImage() — avoids raw allocation crashes in 580.xx drivers
-    createImage(
-        width_, height_, 1,
-        format,
-        VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        hypertraceScoreImage_,
-        hypertraceScoreMemory_,
-        "NexusScoreImage"
-    );
+    VkImageCreateInfo imageInfo{
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType     = VK_IMAGE_TYPE_2D,
+        .format        = format,
+        .extent        = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 },
+        .mipLevels     = 1,
+        .arrayLayers   = 1,
+        .samples       = VK_SAMPLE_COUNT_1_BIT,
+        .tiling        = VK_IMAGE_TILING_OPTIMAL,
+        .usage         = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
 
-    // Safety check — if creation failed (OOM/fragmentation), abort gracefully
-    if (!hypertraceScoreImage_.valid() || !hypertraceScoreMemory_.valid()) {
-        LOG_FATAL_CAT("RENDERER", "NexusScoreImage creation failed — likely VRAM exhaustion or driver bug");
+    VK_CHECK(vkCreateImage(stone_device(), &imageInfo, nullptr, &hypertraceScoreImage_));
+
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(stone_device(), hypertraceScoreImage_, &memReqs);
+
+    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (memType == UINT32_MAX) {
+        LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
         return;
     }
 
-    // Create view
+    VkMemoryAllocateInfo allocInfo{
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = memReqs.size,
+        .memoryTypeIndex = memType
+    };
+
+    VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &hypertraceScoreMemory_));
+    VK_CHECK(vkBindImageMemory(stone_device(), hypertraceScoreImage_, hypertraceScoreMemory_, 0));
+
     VkImageViewCreateInfo viewInfo{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image            = hypertraceScoreImage_.get(),
+        .image            = hypertraceScoreImage_,
         .viewType         = VK_IMAGE_VIEW_TYPE_2D,
         .format           = format,
         .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
     };
 
-    VkImageView rawView = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &rawView));
-    hypertraceScoreView_ = RTX::Handle<VkImageView>(rawView, stone_device(), vkDestroyImageView);
+    VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &hypertraceScoreView_));
 
-    // Initialize with zero + safe transition
+    // Initialize to zero
     VkCommandBuffer cmd = RTX::beginOneTimeSubmit(pool);
 
-    transitionImage(cmd, hypertraceScoreImage_.get(),
+    transitionImage(cmd, hypertraceScoreImage_,
                     VK_IMAGE_LAYOUT_UNDEFINED,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     0,
@@ -1606,9 +1693,9 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
 
     VkClearColorValue clearZero{{0.0f, 0.0f, 0.0f, 0.0f}};
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdClearColorImage(cmd, hypertraceScoreImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearZero, 1, &range);
+    vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearZero, 1, &range);
 
-    transitionImage(cmd, hypertraceScoreImage_.get(),
+    transitionImage(cmd, hypertraceScoreImage_,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     VK_IMAGE_LAYOUT_GENERAL,
                     VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1619,8 +1706,7 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     RTX::endOneTimeSubmit(cmd, queue, pool);
 
     LOG_SUCCESS_CAT("RENDERER", "NEXUS SCORE IMAGE FORGED — {}×{} — {} MiB — ADAPTIVE SAMPLING READY",
-                    width_, height_, 
-                    (width_ * height_ * 8ULL) / (1024ULL * 1024ULL));
+                    width_, height_, (width_ * height_ * 8ULL) / (1024ULL * 1024ULL));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1820,11 +1906,12 @@ void VulkanRenderer::updateNexusDescriptors() noexcept
 
     VkDescriptorSet set = rtDescriptorSets_[currentFrame_ % rtDescriptorSets_.size()];
 
-    // THE NEXUS — THE BRAIN OF THE EMPIRE
     std::array<VkWriteDescriptorSet, 8> writes{};
     uint32_t writeCount = 0;
 
     const auto addImageWrite = [&](uint32_t binding, VkImageView view, VkImageLayout layout) {
+        if (view == VK_NULL_HANDLE) return;
+
         VkDescriptorImageInfo info{ .imageView = view, .imageLayout = layout };
         writes[writeCount++] = VkWriteDescriptorSet{
             .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -1836,9 +1923,12 @@ void VulkanRenderer::updateNexusDescriptors() noexcept
         };
     };
 
-    addImageWrite(6, hypertraceScoreView_.get(), VK_IMAGE_LAYOUT_GENERAL);
+    // Raw handle — direct use
+    addImageWrite(6, hypertraceScoreView_, VK_IMAGE_LAYOUT_GENERAL);
 
-    vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
+    if (writeCount > 0) {
+        vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
+    }
 }
 
 void VulkanRenderer::updateDenoiserDescriptors() noexcept {

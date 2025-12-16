@@ -1,0 +1,96 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D imgCurrent;
+layout(set = 0, binding = 1, rgba16f) uniform readonly image2D imgHistory;
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D imgOutput;
+layout(set = 0, binding = 3, r32f) uniform readonly image2D imgDepth;
+
+layout(set = 0, binding = 4, std140) uniform DreamUBO {
+    float time;
+    uint frame;
+    uint spp;
+    uint totalSpp;
+    float exposure;
+    uint enableEnvMap;
+    uint hypertrace;
+    uint denoising;
+    uint adaptive;
+    uint debugMode;
+    float envIntensity;
+    float envRotation;
+
+    vec2 resolution;
+    vec2 jitter;
+    vec2 jitterPrev;
+    float nexusScoreThreshold;
+    float pad0;
+
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+
+    vec4 camPos;
+
+    float finalPadding[4];
+} ubo;
+
+vec3 reproject(ivec2 pix) {
+    vec2 uv = (vec2(pix) + 0.5) / ubo.resolution;
+    float depth = imageLoad(imgDepth, pix).r;
+    vec4 ndcCurr = vec4(uv * 2.0 - 1.0, depth, 1.0);
+
+    ndcCurr.xy -= ubo.jitterPrev;
+
+    vec4 clipPrev = ubo.proj * ubo.view * ubo.invView * ubo.invProj * ndcCurr;
+    if (clipPrev.w <= 0.0) {
+        return vec3(-1.0);
+    }
+
+    vec3 ndcPrev = clipPrev.xyz / clipPrev.w;
+    ndcPrev.xy += ubo.jitter;
+
+    vec2 reprojUV = ndcPrev.xy * 0.5 + 0.5;
+
+    if (reprojUV.x < 0.0 || reprojUV.x >= 1.0 ||
+        reprojUV.y < 0.0 || reprojUV.y >= 1.0) {
+        return vec3(-1.0);
+    }
+
+    return vec3(reprojUV, ndcPrev.z);
+}
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+
+    if (pix.x >= int(ubo.resolution.x) || pix.y >= int(ubo.resolution.y)) {
+        return;
+    }
+
+    vec3 currColor = imageLoad(imgCurrent, pix).rgb;
+    float currDepth = imageLoad(imgDepth, pix).r;
+
+    vec3 reproj = reproject(pix);
+    vec3 historyColor = vec3(0.0);
+    bool validHistory = reproj.z > 0.0;
+
+    if (validHistory) {
+        ivec2 historyPix = ivec2(reproj.xy * ubo.resolution);
+        historyColor = imageLoad(imgHistory, historyPix).rgb;
+
+        float historyDepth = imageLoad(imgDepth, historyPix).r;
+        if (abs(currDepth - historyDepth) > 0.05) {
+            validHistory = false;
+        }
+    }
+
+    float alpha = validHistory ? 0.1 : 1.0;
+    vec3 accumColor = mix(historyColor, currColor, alpha);
+
+    vec3 dev = abs(currColor - accumColor);
+    accumColor = clamp(accumColor, currColor - 3.0 * dev, currColor + 3.0 * dev);
+
+    imageStore(imgOutput, pix, vec4(accumColor, 1.0));
+}

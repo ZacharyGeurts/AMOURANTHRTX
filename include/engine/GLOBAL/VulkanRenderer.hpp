@@ -68,12 +68,10 @@ public:
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
     void cleanup() noexcept;
     void createCommandPool() noexcept;
+    void createCommandBuffers() noexcept;
+    void resetCommandBuffers() noexcept;
 
     void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept;
-
-    // FIXED: Now properly resets + reuses command buffers instead of leaking
-    void createCommandBuffers() noexcept;
-    void resetCommandBuffers() noexcept;          // ← NEW: called every frame
 
     bool isAlive() const noexcept;
 
@@ -139,6 +137,7 @@ public:
     void createTonemapDescriptorPool() noexcept;
     void createTonemapDescriptorSetLayout() noexcept;
     void createDepthResources() noexcept;
+	void createAccumulationPipeline() noexcept;
 
     static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;
@@ -152,13 +151,18 @@ public:
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
 	VkPipeline               envMapDisplayPipeline_       = VK_NULL_HANDLE;
-VkPipelineLayout         envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
-VkDescriptorSet          envMapDisplayDescriptorSet_  = VK_NULL_HANDLE;
-VkDescriptorSetLayout    envMapDisplayDescSetLayout_  = VK_NULL_HANDLE;
+    VkPipelineLayout         envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSet          envMapDisplayDescriptorSet_  = VK_NULL_HANDLE;
+    VkDescriptorSetLayout    envMapDisplayDescSetLayout_  = VK_NULL_HANDLE;
 
-[[nodiscard]] bool hasEnvMapDisplayPipeline() const noexcept {
-    return envMapDisplayPipeline_ != VK_NULL_HANDLE;
-}
+    VkPipeline            accumulationPipeline_ = VK_NULL_HANDLE;
+    VkPipelineLayout      accumulationPipelineLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout accumulationDescSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorPool      accumulationDescriptorPool_ = VK_NULL_HANDLE;
+
+    std::array<VkDescriptorSet, 2> accumulationSets_ = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+
+    [[nodiscard]] bool hasEnvMapDisplayPipeline() const noexcept { return envMapDisplayPipeline_ != VK_NULL_HANDLE; }
 
     void submitAndPresent(uint32_t slot, uint32_t imageIndex);
     
@@ -263,11 +267,9 @@ VkDescriptorSetLayout    envMapDisplayDescSetLayout_  = VK_NULL_HANDLE;
     RTX::Handle<VkDeviceMemory>denoiserMemory_;
     RTX::Handle<VkImageView>   denoiserView_;
 
-    RTX::Handle<VkImage>       hypertraceScoreImage_;
-    RTX::Handle<VkDeviceMemory>hypertraceScoreMemory_;
-    RTX::Handle<VkImageView>   hypertraceScoreView_;
-    RTX::Handle<VkBuffer>      hypertraceScoreStagingBuffer_;
-    RTX::Handle<VkDeviceMemory>hypertraceScoreStagingMemory_;
+    VkImage       hypertraceScoreImage_       = VK_NULL_HANDLE;
+    VkDeviceMemory hypertraceScoreMemory_     = VK_NULL_HANDLE;
+    VkImageView   hypertraceScoreView_        = VK_NULL_HANDLE;
 
     // Tonemap
     RTX::Handle<VkSampler>              tonemapSampler_;
