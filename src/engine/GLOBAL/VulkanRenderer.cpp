@@ -254,9 +254,9 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     // === CONVERSION PIPELINE ===
-    VkShaderModule convertModule = pipelineManager_.loadShader("shaders/equirect_to_cube.comp.spv");
+    VkShaderModule convertModule = pipelineManager_.loadShader("assets/shaders/compute/equirect_to_cube.spv");
     if (convertModule == VK_NULL_HANDLE) {
-        LOG_WARNING_CAT("RENDERER", "equirect_to_cube.comp.spv missing — using equirect projection in shader");
+        LOG_WARNING_CAT("RENDERER", "equirect_to_cube.spv missing — using equirect projection in shader");
         RTX::endOneTimeSubmit(cmd, stone_graphics_queue(), RTX::g_ctx().commandPool_);
         BUFFER_DESTROY(staging);
 
@@ -446,16 +446,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     VkImage swapImg = stone_images()[imageIndex];
 
-    // Transition swapchain image to GENERAL — direct RTX write target
+    // Transition swapchain image to GENERAL — direct write target
     transitionImage(cmd, swapImg,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_GENERAL,
         0,
         VK_ACCESS_SHADER_WRITE_BIT,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 
-    // Pink fallback — always visible if RTX fails
+    // Pink fallback — always visible if nothing renders
     {
         VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -510,7 +510,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
     else if (pipelineManager_.hasEnvMapDisplayPipeline())
     {
-        // ENVMAP ONLY MODE — PRESS 1 BRO
+        // ENVMAP ONLY MODE — FULL-SCREEN HDR SKY
         recordEnvMapOnlyPass(cmd, imageIndex);
     }
 
@@ -520,7 +520,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         VK_ACCESS_SHADER_WRITE_BIT,
         0,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
@@ -531,96 +531,90 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     accumulationFrame_++;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// recordEnvMapOnlyPass — FULL-SCREEN HDR ENVMAP DISPLAY — THE TRUE SKY
+// Ensures swapchain is correctly transitioned and used — no pink fallback when envmap exists
+// ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept
 {
     auto& pm = RTX::pipeline();
 
-    if (pm.envMapDisplayPipeline_ == VK_NULL_HANDLE || 
-        pm.envMapDisplayDescriptorSet_ == VK_NULL_HANDLE ||
-        !pm.envMapImageView_.valid() || 
-        !pm.envMapSampler_.valid())
+    // If we have a valid envmap and display pipeline → render true sky
+    if (pm.envMapDisplayPipeline_ != VK_NULL_HANDLE &&
+        pm.envMapDisplayDescriptorSet_ != VK_NULL_HANDLE &&
+        pm.envMapImageView_.valid() &&
+        pm.envMapSampler_.valid())
     {
-        // Fallback: clear to sacred pink
-        VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        VkImage swapImage = StoneKey::stone_images()[swapchainImageIndex];
-
-        VkImageMemoryBarrier barrier{
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask       = 0,
-            .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
-            .image               = swapImage,
-            .subresourceRange    = range
+        // Update storage image binding to current swapchain image
+        VkDescriptorImageInfo storageInfo{
+            .imageView   = StoneKey::stone_views()[swapchainImageIndex],
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL
         };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-        vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
+        VkWriteDescriptorSet write{
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet          = pm.envMapDisplayDescriptorSet_,
+            .dstBinding      = 1,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo      = &storageInfo
+        };
+        vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = 0;
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+        // Transition swapchain image to GENERAL
+        transitionImage(cmd, StoneKey::stone_images()[swapchainImageIndex],
+                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                        0, VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-        LOG_WARN_CAT("RENDERER", "Envmap display pipeline not ready — showing sacred pink void");
+        // Bind and dispatch compute shader
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm.envMapDisplayPipeline_);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                pm.envMapDisplayPipelineLayout_, 0, 1,
+                                &pm.envMapDisplayDescriptorSet_, 0, nullptr);
+
+        struct PushConstants {
+            uint32_t width;
+            uint32_t height;
+        } pc{ StoneKey::stone_width(), StoneKey::stone_height() };
+
+        vkCmdPushConstants(cmd, pm.envMapDisplayPipelineLayout_,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+
+        constexpr uint32_t WG = 16;
+        vkCmdDispatch(cmd,
+                      (StoneKey::stone_width() + WG - 1) / WG,
+                      (StoneKey::stone_height() + WG - 1) / WG,
+                      1);
+
+        // Transition back to PRESENT
+        transitionImage(cmd, StoneKey::stone_images()[swapchainImageIndex],
+                        VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                        VK_ACCESS_SHADER_WRITE_BIT, 0,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+        LOG_TRACE_CAT("RENDERER", "True HDR sky rendered — the empire beholds the infinite");
         return;
     }
 
-    // Update storage image binding to current swapchain image
-    VkDescriptorImageInfo storageInfo{
-        .imageView   = StoneKey::stone_views()[swapchainImageIndex],
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
+    // Only fall back to pink if envmap truly failed to load
+    LOG_WARN_CAT("RENDERER", "Envmap display pipeline or texture missing — showing sacred pink void");
 
-    VkWriteDescriptorSet write{
-        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet          = pm.envMapDisplayDescriptorSet_,
-        .dstBinding      = 1,
-        .descriptorCount = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .pImageInfo      = &storageInfo
-    };
-    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
+    VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImage swapImage = StoneKey::stone_images()[swapchainImageIndex];
 
-    // Transition swapchain image to GENERAL
-    VkImageMemoryBarrier barrier{
-        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask       = 0,
-        .dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
-        .image               = StoneKey::stone_images()[swapchainImageIndex],
-        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    transitionImage(cmd, swapImage,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                    0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    // Bind and dispatch
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm.envMapDisplayPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm.envMapDisplayPipelineLayout_, 0, 1, &pm.envMapDisplayDescriptorSet_, 0, nullptr);
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
 
-    struct PushConstants {
-        uint32_t width;
-        uint32_t height;
-    } pc{ StoneKey::stone_width(), StoneKey::stone_height() };
-
-    vkCmdPushConstants(cmd, pm.envMapDisplayPipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
-
-    constexpr uint32_t WG = 16;
-    vkCmdDispatch(cmd,
-                  (StoneKey::stone_width()  + WG - 1) / WG,
-                  (StoneKey::stone_height() + WG - 1) / WG,
-                  1);
-
-    // Transition back to PRESENT
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = 0;
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    LOG_TRACE_CAT("RENDERER", "Envmap-only pass complete — the empire beholds the true sky");
+    transitionImage(cmd, swapImage,
+                    VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -821,14 +815,18 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     LOG_INFO_CAT("RENDERER", "Creating primary render targets...");
 
     LOG_INFO_CAT("RENDERER", "Creating HDR environment map...");
-    EnvironmentMap env = createEnvironmentMap();
-    if (env.image != VK_NULL_HANDLE) {
-        envMapImage_      = RTX::Handle<VkImage>(env.image, stone_device(), vkDestroyImage);
-        envMapMemory_     = RTX::Handle<VkDeviceMemory>(env.memory, stone_device(), vkFreeMemory);
-        envMapImageView_  = RTX::Handle<VkImageView>(env.view, stone_device(), vkDestroyImageView);
-        envMapSampler_    = RTX::Handle<VkSampler>(env.sampler, stone_device(), vkDestroySampler);
-        LOG_SUCCESS_CAT("RENDERER", "Environment map created and sealed");
-    }
+EnvironmentMap env = createEnvironmentMap();
+if (env.image != VK_NULL_HANDLE) {
+    envMapImage_      = RTX::Handle<VkImage>(env.image, stone_device(), vkDestroyImage);
+    envMapMemory_     = RTX::Handle<VkDeviceMemory>(env.memory, stone_device(), vkFreeMemory);
+    envMapImageView_  = RTX::Handle<VkImageView>(env.view, stone_device(), vkDestroyImageView);
+    envMapSampler_    = RTX::Handle<VkSampler>(env.sampler, stone_device(), vkDestroySampler);
+
+    // THIS LINE IS REQUIRED
+    createEnvMapDisplayPipeline(); 
+
+    LOG_SUCCESS_CAT("RENDERER", "HDR sky loaded and display pipeline forged — ready for Mode 2");
+}
 
     LOG_INFO_CAT("RENDERER", "Creating ray tracing output images...");
     createRTOutputImages();
@@ -878,6 +876,128 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 
     LOG_SUCCESS_CAT("RENDERER", "All systems nominal — {}x{} — 2 frames in flight — 2026 MASTERMIND", width, height);
     LOG_SUCCESS_CAT("RENDERER", "Renderer ready — empire eternal");
+}
+
+void VulkanRenderer::createEnvMapDescriptorPool() noexcept
+{
+    if (envMapDescriptorPool_.valid()) return;
+
+    VkDescriptorPoolSize poolSizes[2] = {};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = 1;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo poolInfo{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets       = 1,
+        .poolSizeCount = 2,
+        .pPoolSizes    = poolSizes
+    };
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool));
+
+    envMapDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(), vkDestroyDescriptorPool);
+}
+
+void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
+{
+    if (envMapDisplayPipeline_ != VK_NULL_HANDLE) {
+        return;
+    }
+
+    if (!envMapImageView_.valid() || !envMapSampler_.valid()) {
+        LOG_WARN_CAT("RENDERER", "Envmap not loaded — cannot create display pipeline");
+        return;
+    }
+
+    createEnvMapDescriptorPool();  // ← Dedicated pool, safe early
+
+    VkDevice device = stone_device();
+
+    // Layout
+    VkDescriptorSetLayoutBinding bindings[2] = {};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 2,
+        .pBindings    = bindings
+    };
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &envMapDisplayDescSetLayout_));
+
+    // Pipeline layout
+    VkPushConstantRange pcRange{.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = 8};
+
+    VkPipelineLayoutCreateInfo plInfo{
+        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount         = 1,
+        .pSetLayouts            = &envMapDisplayDescSetLayout_,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges    = &pcRange
+    };
+    VK_CHECK(vkCreatePipelineLayout(device, &plInfo, nullptr, &envMapDisplayPipelineLayout_));
+
+    // Allocate set from dedicated pool
+    VkDescriptorSetAllocateInfo allocInfo{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = envMapDescriptorPool_.get(),
+        .descriptorSetCount = 1,
+        .pSetLayouts        = &envMapDisplayDescSetLayout_
+    };
+    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &envMapDisplayDescriptorSet_));
+
+    // Bind envmap
+    VkDescriptorImageInfo samplerInfo{
+        .sampler     = envMapSampler_.get(),
+        .imageView   = envMapImageView_.get(),
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkWriteDescriptorSet write{
+        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet          = envMapDisplayDescriptorSet_,
+        .dstBinding      = 0,
+        .descriptorCount = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo      = &samplerInfo
+    };
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+
+    // Load shader
+    VkShaderModule shaderModule = pipelineManager_.loadShader("assets/shaders/envmap_display.spv");
+    if (shaderModule == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load envmap_display.spv");
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo stage{
+        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = shaderModule,
+        .pName  = "main"
+    };
+
+    VkComputePipelineCreateInfo pipeInfo{
+        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage  = stage,
+        .layout = envMapDisplayPipelineLayout_
+    };
+
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &envMapDisplayPipeline_));
+
+    vkDestroyShaderModule(device, shaderModule, nullptr);
+
+    LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE FORGED — THE TRUE SKY IS READY");
 }
 
 void VulkanRenderer::createDepthResources() noexcept

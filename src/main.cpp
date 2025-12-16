@@ -609,12 +609,22 @@ static void phase7_forgeTheRTX()
     auto& pipe = RTX::pipeline();
 
     pipe.forgeRTXPipeline(RTX::g_ctx().commandPool_, stone_graphics_queue());
+
+    // Load HDR envmap
     pipe.loadShader("assets/textures/envmap.hdr");
+
+    // CRITICAL FIX: Create the full-screen envmap display pipeline
+    // Use the renderer instance (not static call)
+    if (g_renderer_ptr) {
+        g_renderer_ptr->createEnvMapDisplayPipeline();
+    } else {
+        LOG_WARNING_CAT("RENDERER", "Renderer not yet created — skipping envmap display pipeline");
+    }
 
     StoneKey::stone_seal_pipeline(&pipe);
     crownWorn = true;
 
-    LOG_AMOURANTH("MIA AWAKENS — THE CROWN IS WORN — PHOTONS ETERNAL");
+    LOG_AMOURANTH("MIA AWAKENS — THE CROWN IS WORN — HDR SKY READY — PHOTONS ETERNAL");
 }
 
 // =============================================================================

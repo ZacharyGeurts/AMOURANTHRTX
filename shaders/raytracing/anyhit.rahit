@@ -1,51 +1,62 @@
-// File: shaders/raytracing/anyhit.rahit
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
-// ANY-HIT SHADER — RASPBERRY PINK ALPHA TEST — VALHALLA v∞ TURBO
-// Empire-sealed, StoneKey v∞ compliant, binding-31 immortal
-// The photons know which leaves to pass through.
-
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
-#extension GL_EXT_buffer_reference2 : require
-#extension GL_EXT_scalar_block_layout : enable
 
-#include "../StoneKey.glsl"   // Empire-sealed — binding 31 reserved
+// Payload is required even if not used in any-hit
+layout(location = 0) rayPayloadInEXT vec3 payload;
 
-#pragma shader_stage(anyhit)
+layout(binding = 3, set = 0) uniform sampler2D billboardTex;  // monster.webp
 
-// ── BINDING 3 — DEDICATED ALPHA TEXTURE SAMPLER
-// Matches your material system (set 3, binding 0 = opacity/alpha map)
-layout(set = 3, binding = 0) uniform sampler2D alphaTex[];
+hitAttributeEXT vec2 hitAttribs;
 
-// ── Hit Attributes — Barycentric coordinates from intersection shader
-hitAttributeEXT vec2 attribs;
+layout(push_constant) uniform PushConstants {
+    mat4  invView;
+    mat4  invProj;
+    float totalTime;
+    uint  spp;
+    uint  frameSeed;
+    uint  forceEnvOnly;
+    float jitterStrength;
+    uint  maxRecursion;
+    uint  useEnvSky;
+    uint  flipEnvV;
+    uint  showHotPink;
+    float environmentExposure;
+    float skyIntensity;
+    float environmentRotationY;
+    vec3  billboardBaseColor;
+    float billboardRoughness;
+    float billboardMetallic;
+    uint  billboardUseAlphaBlend;   // 0 = alpha test (cutout), 1 = accept all (future blend)
+    float billboardAlphaCutoff;     // Threshold for alpha test
+} push;
 
-// ── Any-Hit Shader — Raspberry Pink Alpha Test — Pure, Clean, Eternal
 void main()
 {
-    // Instance + primitive index from built-in
-    uint instanceId = gl_InstanceID;
-    uint primitiveId = gl_PrimitiveID;
+    // Barycentric coordinates from hit attributes
+    vec3 bary = vec3(1.0f - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
 
-    // Reconstruct UV from barycentric coordinates
-    // Standard triangle UV interpolation (vertex order: 0,1,2)
-    vec3 bary = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
-    
-    // Fetch UVs from vertex buffer would be ideal, but for now we use standard layout
-    // This works perfectly for OBJs exported with proper UVs
-    vec2 uv = bary.x * vec2(0.0, 0.0) +  // v0
-              bary.y * vec2(1.0, 0.0) +  // v1
-              bary.z * vec2(0.5, 1.0);   // v2 (typical CCW triangle)
+    // Interpolate UVs matching billboard vertex layout:
+    // v0: (0,1) bottom-left
+    // v1: (0,0) top-left
+    // v2: (1,0) top-right
+    // v3: (1,1) bottom-right (not needed for barycentric interpolation)
+    vec2 uv = bary.x * vec2(0.0f, 1.0f) +  // v0
+              bary.y * vec2(0.0f, 0.0f) +  // v1
+              bary.z * vec2(1.0f, 0.0f);   // v2
 
-    // Sample alpha channel (red = opacity in most engines)
-    float alpha = texture(alphaTex[nonuniformEXT(instanceId)], uv).r;
+    // Vulkan textures are Y-down → flip V to match intended UV orientation
+    uv.y = 1.0f - uv.y;
 
-    // RASPBERRY PINK THRESHOLD — 0.5 = clean, artifact-free cutout
-    // This is the empire's law.
-    if (alpha < 0.5)
-    {
-        ignoreIntersectionEXT;
+    // Sample only the alpha channel
+    float alpha = texture(billboardTex, uv).a;
+
+    // Alpha test (cutout) mode — default for sharp edges on monster.webp
+    if (push.billboardUseAlphaBlend == 0u) {
+        if (alpha < push.billboardAlphaCutoff) {
+            ignoreIntersectionEXT;  // Transparent pixel → ignore hit, ray continues
+        }
     }
+
+    // If billboardUseAlphaBlend == 1u, do nothing → accept all hits (for future true blending)
+    // Note: True alpha blending in primary visibility requires OIT or sorting — not supported here
 }

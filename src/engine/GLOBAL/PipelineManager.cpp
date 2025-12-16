@@ -357,7 +357,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
         // Try to convert to cubemap
-        VkShaderModule convertModule = loadShader("shaders/equirect_to_cube.comp.spv");
+        VkShaderModule convertModule = loadShader("shaders/compute/equirect_to_cube.spv");
         bool hasConvertShader = (convertModule != VK_NULL_HANDLE);
 
         VkImageView finalView = VK_NULL_HANDLE;
@@ -435,7 +435,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
             LOG_SUCCESS_CAT("ENV", "HDR envmap successfully converted to cubemap — {}x{}x6", cubeSize, cubeSize);
         } else {
             // === FALLBACK: Use equirect directly ===
-            LOG_WARNING_CAT("ENV", "equirect_to_cube.comp.spv not found — using equirectangular projection");
+            LOG_WARNING_CAT("ENV", "equirect_to_cube.spv not found — using equirectangular projection");
 
             VkImageView equirectView = VK_NULL_HANDLE;
             VkImageViewCreateInfo viewInfo{
@@ -513,100 +513,6 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 
     LOG_SUCCESS_CAT("PIPELINE", "Shader loaded: {}", relativePath);
     return module;
-}
-
-void PipelineManager::createEnvMapDisplayComputePipeline(VkImageView envMapView, VkSampler envMapSampler)
-{
-    VkDevice device = stone_device();
-
-    // === 1. Descriptor Set Layout ===
-    VkDescriptorSetLayoutBinding bindings[2] = {};
-
-    bindings[0].binding         = 0;
-    bindings[0].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    bindings[1].binding         = 1;
-    bindings[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 2,
-        .pBindings    = bindings
-    };
-    VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &envMapDisplayDescSetLayout_));
-
-    // === 2. Pipeline Layout + Push Constants ===
-    VkPushConstantRange pcRange{
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-        .offset     = 0,
-        .size       = 8
-    };
-
-    VkPipelineLayoutCreateInfo plInfo{
-        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount         = 1,
-        .pSetLayouts            = &envMapDisplayDescSetLayout_,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges    = &pcRange
-    };
-    VK_CHECK(vkCreatePipelineLayout(device, &plInfo, nullptr, &envMapDisplayPipelineLayout_));
-
-    // === 3. Allocate Descriptor Set — USING YOUR REAL POOL ===
-    VkDescriptorSetAllocateInfo allocInfo{
-        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool     = rtDescriptorPool_.get(),  // ← FIXED: .get() on Handle
-        .descriptorSetCount = 1,
-        .pSetLayouts        = &envMapDisplayDescSetLayout_
-    };
-    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &envMapDisplayDescriptorSet_));
-
-    // === 4. Update sampler binding ===
-    VkDescriptorImageInfo samplerInfo{
-        .sampler     = envMapSampler,
-        .imageView   = envMapView,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-
-    VkWriteDescriptorSet write{
-        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet          = envMapDisplayDescriptorSet_,
-        .dstBinding      = 0,
-        .descriptorCount = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo      = &samplerInfo
-    };
-    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-
-    // === 5. Load shader using OUR loadShader() — NO REDECLARATION ===
-    VkShaderModule shaderModule = loadShader("shaders/envmap_display.comp.spv");
-    if (shaderModule == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load envmap_display.comp.spv — did you compile it?");
-        return;
-    }
-
-    VkPipelineShaderStageCreateInfo stage{
-        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
-        .module = shaderModule,
-        .pName  = "main"
-    };
-
-    VkComputePipelineCreateInfo pipeInfo{
-        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .stage  = stage,
-        .layout = envMapDisplayPipelineLayout_
-    };
-
-    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &envMapDisplayPipeline_));
-
-    // Clean up
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-
-    LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE FORGED — MODE 1 READY — PRESS 1 BRO");
 }
 
 void PipelineManager::createPipelineLayout()

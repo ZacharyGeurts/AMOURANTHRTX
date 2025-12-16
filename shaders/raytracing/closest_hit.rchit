@@ -1,53 +1,61 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : require
-#extension GL_ARB_gpu_shader_int64 : require
 
-#include "../StoneKey.glsl"   // THE SEAL REMAINS UNBROKEN
+layout(location = 0) rayPayloadInEXT vec3 payload;
 
-hitAttributeEXT vec3 attribs;
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
-layout(location = 1) rayPayloadEXT bool isShadowRay;
+layout(binding = 3, set = 0) uniform sampler2D billboardTex;
 
-layout(binding = 31, set = 0) uniform SceneUBO {
-    float time;
-    uint  frame;
-    vec2  resolution;
-    float blastIntensity;   // 0..1 → 0..9000
-} ubo;
+hitAttributeEXT vec2 hitAttribs;
 
-// ═══════════════════════════════════════════════════════════════
-//                  BALLZ OBLITERATION ENGINE v6.9
-// ═══════════════════════════════════════════════════════════════
+layout(push_constant) uniform PushConstants {
+    mat4  invView;
+    mat4  invProj;
+    float totalTime;
+    uint  spp;
+    uint  frameSeed;
+    uint  forceEnvOnly;
+    float jitterStrength;
+    uint  maxRecursion;
+    uint  useEnvSky;
+    uint  flipEnvV;
+    uint  showHotPink;
+    float environmentExposure;
+    float skyIntensity;
+    float environmentRotationY;
+    vec3  billboardBaseColor;   // Tint multiplier (1,1,1) = true texture colors
+} push;
+
 void main()
 {
-    vec3 N = normalize(attribs);
+    // Barycentric coordinates for the current triangle
+    vec3 bary = vec3(1.0f - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
 
-    // Time-based explosion pulse (you control speed with blastIntensity)
-    float t      = ubo.time * 8.0;
-    float pulse  = sin(t * 3.14159) * 0.5 + 0.5;
-    float boom   = pow(pulse, 0.3) * 12.0;
-    float radius = length(gl_WorldRayOriginEXT - vec3(0.0)); // distance from cube center
+    // Full 4-vertex UV interpolation for the quad
+    // v0: bottom-left  (0,1)
+    // v1: top-left     (0,0)
+    // v2: top-right    (1,0)
+    // v3: bottom-right (1,1)
+    vec2 uv = bary.x * vec2(0.0f, 1.0f) +  // v0
+              bary.y * vec2(0.0f, 0.0f) +  // v1
+              bary.z * vec2(1.0f, 0.0f);   // v2
 
-    // Core blast color — hotter than the surface of Venus
-    vec3 magma      = vec3(1.0, 0.35, 0.8);
-    vec3 plasma     = vec3(1.0, 0.1, 0.9);
-    vec3 nuclear    = vec3(2.5, 0.0, 1.5);
+    // v3 weight = 1 - bary.x - bary.y - bary.z
+    float w = 1.0f - bary.x - bary.y - bary.z;
+    uv += w * vec2(1.0f, 1.0f);  // v3
 
-    // Shockwave rings
-    float rings = sin(radius * 30.0 - t * 20.0) * 0.5 + 0.5;
-    rings = smoothstep(0.45, 0.55, rings);
+    // Vulkan textures are Y-down → flip V to match intended UV orientation
+    uv.y = 1.0f - uv.y;
 
-    // Final annihilation color
-    vec3 color = mix(magma, plasma, rings * boom);
-    color = mix(color, nuclear, pow(boom, 3.0) * 0.1);
+    // Sample the actual WebP texture
+    vec3 texColor = texture(billboardTex, uv).rgb;
 
-    // Overdrive everything
-    color *= 1.0 + boom * ubo.blastIntensity * 20.0;
-    color *= 2.0 + rings * 10.0;
+    // Apply optional tint (set to 1,1,1 in options for true original colors)
+    texColor *= push.billboardBaseColor;
 
-    // HDR bloom go brrrrrrr
-    color = max(color, vec3(0.0));
-
-    hitValue = color;
+    // Debug override: hot pink only when explicitly enabled
+    if (push.showHotPink != 0u) {
+        payload = vec3(1.0, 0.0, 1.0);  // Hot pink for hit debugging
+    } else {
+        payload = texColor;  // True texture colors
+    }
 }

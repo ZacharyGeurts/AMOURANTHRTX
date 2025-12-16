@@ -1,123 +1,105 @@
-// shaders/raytracing/raygen.rgen — FINAL & ETERNAL
-// AMOURANTH RTX Engine (C) 2025 — VALHALLA v∞ TURBO
-// First light achieved. The photons obey. The sky is real.
-
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : require
-#extension GL_ARB_gpu_shader_int64 : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_scalar_block_layout : enable
 
-#include "../StoneKey.glsl"   // Empire-sealed — binding 31 reserved
+layout(location = 0) rayPayloadEXT vec3 hitValue;
 
-// ── Descriptor Set 0 — Core Bindings
-layout(set = 0, binding = 0)  uniform accelerationStructureEXT topLevelAS;
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 1, set = 0, rgba32f) uniform image2D storageImage;
+layout(binding = 2, set = 0) uniform sampler2D envMap;
 
-layout(set = 0, binding = 1, rgba32f) uniform writeonly  image2D  rtOutput;
-layout(set = 0, binding = 2, rgba32f) uniform readonly   image2D  accumulation;
-
-layout(set = 0, binding = 3, scalar) uniform FrameData {
-    mat4  viewToWorld;
-    mat4  projToWorld;
-    vec4  camPos;
-    uint  frameIndex;
-    float time;
-    float jitterX;
-    float jitterY;
-    vec4  _padding;
-} frame;
-
-layout(set = 0, binding = 6, rgba32f) uniform writeonly image2D nexusScore;
-
-// ── BINDING 7 — HDR CUBEMAP SKY — PROTECTED BY STONEKEY v∞
-layout(set = 0, binding = 7) uniform samplerCube envMap;
-
-// ── Push Constants — Control from C++
-layout(push_constant, std430) uniform PushBlock {
-    uint   currentFrame;
-    uint   enableNexus;
-    uint   enableEnvMap;     // 0 = procedural sky, 1 = real HDR sky
-    float  exposure;         // Sky exposure control
-    float  skyRotation;      // Y-axis rotation in degrees
-    uint   _pad[3];
+layout(push_constant) uniform PushConstants {
+    mat4  invView;
+    mat4  invProj;
+    float totalTime;
+    uint  spp;
+    uint  frameSeed;
+    uint  forceEnvOnly;
+    float jitterStrength;
+    uint  maxRecursion;
+    uint  useEnvSky;
+    uint  flipEnvV;
+    uint  showHotPink;
+    float environmentExposure;
+    float skyIntensity;
+    float environmentRotationY;
 } push;
 
-// ── Ray Payload
-layout(location = 0) rayPayloadEXT vec3 radiance;
-
-// ── Helper: Rotate direction around Y axis
-vec3 rotateY(vec3 v, float angleDeg)
+// Fast PCG RNG
+uint pcg_hash(uint seed)
 {
-    float angle = radians(angleDeg);
-    float c = cos(angle);
-    float s = sin(angle);
-    return vec3(
-        v.x * c + v.z * s,
-        v.y,
-        -v.x * s + v.z * c
-    );
+    uint state = seed * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-// ── Main Ray Generation
+float rand(inout uint state)
+{
+    state = pcg_hash(state);
+    return float(state) / float(0xFFFFFFFFu);
+}
+
 void main()
 {
-    const uvec2 pixel = gl_LaunchIDEXT.xy;
-    const uvec2 size  = gl_LaunchSizeEXT.xy;
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    vec2 ndc = inUV * 2.0 - 1.0;
 
-    // Screen UV with jitter
-    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(size);
-    vec2 ndc = uv * 2.0 - 1.0;
-    ndc += vec2(frame.jitterX, frame.jitterY);
+    // Base ray direction
+    vec4 target = push.invProj * vec4(ndc.x, ndc.y, 1.0, 1.0);
+    vec3 rayDir = normalize((push.invView * vec4(target.xyz, 0.0)).xyz);
+    vec3 rayOrigin = (push.invView * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 
-    // World-space ray target
-    vec4 target = frame.projToWorld * vec4(ndc, 1.0, 1.0);
-    target /= target.w;
+    // Jitter for temporal AA
+    uint rngState = push.frameSeed + uint(gl_LaunchIDEXT.x) + uint(gl_LaunchIDEXT.y) * gl_LaunchSizeEXT.x;
+    vec2 jitter = vec2(rand(rngState), rand(rngState)) - 0.5;
+    jitter *= push.jitterStrength / vec2(gl_LaunchSizeEXT.xy);
 
-    vec3 origin    = frame.camPos.xyz;
-    vec3 direction = normalize(target.xyz - origin);
+    vec2 jitteredNDC = ndc + jitter * 2.0;
+    vec4 jitteredTarget = push.invProj * vec4(jitteredNDC.x, jitteredNDC.y, 1.0, 1.0);
+    rayDir = normalize((push.invView * vec4(jitteredTarget.xyz, 0.0)).xyz);
 
-    radiance = vec3(0.0);
+    hitValue = vec3(0.0);
 
-    traceRayEXT(
-        topLevelAS,
-        gl_RayFlagsOpaqueEXT,
-        0xFF,
-        0, 0, 0,
-        origin, 0.001,
-        direction, 10000.0,
-        0
-    );
+    traceRayEXT(topLevelAS,
+                gl_RayFlagsOpaqueEXT,
+                0xFF,
+                0,   // sbtRecordOffset
+                0,   // sbtRecordStride
+                0,   // missIndex
+                rayOrigin,
+                0.001,
+                rayDir,
+                10000.0,
+                0);
 
-    vec3 color = radiance;
-
-    // ── PURE HDR CUBEMAP SKY — MODE 0 TRUTH
-    if (push.enableEnvMap != 0u && length(color) < 0.001)
+    // Force environment only (debug) — show pure sky
+    if (push.forceEnvOnly != 0u)
     {
-        // Rotate sky if desired
-        vec3 skyDir = direction;
-        if (push.skyRotation != 0.0)
-            skyDir = rotateY(direction, push.skyRotation);
+        vec2 envUV = vec2(atan(rayDir.z, rayDir.x) * (1.0 / (2.0 * 3.14159265359)) + 0.5,
+                          acos(clamp(rayDir.y, -1.0, 1.0)) * (1.0 / 3.14159265359));
 
-        vec3 skyColor = texture(envMap, skyDir).rgb;
+        if (push.flipEnvV != 0u)
+            envUV.y = 1.0 - envUV.y;
 
-        // Exposure + ACES-like tone mapping
-        skyColor = vec3(1.0) - exp(-skyColor * push.exposure);
-        skyColor = skyColor / (skyColor + vec3(1.0));
-        skyColor = pow(skyColor, vec3(1.0 / 2.2));
+        float rotRad = radians(push.environmentRotationY);
+        envUV.x = envUV.x - 0.5;
+        envUV.x = envUV.x * cos(rotRad) - envUV.y * sin(rotRad) + 0.5;
+        envUV.x = fract(envUV.x);
 
-        color = skyColor;
+        hitValue = texture(envMap, envUV).rgb * push.environmentExposure * push.skyIntensity;
     }
 
-    // Temporal accumulation
-    vec3 prevColor = imageLoad(accumulation, ivec2(pixel)).rgb;
-    color = mix(prevColor, color, 1.0 / float(push.currentFrame + 1u));
-
-    // Final output
-    imageStore(rtOutput, ivec2(pixel), vec4(color, 1.0));
-
-    // Nexus feedback
-    if (push.enableNexus != 0u && pixel.x == 0 && pixel.y == 0)
+    // ONLY apply hot pink if debug is enabled AND we actually hit geometry
+    // This ensures true material colors are shown when debug is off
+    if (push.showHotPink != 0u)
     {
-        imageStore(nexusScore, ivec2(0,0), vec4(color, 1.0));
+        if (hitValue != vec3(0.0))  // hitValue != 0 means closest-hit ran (geometry hit)
+        {
+            hitValue = vec3(1.0, 0.0, 1.0);  // Hot pink for debug
+        }
+        // If no hit (miss), keep env sky color — no forced pink background
     }
+
+    imageStore(storageImage, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
 }

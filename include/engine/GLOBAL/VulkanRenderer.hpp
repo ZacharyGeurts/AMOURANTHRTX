@@ -150,6 +150,15 @@ public:
     std::vector<VkCommandBuffer> commandBuffers_;           // Size = maxFramesInFlight_ — reused
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
+	VkPipeline               envMapDisplayPipeline_       = VK_NULL_HANDLE;
+VkPipelineLayout         envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
+VkDescriptorSet          envMapDisplayDescriptorSet_  = VK_NULL_HANDLE;
+VkDescriptorSetLayout    envMapDisplayDescSetLayout_  = VK_NULL_HANDLE;
+
+[[nodiscard]] bool hasEnvMapDisplayPipeline() const noexcept {
+    return envMapDisplayPipeline_ != VK_NULL_HANDLE;
+}
+
     void submitAndPresent(uint32_t slot, uint32_t imageIndex);
     
     void transitionImage(
@@ -284,6 +293,7 @@ public:
     RTX::Handle<VkDeviceMemory>    envMapMemory_;
     RTX::Handle<VkImageView>    envMapImageView_;
     RTX::Handle<VkSampler>      envMapSampler_;
+	RTX::Handle<VkDescriptorPool> envMapDescriptorPool_;
 
     std::vector<uint64_t> rtOutputHandles_;
 
@@ -313,6 +323,8 @@ public:
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
 
     VkResult recordCommandBuffer(uint32_t frame) noexcept;
+	void createEnvMapDisplayPipeline() noexcept;
+	void createEnvMapDescriptorPool() noexcept;
 
     void updateRTXDescriptors(uint32_t frame = 0) noexcept;
     void updateNexusDescriptors() noexcept;

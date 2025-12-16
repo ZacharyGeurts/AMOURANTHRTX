@@ -1,0 +1,55 @@
+// shaders/equirect_to_cube.comp — FULL HDR CUBEMAP CONVERSION
+// AMOURANTH RTX Engine (C) 2025 — VALHALLA v∞ TURBO
+// Converts equirectangular HDR to true cubemap — THE SKY IS REAL
+// DECEMBER 15, 2025 — FIRST LIGHT ETERNAL
+
+#version 460
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+// Binding 0: Equirectangular HDR input (R32G32B32A32_SFLOAT)
+layout(set = 0, binding = 0) uniform texture2D equirectTex;
+
+// Binding 1: Cubemap output (6 faces, R32G32B32A32_SFLOAT)
+layout(set = 0, binding = 1, rgba32f) uniform writeonly imageCube cubeMap;
+
+const float PI = 3.14159265359;
+
+void main()
+{
+    // Global invocation ID: x/y = pixel coord, z = face (0-5)
+    uvec3 id = gl_GlobalInvocationID;
+    uint face = id.z;
+    vec2 coord = vec2(id.xy) + vec2(0.5);
+
+    // Cube face size
+    uint size = imageSize(cubeMap).x;
+
+    // Normalized device coordinates [-1, 1]
+    vec2 uv = (coord / float(size)) * 2.0 - 1.0;
+
+    // Direction vector per cube face
+    vec3 dir;
+    if (face == 0) dir = vec3( 1.0, -uv.y, -uv.x); // +X
+    if (face == 1) dir = vec3(-1.0, -uv.y,  uv.x); // -X
+    if (face == 2) dir = vec3( uv.x,  1.0,  uv.y); // +Y
+    if (face == 3) dir = vec3( uv.x, -1.0, -uv.y); // -Y
+    if (face == 4) dir = vec3( uv.x, -uv.y,  1.0); // +Z
+    if (face == 5) dir = vec3(-uv.x, -uv.y, -1.0); // -Z
+
+    dir = normalize(dir);
+
+    // Convert to equirectangular UV
+    float phi   = atan(dir.z, dir.x);
+    float theta = acos(clamp(dir.y, -1.0, 1.0));
+
+    vec2 equiUV = vec2(phi / (2.0 * PI) + 0.5, theta / PI);
+
+    // Sample equirect texture
+    ivec2 texSize = textureSize(equirectTex, 0);
+    vec4 color = texelFetch(equirectTex, ivec2(equiUV * vec2(texSize)), 0);
+
+    // Write to cubemap face
+    imageStore(cubeMap, ivec3(id.xy, face), color);
+}

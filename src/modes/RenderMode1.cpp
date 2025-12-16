@@ -47,7 +47,7 @@ void VulkanRenderer::createSyncObjects() noexcept
         VK_CHECK(vkCreateSemaphore(stone_device(), &semaphoreInfo, nullptr, &renderFinishedSemaphores_[i]));
         VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
 
-        LOG_TRACE_CAT("SYNC", "Sync objects forged for frame slot %u", i);
+        LOG_TRACE_CAT("SYNC", "Sync objects forged for frame slot {}", i);
     }
 
     LOG_SUCCESS_CAT("RENDERER", "Synchronization objects complete — 2 semaphores + 2 fences — the rhythm is eternal");

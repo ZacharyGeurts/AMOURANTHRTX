@@ -1,55 +1,61 @@
 #version 460
-#extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_ray_tracing : require
 
-layout(location = 0) rayPayloadInEXT vec3 hitColor;
-hitAttributeEXT vec2 baryCoord;
+layout(location = 0) rayPayloadInEXT vec3 payload;
 
-struct Vertex {
-    vec3 pos;
-    vec3 normal;
-    vec2 uv;
-};
+layout(binding = 3, set = 0) uniform sampler2D billboardTex;
 
-layout(set = 0, binding = 3, std430) buffer Vertices {
-    Vertex v[];
-} vertices;
-
-layout(set = 0, binding = 4, std430) buffer Indices {
-    uint i[];
-} indices;
+hitAttributeEXT vec2 hitAttribs;
 
 layout(push_constant) uniform PushConstants {
-    mat4 invView;
-    mat4 invProj;
+    mat4  invView;
+    mat4  invProj;
     float totalTime;
-    uint spp;
-    uint frameSeed;
+    uint  spp;
+    uint  frameSeed;
+    uint  forceEnvOnly;
+    float jitterStrength;
+    uint  maxRecursion;
+    uint  useEnvSky;
+    uint  flipEnvV;
+    uint  showHotPink;
+    float environmentExposure;
+    float skyIntensity;
+    float environmentRotationY;
+    vec3  billboardBaseColor;   // Tint multiplier (1,1,1) = true texture colors
 } push;
 
-void main() {
-    // Fetch triangle indices
-    uint idx0 = indices.i[3 * gl_PrimitiveID + 0];
-    uint idx1 = indices.i[3 * gl_PrimitiveID + 1];
-    uint idx2 = indices.i[3 * gl_PrimitiveID + 2];
+void main()
+{
+    // Barycentric coordinates for the current triangle
+    vec3 bary = vec3(1.0f - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
 
-    Vertex v0 = vertices.v[idx0];
-    Vertex v1 = vertices.v[idx1];
-    Vertex v2 = vertices.v[idx2];
+    // Full 4-vertex UV interpolation for the quad
+    // v0: bottom-left  (0,1)
+    // v1: top-left     (0,0)
+    // v2: top-right    (1,0)
+    // v3: bottom-right (1,1)
+    vec2 uv = bary.x * vec2(0.0f, 1.0f) +  // v0
+              bary.y * vec2(0.0f, 0.0f) +  // v1
+              bary.z * vec2(1.0f, 0.0f);   // v2
 
-    // Barycentric interpolation of normals
-    vec3 bary = vec3(1.0 - baryCoord.x - baryCoord.y, baryCoord.x, baryCoord.y);
-    vec3 normal = normalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z);
+    // v3 weight = 1 - bary.x - bary.y - bary.z
+    float w = 1.0f - bary.x - bary.y - bary.z;
+    uv += w * vec2(1.0f, 1.0f);  // v3
 
-    // Transform to world space
-    vec3 worldNormal = normalize(vec3(normal * gl_WorldToObjectEXT));
+    // Vulkan textures are Y-down → flip V to match intended UV orientation
+    uv.y = 1.0f - uv.y;
 
-    // Simple Lambertian + ambient
-    vec3 lightDir = normalize(vec3(0.0, 1.0, 0.5));
-    float diff = max(dot(worldNormal, lightDir), 0.0);
-    vec3 color = vec3(0.8, 0.8, 0.8) * diff + vec3(0.2);
+    // Sample the actual WebP texture
+    vec3 texColor = texture(billboardTex, uv).rgb;
 
-    // Optional time-based pulse
-    color *= (0.8 + 0.2 * sin(push.totalTime));
+    // Apply optional tint (set to 1,1,1 in options for true original colors)
+    texColor *= push.billboardBaseColor;
 
-    hitColor = color;
+    // Debug override: hot pink only when explicitly enabled
+    if (push.showHotPink != 0u) {
+        payload = vec3(1.0, 0.0, 1.0);  // Hot pink for hit debugging
+    } else {
+        payload = texColor;  // True texture colors
+    }
 }
