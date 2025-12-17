@@ -1,63 +1,76 @@
-// =============================================================================
 // src/modes/RenderMode3.cpp
 // =============================================================================
-// RENDERMODE 3 — FULL RTX SCENE — BINDING 31 — PINK ON FRAME 0 — ETERNAL
-// 100% public API. 100% compiling. 100% pink.
+// RENDERMODE 3 — RTX COSMIC DANCE — BINDING 31 — ETERNAL PINK ORBIT
+// Animated camera orbiting a glowing pink emissive sphere
+// Full RTX global illumination + temporal accumulation + subtle Nexus variance overlay
+// The empire revolves in perfect harmony — pink photons illuminate the void
 // =============================================================================
 
 #include "modes/RenderMode3.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 
 using namespace Logging::Color;
 
 RenderMode3::RenderMode3(uint32_t width, uint32_t height)
     : width_(width), height_(height), frameCount_(0)
 {
-    LOG_INFO_CAT("RTX", "MODE 3 — FULL RTX SCENE — BINDING 31 IGNITED — {}x{}", width, height);
-    LOG_SUCCESS_CAT("RTX", "TLAS ACTIVE. ACCUMULATION ENGAGED. PINK ON FRAME 0. THE EMPIRE IS ALIVE.");
+    LOG_AMOURANTH("MODE 3 — RTX COSMIC DANCE — BINDING 31 IGNITED — {}x{}", width, height);
+    LOG_AMOURANTH("Camera orbits a pulsing pink emissive sphere — RTX GI + temporal accumulation");
+    LOG_AMOURANTH("Subtle red overlay shows Nexus adaptive sampling focus — the empire breathes");
+    LOG_SUCCESS_CAT("RTX", "COSMIC DANCE ENGAGED — PINK PHOTONS REVOLVE ETERNALLY");
 }
 
-void RenderMode3::updateUniforms(float)
+void RenderMode3::updateUniforms(float deltaTime)
 {
-    alignas(16) struct RTXCommand {
-        alignas(16) glm::vec3 cameraPos;
-        uint32_t      frame;
-        alignas(16) glm::mat4 view;
-        alignas(16) glm::mat4 proj;
-        alignas(16) glm::mat4 invView;
-        alignas(16) glm::mat4 invProj;
-        alignas(16) glm::vec4 jitter;
-        uint64_t      uKey1       = 0x9E37AF18C64D8A17UL;
-        uint64_t      uKey2       = 0xE4F8B29D71A3C56CUL;
-        uint64_t      uObfuscator = 0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
-        uint64_t      uMode       = 3ULL;
-        float         time        = 0.0f;
-        uint32_t      spp         = 0;
-        uint32_t      _pad[2]     = {0};
+    alignas(16) struct CosmicCommand {
+        alignas(16) glm::vec4 cameraPos    = glm::vec4(0.0f, 2.0f, -8.0f, 1.0f);
+        alignas(16) glm::vec4 lightPos     = glm::vec4(0.0f, 1.5f, 0.0f, 1.0f);
+        alignas(16) glm::vec4 lightColor   = glm::vec4(1.0f, 0.3f, 0.8f, 30.0f);  // Hot pink, high intensity
+        alignas(16) glm::mat4 view         = glm::mat4(1.0f);
+        alignas(16) glm::mat4 proj         = glm::mat4(1.0f);
+        alignas(16) glm::mat4 invView      = glm::mat4(1.0f);
+        alignas(16) glm::mat4 invProj      = glm::mat4(1.0f);
+        alignas(16) glm::vec4 jitter       = glm::vec4(0.0f);
+        uint64_t      uKey1                = 0x9E3779B97F4A7C15UL;
+        uint64_t      uKey2                = 0xFB21A9D37C4E5B62UL;
+        uint64_t      uObfuscator          = 0x1337C0DE69F00D42UL;
+        uint64_t      uMode                = 3ULL;           // RTX COSMIC DANCE
+        uint32_t      frame                = 0;
+        uint32_t      visualizeNexus       = 1;              // Subtle variance overlay
+        uint32_t      enableGI             = 1;
+        uint32_t      enableEmissive       = 1;
+        float         time                 = 0.0f;
+        float         lightPulse           = 1.0f;
+        float         orbitSpeed           = 1.0f;
+        float         _pad                 = 0.0f;
     } cmd{};
 
-    float t = static_cast<float>(frameCount_) * 0.016f;
-    glm::vec3 pos(
-        glm::sin(t * 0.3f) * 8.0f,
-        2.0f + glm::sin(t * 0.7f) * 1.5f,
-        glm::cos(t * 0.3f) * 8.0f
-    );
+    // Smooth orbiting camera
+    float t = frameCount_ * 0.015f;
+    float radius = 8.0f;
+    cmd.cameraPos.x = sin(t) * radius;
+    cmd.cameraPos.z = cos(t) * radius;
+    cmd.cameraPos.y = 2.0f + sin(t * 0.5f) * 1.0f;
 
-    glm::mat4 view = glm::lookAt(pos, glm::vec3(0,1,0), glm::vec3(0,1,0));
-    glm::mat4 proj = glm::perspective(glm::radians(60.0f), float(width_)/float(height_), 0.1f, 1000.0f);
-    proj[1][1] *= -1; // Vulkan Y flip
+    // Pulsing central emissive sphere
+    cmd.lightColor.w = 25.0f + sin(t * 4.0f) * 10.0f;
+    cmd.lightPulse = 1.0f + sin(t * 3.0f) * 0.3f;
 
-    cmd.cameraPos = pos;
-    cmd.frame     = static_cast<uint32_t>(frameCount_);
-    cmd.view      = view;
-    cmd.proj      = proj;
-    cmd.invView   = glm::inverse(view);
-    cmd.invProj   = glm::inverse(proj);
-    cmd.jitter    = glm::vec4(0.0f);
-    cmd.time      = t;
-    cmd.spp       = static_cast<uint32_t>(frameCount_ + 1);
+    // View/projection
+    glm::vec3 target(0.0f, 1.0f, 0.0f);
+    cmd.view = glm::lookAt(glm::vec3(cmd.cameraPos), target, glm::vec3(0.0f, 1.0f, 0.0f));
+    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
+    cmd.proj = glm::perspective(glm::radians(65.0f), aspect, 0.1f, 1000.0f);
+    cmd.proj[1][1] *= -1.0f; // Vulkan Y flip
+
+    cmd.invView = glm::inverse(cmd.view);
+    cmd.invProj = glm::inverse(cmd.proj);
+
+    cmd.frame = static_cast<uint32_t>(frameCount_);
+    cmd.time = t;
 
     g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
 }
@@ -72,7 +85,8 @@ void RenderMode3::renderFrame(VkCommandBuffer cmd, float deltaTime)
     updateUniforms(deltaTime);
     traceRays(cmd);
 
-    if (frameCount_ == 0) {
+    // Reset on first frame or every 20 seconds for fresh convergence showcase
+    if (frameCount_ == 0 || (frameCount_ % 1200 == 0)) {
         g_rtx().requestAccumulationReset();
     }
 
@@ -85,9 +99,8 @@ void RenderMode3::onResize(uint32_t width, uint32_t height)
 
     width_ = width;
     height_ = height;
-    frameCount_ = 0;
 
     g_rtx().requestAccumulationReset();
 
-    LOG_INFO_CAT("RTX", "MODE 3 — RESIZED TO {}x{} — PINK FRAME 0 INCOMING", width, height);
+    LOG_AMOURANTH("MODE 3 — RESIZED TO {}x{} — COSMIC DANCE CONTINUES UNBROKEN", width, height);
 }

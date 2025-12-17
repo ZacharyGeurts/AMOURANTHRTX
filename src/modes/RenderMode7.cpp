@@ -39,6 +39,6 @@ void RenderMode7::updateUniforms(float)
     g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
 }
 
-void RenderMode7::traceRays(VkCommandBuffer cmd) { g_rtx().recordRayTrace(cmd, {width_, height_}); }
+void RenderMode7::traceRays(VkCommandBuffer cmd) { RTX::pipeline().traceRays(cmd, g_rtx().frameNumber() % 2, width_, height_); }
 void RenderMode7::renderFrame(VkCommandBuffer cmd, float dt) { updateUniforms(dt); traceRays(cmd); g_rtx().requestAccumulationReset(); ++frameCount_; }
 void RenderMode7::onResize(uint32_t w, uint32_t h) { width_ = w; height_ = h; frameCount_ = 0; g_rtx().requestAccumulationReset(); }

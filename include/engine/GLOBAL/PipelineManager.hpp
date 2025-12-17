@@ -120,6 +120,7 @@ public:
     // Environment map — loaded via loadShader("assets/textures/envmap.hdr")
     Handle<VkImageView> envMapImageView_;
     Handle<VkSampler>   envMapSampler_;
+	Handle<VkDescriptorSetLayout> emptyDescriptorSetLayout_;
 
     // Any-hit texture descriptor set layout (set 3)
     Handle<VkDescriptorSetLayout> texDescriptorSetLayout_;
