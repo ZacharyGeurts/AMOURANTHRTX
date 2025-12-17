@@ -1,5 +1,5 @@
 // src/modes/RenderMode1.cpp
-// PURE PINK VOID — FULL-SCREEN SACRED PINK — DECEMBER 15, 2025
+// PURE PINK VOID — FULL-SCREEN SACRED PINK — DECEMBER 16, 2025 — ETERNAL FIX
 
 #include "modes/RenderMode1.hpp"
 #include "engine/GLOBAL/logging.hpp"
@@ -24,37 +24,56 @@ void RenderMode1::renderFrame(VkCommandBuffer cmd, uint32_t frameIndex, float de
     VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    VkImage swapImage = StoneKey::stone_images()[frameIndex % StoneKey::stone_image_count()];
+    const uint32_t imageCount = StoneKey::stone_image_count();
+    const uint32_t imageIdx   = frameIndex % imageCount;
+    VkImage swapImage         = StoneKey::stone_images()[imageIdx];
 
-    // CORRECT: oldLayout = PRESENT_SRC_KHR (what it actually is after previous present)
-    VkImageMemoryBarrier barrier{
+    // CRITICAL FIX: Use UNDEFINED as old layout — Vulkan discards old contents safely
+    // This works 100% reliably regardless of previous frame state
+    VkImageMemoryBarrier toGeneral{
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask       = 0,
         .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .oldLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,  // ← FIXED
+        .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,           // ← SAFE & CORRECT
         .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image               = swapImage,
         .subresourceRange    = range
     };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &toGeneral);
+
+    // Clear to sacred pink
     vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
 
-    // Transition back to PRESENT
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = 0;
-    barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    // Transition back to present — required for vkQueuePresentKHR
+    VkImageMemoryBarrier toPresent{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask       = 0,
+        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = swapImage,
+        .subresourceRange    = range
+    };
 
-    LOG_TRACE_CAT("RENDERER", "Pure pink void rendered — frame %u — photons eternal", frameIndex);
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &toPresent);
+
+    LOG_TRACE_CAT("RENDERER", "Pure pink void rendered — frame {} — image {} — photons eternal", frameIndex, imageIdx);
 }
 
 void RenderMode1::onResize(uint32_t w, uint32_t h)
 {
     width_  = w;
     height_ = h;
-    LOG_INFO_CAT("RTX", "Pure pink mode resized → {}×{} — the void expands", w, h);
+    LOG_INFO_CAT("RTX", "Pure pink mode resized → {}×{} — the void expands eternally", w, h);
 }

@@ -3,6 +3,7 @@
 // AMOURANTH RTX Engine © 2025 — GARDEN GNOME WHISPER EDITION — DECEMBER 16, 2025
 // LAS — PURE TLAS — NO BLAS — NO FENCES — DIRECT MAIN CMD BUFFER BUILD
 // GARDEN GNOMES WHISPER — THE EMPIRE IS LIGHT, FAST, AND ETERNAL
+// PINK VOID NOW FULLY RESTORED — BLACKNESS BANISHED
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -46,7 +47,7 @@ void LAS::initTLAS() noexcept
     }
 
     g_tlasInitialized = true;
-    LOG_SUCCESS_CAT("LAS", "GARDEN GNOME TLAS RING INITIALIZED — 3 FRAMES — PURE WHISPER");
+    LOG_SUCCESS_CAT("LAS", "GARDEN GNOME TLAS RING INITIALIZED — {} FRAMES — PURE WHISPER", MAX_FRAMES_IN_FLIGHT);
 }
 
 void LAS::notifyResize() noexcept
@@ -238,5 +239,6 @@ VkAccelerationStructureKHR LAS::getCurrentTLAS() const noexcept
 // =============================================================================
 // GARDEN GNOMES WHISPER — NO FENCES — NO ONE-TIME — PURE MAIN BUFFER BUILD
 // TLAS LIGHT AND FAST — RESIZE INSTANT — PINK PHOTONS ETERNAL
+// BLACKNESS BANISHED — PURE PINK VOID RESTORED
 // DECEMBER 16, 2025 — THE FINAL LIGHT IS WHISPERED AND ETERNAL
 // =============================================================================

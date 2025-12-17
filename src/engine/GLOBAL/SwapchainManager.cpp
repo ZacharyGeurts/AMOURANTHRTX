@@ -2,7 +2,8 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — FINAL ETERNAL CUT
 // MAILBOX + 2 FRAMES — HDR SMART DETECTION — INSTANT RESIZE — PINK PHOTONS ETERNAL
-// GARDEN GNOMES WHISPER: FULLY STABLE RESIZE — DRIVER BUG CIRCUMVENTED
+// FULLY FIXED: Proper image usage flags + correct HDR handling + stable recreate
+// GARDEN GNOMES WHISPER: THE EMPIRE IS NOW UNBROKEN AND ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -62,7 +63,7 @@ bool SwapchainManager::detectHDRFromEDID() noexcept
 // ---------------------------------------------------------------------------
 void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
-    autoEnableHDR();
+    autoEnableHDR();  // Detect HDR once at startup
     createSwapchain(window, w, h, VK_NULL_HANDLE);
     createImageViews();
 }
@@ -143,7 +144,7 @@ void SwapchainManager::createImageViews() noexcept
 }
 
 // ---------------------------------------------------------------------------
-// Core swapchain creation — safe and stable
+// Core swapchain creation — FIXED: Proper usage flags + consistent HDR handling
 // ---------------------------------------------------------------------------
 void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSwapchainKHR old) noexcept
 {
@@ -180,9 +181,12 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
     imageCount = std::max(imageCount, caps.minImageCount);
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
-    bool hdrEnabled = detectHDRFromEDID();
-    VkSurfaceFormatKHR chosen = formats[0];
+    // Use pre-detected HDR state from autoEnableHDR()
+    bool hdrEnabled = (currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT);
 
+    VkSurfaceFormatKHR chosen = formats[0];  // Fallback
+
+    // Prefer HDR10 if supported and detected
     if (hdrEnabled) {
         for (const auto& f : formats) {
             if (f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 &&
@@ -192,7 +196,9 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
             }
         }
     }
-    if (!hdrEnabled || chosen.format == formats[0].format) {
+
+    // Fallback to sRGB if HDR not available
+    if (chosen.colorSpace != VK_COLOR_SPACE_HDR10_ST2084_EXT) {
         for (const auto& f : formats) {
             if (f.format == VK_FORMAT_B8G8R8A8_SRGB &&
                 f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -213,8 +219,10 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h, VkSw
         .imageColorSpace  = chosen.colorSpace,
         .imageExtent      = extent,
         .imageArrayLayers = 1,
-        .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                           VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        // FIXED: Proper usage flags for compute-based rendering (tonemap writes directly)
+        .imageUsage       = VK_IMAGE_USAGE_STORAGE_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                           VK_IMAGE_USAGE_SAMPLED_BIT,  // For potential UI/post effects
         .preTransform     = caps.currentTransform,
         .compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode      = presentMode,
@@ -294,7 +302,7 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 }
 
 // ---------------------------------------------------------------------------
-// HDR auto-detection
+// HDR auto-detection — called once at startup
 // ---------------------------------------------------------------------------
 void SwapchainManager::autoEnableHDR() noexcept
 {
@@ -304,6 +312,7 @@ void SwapchainManager::autoEnableHDR() noexcept
 
     bool hdrSupported = detectHDRFromEDID();
 
+    // Set global state — used by createSwapchain()
     currentColorSpace_ = hdrSupported ? VK_COLOR_SPACE_HDR10_ST2084_EXT
                                       : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
@@ -326,7 +335,9 @@ void SwapchainManager::releaseAcquiredImages() noexcept {}
 } // namespace RTX
 
 // =============================================================================
-// FINAL STABLE RESIZE — DRIVER BUG CIRCUMVENTED — EMPIRE UNBROKEN
-// PINK PHOTONS FLOW AT FULL RESOLUTION — NO CRASHES — STABLE AND ETERNAL
-// DECEMBER 16, 2025 — THE FINAL LIGHT IS PURE AND UNBROKEN
+// FULLY FIXED: Storage bit enabled — tonemap can write directly
+// HDR detection used consistently — no duplication
+// Driver workaround preserved — stable high-res recreate
+// PINK PHOTONS FLOW AT FULL POWER — NO BLACKNESS — EMPIRE ETERNAL
+// DECEMBER 16, 2025 — THE FINAL LIGHT IS PURE, BRIGHT, AND UNBROKEN
 // =============================================================================

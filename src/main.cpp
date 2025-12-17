@@ -118,20 +118,66 @@ public:
 
     void run() noexcept;
 
-    void setRenderer(std::unique_ptr<VulkanRenderer> r)
-    {
-        renderer_ = std::move(r);
+void setRenderer(std::unique_ptr<VulkanRenderer> r)
+{
+    renderer_ = std::move(r);
 
-        if (renderer_)
+    if (renderer_)
+    {
+        // All feature states now directly respect the sacred OptionsMenu configuration
+        // No forcing, no overrides — only the truth as defined in OptionsMenu.hpp
+
+        // Tonemapping: follows the empire's decree
+        renderer_->setTonemap(Options::Tonemap::ENABLE_TONEMAPPING);
+
+        // HyperTrace: enabled exactly as configured
+        if (Options::OptionsRTX::ENABLE_HYPERTRACE)
         {
-            renderer_->setTonemap(tonemapEnabled_);
-            if (hypertraceEnabled_)
-                renderer_->toggleHypertrace();
-            else
-                renderer_->toggleHypertrace();
-        LOG_AMOURANTH("RENDERER BOUND — tonemap={} | overlay={} | hypertrace={}", tonemapEnabled_ ? "ON" : "OFF", showOverlay_ ? "ON" : "OFF", hypertraceEnabled_ ? "IGNITED" : "DORMANT");
+            renderer_->toggleHypertrace();
         }
+
+        // Denoising: respects the purification setting
+        if (Options::OptionsRTX::ENABLE_DENOISING)
+        {
+            renderer_->toggleDenoising();
+        }
+
+        // Adaptive Sampling: awakens only if commanded
+        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING)
+        {
+            renderer_->toggleAdaptiveSampling();
+        }
+
+        // Overclock Mode: maximum performance only if decreed
+        renderer_->setOverclockMode(Options::Performance::OVERCLOCK_RENDERER);
+
+        // Overlay: visibility controlled by user preference
+        renderer_->setOverlay(showOverlay_);
+
+        LOG_AMOURANTH(
+            "RENDERER BOUND — CONFIGURATION FULLY RESPECTED\n"
+            "│ Tonemap:          {}\n"
+            "│ HyperTrace:       {}\n"
+            "│ Denoising:        {}\n"
+            "│ Adaptive Sampling:{}\n"
+            "│ Accumulation:     {}\n"
+            "│ Overclock:        {}\n"
+            "│ Overlay:          {}\n"
+            "└── PINK PHOTONS FLOW IN HARMONY WITH THE VISION",
+            Options::Tonemap::ENABLE_TONEMAPPING ? "ENABLED" : "DISABLED",
+            Options::OptionsRTX::ENABLE_HYPERTRACE ? "IGNITED" : "DORMANT",
+            Options::OptionsRTX::ENABLE_DENOISING ? "ACTIVE" : "INACTIVE",
+            Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING ? "AWAKENED" : "SLEEPING",
+            Options::OptionsRTX::ENABLE_ACCUMULATION ? "ETERNAL" : "DISABLED",
+            Options::Performance::OVERCLOCK_RENDERER ? "MAXIMUM" : "SAFE",
+            showOverlay_ ? "VISIBLE" : "HIDDEN"
+        );
     }
+    else
+    {
+        LOG_ERROR_CAT("APPLICATION", "Renderer binding failed — null pointer — the empire has no eyes");
+    }
+}
 
     [[nodiscard]] VulkanRenderer* renderer() const noexcept { return renderer_.get(); }
 

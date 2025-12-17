@@ -72,6 +72,7 @@ public:
     void resetCommandBuffers() noexcept;
 
     void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept;
+	void updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept;
 
     bool isAlive() const noexcept;
 	bool swapchainNeedsPresentTransition_ = false;
@@ -91,6 +92,7 @@ public:
     void toggleAdaptiveSampling() noexcept;
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
+	void setOverlay(bool enabled) noexcept;
 
     bool debugShowEnvMapOnly_ = false;
 
@@ -107,7 +109,6 @@ public:
     void updateRTDescriptorSet(uint32_t frameIndex);
     void recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex);
     void setTonemap(bool enabled) noexcept;
-    void setOverlay(bool show) noexcept;
     void loadCriticalShaders() noexcept;
 
     void createSyncObjects() noexcept;

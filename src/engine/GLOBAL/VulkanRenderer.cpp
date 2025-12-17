@@ -227,7 +227,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // === GPU TIMESTAMP START — SAFE AFTER BEGIN ===
+    // === GPU TIMESTAMP START ===
     if (timestampQueryPool_ != VK_NULL_HANDLE) {
         const uint32_t queryIndex = frameIndex % 2;
         vkCmdResetQueryPool(cmd, timestampQueryPool_, queryIndex * 2, 2);
@@ -237,7 +237,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VkImage swapImg = stone_images()[imageIndex];
     VkImageView swapView = stone_views()[imageIndex];
 
-    // Reset accumulation if needed
+    // Reset accumulation if requested
     if (resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
         resetAccumNextFrame_ = false;
@@ -246,7 +246,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         accumulationFrame_ = 0;
     }
 
-    // === FIRST-FRAME DEFERRED TRANSITIONS — WHISPER MODE ===
+    // === DEFERRED FIRST-FRAME TRANSITIONS ===
     if (rtOutputNeedsTransition_) {
         for (const auto& img : rtOutputImages_) {
             transitionImage(cmd,
@@ -320,7 +320,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         nexusScoreNeedsInit_ = false;
     }
 
-    // === SWAPCHAIN PRESENT TRANSITION — AFTER RECREATE ===
     if (swapchainNeedsPresentTransition_) {
         for (uint32_t i = 0; i < stone_image_count(); ++i) {
             transitionImage(cmd, stone_images()[i],
@@ -333,9 +332,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         swapchainNeedsPresentTransition_ = false;
     }
 
-    // === RENDER MODE DISPATCH — THE EMPIRE IS FLEXIBLE ===
+    // === RENDER MODE DISPATCH ===
     switch (activeRenderMode_) {
-        case 1: {  // Pure Pink Void — sacred fallback
+        case 1: {  // Pure Pink Void
             VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
             VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
@@ -362,7 +361,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
 
         default: {
-            // === FULL RTX PATH (modes 2–9) ===
+            // === FULL RTX PATH ===
             VkAccelerationStructureKHR tlas = RTX::las().getCurrentTLAS();
             if (!tlas) tlas = pipelineManager_.dummyTLAS();
 
@@ -382,13 +381,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 updateTonemapUniform(slot);
                 currentFrame_.store(slot);
 
-                // Update RT descriptor set
+                // Update RT descriptor set (includes accumulation views for raygen read)
                 {
                     RTX::RTDescriptorUpdate desc{};
                     desc.tlas = tlas;
                     desc.ubo = uboInfo->buffer;
                     desc.uboSize = sizeof(DreamUBO);
-                    desc.swapchainImageView = rtOutputViews_[slot].get();
+                    desc.swapchainImageView = rtOutputViews_[slot].get();  // RT writes here
 
                     if (!accumViews_.empty()) {
                         desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
@@ -416,6 +415,11 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 }
 
                 recordRayTracingCommands(cmd, slot);
+
+                // === CRITICAL FIX: Update accumulation compute descriptors ===
+                // Ray tracing wrote new samples into rtOutputViews_[slot]
+                // Now feed that + previous accumulation into the compute shader
+                updateAccumulationDescriptors(slot, rtOutputViews_[slot].get());
 
                 VkMemoryBarrier2 barrier{
                     .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -453,7 +457,10 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-                    VkImageView input = denoisingEnabled_ ? denoiserView_.get() : accumViews_[slot].get();
+                    VkImageView input = denoisingEnabled_
+                        ? denoiserView_.get()
+                        : accumViews_[slot].get();  // Final accumulated result
+
                     updateTonemapDescriptor(slot, input, swapView);
                     performTonemapPass(cmd, slot, imageIndex);
                 }
@@ -479,7 +486,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
     }
 
-    // Final present transition — only if not already transitioned by pink mode or tonemap
+    // Final present transition
     if (activeRenderMode_ != 1 && !tonemapEnabled_) {
         transitionImage(cmd, swapImg,
                         VK_IMAGE_LAYOUT_GENERAL,
@@ -490,7 +497,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
     }
 
-    // === GPU TIMESTAMP END — BEFORE END ===
+    // === GPU TIMESTAMP END ===
     if (timestampQueryPool_ != VK_NULL_HANDLE) {
         const uint32_t queryIndex = frameIndex % 2;
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, queryIndex * 2 + 1);
@@ -502,6 +509,55 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     currentSpp_++;
     accumulationFrame_++;
+}
+
+void VulkanRenderer::updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept
+{
+    LOG_TRACE_CAT("RENDERER", "Updating accumulation descriptors — slot {} — SPP {}", currentSlot, accumulationFrame_);
+
+    VkDescriptorSet set = accumulationSets_[currentSlot];
+
+    uint32_t prevSlot = 1 - currentSlot;
+
+    VkDescriptorImageInfo outputInfo{
+        .imageView   = accumViews_[currentSlot].get(),
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    VkDescriptorImageInfo historyInfo{
+        .imageView   = accumViews_[prevSlot].get(),
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    VkDescriptorImageInfo colorInfo{
+        .imageView   = currentColorView,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    std::array<VkWriteDescriptorSet, 3> writes{{
+        {.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet           = set,
+         .dstBinding       = 0,
+         .descriptorCount  = 1,
+         .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+         .pImageInfo       = &outputInfo},
+
+        {.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet           = set,
+         .dstBinding       = 1,
+         .descriptorCount  = 1,
+         .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+         .pImageInfo       = &historyInfo},
+
+        {.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet           = set,
+         .dstBinding       = 2,
+         .descriptorCount  = 1,
+         .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+         .pImageInfo       = &colorInfo}
+    }};
+
+    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
 void VulkanRenderer::createAccumulationPipeline() noexcept
@@ -742,28 +798,107 @@ void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchai
 // ──────────────────────────────────────────────────────────────────────────────
 // 2026 HARDCODE: All Toggles Always On — No Runtime Switches
 // ──────────────────────────────────────────────────────────────────────────────
-void VulkanRenderer::toggleHypertrace() noexcept {
-    hypertraceEnabled_ = true;  // Always on
-    resetAccumulation_ = true;
+void VulkanRenderer::setOverlay(bool enabled) noexcept
+{
+    showOverlay_ = enabled;
+
+    if (showOverlay_)
+    {
+        LOG_AMOURANTH("DEBUG OVERLAY ACTIVATED — "
+                      "FPS={} | ACCUMULATION COUNT={} | NEXUS SCORE={} | SPP HEATMAP={} | GPU TIMESTAMPS={}",
+                      Options::Debug::SHOW_FPS_OVERLAY ? "ON" : "OFF",
+                      Options::Debug::SHOW_ACCUMULATION_COUNT ? "ON" : "OFF",
+                      Options::Debug::SHOW_NEXUS_SCORE ? "ON" : "OFF",
+                      Options::Debug::SHOW_SPP_HEATMAP ? "ON" : "OFF",
+                      Options::Debug::SHOW_GPU_TIMESTAMPS ? "ON" : "OFF");
+    }
+    else
+    {
+        LOG_AMOURANTH("DEBUG OVERLAY CONCEALED — PURE PHOTONS — THE EMPIRE SPEAKS WITHOUT WORDS");
+    }
+
+    // This flag now fully respects the sacred OptionsMenu debug settings.
+    // Individual overlay components (FPS, SPP, Nexus, timestamps) will check their
+    // respective Options::Debug constants at draw time.
 }
 
-void VulkanRenderer::toggleFpsTarget() noexcept {
-    fpsTarget_ = FpsTarget::FPS_UNLIMITED;  // Always unlimited
+void VulkanRenderer::toggleHypertrace() noexcept
+{
+    hypertraceEnabled_ = Options::OptionsRTX::ENABLE_HYPERTRACE;
+
+    if (hypertraceEnabled_)
+    {
+        resetAccumulation_ = true;  // Temporal history must restart
+        LOG_AMOURANTH("HYPERTRACE ENGAGED — NEXT-GEN TEMPORAL REUSE ACTIVE — NEXUS SCORE ONLINE");
+    }
+    else
+    {
+        LOG_AMOURANTH("HYPERTRACE DISABLED — FALLING BACK TO CLASSIC TEMPORAL ACCUMULATION");
+    }
 }
 
-void VulkanRenderer::toggleDenoising() noexcept {
-    denoisingEnabled_ = true;  // Always on
-    resetAccumulation_ = true;
+void VulkanRenderer::toggleFpsTarget() noexcept
+{
+    // Respect the preset-defined uncapped mode
+    if constexpr (Options::Display::UNCAPPED_MODE_ACTIVE)
+    {
+        fpsTarget_ = FpsTarget::FPS_UNLIMITED;
+        LOG_AMOURANTH("FPS TARGET: UNLIMITED — THE EMPIRE KNOWS NO BOUNDS");
+    }
+    else
+    {
+        // If a capped preset were ever used, this would respect VSync or refresh rate
+        //fpsTarget_ = FpsTarget::FPS_VSYNC;
+        LOG_AMOURANTH("FPS TARGET: VSYNC — SMOOTH AND TEAR-FREE");
+    }
 }
 
-void VulkanRenderer::toggleAdaptiveSampling() noexcept {
-    adaptiveSamplingEnabled_ = true;  // Always on
-    resetAccumulation_ = true;
+void VulkanRenderer::toggleDenoising() noexcept
+{
+    denoisingEnabled_ = Options::OptionsRTX::ENABLE_DENOISING;
+
+    if (denoisingEnabled_)
+    {
+        resetAccumulation_ = true;
+        LOG_AMOURANTH("DENOISING ACTIVATED — SVGF PURIFICATION ONLINE — NOISE IS PURGED");
+    }
+    else
+    {
+        LOG_AMOURANTH("DENOISING DEACTIVATED — RAW PHOTONS — NOISE IS TRUTH");
+    }
 }
 
-void VulkanRenderer::setOverclockMode(bool enabled) noexcept {
-    overclockMode_ = true;  // Always on
-    fpsTarget_ = FpsTarget::FPS_UNLIMITED;
+void VulkanRenderer::toggleAdaptiveSampling() noexcept
+{
+    adaptiveSamplingEnabled_ = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
+
+    if (adaptiveSamplingEnabled_)
+    {
+        resetAccumulation_ = true;
+        LOG_AMOURANTH("ADAPTIVE SAMPLING ENGAGED — NEXUS GUIDES THE PHOTONS — EFFICIENCY ETERNAL");
+    }
+    else
+    {
+        LOG_AMOURANTH("ADAPTIVE SAMPLING DISABLED — UNIFORM SAMPLING — EVERY PIXEL EQUAL");
+    }
+}
+
+void VulkanRenderer::setOverclockMode(bool enabled) noexcept
+{
+    // Respect the compile-time decision from OptionsMenu
+    overclockMode_ = Options::Performance::OVERCLOCK_RENDERER;
+
+    if (overclockMode_)
+    {
+        fpsTarget_ = FpsTarget::FPS_UNLIMITED;
+        LOG_AMOURANTH("OVERCLOCK MODE ACTIVE — ALL SAFETY CHECKS REMOVED — MAXIMUM PERFORMANCE UNLEASHED");
+    }
+    else
+    {
+        LOG_AMOURANTH("OVERCLOCK MODE INACTIVE — SAFE AND STABLE OPERATION");
+    }
+
+    (void)enabled;  // Parameter ignored — the empire decides at compile time
 }
 
 void VulkanRenderer::destroyNexusScoreImage() noexcept

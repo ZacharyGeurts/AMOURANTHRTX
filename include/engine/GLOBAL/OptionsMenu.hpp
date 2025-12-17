@@ -119,13 +119,13 @@ namespace Audio {
 // ── RTX CORE SETTINGS ─────────────────────────────────────────────────────────
 namespace OptionsRTX {
     // Temporal accumulation of ray tracing samples
-    constexpr bool     ENABLE_ACCUMULATION         = true;
+    constexpr bool     ENABLE_ACCUMULATION         = false;
 
     // Enable real-time denoiser (SVGF or similar)
-    constexpr bool     ENABLE_DENOISING            = true;
+    constexpr bool     ENABLE_DENOISING            = false;
 
     // Adaptive sampling based on per-pixel variance / nexus score
-    constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = true;
+    constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = false;
 
     // Minimum and maximum samples per pixel
     constexpr uint32_t MIN_SPP                     = 1;
@@ -138,7 +138,7 @@ namespace OptionsRTX {
     constexpr float    NEXUS_SCORE_THRESHOLD       = 0.15f;
 
     // HyperTrace — next-gen temporal reuse and jitter system
-    constexpr bool     ENABLE_HYPERTRACE           = true;
+    constexpr bool     ENABLE_HYPERTRACE           = false;
     constexpr float    HYPERTRACE_JITTER_SCALE     = 420.0f;
 
     // Spatiotemporal variance-guided filtering denoiser
@@ -255,7 +255,7 @@ namespace Debug {
 // ── TONEMAPPING & COLOR GRADING ───────────────────────────────────────────────
 namespace Tonemap {
     // Enable tonemapping operator
-    constexpr bool     ENABLE_TONEMAPPING          = true;
+    constexpr bool     ENABLE_TONEMAPPING          = false;
 
     // 0 = ACES, 1 = Filmic, 2 = Reinhard
     constexpr uint32_t TONEMAP_OPERATOR            = 0;
