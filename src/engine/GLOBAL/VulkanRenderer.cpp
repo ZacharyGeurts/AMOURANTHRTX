@@ -2104,8 +2104,9 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept
 {
-    if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0) {
-        LOG_ERROR_CAT("RENDERER", "Frame {} has no UBO — skipping update", frame);
+    if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0)
+    {
+        LOG_ERROR_CAT("RENDERER", "Frame {} has no DreamUBO — skipping update", frame);
         return;
     }
 
@@ -2114,55 +2115,92 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
 
     DreamUBO ubo{};
 
-    // Core parameters
-    ubo.time           = totalTime_;
-    ubo.frame          = frameNumber_;
-    ubo.spp            = currentSpp_;
-    ubo.totalSpp       = accumulationFrame_;
-    ubo.exposure       = currentExposure_;
-    ubo.enableEnvMap   = envMapImageView_.valid() ? 1u : 0u;
-    ubo.hypertrace     = hypertraceEnabled_ ? 1u : 0u;
-    ubo.denoising      = denoisingEnabled_ ? 1u : 0u;
-    ubo.adaptive       = adaptiveSamplingEnabled_ ? 1u : 0u;
-    ubo.debugMode      = static_cast<uint32_t>(activeRenderMode_);
-    ubo.envIntensity   = 1.0f;
-    ubo.envRotation    = 0.0f;
+    // ── Core Time & Frame Data ─────────────────────────────────────────────
+    ubo.time                = totalTime_;
+    ubo.frame               = frameNumber_;
+    ubo.currentSpp          = currentSpp_;
+    ubo.totalSpp            = accumulationFrame_;
+    ubo.exposure            = currentExposure_;
 
-    // Resolution
-    ubo.resolution = glm::vec2(static_cast<float>(width_), static_cast<float>(height_));
+    // Feature toggles (respecting OptionsMenu)
+    ubo.enableEnvMap        = envMapImageView_.valid() ? 1u : 0u;
+    ubo.hypertraceEnabled   = Options::OptionsRTX::ENABLE_HYPERTRACE ? 1u : 0u;
+    ubo.denoisingEnabled    = Options::OptionsRTX::ENABLE_DENOISING ? 1u : 0u;
+    ubo.adaptiveEnabled     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING ? 1u : 0u;
+    ubo.debugMode           = static_cast<uint32_t>(activeRenderMode_);
 
-    // Halton 2,3 jitter sequence (16-frame cycle)
-    static const glm::vec2 halton16[16] = {
-        {0.0f, 0.0f},       {0.5f, 0.333333f},
-        {0.25f, 0.666667f}, {0.75f, 0.111111f},
-        {0.125f, 0.444444f}, {0.625f, 0.777778f},
-        {0.375f, 0.222222f}, {0.875f, 0.555556f},
-        {0.0625f, 0.888889f}, {0.5625f, 0.037037f},
-        {0.3125f, 0.370370f}, {0.8125f, 0.703704f},
-        {0.1875f, 0.148148f}, {0.6875f, 0.481481f},
-        {0.4375f, 0.814815f}, {0.9375f, 0.259259f}
+    ubo.envIntensity        = 1.0f;
+    ubo.envRotation         = 0.0f;
+
+    // ── Resolution & Advanced Jitter ───────────────────────────────────────
+    ubo.resolution          = glm::vec2(static_cast<float>(width_), static_cast<float>(height_));
+
+    // Halton 2,3 sequence — 16-frame cycle for stable temporal sampling
+    static constexpr glm::vec2 halton16[16] = {
+        {0.0f,      0.0f},       {0.5f,      0.333333f},
+        {0.25f,     0.666667f},  {0.75f,     0.111111f},
+        {0.125f,    0.444444f},  {0.625f,    0.777778f},
+        {0.375f,    0.222222f},  {0.875f,    0.555556f},
+        {0.0625f,   0.888889f},  {0.5625f,   0.037037f},
+        {0.3125f,   0.370370f},  {0.8125f,   0.703704f},
+        {0.1875f,   0.148148f},  {0.6875f,   0.481481f},
+        {0.4375f,   0.814815f},  {0.9375f,   0.259259f}
     };
 
-    uint32_t jitterIdx = frameNumber_ % 16;
-    ubo.jitter     = halton16[jitterIdx];
-    ubo.jitterPrev = (frameNumber_ == 0) ? ubo.jitter : halton16[(frameNumber_ - 1) % 16];
+    const uint32_t jitterIdx = frameNumber_ % 16;
+    ubo.jitter              = halton16[jitterIdx];
+    ubo.jitterPrev          = (frameNumber_ == 0) ? ubo.jitter : halton16[(frameNumber_ - 1) % 16];
 
     ubo.nexusScoreThreshold = currentNexusScore_;
+    ubo.hypertraceJitterScale = Options::OptionsRTX::HYPERTRACE_JITTER_SCALE;
 
-    // === CAMERA — CORRECT ACCESS ===
+    // ── Camera Matrices & Parameters ───────────────────────────────────────
     const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
 
-    ubo.view     = camera.view();                    // ← method call
-    ubo.proj     = camera.proj(aspect);              // ← takes aspect
-    ubo.invView  = glm::inverse(camera.view());
-    ubo.invProj  = glm::inverse(camera.proj(aspect));
+    ubo.view     = camera.view();
+    ubo.proj     = camera.proj(aspect);
+    ubo.invView  = glm::inverse(ubo.view);
+    ubo.invProj  = glm::inverse(ubo.proj);
 
-    ubo.camPos   = glm::vec4(camera.pos(), 1.0f);     // ← pos() method
+    ubo.camPos   = glm::vec4(camera.pos(), 1.0f);
+    ubo.camDir   = glm::vec4(camera.forward(), 0.0f);
+    ubo.fov      = camera.fov();
+    ubo.aperture = camera.aperture();
+    ubo.focusDistance = camera.focusDistance();
 
-    // Copy to staging buffer
+    // ── Material & Scene Overrides ─────────────────────────────────────────
+    ubo.materialCount       = static_cast<uint32_t>(materialCount_);
+    ubo.activeMaterialIndex = activeMaterialIndex_;
+    ubo.metallicOverride    = materialMetallicOverride_;
+    ubo.roughnessOverride   = materialRoughnessOverride_;
+    ubo.emissiveIntensity   = emissiveIntensity_;
+
+    ubo.enableBlueNoise     = Options::Environment::ENABLE_BLUE_NOISE ? 1u : 0u;
+    ubo.enableTAA           = Options::OptionsRTX::ENABLE_TAA ? 1u : 0u;
+    ubo.taaAlpha            = Options::OptionsRTX::TAA_ALPHA;
+
+    // ── Lighting & Environment ─────────────────────────────────────────────
+    ubo.sunDirection        = sunDirection_;
+    ubo.sunIntensity        = sunIntensity_;
+    ubo.sunColor            = sunColor_;
+    ubo.fogDensity          = fogDensity_;
+    ubo.fogColor            = fogColor_;
+
+    // ── Debug Visualization Toggles ────────────────────────────────────────
+    ubo.showNexusScore      = Options::Debug::SHOW_NEXUS_SCORE ? 1u : 0u;
+    ubo.showSppHeatmap      = Options::Debug::SHOW_SPP_HEATMAP ? 1u : 0u;
+    ubo.showAccumulationCount = Options::Debug::SHOW_ACCUMULATION_COUNT ? 1u : 0u;
+    ubo.showGpuTimestamps   = Options::Debug::SHOW_GPU_TIMESTAMPS ? 1u : 0u;
+
+    // Optional debug floats — reserved for future use
+    ubo.debugFloat1 = debugFloat1_;
+    ubo.debugFloat2 = debugFloat2_;
+    ubo.debugFloat3 = debugFloat3_;
+    ubo.debugFloat4 = debugFloat4_;
+
+    // ── Transfer to GPU ────────────────────────────────────────────────────
     std::memcpy(mapped, &ubo, sizeof(DreamUBO));
 
-    // Transfer to GPU
     VkCommandBuffer cmd = commandBuffers_[frame];
     VkBuffer dstBuffer = RAW_BUFFER(uniformBufferEncs_[frame]);
 
@@ -2173,16 +2211,22 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     };
     vkCmdCopyBuffer(cmd, BufferManager::getStagingBuffer(), dstBuffer, 1, &copy);
 
-    // Barrier
+    // Memory barrier — ensure UBO is visible to ray tracing and compute shaders
     VkMemoryBarrier barrier{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT
     };
+
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    LOG_TRACE_CAT("RENDERER", "DreamUBO updated — frame {} — totalSpp {} — jitter {} — empire aligned", 
+                  frameNumber_, accumulationFrame_, jitterIdx);
 }
 
 // VulkanRenderer::updateTonemapUniform — RAW BOI DIRECT WRITE (no staging, no null poop)

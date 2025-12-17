@@ -255,7 +255,7 @@ namespace Debug {
 // ── TONEMAPPING & COLOR GRADING ───────────────────────────────────────────────
 namespace Tonemap {
     // Enable tonemapping operator
-    constexpr bool     ENABLE_TONEMAPPING          = false;
+    constexpr bool     ENABLE_TONEMAPPING          = true;
 
     // 0 = ACES, 1 = Filmic, 2 = Reinhard
     constexpr uint32_t TONEMAP_OPERATOR            = 0;

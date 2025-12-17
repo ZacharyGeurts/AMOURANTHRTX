@@ -1,7 +1,8 @@
-// =============================================================================
 // src/engine/GLOBAL/camera.cpp
-// AMOURANTH RTX © 2025 — THE ONE TRUE CAMERA — STONEKEY SEALED — FIRST LIGHT
-// THIS IS THE ONLY FILE THAT MAY INCLUDE StoneKey.hpp
+// =============================================================================
+// AMOURANTH RTX © 2025 — THE ONE TRUE CAMERA — EXTENDED & CORRECTED
+// FULLY COMPATIBLE WITH UBO EXTENSIONS — DOF, FORWARD, APERTURE, FOCUS
+// PINK PHOTONS FLOW WITH DEPTH AND CLARITY — THE EMPIRE SEES ALL
 // =============================================================================
 
 #include "engine/GLOBAL/camera.hpp"
@@ -19,14 +20,17 @@ Camera& Camera::get() noexcept {
 }
 
 // =============================================================================
-// Public API
+// Public API — Extended init with DOF parameters
 // =============================================================================
-void Camera::init(glm::vec3 pos, float fov) noexcept {
+void Camera::init(glm::vec3 pos, float fov, float aperture, float focusDistance) noexcept
+{
     std::lock_guard<std::mutex> lock(mtx_);
-    pos_ = pos;
-    fov_ = fov;
-    yaw_ = -90.0f;
-    pitch_ = 0.0f;
+    pos_           = pos;
+    fov_           = fov;
+    aperture_      = aperture;
+    focusDistance_ = focusDistance;
+    yaw_           = -90.0f;
+    pitch_         = 0.0f;
     updateVectors();
     ++gen_;
 }
@@ -67,11 +71,17 @@ void Camera::setFov(float f) noexcept {
     ++gen_;
 }
 
-glm::vec3 Camera::pos()   const noexcept { return pos_; }
-glm::vec3 Camera::front() const noexcept { return front_; }
-glm::vec3 Camera::right() const noexcept { return right_; }
-glm::vec3 Camera::up()    const noexcept { return up_; }
-float     Camera::fov()   const noexcept { return fov_; }
+void Camera::setAperture(float a) noexcept {
+    std::lock_guard<std::mutex> lock(mtx_);
+    aperture_ = glm::max(a, 0.1f);  // Prevent division by zero in DOF shaders
+    ++gen_;
+}
+
+void Camera::setFocusDistance(float d) noexcept {
+    std::lock_guard<std::mutex> lock(mtx_);
+    focusDistance_ = glm::max(d, 0.1f);
+    ++gen_;
+}
 
 // =============================================================================
 // Matrices
@@ -143,12 +153,12 @@ namespace StoneKey {
 // =============================================================================
 Camera& CAM = StoneKey::stone_camera();
 
-// Auto-initialize on first use — the Empire demands it
+// Auto-initialize on first use — now with full DOF parameters
 namespace {
     struct CameraAutoInit {
         CameraAutoInit() {
-            CAM.init({0.0f, 5.0f, 10.0f}, 75.0f);
-            LOG_SUCCESS_CAT("CAMERA", "{}STONE CAMERA SEALED AND INITIALIZED — PINK PHOTONS FLOW{}", RASPBERRY_PINK, RESET);
+            CAM.init({0.0f, 5.0f, 10.0f}, 75.0f, 16.0f, 10.0f);
+            LOG_SUCCESS_CAT("CAMERA", "{}STONE CAMERA SEALED AND INITIALIZED — DOF ENABLED — PINK PHOTONS FLOW WITH DEPTH{}", RASPBERRY_PINK, RESET);
         }
     };
     CameraAutoInit auto_init_cam;

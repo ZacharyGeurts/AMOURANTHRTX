@@ -163,6 +163,23 @@ public:
     VkDescriptorSetLayout accumulationDescSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool      accumulationDescriptorPool_ = VK_NULL_HANDLE;
 
+	glm::vec3 sunDirection_         = glm::vec3(0.3f, 0.8f, 0.5f);
+    float     sunIntensity_         = 10.0f;
+    glm::vec3 sunColor_             = glm::vec3(1.0f, 0.95f, 0.9f);
+    float     fogDensity_           = 0.02f;
+    glm::vec3 fogColor_             = glm::vec3(0.7f, 0.8f, 0.9f);
+
+	uint32_t  materialCount_        = 0;
+	uint32_t  activeMaterialIndex_  = 0;
+	float     materialMetallicOverride_  = -1.0f;
+	float     materialRoughnessOverride_ = -1.0f;
+	float     emissiveIntensity_    = 1.0f;
+
+	float     debugFloat1_ = 0.0f;
+	float     debugFloat2_ = 0.0f;
+	float     debugFloat3_ = 0.0f;
+	float     debugFloat4_ = 0.0f;
+
     std::array<VkDescriptorSet, 2> accumulationSets_ = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
     [[nodiscard]] bool hasEnvMapDisplayPipeline() const noexcept { return envMapDisplayPipeline_ != VK_NULL_HANDLE; }
