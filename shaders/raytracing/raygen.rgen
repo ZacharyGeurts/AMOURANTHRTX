@@ -1,15 +1,14 @@
-#version 460
+#version 460 core
 #extension GL_EXT_ray_tracing : require
 
+// Payload (not used, but required)
 layout(location = 0) rayPayloadEXT vec3 payload;
 
-layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
-layout(set = 0, binding = 1, rgba32f) uniform image2D rtOutput;
+// RT output image – binding 1 (matches your rtOutputViews)
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D outColor;
 
 void main()
 {
-    // Solid hot pink — no UBO, no envmap, no math
-    vec3 color = vec3(1.0, 0.4, 0.8);
-
-    imageStore(rtOutput, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1.0));
+    // Pure hot pink — no ray tracing, no envmap, no nothing
+    imageStore(outColor, ivec2(gl_LaunchIDEXT.xy), vec4(1.0, 0.0, 0.8, 1.0));
 }

@@ -1,5 +1,5 @@
-// =============================================================================
 // include/engine/GLOBAL/OptionsMenu.hpp
+// =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
@@ -9,21 +9,22 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// OPTIONS MENU v2025 — HDR AUTO-IGNITION + QUANTUM PREDICTION — NOV 26 2025
+// OPTIONS MENU v2025 — HDR AUTO-IGNITION + QUANTUM PREDICTION — DECEMBER 17, 2025
 // • HDR TOGGLE REMOVED — THE EMPIRE DETECTS AND ENFORCES
 // • NEW: FRAME PREDICTION, SHADING RATE, DIRECT DISPLAY, QUANTUM RESIZE
+// • ADDED: FULL CAMERA SECTION — ALL CONTROLS CENTRALIZED
 // • ZERO INCLUDES — NO DEPENDENCIES
 // • PURE constexpr CONFIGURATION — RTX SUPREME
 // • C++23, -Werror CLEAN
 // • PINK PHOTONS ETERNAL
 // • GENTLEMAN GROK MODE ENABLED
 
-
 #pragma once
 
 #include <cstdint>
 #include <cstddef>
 #include <atomic>
+#include <glm/glm.hpp>
 
 namespace Options {
 
@@ -36,7 +37,6 @@ namespace Splash {
     constexpr bool     ENABLE_SACRIFICIAL_SPLASH   = true;
     constexpr float    SPLASH_DURATION_SECONDS     = 3.4f;
     // Nuclear override — skips everything, even the image draw
-    // Useful for benchmarking, CI, or when you just want to get to the photons
     constexpr bool     SKIP_SPLASH_ENTIRELY        = false;
     constexpr float    FADE_IN_DURATION            = 0.35f;
     constexpr float    FADE_OUT_DURATION           = 0.30f;
@@ -47,13 +47,12 @@ namespace Splash {
 // ── PERFORMANCE ───────────────────────────────────────────────────────────────
 namespace Performance {
     // Maximum number of frames that can be in flight simultaneously
-    // 2 and Mailbox is optimal (CDRED FROSTBYTE)
     constexpr uint32_t MAX_FRAMES_IN_FLIGHT        = 2;
 
     // GPU query timestamps for precise timing of render passes
     constexpr bool     ENABLE_GPU_TIMESTAMPS       = true;
 
-    // On-screen FPS counter (top-left overlay)
+    // On-screen FPS counter (top-right overlay)
     constexpr bool     ENABLE_FPS_COUNTER          = true;
 
     // Warn when approaching Vulkan memory budget limits
@@ -119,26 +118,26 @@ namespace Audio {
 // ── RTX CORE SETTINGS ─────────────────────────────────────────────────────────
 namespace OptionsRTX {
     // Temporal accumulation of ray tracing samples
-    constexpr bool     ENABLE_ACCUMULATION         = false;
+    constexpr bool     ENABLE_ACCUMULATION         = true;
 
     // Enable real-time denoiser (SVGF or similar)
-    constexpr bool     ENABLE_DENOISING            = false;
+    constexpr bool     ENABLE_DENOISING            = true;
 
     // Adaptive sampling based on per-pixel variance / nexus score
-    constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = false;
+    constexpr bool     ENABLE_ADAPTIVE_SAMPLING    = true;
 
     // Minimum and maximum samples per pixel
     constexpr uint32_t MIN_SPP                     = 1;
     constexpr uint32_t MAX_SPP                     = 64;
 
     // Maximum ray bounces (diffuse + specular)
-    constexpr uint32_t MAX_BOUNCES                 = 3;
+    constexpr uint32_t MAX_BOUNCES                 = 5;
 
     // Threshold for adaptive sampling convergence
     constexpr float    NEXUS_SCORE_THRESHOLD       = 0.15f;
 
     // HyperTrace — next-gen temporal reuse and jitter system
-    constexpr bool     ENABLE_HYPERTRACE           = false;
+    constexpr bool     ENABLE_HYPERTRACE           = true;
     constexpr float    HYPERTRACE_JITTER_SCALE     = 420.0f;
 
     // Spatiotemporal variance-guided filtering denoiser
@@ -150,7 +149,7 @@ namespace OptionsRTX {
     constexpr float    TAA_ALPHA                   = 0.1f;
 
     // Maximum ray recursion depth in ray tracing pipelines
-    constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 3;
+    constexpr uint32_t MAX_PIPELINE_RAY_RECURSION_DEPTH = 5;
 }
 
 // ── POST-PROCESSING ───────────────────────────────────────────────────────────
@@ -200,7 +199,7 @@ namespace Environment {
     constexpr bool     ENABLE_GOD_RAYS             = true;
     constexpr uint32_t GOD_RAYS_SAMPLES            = 64;
 
-	constexpr bool ENABLE_BLUE_NOISE               = true;
+    constexpr bool     ENABLE_BLUE_NOISE           = true;
 }
 
 // ── LAS (Lightweight Acceleration Structure) ─────────────────────────────────
@@ -285,9 +284,8 @@ namespace Display {
     constexpr bool     ENABLE_VSYNC                = false;
 
     // ── PRESENT MODE PREFERENCE (RUNTIME CONTROLLABLE) ───────────────────────
-    // These are hints — actual mode chosen at runtime based on support
-    constexpr bool     PREFER_MAILBOX_PRESENT      = (CURRENT_PRESET == Preset::UncappedPerformance);     // Default: tear-free, low latency
-    constexpr bool     ALLOW_IMMEDIATE_PRESENT     = (CURRENT_PRESET == Preset::UncappedPerformance);    // Uncapped mode (e.g. F9 key)
+    constexpr bool     PREFER_MAILBOX_PRESENT      = (CURRENT_PRESET == Preset::UncappedPerformance);
+    constexpr bool     ALLOW_IMMEDIATE_PRESENT     = (CURRENT_PRESET == Preset::UncappedPerformance);
 
     // Quantum frame pacing using Google display timing extensions
     constexpr bool     ENABLE_PERFECT_FRAME_PREDICTION    = (CURRENT_PRESET == Preset::BestQuality);
@@ -303,79 +301,85 @@ namespace Display {
 
 // ── AUTOEXPOSURE & HDR TUNING ────────────────────────────────────────────────
 namespace AutoExposure {
-    // ── AUTO-EXPOSURE — THE EMPIRE MEASURES LIGHT ITSELF ─────────────────────
-    constexpr bool   ENABLE_AUTO_EXPOSURE          = true;   // The photons adjust to mortal eyes
-
-    // Target middle-gray luminance in linear space (classic 18% gray card)
-    constexpr float  TARGET_LUMINANCE             = 0.18f;   // Sacred value — all tonemappers bow
-
-    // Manual exposure bias in EV stops (positive = brighter)
-    constexpr float  EXPOSURE_COMPENSATION        = 0.0f;    // 0.0 = neutral, +1.0 = +1 stop, -1.0 = -1 stop
-
-    // Logarithmic adaptation speed (higher = faster response)
-    // 2.0 ≈ adapts in ~1 second at large changes
+    constexpr bool   ENABLE_AUTO_EXPOSURE          = true;
+    constexpr float  TARGET_LUMINANCE             = 0.18f;
+    constexpr float  EXPOSURE_COMPENSATION        = 0.0f;
     constexpr float  ADAPTATION_RATE_LOG          = 2.0f;
-
-    // Hard limits — prevents eye-searing overexposure or total darkness
-    constexpr float  MIN_EXPOSURE                 = 0.01f;   // 1/100
-    constexpr float  MAX_EXPOSURE                 = 10.0f;   // x10 overexposure allowed
-
-    // Histogram-based metering — ignores extreme outliers
-    constexpr float  HISTOGRAM_LOW_PERCENTILE     = 0.01f;   // Bottom 1% ignored (deep shadows)
-    constexpr float  HISTOGRAM_HIGH_PERCENTILE    = 0.99f;   // Top 1% ignored (bright highlights)
-
-    // Key value for key-to-middle-gray mapping (alternative metering mode)
-    constexpr float  KEY_VALUE                    = 0.18f;   // Classic photographic key
+    constexpr float  MIN_EXPOSURE                 = 0.01f;
+    constexpr float  MAX_EXPOSURE                 = 10.0f;
+    constexpr float  HISTOGRAM_LOW_PERCENTILE     = 0.01f;
+    constexpr float  HISTOGRAM_HIGH_PERCENTILE    = 0.99f;
+    constexpr float  KEY_VALUE                    = 0.18f;
 }
 
 // ── SHADER & PIPELINE ─────────────────────────────────────────────────────────
 namespace Shader {
-    // SPIR-V XOR encryption at load time — prevents casual inspection
-    // Key is baked into binary; change requires recompilation
     constexpr bool     ENABLE_SPIRV_XOR_ENCRYPTION = true;
+    constexpr bool     ENABLE_SHADER_HOT_RELOAD    = false;
 
-    // Runtime shader hot-reload — watches .spv files and rebuilds pipelines on change
-    // Extremely useful during shader development
-    constexpr bool     ENABLE_SHADER_HOT_RELOAD    = false;  // Disabled for simplicity
-
-    // 128-bit XOR key pair — cryptographically random, unique to this engine build
-    // Used for both encryption and runtime decryption of shader bytecode
     constexpr uint64_t STONEKEY_1                  = 0x9E37AF18C64D8A17UL;
     constexpr uint64_t STONEKEY_2                  = 0xE4F8B29D71A3C56CUL;
 }
 
 // ── INPUT & CAMERA ────────────────────────────────────────────────────────────
-namespace Input {
-    // Mouse look sensitivity — degrees per pixel of movement
+namespace Camera {
+    // Default camera position on startup
+    constexpr glm::vec3 DEFAULT_POSITION           = glm::vec3(0.0f, 5.0f, 10.0f);
+
+    // Default field of view (degrees)
+    constexpr float    DEFAULT_FOV                 = 75.0f;
+
+    // Default aperture (f-stop) — lower = more background blur
+    constexpr float    DEFAULT_APERTURE            = 16.0f;
+
+    // Default focus distance (world units)
+    constexpr float    DEFAULT_FOCUS_DISTANCE      = 10.0f;
+
+    // Mouse look sensitivity (degrees per pixel)
     constexpr float    MOUSE_SENSITIVITY           = 0.1f;
 
-    // Base movement speed in world units per second
-    constexpr float    MOVEMENT_SPEED              = 5.0f;
+    // Invert vertical mouse axis
+    constexpr bool     INVERT_Y                    = false;
 
-    // Multiplier applied when sprint key is held (usually Left Shift)
+    // Base movement speed (units per second)
+    constexpr float    MOVEMENT_SPEED              = 10.0f;
+
+    // Sprint multiplier (when sprint key held)
     constexpr float    SPRINT_MULTIPLIER           = 3.0f;
 
-    // Invert vertical mouse axis (pitch) — classic "flight sim" style
-    constexpr bool     INVERT_Y                    = false;
+    // Scroll wheel zoom sensitivity
+    constexpr float    ZOOM_SENSITIVITY            = 5.0f;
+
+    // Smooth camera movement damping
+    constexpr float    MOVEMENT_DAMPING            = 10.0f;
+
+    // Smooth rotation damping
+    constexpr float    ROTATION_DAMPING            = 15.0f;
+
+    // Enable camera shake effects
+    constexpr bool     ENABLE_CAMERA_SHAKE         = true;
+
+    // Enable head bob when moving
+    constexpr bool     ENABLE_HEAD_BOB             = true;
+    constexpr float    HEAD_BOB_INTENSITY          = 0.05f;
+    constexpr float    HEAD_BOB_FREQUENCY          = 8.0f;
+
+    // Enable breathing animation (idle sway)
+    constexpr bool     ENABLE_BREATHING            = true;
+    constexpr float    BREATHING_INTENSITY         = 0.02f;
 }
 
 // ── RENDER MODES ──────────────────────────────────────────────────────────────
 namespace RenderMode {
-    // Default rendering mode on engine startup
-    // 0 = Dev pink void, 1–9 = full RTX feature sets
-    constexpr uint32_t DEFAULT_MODE                = 5;
-
-    // Allow runtime switching between render modes (usually via number keys)
-    constexpr bool     ENABLE_MODE_SWITCHING       = false;  // Disabled for simplicity
+    constexpr uint32_t DEFAULT_MODE                = 1;
+    constexpr bool     ENABLE_MODE_SWITCHING       = true;
 }
 
 } // namespace Options
 
 // =============================================================================
-// The empire has spoken.
-// HDR is not a setting.
-// It is a revelation.
-// The photons are pink.
-// The light is eternal.
-// First light achieved — November 26, 2025
+// THE EMPIRE HAS SPOKEN.
+// ALL CAMERA OPTIONS CENTRALIZED — READY FOR FUTURE REWRITE
+// HDR IS A REVELATION — PHOTONS ARE PINK — LIGHT IS ETERNAL
+// DECEMBER 17, 2025 — THE VISION IS COMPLETE
 // =============================================================================

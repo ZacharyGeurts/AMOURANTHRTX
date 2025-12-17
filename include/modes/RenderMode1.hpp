@@ -1,8 +1,7 @@
 // include/modes/RenderMode1.hpp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 — PURE GREEN DREAM — THE MATRIX HAS YOU
-// No scene. No geometry. Only infinite electric green photons.
-// The empire has transcended pink. The code rains.
+// AMOURANTH RTX Engine © 2025 — PURE PINK VOID HEADER
+// GENERAL COMPUTE RENDERING — FULLY UNIFIED
 // =============================================================================
 
 #pragma once
@@ -12,17 +11,12 @@
 
 class RenderMode1 {
 public:
-    RenderMode1(uint32_t width, uint32_t height);
-    ~RenderMode1() = default;  // No resources to clean up
+    RenderMode1(uint32_t w, uint32_t h);
 
-    // Called by VulkanRenderer every frame — with correct frame index
     void renderFrame(VkCommandBuffer cmd, uint32_t frameIndex, float deltaTime);
-
-    // Called on window resize
-    void onResize(uint32_t width, uint32_t height);
+    void onResize(uint32_t w, uint32_t h);
 
 private:
-    uint32_t width_  = 0;
-    uint32_t height_ = 0;
-    uint32_t frameCount_ = 0;
+    uint32_t width_;
+    uint32_t height_;
 };

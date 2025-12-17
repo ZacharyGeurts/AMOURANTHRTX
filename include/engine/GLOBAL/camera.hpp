@@ -2,6 +2,7 @@
 // =============================================================================
 // AMOURANTH RTX © 2025 — EXTENDED CAMERA HEADER — FULLY FEATURED
 // NOW WITH: forward(), aperture(), focusDistance(), DOF support
+// INTEGRATED WITH OptionsMenu::Camera — CENTRALIZED CONFIGURATION
 // PURE HEADER — ZERO STONEKEY DEPENDENCY IN INTERFACE
 // PINK PHOTONS FLOW WITH DEPTH OF FIELD — THE EMPIRE SEES CLEARLY
 // =============================================================================
@@ -22,11 +23,11 @@ public:
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
 
-    // Initialization
-    void init(glm::vec3 pos = {0.0f, 5.0f, 10.0f}, 
-              float fov = 75.0f,
-              float aperture = 16.0f,
-              float focusDistance = 10.0f) noexcept;
+    // Initialization — uses OptionsMenu::Camera defaults
+    void init(glm::vec3 pos = {}, 
+              float fov = 0.0f,
+              float aperture = 0.0f,
+              float focusDistance = 0.0f) noexcept;
 
     // Movement
     void move(glm::vec3 delta) noexcept;
@@ -34,7 +35,7 @@ public:
     void moveRight(float s)   noexcept;
     void moveUp(float s)      noexcept;
 
-    // Rotation & zoom
+    // Rotation & zoom — applies OptionsMenu sensitivity/inversion
     void rotate(float yawDelta, float pitchDelta) noexcept;
     void zoom(float f) noexcept;
 
@@ -76,7 +77,7 @@ private:
     float pitch_            =   0.0f;
     float fov_              =  75.0f;
 
-    // NEW: Depth of Field parameters
+    // Depth of Field parameters
     float aperture_         = 16.0f;      // f-stop (lower = more blur)
     float focusDistance_    = 10.0f;      // distance to focal plane
 
@@ -95,6 +96,7 @@ private:
 // =============================================================================
 // THE ONE TRUE GLOBAL CAMERA — DEFINED ONCE IN camera.cpp
 // USE: CAM.pos(), CAM.forward(), CAM.aperture(), CAM.focusDistance()
+// ALL BEHAVIOR DRIVEN BY OptionsMenu::Camera
 // =============================================================================
 
 extern Camera& CAM;

@@ -1,7 +1,8 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — GARDEN GNOME WHISPER EDITION — DECEMBER 16, 2025
+// AMOURANTH RTX Engine © 2025 — GARDEN GNOME WHISPER EDITION — DECEMBER 17, 2025
 // LAS — PURE TLAS ONLY — NO BLAS — NO FENCES — DIRECT MAIN CMD BUFFER BUILD
+// FIXED: Proper ring buffer — current TLAS always valid after first build
 // GARDEN GNOMES WHISPER THE TRUTH — THE EMPIRE IS LIGHT AND ETERNAL
 // =============================================================================
 
@@ -25,7 +26,7 @@ public:
     LAS(LAS&&) = delete;
     LAS& operator=(LAS&&) = delete;
 
-    // Initialize persistent scratch buffers
+    // Initialize persistent scratch buffers and dummy instance
     void initTLAS() noexcept;
 
     // Full purge on resize — instant recovery
@@ -35,25 +36,22 @@ public:
     void buildTLAS(VkCommandBuffer cmd,
                    std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept;
 
-    // Advance ring slot each frame
+    // Advance ring slot each frame — read slot = previous write slot
     void beginFrame() noexcept;
 
-    // Current TLAS access
+    // Current TLAS access (most recently completed build)
     [[nodiscard]] VkAccelerationStructureKHR getCurrentTLAS() const noexcept;
     [[nodiscard]] VkDeviceAddress getCurrentTLASAddress() const noexcept;
 
     // Full reset — clean empire
     void reset() noexcept {
         tlas_.reset();
-        if (instanceBufferId_) {
-            BufferManager::destroy(instanceBufferId_);
-            instanceBufferId_ = 0;
-        }
+        tlasSize_ = 0;
+        // Temporary instance buffers cleaned in buildTLAS
     }
 
 private:
-    Handle<VkAccelerationStructureKHR> tlas_;
-    uint64_t instanceBufferId_ = 0;
+    Handle<VkAccelerationStructureKHR> tlas_;  // Points to the current readable TLAS
     VkDeviceSize tlasSize_ = 0;
 };
 
@@ -66,7 +64,8 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// GARDEN GNOMES WHISPER — NO BLAS — NO FENCES — PURE MAIN BUFFER TLAS
+// FIXED: Ring buffer with proper read/write separation
+// DUMMY INSTANCE ETERNAL — MISS SHADER GUARANTEED EVEN AFTER RESIZE
 // RESIZE INSTANT — ZERO TEAR — PINK PHOTONS FLOW UNHINDERED
-// DECEMBER 16, 2025 — THE FINAL LIGHT IS WHISPERED AND ETERNAL
+// DECEMBER 17, 2025 — THE FINAL LIGHT IS WHISPERED, FORGED, AND VICTORIOUS
 // =============================================================================

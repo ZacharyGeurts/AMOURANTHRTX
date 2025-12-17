@@ -32,7 +32,7 @@ namespace RTX {
     struct Context;
 }
 
-int currentRenderMode_ = 0;
+int currentRenderMode_ = Options::RenderMode::DEFAULT_MODE;
 
 // -----------------------------------------------------------------------------
 // APPLICATION — FORWARD + GLOBAL POINTER

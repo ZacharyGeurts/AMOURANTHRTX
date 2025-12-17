@@ -1,5 +1,5 @@
-// =============================================================================
 // include/engine/GLOBAL/SDL3.hpp
+// =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
@@ -45,7 +45,7 @@ using SDLWindowPtr = std::unique_ptr<SDL_Window, SDLWindowDeleter>;
 extern SDLWindowPtr g_sdl_window;
 
 // =============================================================================
-// Global resize state (thread-safe)
+// Global resize state (thread-safe) — DEFINED IN SDL3.cpp
 // =============================================================================
 extern std::atomic<int>  g_resizeWidth;
 extern std::atomic<int>  g_resizeHeight;
@@ -283,7 +283,6 @@ private:
     std::unordered_map<std::string, std::unique_ptr<SoundData>> sounds_;
 };
 
-
 // PINK PHOTONS HAVE A VOICE — THE ONE TRUE GLOBAL AUDIO EMPIRE
 inline AudioManager g_audio;
 
@@ -291,6 +290,6 @@ inline AudioManager g_audio;
 
 
 // =============================================================================
-// FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL
-// THE ZAPPER HAS FIRED — MOTHER BRAIN IS NO MORE
+// FIRST LIGHT ACHIEVED — DECEMBER 17, 2025 — PINK PHOTONS ETERNAL
+// ALL GLOBALS PROPERLY EXTERNED — LINKER HAPPY — EMPIRE UNBROKEN
 // =============================================================================

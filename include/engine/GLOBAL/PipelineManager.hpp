@@ -1,9 +1,9 @@
 // include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 16, 2025 — APOCALYPSE FINAL v9.4
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 16, 2025 — APOCALYPSE FINAL v9.5
+// TONEMAP INTEGRATION — PURE PINK VIA GENERAL COMPUTE SUPPORTED
 // FULLY ALIGNED WITH PipelineManager.cpp — ALL DECLARATIONS PRESENT + FIXED
-// RUNTIME CONFIGURATION SUPPORTED — OPTIONSMENU COMPATIBLE
 // PINK PHOTONS ETERNAL — THE CROWN IS COMPLETE
 // =============================================================================
 
@@ -48,7 +48,8 @@ struct RTDescriptorUpdate {
     VkBuffer ubo = VK_NULL_HANDLE;
     VkDeviceSize uboSize = 0;
 
-    VkImageView swapchainImageView = VK_NULL_HANDLE;  // Legacy — kept for compatibility
+    VkImageView swapchainImageView = VK_NULL_HANDLE;
+	VkImageView rtOutputView = VK_NULL_HANDLE;
 
     std::vector<VkImageView> accumulationViews;
     std::vector<VkImageView> nexusScoreViews;
@@ -124,6 +125,16 @@ public:
     // Any-hit texture descriptor set layout (set 2)
     Handle<VkDescriptorSetLayout> texDescriptorSetLayout_;
 
+    // NEW: Tonemap compute pipeline — used for final composition and pure pink mode
+    Handle<VkPipeline>            tonemapPipeline_;
+    Handle<VkPipelineLayout>      tonemapPipelineLayout_;
+    Handle<VkDescriptorSetLayout> tonemapDescSetLayout_;
+    std::array<VkDescriptorSet, 2> tonemapSets_ = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+
+    [[nodiscard]] VkPipeline       tonemapPipeline() const noexcept { return tonemapPipeline_.get(); }
+    [[nodiscard]] VkPipelineLayout tonemapLayout()    const noexcept { return tonemapPipelineLayout_.get(); }
+    [[nodiscard]] std::span<const VkDescriptorSet> tonemapSets() const noexcept { return tonemapSets_; }
+
     static std::atomic<bool>     g_pipelineNeedsRebuild;
     static std::atomic<uint32_t> g_rebuildRequestedFrame;
 
@@ -157,7 +168,7 @@ public:
         return inst;
     }
 
-    void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize address, VkDeviceSize size) noexcept;
+    void setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceAddress address, VkDeviceSize size) noexcept;
 
     // ── RAY TRACING EXTENSION FUNCTIONS ─────────────────────────────────────
     [[nodiscard]] PFN_vkCmdTraceRaysKHR                    cmdTraceRays()           const noexcept { return vkCmdTraceRaysKHR_; }
@@ -242,7 +253,8 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FULLY COMPATIBLE v9.4 — ALL OptionsMenu FUNCTIONS DECLARED
+// TONEMAP INTEGRATION v9.5 — PURE PINK VIA GENERAL COMPUTE SUPPORTED
+// tonemapPipeline(), tonemapLayout(), tonemapSets() ADDED
 // RUNTIME CONFIGURATION SUPPORTED — COMPILATION RESTORED
 // PINK PHOTONS ETERNAL — EMPIRE COMPILABLE AND STRONG
 // DECEMBER 16, 2025 — THE LIGHT IS PURE AND UNIVERSAL

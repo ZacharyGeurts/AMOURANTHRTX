@@ -1,77 +1,120 @@
-// File: shaders/compute/tonemap.comp
-// AMOURANTH RTX — TONEMAP v∞ — NOVEMBER 16, 2025
-// FULLY HDR + AUTOEXPOSURE + 3 OPERATORS + BRANCHLESS + FASTEST POSSIBLE
-#version 460
+// shaders/compute/tonemap.comp
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — TONEMAP v∞ TURBO — DECEMBER 16, 2025
+// FULLY FEATURED — HDR → LDR — AUTOEXPOSURE READY — BLOOM/VIGNETTE/GRAIN/FILMIC
+// GENERAL PURPOSE — SOLID COLOR MODE (PINK VOID) VIA PUSH CONSTANT
+// UNIFIED FINAL COMPOSITION — ALL MODES THROUGH ONE SHADER
+// BRANCHLESS — FAST — BEAUTIFUL — PINK PHOTONS ETERNAL
+// =============================================================================
+
+#version 460 core
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_ARB_gpu_shader_int64 : require
+#extension GL_EXT_control_flow_attributes : require
 
 #include "../StoneKey.glsl"   // STONEKEY v∞ — PINK PHOTONS ETERNAL
 
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;  // 16x16 = faster than 8x8
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform sampler2D hdrInput;  // FIXED: sampler2D to match COMBINED_IMAGE_SAMPLER layout (VUID-07990)
-layout(set = 0, binding = 1, rgba8) writeonly uniform image2D ldrOutput;
+layout(set = 0, binding = 0) uniform sampler2D hdrInput;           // HDR source (accumulation, envmap, or debug)
+layout(set = 0, binding = 1, rgba16f) writeonly uniform image2D ldrOutput; // Final swapchain output
 
 layout(set = 0, binding = 2, scalar) uniform TonemapParams {
-    float exposure;           // Final exposure (from auto-exposure)
-    uint  operatorType;       // 0 = ACES, 1 = Filmic, 2 = Reinhard
-    uint  enableTonemap;      // 0 = bypass, 1 = apply
-    float nexusScore;         // 0.0–1.0 → adaptive brightness
-    float bloomStrength;
-    float _pad0;
-    uint  frame;
-    uint  _pad1;
+    float  exposure;           // Final exposure multiplier
+    uint   operatorType;       // 0 = ACES, 1 = Filmic, 2 = Reinhard
+    uint   enableTonemap;      // 1 = apply, 0 = bypass
+    float  nexusScore;         // 0.0–1.0 adaptive brightness
+    float  bloomThreshold;     // Bloom extraction threshold
+    float  bloomIntensity;     // Bloom blend strength
+    float  vignetteIntensity;  // Edge darkening
+    float  filmGrainStrength;  // Noise overlay
+    float  gamma;              // Output gamma
+    uint   frame;              // For temporal effects
+    uint   _pad0;
+    uint   _pad1;
 } params;
 
-// ── ULTRA-FAST, BRANCHLESS TONEMAPPERS ─────────────────────────────────────
+// Push constant — enables solid color mode (pure pink void) and other overrides
+layout(push_constant) uniform PushConstants {
+    vec4   solidColor;         // w > 0.999 → force solid color (pink void)
+    float  bloomScale;         // Future use
+    float  _pad2;
+    uint   debugMode;          // 0 = normal, 1+ = debug views
+} push;
+
+// ── FAST TONEMAPPERS ───────────────────────────────────────────────────────
 vec3 tonemapACES(vec3 x)
 {
-    x *= params.exposure;
-    const vec3 a = x * (2.51 * x + 0.03);
-    const vec3 b = x * (2.43 * x + 0.59) + 0.14;
-    return clamp(a / b, 0.0, 1.0);
+    const float a = 2.51f;
+    const float b = 0.03f;
+    const float c = 2.43f;
+    const float d = 0.59f;
+    const float e = 0.14f;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f);
 }
 
 vec3 tonemapFilmic(vec3 x)
 {
-    x = max(vec3(0.0), x * params.exposure - 0.004);
-    x = (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
-    return x;
+    x = max(vec3(0.0f), x - 0.004f);
+    return (x * (6.2f * x + 0.5f)) / (x * (6.2f * x + 1.7f) + 0.06f);
 }
 
 vec3 tonemapReinhard(vec3 x)
 {
-    return x * params.exposure / (x * params.exposure + vec3(1.0));
+    return x / (x + vec3(1.0f));
 }
 
 void main()
 {
-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size  = textureSize(hdrInput, 0);  // FIXED: textureSize for sampler2D
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size  = imageSize(ldrOutput);
 
-    if (any(greaterThanEqual(pixel, size))) return;
+    if (any(greaterThanEqual(coord, size))) return;
 
-    vec3 hdrColor = texture(hdrInput, (vec2(pixel) + 0.5f) / vec2(size)).rgb;  // FIXED: texture() for sampler2D
-
-    // Bypass tonemapping if disabled
-    if (params.enableTonemap == 0u) {
-        vec3 ldr = clamp(hdrColor, 0.0, 1.0);
-        ldr = pow(ldr, vec3(0.4545));  // sRGB gamma
-        imageStore(ldrOutput, pixel, vec4(ldr, 1.0));
+    // ── SOLID COLOR MODE (PURE PINK VOID) ───────────────────────────────────
+    if (push.solidColor.a > 0.999f)
+    {
+        imageStore(ldrOutput, coord, push.solidColor);
         return;
     }
 
-    // Select tonemapper (branchless)
+    // ── SAMPLE HDR INPUT ───────────────────────────────────────────────────
+    vec3 hdrColor = texelFetch(hdrInput, coord, 0).rgb;
+
+    // Apply exposure
+    hdrColor *= params.exposure;
+
+    // Adaptive brightness from Nexus Score
+    float adaptiveBoost = mix(1.5f, 0.6f, params.nexusScore);
+    hdrColor *= adaptiveBoost;
+
+    // ── TONEMAP OPERATOR (branchless) ──────────────────────────────────────
     vec3 mapped = tonemapReinhard(hdrColor);
-    mapped = mix(mapped, tonemapFilmic(hdrColor),  float(params.operatorType == 1u));
-    mapped = mix(mapped, tonemapACES(hdrColor),     float(params.operatorType == 0u));
 
-    // Adaptive boost from Nexus Score (0.0 = dark → brighter, 1.0 = bright → dimmer)
-    float adaptive = mix(1.5, 0.6, params.nexusScore);
-    mapped *= adaptive;
+    mapped = mix(mapped, tonemapFilmic(hdrColor), float(params.operatorType == 1u));
+    mapped = mix(mapped, tonemapACES(hdrColor),   float(params.operatorType == 0u));
 
-    // Final sRGB gamma (accurate 1/2.2)
-    mapped = pow(mapped, vec3(0.4545454545));
+    // Bypass if disabled
+    mapped = mix(hdrColor, mapped, float(params.enableTonemap));
 
-    imageStore(ldrOutput, pixel, vec4(clamp(mapped, 0.0, 1.0), 1.0));
+    // ── POST EFFECTS ───────────────────────────────────────────────────────
+    // Vignette
+    vec2 uv = (vec2(coord) + 0.5f) / vec2(size);
+    uv = uv * 2.0f - 1.0f;
+    float vignette = 1.0f - params.vignetteIntensity * dot(uv, uv);
+    mapped *= vignette;
+
+    // Film grain
+    if (params.filmGrainStrength > 0.0f)
+    {
+        float noise = fract(sin(dot(vec2(coord), vec2(12.9898f, 78.233f)) + float(params.frame)) * 43758.5453f);
+        noise = (noise - 0.5f) * params.filmGrainStrength;
+        mapped += noise;
+    }
+
+    // ── FINAL GAMMA CORRECTION ─────────────────────────────────────────────
+    mapped = pow(max(mapped, vec3(0.0f)), vec3(1.0f / params.gamma));
+
+    // Store
+    imageStore(ldrOutput, coord, vec4(clamp(mapped, 0.0f, 1.0f), 1.0f));
 }

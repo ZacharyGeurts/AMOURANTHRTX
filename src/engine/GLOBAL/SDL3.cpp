@@ -8,8 +8,8 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// FIRST LIGHT ACHIEVED — NOVEMBER 21, 2025 — PINK PHOTONS ETERNAL
-// THE ZAPPER HAS FIRED — MOTHER BRAIN IS NO MORE
+// SDL_EVENT_WINDOW_CLOSE_REQUESTED handled early + forced quit event
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
@@ -19,6 +19,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/LAS.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
@@ -43,7 +44,6 @@ using StoneKey::stone_window;
 // =============================================================================
 std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
 SDLWindowPtr                    g_sdl_window;
-
 std::atomic<int>  g_resizeWidth{0};
 std::atomic<int>  g_resizeHeight{0};
 std::atomic<bool> g_resizeRequested{false};
@@ -57,13 +57,10 @@ void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 }
 
 // =============================================================================
-// Namespace: SDL3Initializer — Input System (RESIZE IS FORBIDDEN HERE)
+// Namespace: SDL3Initializer — Input System
 // =============================================================================
 namespace SDL3Initializer {
 
-// ——————————————————————————————————————————————————————————————————————
-// Input callback types — defined locally so SDL3.cpp compiles standalone
-// ——————————————————————————————————————————————————————————————————————
 using KeyboardCallback       = std::function<void(const SDL_KeyboardEvent&)>;
 using MouseButtonCallback    = std::function<void(const SDL_MouseButtonEvent&)>;
 using MouseMotionCallback    = std::function<void(const SDL_MouseMotionEvent&)>;
@@ -72,7 +69,7 @@ using TextInputCallback      = std::function<void(const SDL_TextInputEvent&)>;
 using TouchCallback          = std::function<void(const SDL_TouchFingerEvent&)>;
 using GamepadButtonCallback  = std::function<void(const SDL_GamepadButtonEvent&)>;
 using GamepadAxisCallback    = std::function<void(const SDL_GamepadAxisEvent&)>;
-using GamepadConnectCallback = std::function<void(bool connected, SDL_JoystickID id, SDL_Gamepad* gamepad)>;
+using GamepadConnectCallback = std::function<void(bool connected, SDL_JoystickID id, SDL_Gamepad* gp)>;
 
 std::string SDL3Input::locationString(const std::source_location& loc)
 {
@@ -138,18 +135,15 @@ bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bo
 {
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
+        // === CRITICAL: Immediate quit on window close or X button ===
+        if (ev.type == SDL_EVENT_QUIT || ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+            LOG_INFO_CAT("Input", "{}Window close requested (X icon or ALT+F4) — immediate quit{}", RASPBERRY_PINK, RESET);
+            SDL_Event quit{.type = SDL_EVENT_QUIT};
+            SDL_PushEvent(&quit);
+            return !exitOnClose;
+        }
+
         switch (ev.type) {
-            case SDL_EVENT_QUIT:
-            case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                LOG_INFO_CAT("Input", "{}Quit requested — goodbye, warrior{}", OCEAN_TEAL, RESET);
-                return !exitOnClose;
-
-            // RESIZE IS HANDLED EXCLUSIVELY BY SDL3Window::pollEvents()
-            // We do NOT touch it here — the empire demands order
-            case SDL_EVENT_WINDOW_RESIZED:
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                break;
-
             case SDL_EVENT_KEY_DOWN:
                 handleKeyboard(ev.key, window, audioDevice, consoleOpen);
                 if (m_keyboardCallback) m_keyboardCallback(ev.key);
@@ -202,9 +196,6 @@ bool SDL3Input::pollEvents(SDL_Window* window, SDL_AudioDeviceID audioDevice, bo
     return true;
 }
 
-// ——————————————————————————————————————————————————————————————————————
-// 9 CALLBACKS ONLY — RESIZE IS DEAD HERE
-// ——————————————————————————————————————————————————————————————————————
 void SDL3Input::enableTextInput(SDL_Window* window, bool enable)
 {
     if (enable) {
@@ -338,16 +329,9 @@ void SDL3Input::handleGamepadConnection(const SDL_GamepadDeviceEvent& e)
 } // namespace SDL3Initializer
 
 // =============================================================================
-// Namespace: SDL3Window — The One True Forge — INTEGRATED WITH STONEKEY LOVE
+// Namespace: SDL3Window — The One True Forge
 // =============================================================================
 namespace SDL3Window {
-
-namespace detail {
-    std::atomic<uint64_t> g_lastResizeTime{0};
-    std::atomic<int>      g_pendingWidth{0};
-    std::atomic<int>      g_pendingHeight{0};
-    std::atomic<bool>     g_resizePending{false};
-}
 
 std::vector<std::string> getVulkanExtensions(SDL_Window* window)
 {
@@ -357,17 +341,6 @@ std::vector<std::string> getVulkanExtensions(SDL_Window* window)
 
     const char* const* exts = SDL_Vulkan_GetInstanceExtensions(&count);
     return exts ? std::vector<std::string>(exts, exts + count) : std::vector<std::string>{};
-}
-
-// Inside namespace SDL3Window (or wherever your pollEvents lives)
-// Inside src/engine/GLOBAL/SDL3.cpp → namespace SDL3Window
-
-namespace SDL3Window::detail {
-    inline std::atomic<Uint32> g_lastResizeTime{0};
-    inline std::atomic<int>     g_pendingWidth{0};
-    inline std::atomic<int>     g_pendingHeight{0};
-    inline std::atomic<bool>    g_resizePending{false};
-    inline constexpr Uint32     RESIZE_DEBOUNCE_MS = 120;
 }
 
 bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
@@ -380,12 +353,14 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
     {
         eventSeen = true;
 
+        // === FIXED: Immediate quit on X button ===
+        if (ev.type == SDL_EVENT_QUIT || ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+            quit = true;
+            return eventSeen;
+        }
+
         switch (ev.type)
         {
-            case SDL_EVENT_QUIT:
-                quit = true;
-                break;
-
             case SDL_EVENT_KEY_DOWN:
                 if (ev.key.scancode == SDL_SCANCODE_F11)
                     toggleFS = true;
@@ -394,7 +369,6 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 if (!Options::Window::ALLOW_RESIZE) {
-                    // Ignore resize if not allowed
                     break;
                 }
                 {
@@ -402,12 +376,13 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
                     const int h = ev.window.data2;
                     if (w > 0 && h > 0)
                     {
-                        // ONLY SET ATOMIC FLAG — NO VULKAN CALLS
                         g_resizeWidth.store(w);
                         g_resizeHeight.store(h);
                         g_resizeRequested.store(true);
 
                         LOG_MAIN("Resize requested → {}x{}", w, h);
+
+                        RTX::las().notifyResize();
                     }
                 }
                 break;
@@ -424,6 +399,23 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
         SDL_GetWindowSizeInPixels(g_sdl_window.get(), &w, &h);
         outW = (w > 0) ? w : 1;
         outH = (h > 0) ? h : 1;
+
+        if (g_resizeRequested.load())
+        {
+            int pendingW = g_resizeWidth.load();
+            int pendingH = g_resizeHeight.load();
+            if (pendingW > 0 && pendingH > 0)
+            {
+                outW = pendingW;
+                outH = pendingH;
+
+                if (g_vulkanRenderer)
+                {
+                    g_vulkanRenderer->requestResize(pendingW, pendingH);
+                }
+            }
+            g_resizeRequested.store(false);
+        }
     }
 
     return eventSeen;
@@ -553,7 +545,6 @@ void AudioManager::playSound(std::string_view name) {
 
     const auto& sound = it->second;
 
-    // Create and bind stream once (lazy init)
     if (!stream_) {
         stream_ = SDL_CreateAudioStream(&sound->spec, nullptr);
         if (!stream_) {
@@ -569,7 +560,6 @@ void AudioManager::playSound(std::string_view name) {
         }
     }
 
-    // Feed the WAV data into the stream
     if (SDL_PutAudioStreamData(stream_, sound->buffer, sound->length) == 0) {
         LOG_ERROR_CAT("AUDIO", "SDL_PutAudioStreamData failed: {}", CRIMSON_MAGENTA, SDL_GetError(), RESET);
     } else {
@@ -581,7 +571,7 @@ void AudioManager::playSound(std::string_view name) {
 
 // =============================================================================
 // AMOURANTH RTX — UNIVERSAL IMAGE LOADER v∞ — PINK PHOTONS ETERNAL
-// NOVEMBER 22, 2025 — NO MORE SDL_LoadSurface_* ERRORS — EMPIRE ONLY
+// DECEMBER 17, 2025 — FULLY INTEGRATED — EMPIRE COMPLETE
 // =============================================================================
 namespace AmouranthRTX::ImageLoader {
 
@@ -590,7 +580,6 @@ namespace AmouranthRTX::ImageLoader {
     LOG_ATTEMPT_CAT("IMG", "Empire loading sacred image: {}", RASPBERRY_PINK, path, RESET);
 
 #ifdef SDL3_IMAGE_ENABLED
-    // SDL3_image is linked — use it (supports PNG, JPG, WEBP, ICO, etc.)
     if (SDL_Surface* surf = IMG_Load(path))
     {
         LOG_SUCCESS_CAT("IMG", "SDL3_image summoned {} → {}×{} ({} KB)", 
@@ -601,15 +590,13 @@ namespace AmouranthRTX::ImageLoader {
     LOG_WARN_CAT("IMG", "SDL3_image failed for {} — falling back to core SDL3", AURORA_PINK, path, RESET);
 #endif
 
-    // CORE SDL3 FALLBACK — only BMP is 100% guaranteed
-    // But PNG works if you built SDL3 with libpng (most do)
     SDL_IOStream* io = SDL_IOFromFile(path, "rb");
     if (!io) {
         LOG_FATAL_CAT("IMG", "Cannot open file: {}", CRIMSON_MAGENTA, path, RESET);
         return nullptr;
     }
 
-    SDL_Surface* surf = SDL_LoadBMP_IO(io, true);  // true = auto-close
+    SDL_Surface* surf = SDL_LoadBMP_IO(io, true);
     if (surf) {
         LOG_SUCCESS_CAT("IMG", "Core SDL3 loaded BMP: {}", SAPPHIRE_BLUE, path, RESET);
         return surf;
@@ -641,3 +628,9 @@ namespace AmouranthRTX::ImageLoader {
 }
 
 } // namespace AmouranthRTX::ImageLoader
+
+// =============================================================================
+// SDL_EVENT_WINDOW_CLOSE_REQUESTED handled first
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
+// DECEMBER 17, 2025 — THE LIGHT IS ETERNAL
+// =============================================================================

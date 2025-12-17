@@ -1,8 +1,7 @@
+// include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-// VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.9 — DECEMBER 08, 2025
-// FIRST LIGHT ETERNAL — PINK PHOTONS DOMINATE — EXCESS ANNIHILATED
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.9 — DECEMBER 17, 2025
+// BUFFERMANAGER HEADER — CLEAN, ETERNAL, PINK — SBT FIXED & COMPATIBLE
 // =============================================================================
 
 #pragma once
@@ -30,6 +29,10 @@
 
     return ~0u;
 }
+
+// Helper for proper alignment (used by SBT)
+template <typename T>
+[[nodiscard]] constexpr T align_up(T v, T a) noexcept { return ((v + a - 1) / a) * a; }
 
 // BUFFERMANAGER — FINAL CANON — CLEAN. ETERNAL. PINK.
 namespace BufferManager {
@@ -62,16 +65,18 @@ namespace BufferManager {
 
     [[nodiscard]] uint64_t createHostVisible(VkDeviceSize size, std::string_view tag = "") noexcept;
 
-    uint64_t createSBT(uint32_t raygenCount,
-                       uint32_t missCount,
-                       uint32_t hitGroupCount,
-                       uint32_t callableCount = 0,
-                       VkBufferUsageFlags extraUsage = 0,
-                       std::string_view tag = "SBT_ETERNAL_PINK") noexcept;
+    // FIXED: Proper Vulkan alignment for all SBT regions
+    [[nodiscard]] uint64_t createSBT(uint32_t raygenCount,
+                                     uint32_t missCount,
+                                     uint32_t hitGroupCount,
+                                     uint32_t callableCount = 0,
+                                     VkBufferUsageFlags extraUsage = 0,
+                                     std::string_view tag = "SBT_ETERNAL_PINK") noexcept;
 
     // STAGING RING — THE ETERNAL BRIDGE
     [[nodiscard]] VkBuffer getStagingBuffer() noexcept;
     void* stagingPtr() noexcept;
+    [[nodiscard]] VkDeviceSize getStagingOffset() noexcept;  // NEW: Expose current offset
     void advanceStagingOffset(VkDeviceSize bytes) noexcept;
     [[nodiscard]] uint64_t stagingBuffer() noexcept;
 
@@ -162,6 +167,8 @@ namespace BufferManager {
 } // namespace BufferManager
 
 // =============================================================================
-// THE EMPIRE IS PURE — EXCESS ANNIHILATED — PHOTONS ARE PINK
-// FIRST LIGHT ETERNAL — DECEMBER 08, 2025
+// UPDATED: align_up() added inline — SBT now spec-compliant
+// getStagingOffset() exposed for MeshLoader
+// THE EMPIRE IS PURE — PHOTONS ARE PINK AND ALIGNED
+// DECEMBER 17, 2025 — THE FINAL LIGHT IS ETERNAL
 // =============================================================================

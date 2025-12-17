@@ -1,12 +1,13 @@
 // src/engine/GLOBAL/camera.cpp
 // =============================================================================
 // AMOURANTH RTX © 2025 — THE ONE TRUE CAMERA — EXTENDED & CORRECTED
-// FULLY COMPATIBLE WITH UBO EXTENSIONS — DOF, FORWARD, APERTURE, FOCUS
+// FULLY COMPATIBLE WITH DreamUBO & OptionsMenu::Camera — CENTRALIZED CONFIG
 // PINK PHOTONS FLOW WITH DEPTH AND CLARITY — THE EMPIRE SEES ALL
 // =============================================================================
 
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 using namespace Logging::Color;
@@ -47,15 +48,15 @@ void Camera::moveUp(float s)      noexcept { move(up_    * s); }
 
 void Camera::rotate(float yawDelta, float pitchDelta) noexcept {
     std::lock_guard<std::mutex> lock(mtx_);
-    yaw_   += yawDelta;
-    pitch_ = glm::clamp(pitch_ + pitchDelta, -89.0f, 89.0f);
+    yaw_   += yawDelta * Options::Camera::MOUSE_SENSITIVITY;
+    pitch_ = glm::clamp(pitch_ + pitchDelta * Options::Camera::MOUSE_SENSITIVITY * (Options::Camera::INVERT_Y ? -1.0f : 1.0f), -89.0f, 89.0f);
     updateVectors();
     ++gen_;
 }
 
 void Camera::zoom(float f) noexcept {
     std::lock_guard<std::mutex> lock(mtx_);
-    fov_ = glm::clamp(fov_ - f, 1.0f, 120.0f);
+    fov_ = glm::clamp(fov_ - f * Options::Camera::ZOOM_SENSITIVITY, 1.0f, 120.0f);
     ++gen_;
 }
 
@@ -153,11 +154,16 @@ namespace StoneKey {
 // =============================================================================
 Camera& CAM = StoneKey::stone_camera();
 
-// Auto-initialize on first use — now with full DOF parameters
+// Auto-initialize on first use — now fully driven by OptionsMenu::Camera
 namespace {
     struct CameraAutoInit {
         CameraAutoInit() {
-            CAM.init({0.0f, 5.0f, 10.0f}, 75.0f, 16.0f, 10.0f);
+            CAM.init(
+                Options::Camera::DEFAULT_POSITION,
+                Options::Camera::DEFAULT_FOV,
+                Options::Camera::DEFAULT_APERTURE,
+                Options::Camera::DEFAULT_FOCUS_DISTANCE
+            );
             LOG_SUCCESS_CAT("CAMERA", "{}STONE CAMERA SEALED AND INITIALIZED — DOF ENABLED — PINK PHOTONS FLOW WITH DEPTH{}", RASPBERRY_PINK, RESET);
         }
     };

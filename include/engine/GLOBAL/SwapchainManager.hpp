@@ -1,8 +1,9 @@
 // include/engine/GLOBAL/SwapchainManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — VALHALLA v∞ — FULLY COMPATIBLE EDITION
-// SWAPCHAIN MANAGER — ALL REQUIRED RUNTIME FUNCTIONS DECLARED
-// COMPILATION FIXED — OPTIONSMENU CALLS NOW VALID
+// SWAPCHAIN MANAGER — COLORSPACE PERFECTION + COMPILATION FIXED
+// HDR10 → scRGB → sRGB + Mailbox → FIFO → Immediate
+// ALL FUNCTIONS DECLARED — NO MISSING SYMBOLS
 // PINK PHOTONS ETERNAL — EMPIRE STRONG AND COMPILABLE
 // =============================================================================
 
@@ -102,6 +103,10 @@ private:
     static void cleanupSwapchain() noexcept;
     static void createImageViews() noexcept;
     static void createSwapchain(SDL_Window* window, uint32_t w, uint32_t h) noexcept;
+
+    // Colorspace & present mode selection — declared here
+    static VkSurfaceFormatKHR chooseBestFormat() noexcept;
+    static VkPresentModeKHR   chooseBestPresentMode() noexcept;
 };
 
 // Global convenience aliases — the empire speaks with one voice
@@ -129,8 +134,9 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// FULLY COMPATIBLE — ALL OptionsMenu FUNCTIONS DECLARED
-// RUNTIME CONFIGURATION SUPPORTED — COMPILATION RESTORED
+// COMPILATION FIXED — chooseBestFormat/chooseBestPresentMode DECLARED
+// COLORSPACE PERFECTION — HDR10 → scRGB → sRGB
+// PRESENT MODE: MAILBOX PREFERRED — X11 SAFE
 // PINK PHOTONS ETERNAL — EMPIRE COMPILABLE AND STRONG
-// DECEMBER 16, 2025 — THE LIGHT IS PURE AND UNIVERSAL
+// DECEMBER 17, 2025 — THE LIGHT IS PURE AND UNIVERSAL
 // =============================================================================

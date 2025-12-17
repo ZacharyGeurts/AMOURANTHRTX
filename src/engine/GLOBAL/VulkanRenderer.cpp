@@ -194,11 +194,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     totalTime_ += deltaTime;
 
     if (RTX::SwapchainManager::minimized_) {
+        LOG_TRACE_CAT("RENDERER", "Frame skipped — window minimized");
         return;
     }
 
     const uint32_t frameIndex = frameNumber_++;
     const uint32_t slot       = frameIndex % 2;
+
+    LOG_AMOURANTH("=== FRAME {} === SLOT {} ===", frameIndex, slot);
 
     uint32_t imageIndex = 0;
     VkResult acquireResult = vkAcquireNextImageKHR(
@@ -210,6 +213,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     );
 
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING_CAT("RENDERER", "Swapchain out of date/suboptimal — recreating");
+        vkDeviceWaitIdle(stone_device());  // Critical: prevent race
         RTX::recreateSwapchain(stone_width(), stone_height());
         return;
     }
@@ -239,6 +244,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     // Reset accumulation if requested
     if (resetAccumNextFrame_) {
+        LOG_AMOURANTH("RESETTING ACCUMULATION — NEW CONVERGENCE BEGINS");
         clearAccumulationImages(cmd);
         resetAccumNextFrame_ = false;
         resetAccumulation_ = false;
@@ -246,22 +252,19 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         accumulationFrame_ = 0;
     }
 
-    // === DEFERRED FIRST-FRAME TRANSITIONS ===
+    // === DEFERRED FIRST-FRAME TRANSITIONS (offscreen images only) ===
     if (rtOutputNeedsTransition_) {
+        LOG_TRACE_CAT("RENDERER", "First-frame transition: RT output images → GENERAL");
         for (const auto& img : rtOutputImages_) {
-            transitionImage(cmd,
-                            img.get(),
-                            VK_IMAGE_LAYOUT_UNDEFINED,
-                            VK_IMAGE_LAYOUT_GENERAL,
-                            0,
-                            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+            transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
         }
         rtOutputNeedsTransition_ = false;
     }
 
     if (depthNeedsTransition_) {
+        LOG_TRACE_CAT("RENDERER", "First-frame transition: Depth → DEPTH_STENCIL_ATTACHMENT_OPTIMAL");
         VkImageMemoryBarrier barrier{
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask       = 0,
@@ -273,23 +276,17 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             .image               = depthImage_.get(),
             .subresourceRange    = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 }
         };
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
                              0, 0, nullptr, 0, nullptr, 1, &barrier);
-
         depthNeedsTransition_ = false;
     }
 
     if (accumulationNeedsTransition_) {
+        LOG_TRACE_CAT("RENDERER", "First-frame transition: Accumulation images → GENERAL");
         for (const auto& img : accumImages_) {
-            transitionImage(cmd,
-                            img.get(),
-                            VK_IMAGE_LAYOUT_UNDEFINED,
-                            VK_IMAGE_LAYOUT_GENERAL,
-                            0,
-                            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
         }
@@ -297,206 +294,208 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     if (nexusScoreNeedsInit_) {
-        transitionImage(cmd, hypertraceScoreImage_,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        0,
-                        VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT);
+        LOG_TRACE_CAT("RENDERER", "Initializing Nexus score image (clear to zero)");
+        transitionImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
         VkClearColorValue clearZero{{0.0f, 0.0f, 0.0f, 0.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearZero, 1, &range);
 
-        transitionImage(cmd, hypertraceScoreImage_,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_IMAGE_LAYOUT_GENERAL,
-                        VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+        transitionImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                         VK_PIPELINE_STAGE_TRANSFER_BIT,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
         nexusScoreNeedsInit_ = false;
     }
 
-    if (swapchainNeedsPresentTransition_) {
-        for (uint32_t i = 0; i < stone_image_count(); ++i) {
-            transitionImage(cmd, stone_images()[i],
-                            VK_IMAGE_LAYOUT_UNDEFINED,
-                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            0, 0,
-                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-        }
-        swapchainNeedsPresentTransition_ = false;
+    // Remove swapchainNeedsPresentTransition_ entirely — handled per-path
+
+    // === TEMPORARY HOT PINK OVERRIDE ===
+    constexpr bool FORCE_HOT_PINK = false;
+
+    if (FORCE_HOT_PINK) {
+        LOG_AMOURANTH("FORCING HOT PINK OVERRIDE — RTX PATH BYPASSED — EMPIRE DEMANDS COLOR");
+
+        VkClearColorValue hotPink{{1.0f, 0.0f, 0.8f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
+                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &hotPink, 1, &range);
+
+        transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+        goto end_frame;
     }
 
     // === RENDER MODE DISPATCH ===
     switch (activeRenderMode_) {
-        case 1: {  // Pure Pink Void
+        case 1: {
+            LOG_AMOURANTH("RENDER MODE 1: PURE PINK VOID — PHOTONS ETERNAL");
+
             VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
             VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-            transitionImage(cmd, swapImg,
-                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            VK_IMAGE_LAYOUT_GENERAL,
-                            0,
-                            VK_ACCESS_TRANSFER_WRITE_BIT,
-                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT);
+            transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
+                            0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
             vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
 
-            transitionImage(cmd, swapImg,
-                            VK_IMAGE_LAYOUT_GENERAL,
-                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            VK_ACCESS_TRANSFER_WRITE_BIT,
-                            0,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-
-            LOG_TRACE_CAT("RENDERER", "Pure pink void rendered — mode 1 active — photons eternal");
+            transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
             break;
         }
 
         default: {
-            // === FULL RTX PATH ===
+            LOG_AMOURANTH("RENDER MODE DEFAULT: FULL RTX PATH");
+
             VkAccelerationStructureKHR tlas = RTX::las().getCurrentTLAS();
-            if (!tlas) tlas = pipelineManager_.dummyTLAS();
+            if (!tlas) {
+                tlas = pipelineManager_.dummyTLAS();
+                LOG_WARNING_CAT("RENDERER", "No TLAS — falling back to dummy TLAS");
+            }
 
             const uint64_t uboHandle = uniformBufferEncs_[slot];
             const BufferManager::BufferInfo* uboInfo = nullptr;
-            bool rtxValid = (uboHandle != 0);
+            bool uboValid = (uboHandle != 0);
 
-            if (rtxValid) {
+            if (uboValid) {
                 auto it = BufferManager::s_buffers.find(uboHandle);
-                rtxValid = (it != BufferManager::s_buffers.end() && it->second.buffer != VK_NULL_HANDLE);
-                if (rtxValid) uboInfo = &it->second;
+                uboValid = (it != BufferManager::s_buffers.end() && it->second.buffer != VK_NULL_HANDLE);
+                if (uboValid) uboInfo = &it->second;
             }
 
-            if (rtxValid && pipelineManager_.rtPipeline() != VK_NULL_HANDLE)
-            {
-                updateUniformBuffer(slot, camera, deltaTime);
-                updateTonemapUniform(slot);
-                currentFrame_.store(slot);
+            bool pipelineValid = (pipelineManager_.rtPipeline() != VK_NULL_HANDLE);
+            bool rtxValid = uboValid && pipelineValid;
 
-                // Update RT descriptor set (includes accumulation views for raygen read)
-                {
-                    RTX::RTDescriptorUpdate desc{};
-                    desc.tlas = tlas;
-                    desc.ubo = uboInfo->buffer;
-                    desc.uboSize = sizeof(DreamUBO);
-                    desc.swapchainImageView = rtOutputViews_[slot].get();  // RT writes here
+            LOG_AMOURANTH("RTX VALIDITY CHECK — UBO valid: {} | Pipeline valid: {} | Overall RTX valid: {}",
+                          uboValid, pipelineValid, rtxValid);
 
-                    if (!accumViews_.empty()) {
-                        desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
-                    }
+            if (!rtxValid) {
+                LOG_FATAL_CAT("RENDERER", "RTX PATH SKIPPED — falling back to hot pink void");
 
-                    if (hypertraceScoreView_ != VK_NULL_HANDLE) {
-                        desc.nexusScoreViews = { hypertraceScoreView_, hypertraceScoreView_ };
-                    }
+                VkClearColorValue fallbackPink{{1.0f, 0.2f, 0.8f, 1.0f}};
+                VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-                    if (!materialBufferEncs_.empty()) {
-                        uint64_t matHandle = materialBufferEncs_[0];
-                        const auto* matBuf = BufferManager::get(matHandle);
-                        if (matBuf) {
-                            desc.materialsBuffer = matBuf->buffer;
-                            desc.materialsSize = materialBufferSize();
-                        }
-                    }
+                transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
+                                0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-                    if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
-                        desc.envSampler = pipelineManager_.envMapSampler_.get();
-                        desc.envImageView = pipelineManager_.envMapImageView_.get();
-                    }
+                vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &fallbackPink, 1, &range);
 
-                    pipelineManager_.updateRTDescriptorSet(slot, desc);
-                }
-
-                recordRayTracingCommands(cmd, slot);
-
-                // === CRITICAL FIX: Update accumulation compute descriptors ===
-                // Ray tracing wrote new samples into rtOutputViews_[slot]
-                // Now feed that + previous accumulation into the compute shader
-                updateAccumulationDescriptors(slot, rtOutputViews_[slot].get());
-
-                VkMemoryBarrier2 barrier{
-                    .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                    .srcStageMask  = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-                    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-                    .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
-                };
-                VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
-                vkCmdPipelineBarrier2(cmd, &dep);
-
-                recordAccumulationPass(cmd, slot);
-
-                if (denoisingEnabled_) {
-                    updateDenoiserDescriptors();
-                    performDenoisingPass(cmd);
-                }
-
-                VkMemoryBarrier2 denoiseBarrier{
-                    .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                    .srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-                    .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
-                };
-                VkDependencyInfo denoiseDep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &denoiseBarrier};
-                vkCmdPipelineBarrier2(cmd, &denoiseDep);
-
-                if (tonemapEnabled_) {
-                    transitionImage(cmd, swapImg,
-                                    VK_IMAGE_LAYOUT_UNDEFINED,
-                                    VK_IMAGE_LAYOUT_GENERAL,
-                                    0,
-                                    VK_ACCESS_SHADER_WRITE_BIT,
-                                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-
-                    VkImageView input = denoisingEnabled_
-                        ? denoiserView_.get()
-                        : accumViews_[slot].get();  // Final accumulated result
-
-                    updateTonemapDescriptor(slot, input, swapView);
-                    performTonemapPass(cmd, slot, imageIndex);
-                }
+                transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+                break;
             }
-            else if (pipelineManager_.hasEnvMapDisplayPipeline())
+
+            LOG_SUCCESS_CAT("RENDERER", "RTX PATH ACTIVE — RAY TRACING ENGAGED — PHOTONS FLOW");
+
+            updateUniformBuffer(slot, camera, deltaTime);
+            updateTonemapUniform(slot);
+            currentFrame_.store(slot);
+
+            // Update RT descriptor set
             {
-                transitionImage(cmd, swapImg,
-                                VK_IMAGE_LAYOUT_UNDEFINED,
-                                VK_IMAGE_LAYOUT_GENERAL,
-                                0,
-                                VK_ACCESS_SHADER_WRITE_BIT,
-                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+                RTX::RTDescriptorUpdate desc{};
+                desc.tlas = tlas;
+                desc.ubo = uboInfo->buffer;
+                desc.uboSize = sizeof(DreamUBO);
+                desc.rtOutputView = rtOutputViews_[slot].get();
 
-                recordEnvMapOnlyPass(cmd, imageIndex);
-
-                if (tonemapEnabled_) {
-                    updateTonemapDescriptor(slot, pipelineManager_.envMapImageView_.get(), swapView);
-                    performTonemapPass(cmd, slot, imageIndex);
+                if (!accumViews_.empty()) {
+                    desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
                 }
+
+                if (hypertraceScoreView_ != VK_NULL_HANDLE) {
+                    desc.nexusScoreViews = { hypertraceScoreView_, hypertraceScoreView_ };
+                }
+
+                if (!materialBufferEncs_.empty()) {
+                    uint64_t matHandle = materialBufferEncs_[0];
+                    const auto* matBuf = BufferManager::get(matHandle);
+                    if (matBuf) {
+                        desc.materialsBuffer = matBuf->buffer;
+                        desc.materialsSize = materialBufferSize();
+                    }
+                }
+
+                if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
+                    desc.envSampler = pipelineManager_.envMapSampler_.get();
+                    desc.envImageView = pipelineManager_.envMapImageView_.get();
+                }
+
+                pipelineManager_.updateRTDescriptorSet(slot, desc);
+            }
+
+            recordRayTracingCommands(cmd, slot);
+
+            updateAccumulationDescriptors(slot, rtOutputViews_[slot].get());
+
+            VkMemoryBarrier2 rtBarrier{
+                .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                .srcStageMask  = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+                .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
+            };
+            VkDependencyInfo rtDep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &rtBarrier};
+            vkCmdPipelineBarrier2(cmd, &rtDep);
+
+            recordAccumulationPass(cmd, slot);
+
+            if (denoisingEnabled_) {
+                updateDenoiserDescriptors();
+                performDenoisingPass(cmd);
+            }
+
+            VkMemoryBarrier2 denoiseBarrier{
+                .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                .srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
+            };
+            VkDependencyInfo denoiseDep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &denoiseBarrier};
+            vkCmdPipelineBarrier2(cmd, &denoiseDep);
+
+            if (tonemapEnabled_) {
+                LOG_TRACE_CAT("RENDERER", "Executing final tonemap pass");
+
+                VkImageView input = denoisingEnabled_ ? denoiserView_.get() : accumViews_[slot].get();
+
+                updateTonemapDescriptor(slot, input, swapView);
+                performTonemapPass(cmd, slot, imageIndex);  // Handles transitions internally
+            } else {
+                // If tonemap disabled, copy from accum/denoiser to swapchain or clear
+                // For simplicity, clear to black if no tonemap
+                VkClearColorValue black{{0.0f, 0.0f, 0.0f, 1.0f}};
+                VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+                transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
+                                0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+                vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, &black, 1, &range);
+
+                transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
             }
             break;
         }
     }
 
-    // Final present transition
-    if (activeRenderMode_ != 1 && !tonemapEnabled_) {
-        transitionImage(cmd, swapImg,
-                        VK_IMAGE_LAYOUT_GENERAL,
-                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                        VK_ACCESS_SHADER_WRITE_BIT,
-                        0,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-    }
-
+end_frame:
     // === GPU TIMESTAMP END ===
     if (timestampQueryPool_ != VK_NULL_HANDLE) {
         const uint32_t queryIndex = frameIndex % 2;
@@ -509,6 +508,8 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     currentSpp_++;
     accumulationFrame_++;
+
+    LOG_AMOURANTH("=== FRAME {} COMPLETE ===", frameIndex);
 }
 
 void VulkanRenderer::updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept
@@ -709,21 +710,18 @@ void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) 
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// recordEnvMapOnlyPass — FULL-SCREEN HDR ENVMAP DISPLAY — THE TRUE SKY
-// Ensures swapchain is correctly transitioned and used — no pink fallback when envmap exists
-// ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept
 {
     auto& pm = RTX::pipeline();
+    VkImage swapImage = StoneKey::stone_images()[swapchainImageIndex];
 
-    // If we have a valid envmap and display pipeline → render true sky
+    // If we have a valid envmap and display pipeline → render true HDR sky
     if (pm.envMapDisplayPipeline_ != VK_NULL_HANDLE &&
         pm.envMapDisplayDescriptorSet_ != VK_NULL_HANDLE &&
         pm.envMapImageView_.valid() &&
         pm.envMapSampler_.valid())
     {
-        // Update storage image binding to current swapchain image
+        // Update storage image binding to current swapchain image view
         VkDescriptorImageInfo storageInfo{
             .imageView   = StoneKey::stone_views()[swapchainImageIndex],
             .imageLayout = VK_IMAGE_LAYOUT_GENERAL
@@ -739,18 +737,19 @@ void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchai
         };
         vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 
-        // Transition swapchain image to GENERAL
-        transitionImage(cmd, StoneKey::stone_images()[swapchainImageIndex],
-                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+        // Transition: PRESENT_SRC_KHR → GENERAL (compute write)
+        transitionImage(cmd, swapImage,
+                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
                         0, VK_ACCESS_SHADER_WRITE_BIT,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-        // Bind and dispatch compute shader
+        // Bind pipeline and descriptor set
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm.envMapDisplayPipeline_);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                 pm.envMapDisplayPipelineLayout_, 0, 1,
                                 &pm.envMapDisplayDescriptorSet_, 0, nullptr);
 
+        // Push resolution
         struct PushConstants {
             uint32_t width;
             uint32_t height;
@@ -759,14 +758,15 @@ void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchai
         vkCmdPushConstants(cmd, pm.envMapDisplayPipelineLayout_,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
+        // Dispatch
         constexpr uint32_t WG = 16;
         vkCmdDispatch(cmd,
                       (StoneKey::stone_width() + WG - 1) / WG,
                       (StoneKey::stone_height() + WG - 1) / WG,
                       1);
 
-        // Transition back to PRESENT
-        transitionImage(cmd, StoneKey::stone_images()[swapchainImageIndex],
+        // Transition back: GENERAL → PRESENT_SRC_KHR
+        transitionImage(cmd, swapImage,
                         VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                         VK_ACCESS_SHADER_WRITE_BIT, 0,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
@@ -775,20 +775,21 @@ void VulkanRenderer::recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchai
         return;
     }
 
-    // Only fall back to pink if envmap truly failed to load
+    // Fallback: sacred pink void if envmap failed to load
     LOG_WARN_CAT("RENDERER", "Envmap display pipeline or texture missing — showing sacred pink void");
 
     VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VkImage swapImage = StoneKey::stone_images()[swapchainImageIndex];
 
+    // Transition: PRESENT_SRC_KHR → GENERAL (transfer write)
     transitionImage(cmd, swapImage,
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
                     0, VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
     vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_GENERAL, &pink, 1, &range);
 
+    // Transition back: GENERAL → PRESENT_SRC_KHR
     transitionImage(cmd, swapImage,
                     VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                     VK_ACCESS_TRANSFER_WRITE_BIT, 0,
@@ -1407,24 +1408,24 @@ void VulkanRenderer::createRTOutputImages() noexcept
 
 void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
 {
-    // WAIT FOR PREVIOUS FRAME USING THIS SLOT TO FINISH
-    // THIS IS THE ONE TRUE SYNCHRONIZATION
+    // ONE TRUE SYNCHRONIZATION — FENCE WAIT ON CURRENT SLOT ONLY
+    // No global device wait — no stalls — maximum throughput
     vkWaitForFences(stone_device(), 1, &inFlightFences_[slot], VK_TRUE, UINT64_MAX);
     vkResetFences(stone_device(), 1, &inFlightFences_[slot]);
 
     VkSemaphoreSubmitInfo waitInfo{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = imageAvailableSemaphores_[slot],
         .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
     };
 
     VkCommandBufferSubmitInfo cmdInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
         .commandBuffer = commandBuffers_[slot]
     };
 
     VkSemaphoreSubmitInfo signalInfo{
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = renderFinishedSemaphores_[slot]
     };
 
@@ -1438,6 +1439,7 @@ void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
         .pSignalSemaphoreInfos    = &signalInfo
     };
 
+    // Submit to graphics queue — no fence returned, no extra wait
     vkQueueSubmit2(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]);
 
     VkPresentInfoKHR present{
@@ -1451,7 +1453,16 @@ void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
 
     VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+        // Resize handled elsewhere — no device wait here
         RTX::recreateSwapchain(stone_width(), stone_height());
+    }
+}
+
+// Optional: If you ever need a full GPU sync (debug, shutdown)
+void VulkanRenderer::waitForGPU() noexcept
+{
+    if (stone_device() != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(stone_device());
     }
 }
 
@@ -2060,7 +2071,8 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// FIXED: Added swapchain transition to GENERAL before write
+// FIXED: Safe swapchain layout transitions (PRESENT_SRC_KHR → GENERAL → PRESENT_SRC_KHR)
+// No more VK_IMAGE_LAYOUT_UNDEFINED usage on swapchain images
 // ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept
 {
@@ -2070,16 +2082,17 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
         return;
     }
 
-    // Transition swapchain to general for storage write
     VkImage swapImg = stone_images()[swapImageIdx];
+
+    // SAFE: Transition from PRESENT_SRC_KHR to GENERAL for compute shader write
     transitionImage(cmd, swapImg,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_GENERAL,
-        0, VK_ACCESS_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
+                    0, VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tonemapPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tonemapLayout_.get(), 0, 1, &set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            tonemapLayout_.get(), 0, 1, &set, 0, nullptr);
 
     // Push constants
     struct Push {
@@ -2100,6 +2113,12 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
     uint32_t wgX = (ext.width + 15) / 16;
     uint32_t wgY = (ext.height + 15) / 16;
     vkCmdDispatch(cmd, wgX, wgY, 1);
+
+    // SAFE: Transition back to PRESENT_SRC_KHR for presentation
+    transitionImage(cmd, swapImg,
+                    VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_SHADER_WRITE_BIT, 0,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept
@@ -2250,22 +2269,21 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
         return;
     }
 
-    struct TonemapUniform {
-        float    exposure;
-        uint32_t type;
-        uint32_t enabled;
-        float    nexusScore;
-        uint32_t frame;
-        uint32_t spp;
-        float    _pad[2];
-    } ubo{};
+    TonemapUBO ubo{};
 
-    ubo.exposure   = currentExposure_;
-    ubo.type       = static_cast<uint32_t>(tonemapType_);
-    ubo.enabled    = 1u;  // Always on
+    ubo.exposure = currentExposure_;
+    ubo.type = static_cast<uint32_t>(tonemapType_);
+    ubo.enabled = 1u;  // Always on
     ubo.nexusScore = currentNexusScore_;
-    ubo.frame      = frameNumber_;
-    ubo.spp        = currentSpp_;
+    ubo.frame = frameNumber_;
+    ubo.spp = currentSpp_;
+
+    ubo.gamma = 2.2f;
+    ubo.bloomThreshold = 1.0f;
+    ubo.bloomIntensity = 0.8f;
+    ubo.vignetteIntensity = 0.4f;
+    ubo.filmGrainStrength = 0.05f;
+    ubo.lensFlareIntensity = 0.3f;
 
     // Direct eternal write — raw boi, no staging, no bullshit
     std::memcpy(info.mapped, &ubo, sizeof(ubo));
@@ -2474,13 +2492,6 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx,
     vkUpdateDescriptorSets(stone_device(), 3, writes.data(), 0, nullptr);
 }
 
-void VulkanRenderer::waitForGPU() noexcept
-{
-    if (stone_device() != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(stone_device());
-    }
-}
-
 void VulkanRenderer::createTonemapDescriptorSetLayout() noexcept
 {
     if (tonemapDescriptorSetLayout_.valid()) {
@@ -2667,14 +2678,10 @@ bool VulkanRenderer::createSharedStaging() noexcept
 
 void VulkanRenderer::recreateSwapchainDependentResources() noexcept
 {
-    // CRITICAL: Wait for GPU to finish using old resources — EMPIRE MUST BE STILL
     vkDeviceWaitIdle(stone_device());
 
-    LOG_AMOURANTH("RECREATING SWAPCHAIN-DEPENDENT RESOURCES — EMPIRE REBIRTH — PHOTONS REALIGN");
+    LOG_AMOURANTH("RECREATING SWAPCHAIN-DEPENDENT RESOURCES — EMPIRE REBIRTH");
 
-    // ====================================================================
-    // 1. DESTROY OLD RT RESOURCES — IN SACRED ORDER
-    // ====================================================================
     destroyRTOutputImages();
     rtOutputImages_.clear();
     rtOutputMemories_.clear();
@@ -2688,43 +2695,30 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     destroyDenoiserImage();
     destroyNexusScoreImage();
 
-    // ====================================================================
-    // 2. RECREATE COMMAND BUFFERS — FRESH FOR THE NEW EMPIRE
-    // ====================================================================
-    createCommandBuffers();  // Critical — new buffers after waitIdle
+    createCommandBuffers();
 
-    // ====================================================================
-    // 3. RECREATE IMAGES — USING FRESH COMMAND BUFFERS
-    // ====================================================================
     createRTOutputImages();
     createAccumulationImages();
     createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
-    // ====================================================================
-    // 4. UBOs — tonemap reborn with new dimensions
-    // ====================================================================
     recreateTonemapUBOs();
 
-    // ====================================================================
-    // 5. ACCUMULATION RESET — FRESH CONVERGENCE BEGINS
-    // ====================================================================
+    // === FINAL FIX: RE-ALLOCATE DESCRIPTOR SETS AFTER RESIZE ===
+    pipelineManager_.allocateDescriptorSets();
+    LOG_AMOURANTH("RT DESCRIPTOR SETS RE-ALLOCATED — BINDINGS SAFE — PINK SURVIVES RESIZE");
+
     resetAccumulation_   = true;
     resetAccumNextFrame_ = true;
     accumulationFrame_   = 0;
     currentSpp_          = 0;
 
-    // ====================================================================
-    // 6. MARK FIRST-FRAME TRANSITIONS — WHISPER MODE
-    // ====================================================================
     rtOutputNeedsTransition_     = true;
-    depthNeedsTransition_        = true;
+    depthNeedsTransition_       = true;
     accumulationNeedsTransition_ = true;
     nexusScoreNeedsInit_         = true;
-
-    // NEW: Mark swapchain images for first-frame present transition
     swapchainNeedsPresentTransition_ = true;
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Dependent resources reborn — command buffers refreshed — EMPIRE UNBROKEN — PHOTONS ETERNAL");
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Resources reborn — pink eternal across resize — EMPIRE UNBROKEN");
 }
 
 void VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
@@ -2836,18 +2830,37 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
     LOG_AMOURANTH("ON SWAPCHAIN REBUILT — ALL SYSTEMS NOMINAL — RESUME RENDERING");
 }
 
-// ── NEW: onWindowResize implementation ──────────────────────────────────────
 void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
 {
-    // Early exit if size unchanged (avoids unnecessary recreates)
+    // Early exit if size unchanged — avoids unnecessary swapchain recreation
     if (static_cast<uint32_t>(width_) == w && static_cast<uint32_t>(height_) == h) {
         LOG_TRACE_CAT("RENDERER", "Resize event ignored — dimensions unchanged ({}×{})", w, h);
         return;
     }
 
-    // Log and delegate to requestResize
-    LOG_INFO_CAT("RENDERER", "Window resize event: {}×{}", w, h);
-    requestResize(w, h);
+    LOG_AMOURANTH("WINDOW RESIZE DETECTED — {}×{} → {}×{} — EMPIRE REBIRTH INITIATED", width_, height_, w, h);
+
+    // Update internal size immediately — prevents race with render thread
+    width_  = static_cast<int>(w);
+    height_ = static_cast<int>(h);
+
+    // Immediate swapchain recreation — no debounce needed (SDL events are already throttled)
+    RTX::recreateSwapchain(w, h);
+
+    // Force first-frame transitions after recreation
+    rtOutputNeedsTransition_     = true;
+    depthNeedsTransition_        = true;
+    accumulationNeedsTransition_ = true;
+    nexusScoreNeedsInit_         = true;
+    swapchainNeedsPresentTransition_ = true;
+
+    // Critical: Re-allocate descriptor sets to bind new RT output images
+    pipelineManager_.allocateDescriptorSets();
+
+    // Reset accumulation — fresh convergence on new resolution
+    requestAccumulationReset();
+
+    LOG_SUCCESS_CAT("RENDERER", "Resize complete — {}×{} — all resources reborn — pink survives");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
