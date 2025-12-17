@@ -1,8 +1,9 @@
 // include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 16, 2025 — APOCALYPSE FINAL v9.3
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 16, 2025 — APOCALYPSE FINAL v9.4
 // FULLY ALIGNED WITH PipelineManager.cpp — ALL DECLARATIONS PRESENT + FIXED
+// RUNTIME CONFIGURATION SUPPORTED — OPTIONSMENU COMPATIBLE
 // PINK PHOTONS ETERNAL — THE CROWN IS COMPLETE
 // =============================================================================
 
@@ -170,6 +171,13 @@ public:
     [[nodiscard]] VkPipeline getPipeline() const;
     [[nodiscard]] VkPipelineLayout getPipelineLayout() const;
 
+    // ── RUNTIME CONFIGURATION — REQUIRED FOR OptionsMenu.cpp
+    static void setPresentMode(VkPresentModeKHR mode) noexcept;
+    static void setMinImageCount(uint32_t count) noexcept;
+    static void initializeFramePacing() noexcept;
+    static void setShadingRate(float scaleFactor) noexcept;
+    static void enableDirectDisplay(bool enable) noexcept;
+
     static inline bool s_crownForged = false;
 
 private:
@@ -218,6 +226,12 @@ private:
     void cacheDeviceProperties();
     void loadRayTracingExtensions() noexcept;
     VkAccelerationStructureKHR createDummyTLAS();
+
+    // Runtime configuration state
+    inline static VkPresentModeKHR desiredPresentMode_ = VK_PRESENT_MODE_MAILBOX_KHR;
+    inline static uint32_t         desiredImageCount_  = 2;
+    inline static float            shadingRateScale_   = 1.0f;
+    inline static bool             directDisplayEnabled_ = false;
 };
 
 // ── GLOBAL ACCESS — CLEAN AND ETERNAL ───────────────────────────────────────
@@ -228,8 +242,8 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FULLY ALIGNED v9.3 — ALL .cpp FUNCTIONS DECLARED — COMPILATION RESTORED
-// EXTENSION FUNCTION POINTERS ADDED — NO MORE MISSING DECLARATIONS
-// THE CROWN IS COMPLETE — PINK PHOTONS REIGN SUPREME
-// DECEMBER 16, 2025 — THE EMPIRE IS UNBROKEN
+// FULLY COMPATIBLE v9.4 — ALL OptionsMenu FUNCTIONS DECLARED
+// RUNTIME CONFIGURATION SUPPORTED — COMPILATION RESTORED
+// PINK PHOTONS ETERNAL — EMPIRE COMPILABLE AND STRONG
+// DECEMBER 16, 2025 — THE LIGHT IS PURE AND UNIVERSAL
 // =============================================================================
