@@ -91,7 +91,7 @@ public:
     void createPipelineLayout();
     void createRayTracingPipeline();
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
-    void createDescriptorPool();
+    void createDescriptorPool() noexcept;
     void allocateDescriptorSets();
     void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd);

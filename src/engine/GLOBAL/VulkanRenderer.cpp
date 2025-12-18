@@ -389,6 +389,40 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     if (activeRenderMode_ == 1) {
         LOG_AMOURANTH("RENDER MODE 1: PURE PINK VOID — PHOTONS ETERNAL");
 
+        // FORCE DUMMY TLAS IN MODE 1 — GUARANTEED MISS → ENVMAP SKY
+        VkAccelerationStructureKHR forcedTlas = pipelineManager_.dummyTLAS();
+
+        RTX::RTDescriptorUpdate desc{};
+        desc.tlas = forcedTlas;
+        desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
+        desc.uboSize = sizeof(DreamUBO);
+        desc.rtOutputView = rtOutputViews_[slot].get();
+
+        if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
+            desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
+        }
+
+        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_ != VK_NULL_HANDLE) {
+            desc.nexusScoreViews = { hypertraceScoreView_, hypertraceScoreView_ };
+        }
+
+        if (!materialBufferEncs_.empty()) {
+            const auto* matBuf = BufferManager::get(materialBufferEncs_[0]);
+            if (matBuf) {
+                desc.materialsBuffer = matBuf->buffer;
+                desc.materialsSize = materialBufferSize();
+            }
+        }
+
+        if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
+            desc.envSampler = pipelineManager_.envMapSampler_.get();
+            desc.envImageView = pipelineManager_.envMapImageView_.get();
+        }
+
+        pipelineManager_.updateRTDescriptorSet(slot, desc);
+
+        recordRayTracingCommands(cmd, slot);
+
         VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
@@ -986,7 +1020,11 @@ void VulkanRenderer::updateTonemapUBO(uint32_t frame) noexcept {
     auto* buf = BufferManager::get(tonemapUniformEncs_[frame]);
     if (!buf || buf->buffer == VK_NULL_HANDLE) return;
 
-    VkDescriptorBufferInfo uboInfo{ .buffer = buf->buffer, .offset = 0, .range = VK_WHOLE_SIZE };
+    VkDescriptorBufferInfo uboInfo{
+        .buffer = buf->buffer,
+        .offset = 0,
+        .range  = sizeof(DreamUBO)  // FIXED
+    };
 
     VkWriteDescriptorSet write = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -1595,7 +1633,7 @@ void VulkanRenderer::createTonemapSampler() noexcept {
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 
     VkSampler rawSampler = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &rawSampler), "Create tonemap sampler");
+    VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &rawSampler));
 
     tonemapSampler_ = RTX::Handle<VkSampler>(rawSampler, stone_device(),
         [](VkDevice d, VkSampler s, const VkAllocationCallbacks*) { vkDestroySampler(d, s, nullptr); },
@@ -1843,8 +1881,8 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
         return;
     }
 
-    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — 2 frames | UBO: {} bytes | Materials: {} bytes", 
-                  sizeof(DreamUBO), materialBufferSize());
+    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — {} frames | DreamUBO: {} bytes | TonemapUBO: {} bytes | Materials: {} bytes",
+                  frames, sizeof(DreamUBO), sizeof(TonemapUBO), materialBufferSize());
 
     // DESTROY OLD
     for (auto h : uniformBufferEncs_)   if (h) BUFFER_DESTROY(h);
@@ -1862,13 +1900,13 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     for (uint32_t i = 0; i < frames; ++i)
     {
         // DreamUBO — host-visible, persistently mapped
-        uniformBufferEncs_[i] = BufferManager::createHostVisible(sizeof(DreamUBO), "DreamUBO");
+        uniformBufferEncs_[i] = BufferManager::createDreamUBO(std::format("DreamUBO[{}]", i));
         if (!uniformBufferEncs_[i]) {
             LOG_FATAL("Failed to create DreamUBO {} — THE EMPIRE CANNOT DREAM", i);
         }
 
         // TonemapUBO — host-visible, persistently mapped
-        tonemapUniformEncs_[i] = BufferManager::createHostVisible(sizeof(TonemapUBO), "TonemapUBO");
+        tonemapUniformEncs_[i] = BufferManager::createTonemapUBO(std::format("TonemapUBO[{}]", i));
         if (!tonemapUniformEncs_[i]) {
             LOG_FATAL("Failed to create TonemapUBO {}", i);
         }
@@ -1881,7 +1919,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     // DO NOT populate here — commandBuffers_ not created yet!
     // First real frame will write correct data via updateUniformBuffer/updateTonemapUniform
 
-    LOG_AMOURANTH("DREAM UBOs UPGRADED — ENCRYPTIE BOI MODE — PULSING PINK VOID — SASQUATCH IS STONED AND STRONK");
+    LOG_AMOURANTH("DREAM & TONEMAP UBOs UPGRADED — PERSISTENTLY MAPPED — ENCRYPTIE BOI MODE — PULSING PINK VOID — SASQUATCH IS STONED AND STRONK");
 }
 
 void VulkanRenderer::createCommandBuffers() noexcept
@@ -2109,8 +2147,13 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         return;
     }
 
-    BufferManager::ensureStagingRing();
-    void* mapped = BufferManager::stagingPtr();
+    const uint64_t handle = uniformBufferEncs_[frame];
+    const BufferManager::BufferInfo* info = BufferManager::get(handle);
+    if (!info || info->mapped == nullptr)
+    {
+        LOG_ERROR_CAT("RENDERER", "DreamUBO handle {} not mapped — skipping update", handle);
+        return;
+    }
 
     DreamUBO ubo{};
 
@@ -2197,32 +2240,8 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     ubo.debugFloat3 = debugFloat3_;
     ubo.debugFloat4 = debugFloat4_;
 
-    // ── Transfer to GPU ────────────────────────────────────────────────────
-    std::memcpy(mapped, &ubo, sizeof(DreamUBO));
-
-    VkCommandBuffer cmd = commandBuffers_[frame];
-    VkBuffer dstBuffer = RAW_BUFFER(uniformBufferEncs_[frame]);
-
-    VkBufferCopy copy{
-        .srcOffset = 0,
-        .dstOffset = 0,
-        .size      = sizeof(DreamUBO)
-    };
-    vkCmdCopyBuffer(cmd, BufferManager::getStagingBuffer(), dstBuffer, 1, &copy);
-
-    // Memory barrier — ensure UBO is visible to ray tracing and compute shaders
-    VkMemoryBarrier barrier{
-        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT
-    };
-
-    vkCmdPipelineBarrier(cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 1, &barrier, 0, nullptr, 0, nullptr);
+    // ── Direct write to persistently mapped host-visible UBO ──
+    std::memcpy(info->mapped, &ubo, sizeof(DreamUBO));
 
     LOG_TRACE_CAT("RENDERER", "DreamUBO updated — frame {} — totalSpp {} — jitter {} — empire aligned", 
                   frameNumber_, accumulationFrame_, jitterIdx);
@@ -2236,15 +2255,9 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
     }
 
     const uint64_t handle = tonemapUniformEncs_[frame];
-    auto it = BufferManager::s_buffers.find(handle);
-    if (it == BufferManager::s_buffers.end()) {
-        LOG_ERROR_CAT("RENDERER", "Tonemap UBO handle {} missing from s_buffers — skipping update (frame {})", handle, frame);
-        return;
-    }
-    const BufferManager::BufferInfo& info = it->second;
-
-    if (info.mapped == nullptr) {
-        LOG_WARN_CAT("RENDERER", "Tonemap UBO not mapped for handle {} (frame {}) — skipping update", handle, frame);
+    const BufferManager::BufferInfo* info = BufferManager::get(handle);
+    if (!info || info->mapped == nullptr) {
+        LOG_ERROR_CAT("RENDERER", "Tonemap UBO handle {} not mapped — skipping update", handle);
         return;
     }
 
@@ -2264,8 +2277,8 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
     ubo.filmGrainStrength = 0.05f;
     ubo.lensFlareIntensity = 0.3f;
 
-    // Direct eternal write — raw boi, no staging, no bullshit
-    std::memcpy(info.mapped, &ubo, sizeof(TonemapUBO));
+    // Direct eternal write — raw boi, no staging
+    std::memcpy(info->mapped, &ubo, sizeof(TonemapUBO));
 }
 
 void VulkanRenderer::setTonemap(bool enabled) noexcept
@@ -2459,7 +2472,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx,
     VkDescriptorBufferInfo uboInfo = {
         .buffer = buf->buffer,
         .offset = 0,
-        .range  = VK_WHOLE_SIZE
+        .range = sizeof(TonemapUBO)  // FIXED
     };
 
     std::array<VkWriteDescriptorSet, 3> writes = {{

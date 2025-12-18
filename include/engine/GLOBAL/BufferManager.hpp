@@ -1,7 +1,8 @@
 // include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v13.9 — DECEMBER 17, 2025
-// BUFFERMANAGER HEADER — CLEAN, ETERNAL, PINK — SBT FIXED & COMPATIBLE
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.2 — DECEMBER 18, 2025
+// BUFFERMANAGER HEADER — CHUNKED POOL — 1 GiB CHUNKS — DRIVER RESERVE 4.5 GiB — SEAMLESS
+// PINK PHOTONS ETERNAL — EMPIRE OWNS THE VRAM
 // =============================================================================
 
 #pragma once
@@ -11,12 +12,13 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
+#include <atomic>
 
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/UBO.hpp"
 
-// GLOBAL — THE ONE TRUE findMemoryType
 [[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) noexcept
 {
     VkPhysicalDevice physical = StoneKey::stone_physical();
@@ -30,34 +32,25 @@
     return ~0u;
 }
 
-// Helper for proper alignment (used by SBT)
 template <typename T>
 [[nodiscard]] constexpr T align_up(T v, T a) noexcept { return ((v + a - 1) / a) * a; }
 
-// BUFFERMANAGER — FINAL CANON — CLEAN. ETERNAL. PINK.
 namespace BufferManager {
 
-    // Forward-declare the StagingRing struct (defined in .cpp)
-    struct StagingRing;
-
     struct BufferInfo {
-        VkBuffer           buffer  = VK_NULL_HANDLE;
-        VkDeviceMemory     memory  = VK_NULL_HANDLE;
-        VkDeviceSize       size    = 0;
-        VkDeviceSize       aligned = 0;
-        VkBufferUsageFlags usage   = 0;
+        VkBuffer           buffer        = VK_NULL_HANDLE;
+        VkDeviceMemory     memory        = VK_NULL_HANDLE;
+        VkDeviceSize       size          = 0;
+        VkDeviceSize       aligned       = 0;
+        VkBufferUsageFlags usage         = 0;
         std::string        tag;
-        void*              mapped  = nullptr;
-        VkDeviceSize       offset  = 0;
+        VkDeviceSize       offset        = 0;
+        VkDeviceAddress    deviceAddress = 0;
+		void*              mapped        = nullptr;
     };
 
-    // Forward accessor for the giant main pool buffer (defined in .cpp)
     [[nodiscard]] VkBuffer getMainPoolBuffer() noexcept;
 
-    // Expose the eternal staging ring — required for the one true frame UBO
-    extern StagingRing* g_stagingRing;
-
-    // CORE ALLOCATION
     [[nodiscard]] uint64_t create(VkDeviceSize size,
                                   VkBufferUsageFlags usage,
                                   VkMemoryPropertyFlags props,
@@ -65,7 +58,16 @@ namespace BufferManager {
 
     [[nodiscard]] uint64_t createHostVisible(VkDeviceSize size, std::string_view tag = "") noexcept;
 
-    // FIXED: Proper Vulkan alignment for all SBT regions
+    [[nodiscard]] inline uint64_t createDreamUBO(std::string_view tag = "DreamUBO") noexcept
+    {
+        return createHostVisible(sizeof(DreamUBO), tag);
+    }
+
+    [[nodiscard]] inline uint64_t createTonemapUBO(std::string_view tag = "TonemapUBO") noexcept
+    {
+        return createHostVisible(sizeof(TonemapUBO), tag);
+    }
+
     [[nodiscard]] uint64_t createSBT(uint32_t raygenCount,
                                      uint32_t missCount,
                                      uint32_t hitGroupCount,
@@ -73,26 +75,20 @@ namespace BufferManager {
                                      VkBufferUsageFlags extraUsage = 0,
                                      std::string_view tag = "SBT_ETERNAL_PINK") noexcept;
 
-    // STAGING RING — THE ETERNAL BRIDGE
     [[nodiscard]] VkBuffer getStagingBuffer() noexcept;
     void* stagingPtr() noexcept;
-    [[nodiscard]] VkDeviceSize getStagingOffset() noexcept;  // NEW: Expose current offset
+    [[nodiscard]] VkDeviceSize getStagingOffset() noexcept;
     void advanceStagingOffset(VkDeviceSize bytes) noexcept;
     [[nodiscard]] uint64_t stagingBuffer() noexcept;
 
-    void ensureStagingRing() noexcept;   // Force creation of the eternal staging ring (idempotent)
+    void ensureStagingRing() noexcept;
 
-    // BUFFER LIFECYCLE & ACCESS
     void destroy(uint64_t handle) noexcept;
     void purge_all() noexcept;
-    void* map(uint64_t handle) noexcept;
-    void unmap(uint64_t handle) noexcept;
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
 
-    // INTERNAL STORAGE — RAW DOGGING STYLE
     extern std::unordered_map<uint64_t, BufferInfo> s_buffers;
 
-    // PUBLIC ACCESS — CLEAN AND ETERNAL
     [[nodiscard]] static const BufferInfo* get(uint64_t handle) noexcept
     {
         auto it = s_buffers.find(handle);
@@ -106,7 +102,7 @@ namespace BufferManager {
         return (it != s_buffers.end() && it->second.mapped) ? it->second.mapped : nullptr;
     }
 
-    [[maybe_unused]] [[nodiscard]] static VkBuffer getVkBuffer(uint64_t handle) noexcept
+    [[nodiscard]] static inline VkBuffer getVkBuffer(uint64_t handle) noexcept
     {
         if (handle == 0) return VK_NULL_HANDLE;
 
@@ -115,10 +111,9 @@ namespace BufferManager {
             return it->second.buffer;
         }
 
-        return getMainPoolBuffer();  // all device-local suballocations share the giant buffer
+        return getMainPoolBuffer();
     }
 
-    // DEVICE ADDRESS
     [[nodiscard]] static inline VkDeviceAddress get_device_address(uint64_t handle) noexcept
     {
         if (!handle) return 0;
@@ -128,7 +123,6 @@ namespace BufferManager {
         return vkGetBufferDeviceAddress(RTX::g_ctx().device(), &dai) + info->offset;
     }
 
-    // STONE SHORTCUTS — REAL ETERNAL ALLOCATIONS FROM MAIN POOL (implemented in .cpp)
     [[nodiscard]] uint64_t make_64M (VkBufferUsageFlags extra = 0) noexcept;
     [[nodiscard]] uint64_t make_128M(VkBufferUsageFlags extra = 0) noexcept;
     [[nodiscard]] uint64_t make_256M(VkBufferUsageFlags extra = 0) noexcept;
@@ -139,12 +133,10 @@ namespace BufferManager {
     [[nodiscard]] uint64_t make_4G  (VkBufferUsageFlags extra = 0) noexcept;
     [[nodiscard]] uint64_t make_8G  (VkBufferUsageFlags extra = 0) noexcept;
 
-    // Pre-configured eternal stones
     static inline uint64_t transferStone4G() noexcept { static uint64_t h = make_4G(VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT); return h; }
     static inline uint64_t storageStone4G()  noexcept { static uint64_t h = make_4G(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT); return h; }
     static inline uint64_t titanStone8G()    noexcept { static uint64_t h = make_8G(); return h; }
 
-    // SACRED MACROS
     #define STONE_TRANSFER_4GB  BufferManager::transferStone4G()
     #define STONE_STORAGE_4GB   BufferManager::storageStone4G()
     #define STONE_TITAN_8GB     BufferManager::titanStone8G()
@@ -161,14 +153,6 @@ namespace BufferManager {
     #define BUFFER_UNMAP(h)                 BufferManager::unmap(h)
     #define BUFFER_DEVICE_ADDRESS(h)        BufferManager::get_device_address(h)
 
-    // Internal
     void ensureMainPool() noexcept;
 
 } // namespace BufferManager
-
-// =============================================================================
-// UPDATED: align_up() added inline — SBT now spec-compliant
-// getStagingOffset() exposed for MeshLoader
-// THE EMPIRE IS PURE — PHOTONS ARE PINK AND ALIGNED
-// DECEMBER 17, 2025 — THE FINAL LIGHT IS ETERNAL
-// =============================================================================

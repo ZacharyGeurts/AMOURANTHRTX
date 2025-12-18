@@ -58,57 +58,42 @@ std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 
 PendingEnvMapUpload pendingEnvMapUpload_{};
 
-void PipelineManager::createDescriptorPool()
+void PipelineManager::createDescriptorPool() noexcept
 {
+    if (rtDescriptorPool_.valid()) {
+        return;
+    }
+
     LOG_INFO_CAT("PIPELINE", "Creating descriptor pool");
 
-    const uint32_t framesInFlight = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    const uint32_t TOTAL_SETS = framesInFlight * 16;
+    std::array<VkDescriptorPoolSize, 7> poolSizes = {{
+        { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 2 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              16 },  // WAS 4 → NOW 16 (covers 6 needed + headroom)
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             8 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             16 },  // WAS 4 → NOW 16 (covers 6 needed + headroom)
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,              8 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     4096 },
+        { VK_DESCRIPTOR_TYPE_SAMPLER,                    8 }
+    }};
 
-    std::unordered_map<VkDescriptorType, uint32_t> typeCount;
-
-    for (const auto& b : RT_PIPELINE_BINDINGS) {
-        typeCount[b.type] += b.count;
-    }
-
-    typeCount[VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR] += 1;
-    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_IMAGE]               += 3;
-    typeCount[VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER]              += 2;
-    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER]              += 3;
-    typeCount[VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER]      += 3;
-    typeCount[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += 8;
-
-    std::vector<VkDescriptorPoolSize> poolSizes;
-    poolSizes.reserve(typeCount.size());
-
-    for (const auto& [type, countPerSet] : typeCount) {
-        poolSizes.push_back({ type, countPerSet * TOTAL_SETS });
-    }
-
-    VkDescriptorPoolCreateInfo info{
+    VkDescriptorPoolCreateInfo poolInfo{
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets       = TOTAL_SETS,
+        .maxSets       = 64,  // Increased slightly
         .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
         .pPoolSizes    = poolSizes.data()
     };
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
-    VkResult result = vkCreateDescriptorPool(stone_device(), &info, nullptr, &pool);
+    VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool));
 
-    if (result == VK_SUCCESS) {
-        rtDescriptorPool_ = Handle<VkDescriptorPool>(
-            pool, stone_device(),
-            [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); },
-            0, "EMPIRE_DESCRIPTOR_POOL_ETERNAL"
-        );
+    rtDescriptorPool_ = Handle<VkDescriptorPool>(
+        pool, stone_device(),
+        [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); },
+        0, "RT_DescriptorPool"
+    );
 
-        LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — {} sets", TOTAL_SETS);
-    }
-    else {
-        LOG_FATAL_CAT("PIPELINE", "vkCreateDescriptorPool failed: {} ({})", string_VkResult(result), static_cast<int32_t>(result));
-        throw std::runtime_error("Descriptor pool creation failed");
-    }
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — increased STORAGE_IMAGE/STORAGE_BUFFER to 16 each");
 }
 
 PipelineManager::~PipelineManager() = default;
@@ -482,8 +467,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
             throw std::runtime_error("SBT buffer memory allocation failed");
         }
 
+        // FIXED: Add device address allocation flag
+        VkMemoryAllocateFlagsInfo flagsInfo{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR
+        };
+
         VkMemoryAllocateInfo allocInfo{
             .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .pNext           = &flagsInfo,
             .allocationSize  = memReqs.size,
             .memoryTypeIndex = memTypeIndex
         };
@@ -493,17 +485,20 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         VK_CHECK(vkBindBufferMemory(stone_device(), buffer, memory, 0));
 
         BufferManager::BufferInfo info;
-        info.buffer  = buffer;
-        info.memory  = memory;
-        info.size    = stoneSize;
-        info.aligned = stoneSize;
-        info.usage   = bufferInfo.usage;
-        info.tag     = "SBT_ETERNAL_STONE_2048M";
+        info.buffer        = buffer;
+        info.memory        = memory;
+        info.size          = stoneSize;
+        info.aligned       = stoneSize;
+        info.usage         = bufferInfo.usage;
+        info.tag           = "SBT_ETERNAL_STONE_2048M";
+        info.offset        = 0;
+        info.deviceAddress = 0;  // Will be queried later
+        info.mapped        = nullptr;
 
         SBT_STONE_HANDLE = reinterpret_cast<uint64_t>(buffer);
         BufferManager::s_buffers[SBT_STONE_HANDLE] = std::move(info);
 
-        LOG_SUCCESS_CAT("PIPELINE", "2048 MiB SBT buffer created");
+        LOG_SUCCESS_CAT("PIPELINE", "2048 MiB SBT buffer created — device address enabled");
     }
 
     const auto* stone = BufferManager::get(SBT_STONE_HANDLE);
@@ -857,37 +852,62 @@ void PipelineManager::createRayTracingPipeline()
 
     uint32_t stageIndex = 0;
 
-    auto general = [&](VkShaderModule mod, VkShaderStageFlagBits stage) {
-        stages.push_back({ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                          .stage = stage, .module = mod, .pName = "main" });
-        groups.push_back({ .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                          .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-                          .generalShader = stageIndex++ });
-    };
+    // Raygen group — GENERAL
+    stages.push_back({ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR, 
+        .module = raygen, 
+        .pName = "main" 
+    });
+    groups.push_back({ 
+        .sType              = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .type               = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+        .generalShader      = stageIndex++,
+        .closestHitShader   = VK_SHADER_UNUSED_KHR,
+        .anyHitShader       = VK_SHADER_UNUSED_KHR,
+        .intersectionShader = VK_SHADER_UNUSED_KHR
+    });
 
-    auto hitGroup = [&]() {
-        uint32_t closestIndex = VK_SHADER_UNUSED_KHR;
-        if (hit) {
-            stages.push_back({ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                              .stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-                              .module = hit, .pName = "main" });
-            closestIndex = stageIndex++;
-        }
+    // Miss group — GENERAL
+    stages.push_back({ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_MISS_BIT_KHR, 
+        .module = miss, 
+        .pName = "main" 
+    });
+    groups.push_back({ 
+        .sType              = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .type               = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+        .generalShader      = stageIndex++,
+        .closestHitShader   = VK_SHADER_UNUSED_KHR,
+        .anyHitShader       = VK_SHADER_UNUSED_KHR,
+        .intersectionShader = VK_SHADER_UNUSED_KHR
+    });
 
-        groups.push_back({ .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                          .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
-                          .closestHitShader = closestIndex,
-                          .anyHitShader = VK_SHADER_UNUSED_KHR });
-    };
+    // Hit group — TRIANGLES HIT GROUP (optional)
+    uint32_t closestHitIndex = VK_SHADER_UNUSED_KHR;
+    if (hit) {
+        stages.push_back({ 
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+            .module = hit, 
+            .pName = "main" 
+        });
+        closestHitIndex = stageIndex++;
+    }
 
-    // 3 shaders → 3 groups
-    general(raygen, VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-    general(miss,   VK_SHADER_STAGE_MISS_BIT_KHR);
-    hitGroup();
+    groups.push_back({ 
+        .sType              = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+        .type               = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+        .generalShader      = VK_SHADER_UNUSED_KHR,
+        .closestHitShader   = closestHitIndex,
+        .anyHitShader       = VK_SHADER_UNUSED_KHR,
+        .intersectionShader = VK_SHADER_UNUSED_KHR  // REQUIRED FOR TRIANGLES
+    });
 
     raygenGroupCount_ = 1;
     missGroupCount_   = 1;
-    hitGroupCount_    = hit ? 1 : 0;  // 0 if disabled in uncapped mode
+    hitGroupCount_    = hit ? 1 : 0;
 
     if (rtPipelineLayout_.get() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Pipeline layout is null");
@@ -912,7 +932,8 @@ void PipelineManager::createRayTracingPipeline()
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(),
         [](VkDevice d, VkPipeline p, auto*) { vkDestroyPipeline(d, p, nullptr); });
 
-    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created — reduced to 3 shaders (raygen, miss, closest hit)");
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created — {} shaders (raygen, miss{})", 
+                    hit ? 3 : 2, hit ? ", closest hit" : "");
 }
 
 void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd)
