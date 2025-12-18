@@ -1,10 +1,10 @@
-// shaders/compute/tonemap.comp
+// shaders/compute/tonemap.comp — FINAL 2026 EDITION — DECEMBER 18, 2025
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — TONEMAP v∞ TURBO — DECEMBER 16, 2025
-// FULLY FEATURED — HDR → LDR — AUTOEXPOSURE READY — BLOOM/VIGNETTE/GRAIN/FILMIC
-// GENERAL PURPOSE — SOLID COLOR MODE (PINK VOID) VIA PUSH CONSTANT
-// UNIFIED FINAL COMPOSITION — ALL MODES THROUGH ONE SHADER
-// BRANCHLESS — FAST — BEAUTIFUL — PINK PHOTONS ETERNAL
+// AMOURANTH RTX Engine © 2025 — TONEMAP v∞ TURBO — PURE FINAL COMPOSITION
+// HDR → LDR — AUTOEXPOSURE — BLOOM/VIGNETTE/GRAIN/FILMIC/ACES/REINHARD
+// NEW: GENERATED NORMAL ENV HDR FALLBACK — SOFT BLUE SKY + SUN + GROUND
+// SOLID COLOR MODE (PINK VOID) VIA PUSH CONSTANT
+// NO EXTERNAL TEXTURE DEPENDENCY — ALWAYS WORKS — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #version 460 core
@@ -12,11 +12,9 @@
 #extension GL_ARB_gpu_shader_int64 : require
 #extension GL_EXT_control_flow_attributes : require
 
-#include "../StoneKey.glsl"   // STONEKEY v∞ — PINK PHOTONS ETERNAL
-
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform sampler2D hdrInput;           // HDR source (accumulation, envmap, or debug)
+layout(set = 0, binding = 0) uniform sampler2D hdrInput;           // HDR source (RT output, accumulation, or fallback)
 layout(set = 0, binding = 1, rgba16f) writeonly uniform image2D ldrOutput; // Final swapchain output
 
 layout(set = 0, binding = 2, scalar) uniform TonemapParams {
@@ -34,13 +32,34 @@ layout(set = 0, binding = 2, scalar) uniform TonemapParams {
     uint   _pad1;
 } params;
 
-// Push constant — enables solid color mode (pure pink void) and other overrides
+// Push constant — controls render mode and overrides
 layout(push_constant) uniform PushConstants {
     vec4   solidColor;         // w > 0.999 → force solid color (pink void)
-    float  bloomScale;         // Future use
+    uint   envMode;            // 0 = use hdrInput, 1 = generated normal env HDR
     float  _pad2;
-    uint   debugMode;          // 0 = normal, 1+ = debug views
+    uint   debugMode;          // Future use
 } push;
+
+// ── GENERATED NORMAL ENVIRONMENT HDR — SOFT BLUE SKY + SUN + GROUND ────────
+vec3 normalEnvHDR(vec3 dir)
+{
+    // Normalize direction
+    dir = normalize(dir);
+
+    // Sky gradient — soft blue
+    float skyFactor = max(dir.y, 0.0);
+    vec3 skyColor = mix(vec3(0.35, 0.45, 0.65), vec3(0.6, 0.8, 1.0), skyFactor * skyFactor);
+
+    // Ground — subtle brown/gray
+    float groundFactor = max(-dir.y, 0.0);
+    vec3 groundColor = vec3(0.4, 0.35, 0.3) * groundFactor;
+
+    // Sun — bright directional light
+    vec3 sunDir = normalize(vec3(0.3, 0.8, 0.4));
+    float sun = pow(max(dot(dir, sunDir), 0.0), 256.0) * 30.0;
+
+    return skyColor + groundColor + vec3(1.0) * sun;
+}
 
 // ── FAST TONEMAPPERS ───────────────────────────────────────────────────────
 vec3 tonemapACES(vec3 x)
@@ -71,15 +90,32 @@ void main()
 
     if (any(greaterThanEqual(coord, size))) return;
 
+    vec3 hdrColor;
+
+    // ── GENERATED NORMAL ENV HDR MODE ───────────────────────────────────────
+    if (push.envMode == 1u) {
+        // Equirectangular projection
+        vec2 uv = (vec2(coord) + 0.5f) / vec2(size);
+        float longitude = uv.x * 2.0 * 3.14159265;
+        float latitude  = uv.y * 3.14159265;
+
+        vec3 dir = vec3(
+            sin(latitude) * cos(longitude),
+            cos(latitude),
+            sin(latitude) * sin(longitude)
+        );
+
+        hdrColor = normalEnvHDR(dir);
+    }
     // ── SOLID COLOR MODE (PURE PINK VOID) ───────────────────────────────────
-    if (push.solidColor.a > 0.999f)
-    {
+    else if (push.solidColor.a > 0.999f) {
         imageStore(ldrOutput, coord, push.solidColor);
         return;
     }
-
-    // ── SAMPLE HDR INPUT ───────────────────────────────────────────────────
-    vec3 hdrColor = texelFetch(hdrInput, coord, 0).rgb;
+    // ── NORMAL HDR INPUT (RT OUTPUT OR ACCUMULATION) ────────────────────────
+    else {
+        hdrColor = texelFetch(hdrInput, coord, 0).rgb;
+    }
 
     // Apply exposure
     hdrColor *= params.exposure;
@@ -91,8 +127,8 @@ void main()
     // ── TONEMAP OPERATOR (branchless) ──────────────────────────────────────
     vec3 mapped = tonemapReinhard(hdrColor);
 
-    mapped = mix(mapped, tonemapFilmic(hdrColor), float(params.operatorType == 1u));
-    mapped = mix(mapped, tonemapACES(hdrColor),   float(params.operatorType == 0u));
+    [[flatten]] if (params.operatorType == 1u) mapped = tonemapFilmic(hdrColor);
+    [[flatten]] if (params.operatorType == 0u) mapped = tonemapACES(hdrColor);
 
     // Bypass if disabled
     mapped = mix(hdrColor, mapped, float(params.enableTonemap));
@@ -105,8 +141,7 @@ void main()
     mapped *= vignette;
 
     // Film grain
-    if (params.filmGrainStrength > 0.0f)
-    {
+    if (params.filmGrainStrength > 0.0f) {
         float noise = fract(sin(dot(vec2(coord), vec2(12.9898f, 78.233f)) + float(params.frame)) * 43758.5453f);
         noise = (noise - 0.5f) * params.filmGrainStrength;
         mapped += noise;
@@ -115,6 +150,6 @@ void main()
     // ── FINAL GAMMA CORRECTION ─────────────────────────────────────────────
     mapped = pow(max(mapped, vec3(0.0f)), vec3(1.0f / params.gamma));
 
-    // Store
+    // Store final LDR
     imageStore(ldrOutput, coord, vec4(clamp(mapped, 0.0f, 1.0f), 1.0f));
 }

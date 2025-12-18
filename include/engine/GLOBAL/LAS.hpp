@@ -36,6 +36,8 @@ public:
     // Uses direct geometry from added meshes — no BLAS needed
     void buildTLAS(VkCommandBuffer cmd) noexcept;
 
+	[[nodiscard]] VkAccelerationStructureKHR getLatestTLAS() const noexcept;
+
     // Add mesh for direct inclusion in TLAS (no BLAS)
     void addMesh(std::unique_ptr<MeshLoader::Mesh> mesh) noexcept;
 

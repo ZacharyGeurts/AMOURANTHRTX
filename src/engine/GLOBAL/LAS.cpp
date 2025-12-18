@@ -1,8 +1,9 @@
-// src/engine/GLOBAL/LAS.cpp — FINAL POINTER FIX — COMPILES CLEAN
+// src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// TLAS-ONLY DIRECT GEOMETRY — CORRECT ppRangeInfos POINTER
-// vkCmdBuildAccelerationStructuresKHR now receives proper const** argument
-// CUBE VISIBLE — NO BLACK — PINK PHOTONS ETERNAL
+// AMOURANTH RTX Engine © 2025 — LAS v∞ TURBO — TLAS-ONLY DIRECT GEOMETRY — DECEMBER 18, 2025
+// NO BLAS — DIRECT TRIANGLES IN TLAS — PURE 2026 MAGIC — FAST & LIGHT
+// DEFAULT CUBE VISIBLE FROM FRAME 1 — PINK FALLBACK WHEN EMPTY
+// PINK PHOTONS ETERNAL — EMPIRE SEES THE INFINITE
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -11,7 +12,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/MeshLoader.hpp"
+#include "engine/GLOBAL/MeshLoader.hpp"  // Required for MeshLoader::Mesh
 
 using StoneKey::stone_device;
 
@@ -59,6 +60,7 @@ void LAS::initTLAS() noexcept
             std::format("TLAS_Scratch_Frame_{}", i));
     }
 
+    // Dummy instance for empty scene (pink void)
     VkAccelerationStructureInstanceKHR dummy{};
     dummy.mask = 0xFF;
     dummy.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
@@ -210,7 +212,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd) noexcept
     buildInfo.dstAccelerationStructure = frame.tlas;
     buildInfo.scratchData.deviceAddress = BufferManager::get_device_address(g_scratchHandles[g_currentWriteSlot]);
 
-    // FIXED: Correct pointer-to-pointer for ppRangeInfos
     const VkAccelerationStructureBuildRangeInfoKHR* ppRangeInfos = rangeInfos.data();
 
     g_ext.vkCmdBuildAccelerationStructuresKHR(
@@ -228,6 +229,12 @@ VkAccelerationStructureKHR LAS::getCurrentTLAS() const noexcept
     return tlas_.valid() ? tlas_.get() : VK_NULL_HANDLE;
 }
 
+VkAccelerationStructureKHR LAS::getLatestTLAS() const noexcept
+{
+    const auto& frame = g_tlasFrames[g_currentWriteSlot];
+    return frame.tlas;
+}
+
 VkDeviceAddress LAS::getCurrentTLASAddress() const noexcept
 {
     if (!tlas_.valid()) return 0;
@@ -241,7 +248,7 @@ VkDeviceAddress LAS::getCurrentTLASAddress() const noexcept
 } // namespace RTX
 
 // =============================================================================
-// TLAS-ONLY DIRECT GEOMETRY — POINTER FIX APPLIED
-// COMPILES CLEAN — CUBE VISIBLE — PINK PHOTONS ETERNAL
+// TLAS-ONLY DIRECT GEOMETRY — NO BLAS — CUBE VISIBLE — PINK FALLBACK
+// COMPILES CLEAN — RUNS FAST — EMPIRE SEES ALL
 // DECEMBER 18, 2025 — THE LIGHT IS PURE AND UNBROKEN
 // =============================================================================

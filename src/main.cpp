@@ -1,7 +1,11 @@
-// main.cpp — FINAL — CUBE LOADED IN PHASE6 — NO BLACK SCREEN
+// main.cpp — FINAL 2026 — RENDER MODES CYCLED IN MAIN — NO MODE 0 — ENVMAP RESERVED AS MODE 2
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — DECEMBER 18, 2025
-// PHASE6: DEFAULT CUBE LOADED — THE EMPIRE HAS FORM — PHOTONS HIT — PINK OR RENDERED
+// RENDER MODES DISPATCHED DIRECTLY IN MAIN LOOP
+// MODE 1 = PURE PINK VOID (direct clear — guaranteed visible)
+// MODES 3–9 = FULL RTX PATH
+// MODE 2 RESERVED FOR ENVMAP (to be added later)
+// CLEAN, ROBUST, NO BLACK SCREEN — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "main.hpp"
@@ -21,14 +25,7 @@
 #include "engine/GLOBAL/UBO.hpp"
 
 #include "modes/RenderMode1.hpp"
-#include "modes/RenderMode2.hpp"
-#include "modes/RenderMode3.hpp"
-#include "modes/RenderMode4.hpp"
-#include "modes/RenderMode5.hpp"
-#include "modes/RenderMode6.hpp"
-#include "modes/RenderMode7.hpp"
-#include "modes/RenderMode8.hpp"
-#include "modes/RenderMode9.hpp"
+// Future modes will be added here (Mode 2 will be envmap)
 
 #include <vulkan/vulkan.hpp>
 #include <string>
@@ -92,6 +89,9 @@ std::unique_ptr<Application> g_app_ptr = nullptr;
 VulkanRenderer* g_renderer_ptr = nullptr;
 float g_deltaTime = 0.0f;
 
+// Global render mode instance for pure pink void
+static RenderMode1 g_mode1(stone_width(), stone_height());
+
 inline const char* physicalDeviceName() { return RTX::g_ctx().physicalDeviceProperties_.deviceName; }
 inline float vramGB() {
     const auto& heaps = RTX::g_ctx().physicalDeviceMemoryProperties_.memoryHeaps;
@@ -110,6 +110,7 @@ public:
 
     void setRenderer(std::unique_ptr<VulkanRenderer> r) {
         renderer_ = std::move(r);
+        g_renderer_ptr = renderer_.get();
         if (renderer_) {
             renderer_->setTonemap(Options::Tonemap::ENABLE_TONEMAPPING);
             if (Options::OptionsRTX::ENABLE_HYPERTRACE) {
@@ -134,17 +135,6 @@ public:
 
 private:
     void processInput(float deltaTime);
-    void render(float deltaTime);
-
-    void toggleFullscreen() { SDL3Window::toggleFullscreen(); }
-    void toggleOverlay()    { showOverlay_ = !showOverlay_; if (renderer_) renderer_->setOverlay(showOverlay_); }
-    void toggleTonemap()    { tonemapEnabled_ = !tonemapEnabled_; if (renderer_) renderer_->setTonemap(tonemapEnabled_); }
-    void toggleHypertrace() { hypertraceEnabled_ = !hypertraceEnabled_; }
-
-    std::vector<VkCommandBuffer> commandBuffers_;
-    std::vector<VkSemaphore> imageAvailableSemaphores_;
-    std::vector<VkSemaphore> renderFinishedSemaphores_;
-    std::vector<VkFence>     inFlightFences_;
 
     std::string title_;
     int width_, height_;
@@ -154,9 +144,7 @@ private:
 
     bool quit_ = false;
     bool showOverlay_ = true;
-    bool tonemapEnabled_ = true;
-    bool hypertraceEnabled_ = false;
-    bool maximized_ = false;
+    int currentRenderMode_ = 1;  // Start in pure pink void
 
     std::unique_ptr<VulkanRenderer> renderer_;
 };
@@ -216,6 +204,9 @@ void Application::run() noexcept {
                     renderer_->onWindowResize(static_cast<uint32_t>(pendingWidth), static_cast<uint32_t>(pendingHeight));
                 }
 
+                // Update render mode instances on resize
+                g_mode1.onResize(pendingWidth, pendingHeight);
+
                 pendingWidth = pendingHeight = 0;
             }
         }
@@ -230,7 +221,18 @@ void Application::run() noexcept {
 
         if (renderer_ && renderer_->isAlive() && swapchainValid) {
             renderer_->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
-            renderer_->renderFrame(CAM, g_deltaTime);
+
+            const uint32_t frameIndex = renderer_->frameNumber();
+
+            VkCommandBuffer cmd = renderer_->commandBuffers()[frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT];
+
+            // RENDER MODE DISPATCH — CYCLED IN MAIN LOOP
+            if (currentRenderMode_ == 1) {
+                g_mode1.renderFrame(cmd, frameIndex, g_deltaTime);
+            } else {
+                // Modes 3–9: Full RTX path (Mode 2 reserved for envmap later)
+                renderer_->renderFrame(CAM, g_deltaTime);
+            }
         }
 
         titleTimer += g_deltaTime;
@@ -276,29 +278,19 @@ void Application::setRenderMode(int mode) {
         return;
     }
 
-    renderer_->setRenderMode(mode);
-
-    bool requiresSwapchainRebuild = false;
-
-    switch (mode) {
-        case 4:
-        case 5:
-        case 6:
-        case 8:
-            requiresSwapchainRebuild = true;
-            break;
-        default:
-            break;
-    }
-
-    if (requiresSwapchainRebuild) {
-        RTX::recreateSwapchain(stone_width(), stone_height());
-    }
-
-    renderer_->requestAccumulationReset();
+    LOG_AMOURANTH("RENDER MODE SWITCH → {} — EMPIRE SHIFTS REALITY", mode);
 
     currentRenderMode_ = mode;
+
+    // Reset accumulation on mode change
+    if (renderer_) {
+        renderer_->requestAccumulationReset();
+    }
 }
+
+// =============================================================================
+// Rest of the file unchanged (phase functions, splash, window creation, etc.)
+// =============================================================================
 
 static void createCommandPool() noexcept {
     if (RTX::g_ctx().commandPool_ != VK_NULL_HANDLE) {
@@ -679,13 +671,11 @@ int main(int, char**) {
     stone_seal_renderer(renderer.get());
     phase8_forgeTheRTX(renderer.get());
 
-    // PHASE6 — DEFAULT CUBE LOADED
     phase6_loadDefaultCube();
 
     stone_seal_final();
 
     g_app_ptr = std::make_unique<Application>("AMOURANTH RTX vTURBO", 3840, 2160);
-    g_renderer_ptr = renderer.get();
     g_app_ptr->setRenderer(std::move(renderer));
 
     g_app_ptr->run();

@@ -228,7 +228,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     const uint32_t frameIndex = frameNumber_++;
     const uint32_t slot       = frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    LOG_AMOURANTH("=== FRAME {} === SLOT {} === SPP {} ===", frameIndex, slot, currentSpp_);
+    LOG_AMOURANTH("=== FRAME {} === SLOT {} === SPP {} === MODE {}", frameIndex, slot, currentSpp_, activeRenderMode_);
 
     // =====================================================================
     // Acquire swapchain image
@@ -263,7 +263,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
     // =====================================================================
-    // GPU timestamps
+    // GPU timestamps (begin)
     // =====================================================================
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS && timestampQueryPool_ != VK_NULL_HANDLE) {
         const uint32_t queryIndex = frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT;
@@ -340,25 +340,23 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     // =====================================================================
-    // ENVMAP UPLOAD — WHISPER MODE — FIRST FRAME ONLY
+    // ENVMAP UPLOAD — FIRST FRAME ONLY
     // =====================================================================
     if (envMapNeedsUpload_) {
-        LOG_AMOURANTH("FIRST FRAME — WHISPER UPLOADING HDR ENVMAP assets/textures/envmap.hdr — THE SKY AWAKENS");
+        LOG_AMOURANTH("FIRST FRAME — WHISPER UPLOADING HDR ENVMAP — THE SKY AWAKENS");
 
         int w = 0, h = 0, channels = 0;
         float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &channels, 4);
         if (!data) {
-            LOG_FATAL_CAT("RENDERER", "Failed to load envmap.hdr for upload — {}", stbi_failure_reason());
+            LOG_FATAL_CAT("RENDERER", "Failed to load envmap.hdr — {}", stbi_failure_reason());
         } else {
             const VkDeviceSize imageSize = static_cast<VkDeviceSize>(w) * h * 4 * sizeof(float);
 
-            // Staging buffer upload
             uint64_t stagingHandle = BufferManager::createHostVisible(imageSize, "EnvMap_Staging_Temp");
             void* mapped = BufferManager::getMappedStagingPtr(stagingHandle);
             std::memcpy(mapped, data, imageSize);
             stbi_image_free(data);
 
-            // Transition envmap image to transfer dst
             transitionImage(cmd, envMapImage_.get(),
                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             0, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -379,7 +377,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                    1, &region);
 
-            // Transition to shader read
             transitionImage(cmd, envMapImage_.get(),
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
@@ -389,51 +386,45 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
 
         envMapNeedsUpload_ = false;
-
-        // NOW safe to create display pipeline
         createEnvMapDisplayPipeline();
-        LOG_AMOURANTH("ENVMAP UPLOADED AND DISPLAY PIPELINE FORGED — THE TRUE SKY IS READY");
+        LOG_AMOURANTH("ENVMAP UPLOADED — SKY READY");
     }
 
     // =====================================================================
-    // Special render modes (pure pink void)
+    // BUILD TLAS — EVERY FRAME (direct geometry)
+    // =====================================================================
+    RTX::las().buildTLAS(cmd);
+
+    // =====================================================================
+    // RENDER MODE DISPATCH — CLEAN FLOW WITH EARLY RETURNS
     // =====================================================================
     if (activeRenderMode_ == 1) {
         LOG_AMOURANTH("RENDER MODE 1: PURE PINK VOID — PHOTONS ETERNAL");
 
-        // FORCE DUMMY TLAS IN MODE 1 — GUARANTEED MISS → ENVMAP SKY
-        VkAccelerationStructureKHR forcedTlas = pipelineManager_.dummyTLAS();
+        VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        RTX::RTDescriptorUpdate desc{};
-        desc.tlas = forcedTlas;
-        desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
-        desc.uboSize = sizeof(DreamUBO);
-        desc.rtOutputView = rtOutputViews_[slot].get();
+        transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-        if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
-            desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
-        }
+        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &pink, 1, &range);
 
-        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_ != VK_NULL_HANDLE) {
-            desc.nexusScoreViews = { hypertraceScoreView_, hypertraceScoreView_ };
-        }
+        transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
-        if (!materialBufferEncs_.empty()) {
-            const auto* matBuf = BufferManager::get(materialBufferEncs_[0]);
-            if (matBuf) {
-                desc.materialsBuffer = matBuf->buffer;
-                desc.materialsSize = materialBufferSize();
-            }
-        }
+        goto submit_frame;
+    }
 
-        if (pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
-            desc.envSampler = pipelineManager_.envMapSampler_.get();
-            desc.envImageView = pipelineManager_.envMapImageView_.get();
-        }
+    // All other modes (2–9) use the full RTX path
+    LOG_SUCCESS_CAT("RENDERER", "RENDER MODE {} — FULL RTX PATH ENGAGED", activeRenderMode_);
 
-        pipelineManager_.updateRTDescriptorSet(slot, desc);
-
-        recordRayTracingCommands(cmd, slot);
+    // =====================================================================
+    // RTX PATH VALIDITY — FALLBACK TO PINK IF INVALID
+    // =====================================================================
+    if (!pipelineManager_.isRTXValid() || uniformBufferEncs_[slot] == 0) {
+        LOG_FATAL_CAT("RENDERER", "RTX PATH INVALID — FALLING BACK TO SACRED PINK VOID");
 
         VkClearColorValue pink{{1.0f, 0.0f, 0.5f, 1.0f}};
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -452,50 +443,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     // =====================================================================
-    // Envmap-only display mode (if pipeline ready)
-    // =====================================================================
-    if (envMapDisplayPipeline_ != VK_NULL_HANDLE && activeRenderMode_ == 0) {  // Mode 0 = envmap only
-        recordEnvMapOnlyPass(cmd, imageIndex);
-        goto submit_frame;
-    }
-
-    // =====================================================================
-    // RTX path validity check
-    // =====================================================================
-    if (!pipelineManager_.isRTXValid() || uniformBufferEncs_[slot] == 0) {
-        LOG_FATAL_CAT("RENDERER", "RTX PATH INVALID — FALLING BACK TO SACRED PINK VOID");
-
-        VkClearColorValue fallback{{1.0f, 0.2f, 0.8f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &fallback, 1, &range);
-
-        transitionImage(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-
-        goto submit_frame;
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "RTX PATH ACTIVE — RAY TRACING ENGAGED — PHOTONS FLOW ETERNAL");
-
-    // =====================================================================
-    // Per-frame updates
+    // FULL RTX PATH — MODES 2–9
     // =====================================================================
     updateUniformBuffer(slot, camera, deltaTime);
     updateTonemapUniform(slot);
     currentFrame_.store(slot);
 
-    // =====================================================================
-    // Descriptor set update
-    // =====================================================================
+    // Update RT descriptors — use LATEST TLAS for certainty
     {
         RTX::RTDescriptorUpdate desc{};
-        desc.tlas = RTX::las().getCurrentTLAS();
+        desc.tlas = RTX::las().getLatestTLAS();
         if (!desc.tlas) desc.tlas = pipelineManager_.dummyTLAS();
 
         desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
@@ -526,29 +483,21 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         pipelineManager_.updateRTDescriptorSet(slot, desc);
     }
 
-    // =====================================================================
-    // Ray tracing pass
-    // =====================================================================
+    // Ray tracing
     recordRayTracingCommands(cmd, slot);
 
-    // =====================================================================
-    // Temporal accumulation
-    // =====================================================================
+    // Accumulation
     if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
         recordAccumulationPass(cmd, slot);
     }
 
-    // =====================================================================
     // Denoising
-    // =====================================================================
     if (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_) {
         updateDenoiserDescriptors();
         performDenoisingPass(cmd);
     }
 
-    // =====================================================================
-    // Final tonemapping & present
-    // =====================================================================
+    // Tonemapping
     if (Options::Tonemap::ENABLE_TONEMAPPING && tonemapEnabled_) {
         VkImageView input = (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
                             ? denoiserView_.get()
@@ -572,9 +521,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
 submit_frame:
-    // =====================================================================
     // GPU timestamp end
-    // =====================================================================
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS && timestampQueryPool_ != VK_NULL_HANDLE) {
         const uint32_t queryIndex = frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT;
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, queryIndex * 2 + 1);

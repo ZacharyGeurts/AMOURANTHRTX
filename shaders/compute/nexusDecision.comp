@@ -1,38 +1,62 @@
-#version 460
+// shaders/compute/nexusdecision.comp — FIXED COMPILATION — DECEMBER 18, 2025
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — NEXUS DECISION v∞ TURBO — ADAPTIVE SAMPLING BRAIN
+// Computes per-pixel variance + luminance → nexus score for adaptive sampling
+// R16G16_SFLOAT target — variance in R, luminance in G
+// HIGH PRECISION — TEMPORAL STABILITY — NOISE-FREE DECISION
+// FIXED: removed 'writeonly' on imageStore target (GLSL restriction)
+// PINK PHOTONS ETERNAL — EMPIRE SAMPLES WISELY
+// =============================================================================
+
+#version 460 core
 #extension GL_EXT_scalar_block_layout : require
 
-layout(local_size_x = 16, local_size_y = 16) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba16f) uniform readonly image2D imgCurrent;   // Current noisy frame (RT output)
-layout(set = 0, binding = 1, rgba16f) uniform readonly image2D imgHistory;   // Previous denoised/accum frame
-layout(set = 0, binding = 2, rg16f)   uniform writeonly image2D imgScore;     // Output: R = variance, G = luminance
+layout(set = 0, binding = 0, rgba16f) readonly uniform image2D currentColor;   // Current frame RT output
+layout(set = 0, binding = 1, rgba16f) readonly uniform image2D historyColor;   // Previous accumulated frame
+layout(set = 0, binding = 2, rg16f) uniform image2D nexusOutput;               // R = variance, G = luminance (removed writeonly)
 
-layout(push_constant) uniform Push {
-    float varianceClip;     // Clip fireflies (e.g., 10.0)
-    float luminanceWeight;  // Boost score in dark areas (e.g., 3.0)
-    float minVariance;      // Floor to prevent zero sampling (e.g., 0.001)
-} pc;
+layout(set = 0, binding = 3, scalar) uniform NexusParams {
+    float varianceSensitivity;   // How sensitive to variance (50.0 typical)
+    float luminanceThreshold;    // Base luminance for high-detail areas
+    float temporalStability;     // Blend factor with history (0.9 = stable)
+    float _pad;
+} params;
 
-float luminance(vec3 c) {
-    return dot(c, vec3(0.2126, 0.7152, 0.0722));
-}
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size  = imageSize(currentColor);
 
-void main() {
-    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-    if (pix.x >= imageSize(imgCurrent).x || pix.y >= imageSize(imgCurrent).y) return;
+    if (any(greaterThanEqual(coord, size))) return;
 
-    vec3 curr = imageLoad(imgCurrent, pix).rgb;
-    vec3 hist = imageLoad(imgHistory, pix).rgb;
+    vec3 current = imageLoad(currentColor, coord).rgb;
+    vec3 history = imageLoad(historyColor, coord).rgb;
 
-    vec3 diff = curr - hist;
-    float variance = dot(diff, diff);
+    // Convert to luminance
+    float lumCurrent = dot(current, vec3(0.2126f, 0.7152f, 0.0722f));
+    float lumHistory = dot(history, vec3(0.2126f, 0.7152f, 0.0722f));
 
-    variance = min(variance, pc.varianceClip);
+    // Variance — difference in luminance (simple but effective)
+    float variance = abs(lumCurrent - lumHistory);
 
-    float lum = luminance(hist);
-    float darkBoost = 1.0 + (1.0 - smoothstep(0.0, 0.2, lum)) * pc.luminanceWeight;
+    // Apply sensitivity
+    variance *= params.varianceSensitivity;
 
-    variance = max(variance * darkBoost, pc.minVariance);
+    // Clamp variance to reasonable range
+    variance = clamp(variance, 0.0f, 1.0f);
 
-    imageStore(imgScore, pix, vec4(variance, lum, 0.0, 0.0));
+    // Final luminance — use current for responsiveness
+    float luminance = lumCurrent;
+
+    // Boost variance in bright areas (edges in highlights)
+    variance *= mix(1.0f, 2.0f, step(params.luminanceThreshold, luminance));
+
+    // Temporal smoothing of variance (reduces flickering decisions)
+    float historyVariance = imageLoad(nexusOutput, coord).r;
+    variance = mix(variance, historyVariance, params.temporalStability);
+
+    // Output: R = variance (for adaptive sampling), G = luminance (for UI/debug)
+    imageStore(nexusOutput, coord, vec4(variance, luminance, 0.0f, 0.0f));
 }
