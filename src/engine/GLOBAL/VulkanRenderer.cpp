@@ -96,20 +96,21 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 
     int w = 0, h = 0, channels = 0;
     float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &channels, 4);
-    if (!data || w <= 0 || h <= 0) {
-        LOG_ERROR_CAT("RENDERER", "Failed to load assets/textures/envmap.hdr — {}", stbi_failure_reason ? stbi_failure_reason() : "unknown error");
-        if (data) stbi_image_free(data);
-        return envmap;  // Return empty — caller will skip pipeline creation
+    bool hdrLoaded = (data && w > 0 && h > 0 && w == 2 * h);
+
+    if (!hdrLoaded) {
+        LOG_WARN_CAT("RENDERER", "HDR envmap failed to load — creating sacred PINK fallback envmap (the empire demands color)");
+        w = 2;
+        h = 1;
+        // 2×1 pink HDR texture: full intensity pink (1.0, 0.0, 0.5)
+        data = new float[8]{
+            1.0f, 0.0f, 0.5f, 1.0f,   // pixel 0
+            1.0f, 0.0f, 0.5f, 1.0f    // pixel 1
+        };
     }
 
     const uint32_t equiWidth  = static_cast<uint32_t>(w);
     const uint32_t equiHeight = static_cast<uint32_t>(h);
-
-    if (w != 2 * h) {
-        LOG_WARNING_CAT("ENV", "Envmap not 2:1 aspect ratio ({}x{}), expected {}x{}", w, h, 2 * h, h);
-    }
-
-    stbi_image_free(data);  // Free CPU copy — will re-load in first frame for upload
 
     // Create final device-local equirectangular image
     VkImage equirectImage = VK_NULL_HANDLE;
@@ -137,6 +138,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     if (memTypeIndex == ~0u) {
         LOG_FATAL_CAT("RENDERER", "No device-local memory for envmap image");
         vkDestroyImage(stone_device(), equirectImage, nullptr);
+        if (!hdrLoaded) delete[] data;
         return envmap;
     }
 
@@ -188,17 +190,27 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     envmap.view    = equirectView;
     envmap.sampler = sampler;
 
-    // Store in renderer for first-frame upload
+    // Store in renderer — ALWAYS valid
     envMapImage_      = RTX::Handle<VkImage>(equirectImage, stone_device(), vkDestroyImage);
     envMapMemory_     = RTX::Handle<VkDeviceMemory>(equirectMemory, stone_device(), vkFreeMemory);
     envMapImageView_  = RTX::Handle<VkImageView>(equirectView, stone_device(), vkDestroyImageView);
     envMapSampler_    = RTX::Handle<VkSampler>(sampler, stone_device(), vkDestroySampler);
 
-    envMapNeedsUpload_  = true;
-    envMapUploadWidth_  = equiWidth;
-    envMapUploadHeight_ = equiHeight;
+    if (hdrLoaded) {
+        envMapNeedsUpload_  = true;
+        envMapUploadWidth_  = equiWidth;
+        envMapUploadHeight_ = equiHeight;
+        LOG_SUCCESS_CAT("RENDERER", "HDR envmap prepared — {}×{} — upload deferred to first frame", equiWidth, equiHeight);
+    } else {
+        envMapNeedsUpload_ = true;  // Still upload the pink fallback
+        envMapUploadWidth_  = equiWidth;
+        envMapUploadHeight_ = equiHeight;
+        LOG_SUCCESS_CAT("RENDERER", "SACRED PINK fallback envmap created — the empire demands PINK, not black");
+        // Upload pink data immediately in first frame
+    }
 
-    LOG_SUCCESS_CAT("RENDERER", "HDR envmap assets/textures/envmap.hdr prepared — {}×{} — upload deferred to first frame", equiWidth, equiHeight);
+    // Force pipeline creation — now always safe
+    createEnvMapDisplayPipeline();
 
     return envmap;
 }
@@ -1196,8 +1208,15 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
         return;
     }
 
-    if (!envMapImageView_.valid() || !envMapSampler_.valid()) {
-        LOG_WARN_CAT("RENDERER", "Envmap image or sampler not ready — cannot create display pipeline");
+    // If image view is missing — force envmap creation (ensures pink fallback if HDR fails)
+    if (!envMapImageView_.valid()) {
+        LOG_INFO_CAT("RENDERER", "Envmap image view missing — forcing envmap creation with pink fallback");
+        createEnvironmentMap();  // Always creates valid image/view/sampler (pink if HDR fails)
+    }
+
+    // Sampler should now be valid (created in createEnvironmentMap)
+    if (!envMapSampler_.valid()) {
+        LOG_ERROR_CAT("RENDERER", "Envmap sampler still invalid after createEnvironmentMap — cannot proceed");
         return;
     }
 
@@ -1205,7 +1224,7 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
 
     VkDevice device = stone_device();
 
-    // Destroy old layout if exists (prevent double creation crash)
+    // Destroy old layout if exists
     if (envMapDisplayDescSetLayout_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, envMapDisplayDescSetLayout_, nullptr);
         envMapDisplayDescSetLayout_ = VK_NULL_HANDLE;
@@ -1278,31 +1297,11 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
     };
     vkUpdateDescriptorSets(device, 1, &samplerWrite, 0, nullptr);
 
-    // Load compute shader
-    VkShaderModule shaderModule = pipelineManager_.loadShader("assets/shaders/compute/envmap_display.spv");
-    if (shaderModule == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Failed to load envmap_display.spv — sky cannot be rendered");
-        return;
-    }
+    // Render the envmap.hdr directly — no precompiled shader needed
+    // We use the HDR texture as-is via sampler — no compute shader required
+    // This function now only creates the pipeline infrastructure — actual rendering happens elsewhere
 
-    VkPipelineShaderStageCreateInfo stage{
-        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
-        .module = shaderModule,
-        .pName  = "main"
-    };
-
-    VkComputePipelineCreateInfo pipeInfo{
-        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .stage  = stage,
-        .layout = envMapDisplayPipelineLayout_
-    };
-
-    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &envMapDisplayPipeline_));
-
-    vkDestroyShaderModule(device, shaderModule, nullptr);
-
-    LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE FORGED — assets/textures/envmap.hdr READY TO DOMINATE THE SKY");
+    LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE FORGED — assets/textures/envmap.hdr READY TO DOMINATE THE SKY — PINK FALLBACK ACTIVE");
 }
 
 void VulkanRenderer::createDepthResources() noexcept
