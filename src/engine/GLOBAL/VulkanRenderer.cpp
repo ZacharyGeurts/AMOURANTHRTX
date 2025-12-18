@@ -92,14 +92,14 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 {
     EnvironmentMap envmap{};
 
-    LOG_AMOURANTH("FIRST LIGHT — Loading HDR environment map — whisper mode upload in first frame");
+    LOG_AMOURANTH("FIRST LIGHT — Preparing HDR environment map assets/textures/envmap.hdr — whisper mode upload in first frame");
 
     int w = 0, h = 0, channels = 0;
     float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &channels, 4);
     if (!data || w <= 0 || h <= 0) {
-        LOG_ERROR_CAT("RENDERER", "Failed to load envmap.hdr — {}", stbi_failure_reason());
+        LOG_ERROR_CAT("RENDERER", "Failed to load assets/textures/envmap.hdr — {}", stbi_failure_reason ? stbi_failure_reason() : "unknown error");
         if (data) stbi_image_free(data);
-        return envmap;
+        return envmap;  // Return empty — caller will skip pipeline creation
     }
 
     const uint32_t equiWidth  = static_cast<uint32_t>(w);
@@ -109,9 +109,9 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
         LOG_WARNING_CAT("ENV", "Envmap not 2:1 aspect ratio ({}x{}), expected {}x{}", w, h, 2 * h, h);
     }
 
-    stbi_image_free(data);  // Free CPU copy — we re-load in first frame for upload
+    stbi_image_free(data);  // Free CPU copy — will re-load in first frame for upload
 
-    // Create final equirectangular image (device-local)
+    // Create final device-local equirectangular image
     VkImage equirectImage = VK_NULL_HANDLE;
     VkDeviceMemory equirectMemory = VK_NULL_HANDLE;
 
@@ -133,16 +133,23 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), equirectImage, &memReqs);
 
+    uint32_t memTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (memTypeIndex == ~0u) {
+        LOG_FATAL_CAT("RENDERER", "No device-local memory for envmap image");
+        vkDestroyImage(stone_device(), equirectImage, nullptr);
+        return envmap;
+    }
+
     VkMemoryAllocateInfo allocInfo{
         .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize  = memReqs.size,
-        .memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+        .memoryTypeIndex = memTypeIndex
     };
 
     VK_CHECK(vkAllocateMemory(stone_device(), &allocInfo, nullptr, &equirectMemory));
     VK_CHECK(vkBindImageMemory(stone_device(), equirectImage, equirectMemory, 0));
 
-    // Create view and sampler
+    // Create image view
     VkImageView equirectView = VK_NULL_HANDLE;
     VkImageViewCreateInfo viewInfo{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -153,6 +160,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     };
     VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &equirectView));
 
+    // Create sampler
     VkSampler sampler = VK_NULL_HANDLE;
     VkSamplerCreateInfo samplerInfo{
         .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -174,18 +182,23 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     };
     VK_CHECK(vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler));
 
-    // Store final resources
+    // Fill return struct
+    envmap.image   = equirectImage;
+    envmap.memory  = equirectMemory;
+    envmap.view    = equirectView;
+    envmap.sampler = sampler;
+
+    // Store in renderer for first-frame upload
     envMapImage_      = RTX::Handle<VkImage>(equirectImage, stone_device(), vkDestroyImage);
     envMapMemory_     = RTX::Handle<VkDeviceMemory>(equirectMemory, stone_device(), vkFreeMemory);
     envMapImageView_  = RTX::Handle<VkImageView>(equirectView, stone_device(), vkDestroyImageView);
     envMapSampler_    = RTX::Handle<VkSampler>(sampler, stone_device(), vkDestroySampler);
 
-    // Flag for first-frame upload
     envMapNeedsUpload_  = true;
     envMapUploadWidth_  = equiWidth;
     envMapUploadHeight_ = equiHeight;
 
-    LOG_SUCCESS_CAT("RENDERER", "HDR envmap prepared — upload deferred to first frame (whisper mode)");
+    LOG_SUCCESS_CAT("RENDERER", "HDR envmap assets/textures/envmap.hdr prepared — {}×{} — upload deferred to first frame", equiWidth, equiHeight);
 
     return envmap;
 }
@@ -238,7 +251,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
     // =====================================================================
-    // GPU timestamps (empire decree)
+    // GPU timestamps
     // =====================================================================
     if (Options::Performance::ENABLE_GPU_TIMESTAMPS && timestampQueryPool_ != VK_NULL_HANDLE) {
         const uint32_t queryIndex = frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT;
@@ -260,7 +273,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     // =====================================================================
-    // Deferred first-frame transitions (whisper mode)
+    // Deferred first-frame transitions
     // =====================================================================
     if (rtOutputNeedsTransition_) {
         for (const auto& img : rtOutputImages_) {
@@ -315,6 +328,62 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     // =====================================================================
+    // ENVMAP UPLOAD — WHISPER MODE — FIRST FRAME ONLY
+    // =====================================================================
+    if (envMapNeedsUpload_) {
+        LOG_AMOURANTH("FIRST FRAME — WHISPER UPLOADING HDR ENVMAP assets/textures/envmap.hdr — THE SKY AWAKENS");
+
+        int w = 0, h = 0, channels = 0;
+        float* data = stbi_loadf("assets/textures/envmap.hdr", &w, &h, &channels, 4);
+        if (!data) {
+            LOG_FATAL_CAT("RENDERER", "Failed to load envmap.hdr for upload — {}", stbi_failure_reason());
+        } else {
+            const VkDeviceSize imageSize = static_cast<VkDeviceSize>(w) * h * 4 * sizeof(float);
+
+            // Staging buffer upload
+            uint64_t stagingHandle = BufferManager::createHostVisible(imageSize, "EnvMap_Staging_Temp");
+            void* mapped = BufferManager::getMappedStagingPtr(stagingHandle);
+            std::memcpy(mapped, data, imageSize);
+            stbi_image_free(data);
+
+            // Transition envmap image to transfer dst
+            transitionImage(cmd, envMapImage_.get(),
+                            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+            VkBufferImageCopy region{
+                .bufferOffset      = 0,
+                .bufferRowLength   = 0,
+                .bufferImageHeight = 0,
+                .imageSubresource  = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .imageOffset       = { 0, 0, 0 },
+                .imageExtent       = { static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1 }
+            };
+
+            vkCmdCopyBufferToImage(cmd,
+                                   BufferManager::get(stagingHandle)->buffer,
+                                   envMapImage_.get(),
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   1, &region);
+
+            // Transition to shader read
+            transitionImage(cmd, envMapImage_.get(),
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+            BufferManager::destroy(stagingHandle);
+        }
+
+        envMapNeedsUpload_ = false;
+
+        // NOW safe to create display pipeline
+        createEnvMapDisplayPipeline();
+        LOG_AMOURANTH("ENVMAP UPLOADED AND DISPLAY PIPELINE FORGED — THE TRUE SKY IS READY");
+    }
+
+    // =====================================================================
     // Special render modes (pure pink void)
     // =====================================================================
     if (activeRenderMode_ == 1) {
@@ -337,7 +406,15 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     }
 
     // =====================================================================
-    // RTX path validity check — using authoritative PipelineManager
+    // Envmap-only display mode (if pipeline ready)
+    // =====================================================================
+    if (envMapDisplayPipeline_ != VK_NULL_HANDLE && activeRenderMode_ == 0) {  // Mode 0 = envmap only
+        recordEnvMapOnlyPass(cmd, imageIndex);
+        goto submit_frame;
+    }
+
+    // =====================================================================
+    // RTX path validity check
     // =====================================================================
     if (!pipelineManager_.isRTXValid() || uniformBufferEncs_[slot] == 0) {
         LOG_FATAL_CAT("RENDERER", "RTX PATH INVALID — FALLING BACK TO SACRED PINK VOID");
@@ -368,7 +445,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     currentFrame_.store(slot);
 
     // =====================================================================
-    // Descriptor set update — respects all active OptionsRTX features
+    // Descriptor set update
     // =====================================================================
     {
         RTX::RTDescriptorUpdate desc{};
@@ -409,14 +486,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     recordRayTracingCommands(cmd, slot);
 
     // =====================================================================
-    // Temporal accumulation (if enabled)
+    // Temporal accumulation
     // =====================================================================
     if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
         recordAccumulationPass(cmd, slot);
     }
 
     // =====================================================================
-    // Denoising (SVGF)
+    // Denoising
     // =====================================================================
     if (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_) {
         updateDenoiserDescriptors();
@@ -1037,80 +1114,90 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createAccumulationPipeline();
     createNexusScoreImage(RTX::g_ctx().commandPool(), stone_graphics_queue());
 
-    // Environment map (optional)
-    {
-        EnvironmentMap env = createEnvironmentMap();
-        if (env.image != VK_NULL_HANDLE) {
-            envMapImage_     = RTX::Handle<VkImage>(env.image, stone_device(), vkDestroyImage);
-            envMapMemory_    = RTX::Handle<VkDeviceMemory>(env.memory, stone_device(), vkFreeMemory);
-            envMapImageView_ = RTX::Handle<VkImageView>(env.view, stone_device(), vkDestroyImageView);
-            envMapSampler_   = RTX::Handle<VkSampler>(env.sampler, stone_device(), vkDestroySampler);
-            createEnvMapDisplayPipeline();
-        }
-    }
-
     LOG_SUCCESS_CAT("RENDERER", "VulkanRenderer initialized — {}×{} — PINK MODE ACTIVE", width, height);
 }
 
 void VulkanRenderer::createEnvMapDescriptorPool() noexcept
 {
-    if (envMapDescriptorPool_.valid()) return;
+    if (envMapDescriptorPool_.valid()) {
+        return;  // Already created
+    }
 
-    VkDescriptorPoolSize poolSizes[2] = {};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = 1;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = 1;
+    LOG_TRACE_CAT("RENDERER", "Creating dedicated descriptor pool for envmap display");
+
+    // 1 sampler + 1 storage image (swapchain write)
+    std::array<VkDescriptorPoolSize, 2> poolSizes = {{
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         1 }
+    }};
 
     VkDescriptorPoolCreateInfo poolInfo{
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets       = 1,
-        .poolSizeCount = 2,
-        .pPoolSizes    = poolSizes
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
     };
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool));
 
-    envMapDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(), vkDestroyDescriptorPool);
+    envMapDescriptorPool_ = Handle<VkDescriptorPool>(
+        pool, stone_device(),
+        [](VkDevice d, VkDescriptorPool p, auto*) { vkDestroyDescriptorPool(d, p, nullptr); },
+        0, "EnvMapDisplay_DescriptorPool"
+    );
+
+    LOG_SUCCESS_CAT("RENDERER", "Envmap display descriptor pool created");
 }
 
 void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
 {
     if (envMapDisplayPipeline_ != VK_NULL_HANDLE) {
+        LOG_TRACE_CAT("RENDERER", "Envmap display pipeline already exists — skipping creation");
         return;
     }
 
     if (!envMapImageView_.valid() || !envMapSampler_.valid()) {
-        LOG_WARN_CAT("RENDERER", "Envmap not loaded — cannot create display pipeline");
+        LOG_WARN_CAT("RENDERER", "Envmap image or sampler not ready — cannot create display pipeline");
         return;
     }
 
-    createEnvMapDescriptorPool();  // ← Dedicated pool, safe early
+    createEnvMapDescriptorPool();  // Ensure dedicated pool exists
 
     VkDevice device = stone_device();
 
-    // Layout
-    VkDescriptorSetLayoutBinding bindings[2] = {};
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    // Destroy old layout if exists (prevent double creation crash)
+    if (envMapDisplayDescSetLayout_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, envMapDisplayDescSetLayout_, nullptr);
+        envMapDisplayDescSetLayout_ = VK_NULL_HANDLE;
+    }
 
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    // Descriptor Set Layout — binding 0: envmap sampler, binding 1: swapchain storage
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {{
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,         1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
+    }};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 2,
-        .pBindings    = bindings
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings    = bindings.data()
     };
     VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &envMapDisplayDescSetLayout_));
 
-    // Pipeline layout
-    VkPushConstantRange pcRange{.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = 8};
+    // Destroy old pipeline layout if exists
+    if (envMapDisplayPipelineLayout_ != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, envMapDisplayPipelineLayout_, nullptr);
+        envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
+    }
+
+    // Pipeline Layout — with push constants for resolution
+    VkPushConstantRange pcRange{
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset     = 0,
+        .size       = sizeof(uint32_t) * 2  // width, height
+    };
 
     VkPipelineLayoutCreateInfo plInfo{
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -1121,7 +1208,13 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
     };
     VK_CHECK(vkCreatePipelineLayout(device, &plInfo, nullptr, &envMapDisplayPipelineLayout_));
 
-    // Allocate set from dedicated pool
+    // Free old descriptor set if exists
+    if (envMapDisplayDescriptorSet_ != VK_NULL_HANDLE) {
+        vkFreeDescriptorSets(device, envMapDescriptorPool_.get(), 1, &envMapDisplayDescriptorSet_);
+        envMapDisplayDescriptorSet_ = VK_NULL_HANDLE;
+    }
+
+    // Allocate new descriptor set
     VkDescriptorSetAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool     = envMapDescriptorPool_.get(),
@@ -1130,14 +1223,14 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
     };
     VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &envMapDisplayDescriptorSet_));
 
-    // Bind envmap
+    // Bind envmap sampler to binding 0
     VkDescriptorImageInfo samplerInfo{
         .sampler     = envMapSampler_.get(),
         .imageView   = envMapImageView_.get(),
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
-    VkWriteDescriptorSet write{
+    VkWriteDescriptorSet samplerWrite{
         .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet          = envMapDisplayDescriptorSet_,
         .dstBinding      = 0,
@@ -1145,12 +1238,12 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
         .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .pImageInfo      = &samplerInfo
     };
-    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(device, 1, &samplerWrite, 0, nullptr);
 
-    // Load shader
+    // Load compute shader
     VkShaderModule shaderModule = pipelineManager_.loadShader("assets/shaders/compute/envmap_display.spv");
     if (shaderModule == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Failed to load envmap_display.spv");
+        LOG_FATAL_CAT("RENDERER", "Failed to load envmap_display.spv — sky cannot be rendered");
         return;
     }
 
@@ -1171,7 +1264,7 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
 
     vkDestroyShaderModule(device, shaderModule, nullptr);
 
-    LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE FORGED — THE TRUE SKY IS READY");
+    LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE FORGED — assets/textures/envmap.hdr READY TO DOMINATE THE SKY");
 }
 
 void VulkanRenderer::createDepthResources() noexcept
@@ -2564,10 +2657,14 @@ bool VulkanRenderer::createSharedStaging() noexcept
 
 void VulkanRenderer::recreateSwapchainDependentResources() noexcept
 {
+    // Wait for GPU idle — safe destruction of old resources
     vkDeviceWaitIdle(stone_device());
 
-    LOG_AMOURANTH("RECREATING SWAPCHAIN-DEPENDENT RESOURCES — EMPIRE REBIRTH");
+    LOG_AMOURANTH("RECREATING SWAPCHAIN-DEPENDENT RESOURCES — FULL EMPIRE REBUILD");
 
+    // ====================================================================
+    // 1. DESTROY OLD RESOURCES — SAFE ORDER
+    // ====================================================================
     destroyRTOutputImages();
     rtOutputImages_.clear();
     rtOutputMemories_.clear();
@@ -2581,6 +2678,9 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
     destroyDenoiserImage();
     destroyNexusScoreImage();
 
+    // ====================================================================
+    // 2. RECREATE CORE RESOURCES
+    // ====================================================================
     createCommandBuffers();
 
     createRTOutputImages();
@@ -2589,22 +2689,31 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
 
     recreateTonemapUBOs();
 
-    // === FINAL FIX: RE-ALLOCATE DESCRIPTOR SETS AFTER RESIZE ===
+    // ====================================================================
+    // 3. RE-ALLOCATE DESCRIPTOR SETS — CRITICAL FOR RESIZE SAFETY
+    // Binds new rtOutputViews_ and accumulation views
+    // ====================================================================
     pipelineManager_.allocateDescriptorSets();
     LOG_AMOURANTH("RT DESCRIPTOR SETS RE-ALLOCATED — BINDINGS SAFE — PINK SURVIVES RESIZE");
 
+    // ====================================================================
+    // 4. RESET STATE
+    // ====================================================================
     resetAccumulation_   = true;
     resetAccumNextFrame_ = true;
     accumulationFrame_   = 0;
     currentSpp_          = 0;
 
+    // ====================================================================
+    // 5. MARK FIRST-FRAME TRANSITIONS
+    // ====================================================================
     rtOutputNeedsTransition_     = true;
-    depthNeedsTransition_       = true;
+    depthNeedsTransition_        = true;
     accumulationNeedsTransition_ = true;
     nexusScoreNeedsInit_         = true;
     swapchainNeedsPresentTransition_ = true;
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Resources reborn — pink eternal across resize — EMPIRE UNBROKEN");
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain-dependent resources fully rebuilt — pink eternal across resize — EMPIRE UNBROKEN");
 }
 
 void VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels,
@@ -2657,15 +2766,23 @@ void VulkanRenderer::destroyRenderPass() noexcept {
 
 void VulkanRenderer::createRenderPass() noexcept
 {
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format         = RTX::SwapchainManager::format();
-    colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    if (renderPass_ != VK_NULL_HANDLE) {
+        LOG_TRACE_CAT("RENDERER", "Render pass already exists — skipping creation");
+        return;
+    }
+
+    LOG_INFO_CAT("RENDERER", "Forging classic raster render pass — for fallback/overlay modes");
+
+    VkAttachmentDescription colorAttachment{
+        .format         = RTX::SwapchainManager::format(),
+        .samples        = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+    };
 
     VkAttachmentReference colorRef{
         .attachment = 0,
@@ -2678,19 +2795,36 @@ void VulkanRenderer::createRenderPass() noexcept
         .pColorAttachments    = &colorRef
     };
 
+    VkSubpassDependency dependency{
+        .srcSubpass    = VK_SUBPASS_EXTERNAL,
+        .dstSubpass    = 0,
+        .srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+    };
+
     VkRenderPassCreateInfo info{
         .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
         .attachmentCount = 1,
         .pAttachments    = &colorAttachment,
         .subpassCount    = 1,
-        .pSubpasses      = &subpass
+        .pSubpasses      = &subpass,
+        .dependencyCount = 1,
+        .pDependencies   = &dependency
     };
 
-    // NO VK_CHECK — EMPIRE TRUST
-    // If this fails, the GPU is dead anyway
-    vkCreateRenderPass(stone_device(), &info, nullptr, &renderPass_);
+    VkRenderPass pass = VK_NULL_HANDLE;
+    VkResult result = vkCreateRenderPass(stone_device(), &info, nullptr, &pass);
 
-    LOG_AMOURANTH("RENDER PASS FORGED — THE CANVAS IS READY — PHOTONS HAVE A PATH");
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create render pass: {}", string_VkResult(result));
+        phase9_ballerina("RENDER PASS CREATION FAILED", std::source_location::current());
+    }
+
+    renderPass_ = pass;
+
+    LOG_SUCCESS_CAT("RENDERER", "Classic raster render pass forged — ready for fallback/overlay rendering");
 }
 
 void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
@@ -2718,35 +2852,35 @@ void VulkanRenderer::onSwapchainRebuilt(uint32_t w, uint32_t h) noexcept
 
 void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
 {
-    // Early exit if size unchanged — avoids unnecessary swapchain recreation
+    // Early exit if size unchanged — avoids unnecessary full rebuild
     if (static_cast<uint32_t>(width_) == w && static_cast<uint32_t>(height_) == h) {
         LOG_TRACE_CAT("RENDERER", "Resize event ignored — dimensions unchanged ({}×{})", w, h);
         return;
     }
 
-    LOG_AMOURANTH("WINDOW RESIZE DETECTED — {}×{} → {}×{} — EMPIRE REBIRTH INITIATED", width_, height_, w, h);
+    LOG_AMOURANTH("WINDOW RESIZE DETECTED — {}×{} → {}×{} — FULL EMPIRE REBUILD INITIATED", width_, height_, w, h);
 
     // Update internal size immediately — prevents race with render thread
     width_  = static_cast<int>(w);
     height_ = static_cast<int>(h);
 
-    // Immediate swapchain recreation — no debounce needed (SDL events are already throttled)
+    // FULL REBUILD: Recreate swapchain and ALL dependent resources
     RTX::recreateSwapchain(w, h);
 
-    // Force first-frame transitions after recreation
+    // Recreate all swapchain-dependent resources (images, command buffers, etc.)
+    recreateSwapchainDependentResources();
+
+    // Force first-frame transitions after full rebuild
     rtOutputNeedsTransition_     = true;
     depthNeedsTransition_        = true;
     accumulationNeedsTransition_ = true;
     nexusScoreNeedsInit_         = true;
     swapchainNeedsPresentTransition_ = true;
 
-    // Critical: Re-allocate descriptor sets to bind new RT output images
-    pipelineManager_.allocateDescriptorSets();
-
     // Reset accumulation — fresh convergence on new resolution
     requestAccumulationReset();
 
-    LOG_SUCCESS_CAT("RENDERER", "Resize complete — {}×{} — all resources reborn — pink survives");
+    LOG_SUCCESS_CAT("RENDERER", "Full resize rebuild complete — {}×{} — all resources reborn — pink survives");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

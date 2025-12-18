@@ -540,30 +540,6 @@ static void phase4_merchantShip() {
     RTX::g_ctx().init();
 }
 
-static void phase6_sceneAndAccelerationStructures() {
-    g_mesh = MeshLoader::loadOBJ("assets/models/scene.obj");
-
-    if (!g_mesh) {
-        phase9_ballerina("Mesh load failed - nullptr");
-    }
-    if (g_mesh->vertices.empty()) {
-        phase9_ballerina("Mesh vertices empty");
-    }
-    if (g_mesh->vertexBuffer == 0 || g_mesh->indexBuffer == 0) {
-        phase9_ballerina("Mesh buffers not allocated");
-    }
-
-    auto* mesh = g_mesh.get();
-
-    stone_seal_mesh(
-        RAW_BUFFER(mesh->vertexBuffer),
-        BufferManager::get(mesh->vertexBuffer)->memory,
-        RAW_BUFFER(mesh->indexBuffer),
-        BufferManager::get(mesh->indexBuffer)->memory,
-        static_cast<uint32_t>(mesh->indices.size())
-    );
-}
-
 static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept
 {
     auto renderer = std::make_unique<VulkanRenderer>(
@@ -680,7 +656,6 @@ int main(int, char**) {
 
     phase3_sacrificialSplash();
     phase4_merchantShip();
-    phase6_sceneAndAccelerationStructures();
 
     auto renderer = phase7_Renderer();
     stone_seal_renderer(renderer.get());
