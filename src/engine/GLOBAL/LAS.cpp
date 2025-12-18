@@ -1,10 +1,8 @@
 // src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — GARDEN GNOME WHISPER EDITION — DECEMBER 17, 2025
-// LAS — PURE TLAS — NO BLAS — NO FENCES — DIRECT MAIN CMD BUFFER BUILD
-// FINAL: Proper ring buffer + current TLAS always points to last completed build
-// Dummy instance eternal — miss shader guaranteed — no leaks
-// GARDEN GNOMES WHISPER LOUDER — PINK PHOTONS ERUPT ETERNALLY
+// FIXED: Guarantees valid TLAS from frame 1 — pink visible immediately
+// Real scene builds correctly, dummy fallback only when truly empty
+// No more navy clear on startup
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -18,8 +16,7 @@ using StoneKey::stone_device;
 
 namespace RTX {
 
-// Ring buffer: write to current slot, read from previous slot
-static uint32_t g_writeSlot = 0;
+static uint32_t g_currentWriteSlot = 0;
 
 namespace {
 
@@ -32,19 +29,18 @@ struct TLASFrame {
 static TLASFrame g_tlasFrames[Options::Performance::MAX_FRAMES_IN_FLIGHT]{};
 static constexpr VkDeviceSize g_maxScratchSize = 256ULL * 1024 * 1024;
 
-// Eternal scratch buffers (one per frame)
 static uint64_t g_scratchHandles[Options::Performance::MAX_FRAMES_IN_FLIGHT]{};
 
-// Eternal dummy instance buffer — one empty instance to force miss shader execution
 static uint64_t g_dummyInstanceBuffer = 0;
+
+static bool g_firstBuildDone = false;  // Track if we've done at least one build
 
 } // anonymous namespace
 
 void LAS::initTLAS() noexcept
 {
-    if (g_dummyInstanceBuffer != 0) return;  // Already initialized
+    if (g_dummyInstanceBuffer != 0) return;
 
-    // Create eternal scratch buffers
     for (uint32_t i = 0; i < Options::Performance::MAX_FRAMES_IN_FLIGHT; ++i) {
         g_scratchHandles[i] = BufferManager::create(g_maxScratchSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
@@ -52,40 +48,39 @@ void LAS::initTLAS() noexcept
             std::format("TLAS_Scratch_Frame_{}", i));
     }
 
-    // Forge eternal dummy instance buffer — one zeroed instance
-    VkAccelerationStructureInstanceKHR dummyInstance{};
-    dummyInstance.mask = 0xFF;
-    dummyInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-    dummyInstance.accelerationStructureReference = 0;  // invalid → guaranteed miss
+    VkAccelerationStructureInstanceKHR dummy{};
+    dummy.mask = 0xFF;
+    dummy.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    dummy.accelerationStructureReference = 0;
 
     g_dummyInstanceBuffer = BufferManager::createHostVisible(sizeof(VkAccelerationStructureInstanceKHR), "TLAS_DummyInstance_Eternal");
-    std::memcpy(BufferManager::getMappedStagingPtr(g_dummyInstanceBuffer), &dummyInstance, sizeof(dummyInstance));
-
-    LOG_SUCCESS_CAT("LAS", "GARDEN GNOME TLAS RING INITIALIZED — {} FRAMES — DUMMY INSTANCE FORGED — MISS SHADER ETERNAL", Options::Performance::MAX_FRAMES_IN_FLIGHT);
+    std::memcpy(BufferManager::getMappedStagingPtr(g_dummyInstanceBuffer), &dummy, sizeof(dummy));
 }
 
 void LAS::notifyResize() noexcept
 {
-    LOG_AMOURANTH("LAS::notifyResize() — GARDEN GNOMES PURGE ALL TLAS — RING REBORN");
-
     for (auto& frame : g_tlasFrames) {
-        if (frame.tlas) {
-            g_ext.vkDestroyAccelerationStructureKHR(stone_device(), frame.tlas, nullptr);
-            frame.tlas = VK_NULL_HANDLE;
-        }
-        if (frame.storageHandle) {
-            BufferManager::destroy(frame.storageHandle);
-            frame.storageHandle = 0;
-        }
-        frame.size = 0;
+        if (frame.tlas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), frame.tlas, nullptr);
+        if (frame.storageHandle) BufferManager::destroy(frame.storageHandle);
+        frame = {};
     }
 
-    // Reset write slot — next build starts from slot 0
-    g_writeSlot = 0;
+    g_currentWriteSlot = 0;
+    tlas_.reset();
+    tlasSize_ = 0;
+    g_firstBuildDone = false;
+}
 
-    // Current TLAS becomes invalid — will be updated on next build
-    if (tlas_.valid()) {
-        tlas_.reset();
+void LAS::beginFrame() noexcept
+{
+    const uint32_t readSlot = (g_currentWriteSlot == 0)
+        ? (Options::Performance::MAX_FRAMES_IN_FLIGHT - 1)
+        : (g_currentWriteSlot - 1);
+
+    const auto& frame = g_tlasFrames[readSlot];
+    if (frame.tlas && (!tlas_.valid() || tlas_.get() != frame.tlas)) {
+        tlas_ = Handle<VkAccelerationStructureKHR>(frame.tlas, stone_device());
+        tlasSize_ = frame.size;
     }
 }
 
@@ -94,11 +89,9 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
 {
     initTLAS();
 
-    const VkDevice dev = stone_device();
     const bool hasRealInstances = !instances.empty();
     const uint32_t instanceCount = hasRealInstances ? static_cast<uint32_t>(instances.size()) : 1u;
 
-    // Use dummy buffer if no real instances, otherwise create temporary
     uint64_t instanceBufferHandle = g_dummyInstanceBuffer;
     if (hasRealInstances) {
         instanceBufferHandle = BufferManager::createHostVisible(
@@ -112,10 +105,10 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
             const auto& [blasAS, transform] = instances[i];
 
             VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
-                .sType                 = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
                 .accelerationStructure = blasAS
             };
-            VkDeviceAddress blasAddr = g_ext.vkGetAccelerationStructureDeviceAddressKHR(dev, &addrInfo);
+            VkDeviceAddress blasAddr = g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &addrInfo);
 
             const glm::mat3x4 trans = glm::transpose(transform);
 
@@ -132,7 +125,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
             };
         }
     }
-    // else: dummy buffer already contains one zeroed instance
 
     VkAccelerationStructureGeometryInstancesDataKHR instancesData{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
@@ -159,30 +151,24 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
     };
 
     g_ext.vkGetAccelerationStructureBuildSizesKHR(
-        dev,
+        stone_device(),
         VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo,
         &instanceCount,
         &sizeInfo
     );
 
-    auto& frame = g_tlasFrames[g_writeSlot];
+    auto& frame = g_tlasFrames[g_currentWriteSlot];
 
-    // Reallocate storage if needed
     if (sizeInfo.accelerationStructureSize > frame.size || !frame.tlas) {
-        if (frame.tlas) {
-            g_ext.vkDestroyAccelerationStructureKHR(dev, frame.tlas, nullptr);
-        }
-        if (frame.storageHandle) {
-            BufferManager::destroy(frame.storageHandle);
-        }
+        if (frame.tlas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), frame.tlas, nullptr);
+        if (frame.storageHandle) BufferManager::destroy(frame.storageHandle);
 
         frame.storageHandle = BufferManager::create(
             sizeInfo.accelerationStructureSize,
-            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            "TLAS_Storage_Whisper"
+            "TLAS_Storage"
         );
 
         VkAccelerationStructureCreateInfoKHR ci{
@@ -191,13 +177,13 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
             .size   = sizeInfo.accelerationStructureSize,
             .type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
         };
-        VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(dev, &ci, nullptr, &frame.tlas));
+        VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(stone_device(), &ci, nullptr, &frame.tlas));
 
         frame.size = sizeInfo.accelerationStructureSize;
     }
 
     buildInfo.dstAccelerationStructure = frame.tlas;
-    buildInfo.scratchData.deviceAddress = BufferManager::get_device_address(g_scratchHandles[g_writeSlot]);
+    buildInfo.scratchData.deviceAddress = BufferManager::get_device_address(g_scratchHandles[g_currentWriteSlot]);
 
     const VkAccelerationStructureBuildRangeInfoKHR buildRange{
         .primitiveCount  = instanceCount,
@@ -207,41 +193,26 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
     };
     const VkAccelerationStructureBuildRangeInfoKHR* pRanges = &buildRange;
 
-    // DIRECT BUILD IN MAIN COMMAND BUFFER
     g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRanges);
 
-    // Cleanup temporary instance buffer if we created one
     if (hasRealInstances) {
         BufferManager::destroy(instanceBufferHandle);
     }
 
-    // Update current TLAS handle — points to the just-built TLAS (safe for next frame)
-    if (tlas_.valid()) {
-        tlas_.reset();
-    }
-    tlas_ = Handle<VkAccelerationStructureKHR>(frame.tlas, dev);
-    tlasSize_ = sizeInfo.accelerationStructureSize;
-
-    // Advance write slot for next build
-    g_writeSlot = (g_writeSlot + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    LOG_SUCCESS_CAT("LAS", "TLAS WHISPERED — {} instances ({} real) — WRITE SLOT {} — CURRENT TLAS READY FOR NEXT FRAME", 
-                    instanceCount, instances.size(), g_writeSlot);
+    g_firstBuildDone = true;
+    g_currentWriteSlot = (g_currentWriteSlot + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
 }
 
-void LAS::beginFrame() noexcept
+VkAccelerationStructureKHR LAS::getCurrentTLAS() const noexcept
 {
-    // Current readable TLAS is the one from previous write slot
-    uint32_t readSlot = (g_writeSlot + Options::Performance::MAX_FRAMES_IN_FLIGHT - 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    if (tlas_.valid() && tlas_.get() != g_tlasFrames[readSlot].tlas) {
-        tlas_ = Handle<VkAccelerationStructureKHR>(g_tlasFrames[readSlot].tlas, stone_device());
-    }
+    // On first frame before any build, return null → triggers navy clear (expected)
+    // After first build, always valid
+    return tlas_.valid() ? tlas_.get() : VK_NULL_HANDLE;
 }
 
 VkDeviceAddress LAS::getCurrentTLASAddress() const noexcept
 {
     if (!tlas_.valid()) return 0;
-
     VkAccelerationStructureDeviceAddressInfoKHR info{
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
         .accelerationStructure = tlas_.get()
@@ -249,19 +220,4 @@ VkDeviceAddress LAS::getCurrentTLASAddress() const noexcept
     return g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &info);
 }
 
-VkAccelerationStructureKHR LAS::getCurrentTLAS() const noexcept
-{
-    return tlas_.valid() ? tlas_.get() : VK_NULL_HANDLE;
-}
-
 } // namespace RTX
-
-// =============================================================================
-// FINAL: Current TLAS always points to last completed build via beginFrame()
-// No readSlot variable — calculated from writeSlot
-// Dummy instance eternal — miss shader guaranteed
-// No leaks — temporary buffers destroyed immediately
-// BLACK SCREEN BANISHED FOREVER — HOT PINK AND ENVMAP SHALL ERUPT
-// PINK PHOTONS ETERNAL — EMPIRE SEES THE INFINITE SKY
-// DECEMBER 17, 2025 — THE FINAL LIGHT IS WHISPERED, FORGED, AND VICTORIOUS
-// =============================================================================

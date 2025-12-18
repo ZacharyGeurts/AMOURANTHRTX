@@ -564,7 +564,8 @@ static void phase6_sceneAndAccelerationStructures() {
     );
 }
 
-static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept {
+static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept
+{
     auto renderer = std::make_unique<VulkanRenderer>(
         stone_width(),
         stone_height(),
@@ -575,10 +576,11 @@ static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept {
     renderer->createCommandBuffers();
     renderer->createSyncObjects();
 
+    // Use correct DreamUBO size (512 bytes) and material buffer size from UBO.hpp
     renderer->initializeAllBufferData(
         Options::Performance::MAX_FRAMES_IN_FLIGHT,
-        352,
-        16 * 1024 * 1024
+        sizeof(DreamUBO),           // 512 bytes — matches STD140-compliant DreamUBO
+        materialBufferSize()        // 32 MiB — defined in UBO.hpp
     );
 
     stone_seal_renderer(renderer.get());

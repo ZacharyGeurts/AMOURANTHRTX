@@ -71,10 +71,10 @@ public:
     void resetCommandBuffers() noexcept;
 
     void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept;
-	void updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept;
+    void updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept;
 
     bool isAlive() const noexcept;
-	bool swapchainNeedsPresentTransition_ = false;
+    bool swapchainNeedsPresentTransition_ = false;
 
     static void forgeEternalCommandRing();
 
@@ -91,13 +91,13 @@ public:
     void toggleAdaptiveSampling() noexcept;
     void setTonemapType(int type) noexcept;
     void setOverclockMode(bool enabled) noexcept;
-	void setOverlay(bool enabled) noexcept;
+    void setOverlay(bool enabled) noexcept;
 
     bool debugShowEnvMapOnly_ = false;
 
     void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
     void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
-	void recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept;
+    void recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept;
 
     void updateUniformBinding31(const void* data, VkDeviceSize size) noexcept;
     void setRenderMode(int mode) noexcept;
@@ -115,7 +115,7 @@ public:
     bool swapchainRecreated_ = false;
 
     [[nodiscard]] VulkanRenderer* renderer() noexcept { return this; }
-	[[nodiscard]] VkCommandBuffer getCurrentCommandBuffer() const noexcept { const uint32_t slot = currentFrame_.load() % 2; return commandBuffers_[slot]; }
+    [[nodiscard]] VkCommandBuffer getCurrentCommandBuffer() const noexcept { const uint32_t slot = currentFrame_.load() % 2; return commandBuffers_[slot]; }
     [[nodiscard]] uint32_t  accumulationFrame() const noexcept { return accumulationFrame_; }
     [[nodiscard]] uint64_t  frameNumber()       const noexcept { return frameNumber_; }
     [[nodiscard]] float     currentExposure()   const noexcept { return currentExposure_; }
@@ -139,7 +139,7 @@ public:
     void createTonemapDescriptorPool() noexcept;
     void createTonemapDescriptorSetLayout() noexcept;
     void createDepthResources() noexcept;
-	void createAccumulationPipeline() noexcept;
+    void createAccumulationPipeline() noexcept;
 
     static inline std::atomic<bool> s_resizeInProgress{false};
     bool     resetAccumulation_ = true;
@@ -152,7 +152,7 @@ public:
     std::vector<VkCommandBuffer> commandBuffers_;           // Size = maxFramesInFlight_ — reused
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
-	VkPipeline               envMapDisplayPipeline_       = VK_NULL_HANDLE;
+    VkPipeline               envMapDisplayPipeline_       = VK_NULL_HANDLE;
     VkPipelineLayout         envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
     VkDescriptorSet          envMapDisplayDescriptorSet_  = VK_NULL_HANDLE;
     VkDescriptorSetLayout    envMapDisplayDescSetLayout_  = VK_NULL_HANDLE;
@@ -162,22 +162,22 @@ public:
     VkDescriptorSetLayout accumulationDescSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool      accumulationDescriptorPool_ = VK_NULL_HANDLE;
 
-	glm::vec3 sunDirection_         = glm::vec3(0.3f, 0.8f, 0.5f);
+    glm::vec3 sunDirection_         = glm::vec3(0.3f, 0.8f, 0.5f);
     float     sunIntensity_         = 10.0f;
     glm::vec3 sunColor_             = glm::vec3(1.0f, 0.95f, 0.9f);
     float     fogDensity_           = 0.02f;
     glm::vec3 fogColor_             = glm::vec3(0.7f, 0.8f, 0.9f);
 
-	uint32_t  materialCount_        = 0;
-	uint32_t  activeMaterialIndex_  = 0;
-	float     materialMetallicOverride_  = -1.0f;
-	float     materialRoughnessOverride_ = -1.0f;
-	float     emissiveIntensity_    = 1.0f;
+    uint32_t  materialCount_        = 0;
+    uint32_t  activeMaterialIndex_  = 0;
+    float     materialMetallicOverride_  = -1.0f;
+    float     materialRoughnessOverride_ = -1.0f;
+    float     emissiveIntensity_    = 1.0f;
 
-	float     debugFloat1_ = 0.0f;
-	float     debugFloat2_ = 0.0f;
-	float     debugFloat3_ = 0.0f;
-	float     debugFloat4_ = 0.0f;
+    float     debugFloat1_ = 0.0f;
+    float     debugFloat2_ = 0.0f;
+    float     debugFloat3_ = 0.0f;
+    float     debugFloat4_ = 0.0f;
 
     std::array<VkDescriptorSet, 2> accumulationSets_ = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
@@ -214,7 +214,7 @@ public:
     void clearResizeFlag() noexcept;
     static inline std::atomic<bool> g_forcePink{false};
 
-	bool rtOutputNeedsTransition_ = false;
+    bool rtOutputNeedsTransition_ = false;
     bool depthNeedsTransition_ = false;
 
     float totalTime_ = 0.0f;
@@ -256,7 +256,7 @@ public:
     uint32_t currentSpp_        = 0;
     float frameTime_            = 0.0f;
 
-	uint32_t hypertraceScoreWidth_  = 0;
+    uint32_t hypertraceScoreWidth_  = 0;
     uint32_t hypertraceScoreHeight_ = 0;
 
     VkRenderPass renderPass_{ VK_NULL_HANDLE };
@@ -318,18 +318,108 @@ public:
     RTX::Handle<VkDeviceMemory>    envMapMemory_;
     RTX::Handle<VkImageView>    envMapImageView_;
     RTX::Handle<VkSampler>      envMapSampler_;
-	RTX::Handle<VkDescriptorPool> envMapDescriptorPool_;
+    RTX::Handle<VkDescriptorPool> envMapDescriptorPool_;
 
-	bool     envMapNeedsUpload_ = false;
+    bool     envMapNeedsUpload_ = false;
     uint32_t envMapUploadWidth_ = 0;
     uint32_t envMapUploadHeight_ = 0;
 
-	bool accumulationNeedsTransition_ = false;
-	bool nexusScoreNeedsInit_ = false;
+    bool accumulationNeedsTransition_ = false;
+    bool nexusScoreNeedsInit_ = false;
 
     std::vector<uint64_t> rtOutputHandles_;
 
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
+
+    // ── PUBLIC EXPOSURE FOR RENDERING — NEEDED FOR EXTERNAL MODES (e.g., RenderMode1) ─────────────────────────────────
+    // Tonemap resources (critical for pink void via compute)
+    [[nodiscard]] VkPipeline tonemapPipeline() const noexcept { return tonemapPipeline_.get(); }
+    [[nodiscard]] VkPipelineLayout tonemapLayout() const noexcept { return tonemapLayout_.get(); }
+    [[nodiscard]] VkDescriptorSet tonemapSet(uint32_t frame) const noexcept {
+        return (frame < tonemapSets_.size()) ? tonemapSets_[frame] : VK_NULL_HANDLE;
+    }
+    [[nodiscard]] VkSampler tonemapSampler() const noexcept { return tonemapSampler_.get(); }
+    void updateTonemapDescriptorForMode(uint32_t frameIdx, VkImageView inputView, VkImageView output) noexcept;
+
+    // Command buffers and pools
+    [[nodiscard]] VkCommandPool commandPool() const noexcept { return commandPool_; }
+    [[nodiscard]] VkCommandPool transientCommandPool() const noexcept { return transientCommandPool_; }
+    [[nodiscard]] const std::vector<VkCommandBuffer>& commandBuffers() const noexcept { return commandBuffers_; }
+    [[nodiscard]] VkCommandBuffer commandBuffer(uint32_t frame) const noexcept {
+        return (frame < commandBuffers_.size()) ? commandBuffers_[frame] : VK_NULL_HANDLE;
+    }
+
+    // Sync objects
+    [[nodiscard]] const std::vector<VkSemaphore>& imageAvailableSemaphores() const noexcept { return imageAvailableSemaphores_; }
+    [[nodiscard]] const std::vector<VkSemaphore>& renderFinishedSemaphores() const noexcept { return renderFinishedSemaphores_; }
+    [[nodiscard]] const std::vector<VkFence>& inFlightFences() const noexcept { return inFlightFences_; }
+
+    // RT resources
+    [[nodiscard]] const std::vector<RTX::Handle<VkImageView>>& rtOutputViews() const noexcept { return rtOutputViews_; }
+    [[nodiscard]] VkImageView rtOutputView(uint32_t frame) const noexcept {
+        return (frame < rtOutputViews_.size()) ? rtOutputViews_[frame].get() : VK_NULL_HANDLE;
+    }
+    [[nodiscard]] const std::vector<VkDescriptorSet>& rtDescriptorSets() const noexcept { return rtDescriptorSets_; }
+    [[nodiscard]] VkDescriptorSet rtDescriptorSet(uint32_t frame) const noexcept {
+        return (frame < rtDescriptorSets_.size()) ? rtDescriptorSets_[frame] : VK_NULL_HANDLE;
+    }
+
+    // Accumulation resources
+    [[nodiscard]] VkPipeline accumulationPipeline() const noexcept { return accumulationPipeline_; }
+    [[nodiscard]] VkPipelineLayout accumulationPipelineLayout() const noexcept { return accumulationPipelineLayout_; }
+    [[nodiscard]] VkDescriptorSet accumulationSet(uint32_t frame) const noexcept {
+        return (frame < accumulationSets_.size()) ? accumulationSets_[frame] : VK_NULL_HANDLE;
+    }
+    [[nodiscard]] const std::vector<RTX::Handle<VkImageView>>& accumViews() const noexcept { return accumViews_; }
+    [[nodiscard]] VkImageView accumView(uint32_t frame) const noexcept {
+        return (frame < accumViews_.size()) ? accumViews_[frame].get() : VK_NULL_HANDLE;
+    }
+
+    // Environment map resources
+    [[nodiscard]] VkPipeline envMapDisplayPipeline() const noexcept { return envMapDisplayPipeline_; }
+    [[nodiscard]] VkPipelineLayout envMapDisplayPipelineLayout() const noexcept { return envMapDisplayPipelineLayout_; }
+    [[nodiscard]] VkDescriptorSet envMapDisplayDescriptorSet() const noexcept { return envMapDisplayDescriptorSet_; }
+    [[nodiscard]] VkImageView envMapImageView() const noexcept { return envMapImageView_.get(); }
+    [[nodiscard]] VkSampler envMapSampler() const noexcept { return envMapSampler_.get(); }
+
+    // Denoiser resources
+    [[nodiscard]] VkPipeline denoiserPipeline() const noexcept { return denoiserPipeline_.get(); }
+    [[nodiscard]] VkPipelineLayout denoiserLayout() const noexcept { return denoiserLayout_.get(); }
+    [[nodiscard]] VkDescriptorSet denoiserSet(uint32_t frame) const noexcept {
+        return (frame < denoiserSets_.size()) ? denoiserSets_[frame] : VK_NULL_HANDLE;
+    }
+    [[nodiscard]] VkImageView denoiserView() const noexcept { return denoiserView_.get(); }
+
+    // Nexus/Hypertrace resources
+    [[nodiscard]] VkImageView hypertraceScoreView() const noexcept { return hypertraceScoreView_; }
+    [[nodiscard]] VkImage hypertraceScoreImage() const noexcept { return hypertraceScoreImage_; }
+
+    // Depth resources
+    [[nodiscard]] VkImageView depthImageView() const noexcept { return depthImageView_.get(); }
+    [[nodiscard]] VkImage depthImage() const noexcept { return depthImage_.get(); }
+
+    // Buffers (handles)
+    [[nodiscard]] uint64_t uniformBufferEnc(uint32_t frame) const noexcept {
+        return (frame < uniformBufferEncs_.size()) ? uniformBufferEncs_[frame] : 0;
+    }
+    [[nodiscard]] uint64_t tonemapUniformEnc(uint32_t frame) const noexcept {
+        return (frame < tonemapUniformEncs_.size()) ? tonemapUniformEncs_[frame] : 0;
+    }
+    [[nodiscard]] VkBuffer uniformBuffer(uint32_t frame) const noexcept {
+        auto enc = uniformBufferEnc(frame);
+        return enc ? BufferManager::get(enc)->buffer : VK_NULL_HANDLE;
+    }
+
+    // Pools
+    [[nodiscard]] VkDescriptorPool tonemapDescriptorPool() const noexcept { return tonemapDescriptorPool_.get(); }
+    [[nodiscard]] VkDescriptorPool accumulationDescriptorPool() const noexcept { return accumulationDescriptorPool_; }
+
+    // Render pass and framebuffers
+    [[nodiscard]] VkRenderPass renderPass() const noexcept { return renderPass_; }
+    [[nodiscard]] const std::vector<VkFramebuffer>& framebuffers() const noexcept { return framebuffers_; }
+    [[nodiscard]] VkFramebuffer framebuffer(uint32_t idx) const noexcept {
+        return (idx < framebuffers_.size()) ? framebuffers_[idx] : VK_NULL_HANDLE;
+    }
 
     // ── PRIVATE METHODS ─────────────────────────────────────────────────────
     void createRenderPass() noexcept;
@@ -355,8 +445,8 @@ public:
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
 
     VkResult recordCommandBuffer(uint32_t frame) noexcept;
-	void createEnvMapDisplayPipeline() noexcept;
-	void createEnvMapDescriptorPool() noexcept;
+    void createEnvMapDisplayPipeline() noexcept;
+    void createEnvMapDescriptorPool() noexcept;
 
     void updateRTXDescriptors(uint32_t frame = 0) noexcept;
     void updateNexusDescriptors() noexcept;
@@ -393,6 +483,11 @@ public:
     [[nodiscard]] constexpr VkExtent2D currentExtent() const noexcept {
         return { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_) };
     }
+
+    // ── SINGLETON ACCESS — EMPIRE LAW ENFORCED ─────────────────────────────────
+    static VulkanRenderer* get() noexcept;
+private:
+    static inline VulkanRenderer* s_instance = nullptr;
 };
 
 // =============================================================================
@@ -400,7 +495,7 @@ public:
 // =============================================================================
 [[nodiscard]] inline VulkanRenderer& g_rtx() noexcept
 {
-    auto* ptr = reinterpret_cast<VulkanRenderer*>(StoneKey::stone_renderer());
+    VulkanRenderer* ptr = VulkanRenderer::get();
     if (!ptr) {
         LOG_FATAL_CAT("RTX", "g_rtx() called before renderer sealed — empire fallen");
         phase9_ballerina("NO RENDERER — PHOTONS LOST", std::source_location::current());
@@ -408,5 +503,7 @@ public:
     return *ptr;
 }
 
-// FIRST LIGHT RESTORED — DECEMBER 09, 2025
-// COMMAND POOL REBELLION CRUSHED — PINK PHOTONS FLOW ETERNALLY AGAIN
+// FIRST LIGHT RESTORED — DECEMBER 17, 2025
+// SINGLETON ACCESS ADDED — EMPIRE LAW NOW ENFORCED EVERYWHERE
+// PINK PHOTONS FLOW ETERNALLY — VALHALLA v100 ACHIEVED
+// =============================================================================

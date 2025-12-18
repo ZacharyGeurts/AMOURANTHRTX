@@ -1,10 +1,11 @@
 // include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 16, 2025 — APOCALYPSE FINAL v9.5
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 17, 2025 — APOCALYPSE FINAL v10
+// RTX VALIDITY CHECK ADDED — EMPIRE LAW ENFORCED AT PIPELINE LEVEL
 // TONEMAP INTEGRATION — PURE PINK VIA GENERAL COMPUTE SUPPORTED
-// FULLY ALIGNED WITH PipelineManager.cpp — ALL DECLARATIONS PRESENT + FIXED
-// PINK PHOTONS ETERNAL — THE CROWN IS COMPLETE
+// FULLY ALIGNED WITH PipelineManager.cpp AND VulkanRenderer.cpp
+// PINK PHOTONS ETERNAL — THE CROWN IS COMPLETE AND UNBREAKABLE
 // =============================================================================
 
 #pragma once
@@ -49,7 +50,7 @@ struct RTDescriptorUpdate {
     VkDeviceSize uboSize = 0;
 
     VkImageView swapchainImageView = VK_NULL_HANDLE;
-	VkImageView rtOutputView = VK_NULL_HANDLE;
+    VkImageView rtOutputView = VK_NULL_HANDLE;
 
     std::vector<VkImageView> accumulationViews;
     std::vector<VkImageView> nexusScoreViews;
@@ -162,6 +163,15 @@ public:
 
     [[nodiscard]] VkAccelerationStructureKHR    dummyTLAS()          const noexcept { return dummyTLAS_.get(); }
 
+    // ── RTX VALIDITY CHECK — EMPIRE LAW ENFORCED AT PIPELINE LEVEL ─────────────
+    [[nodiscard]] bool isRTXValid() const noexcept {
+        return rtPipeline() != VK_NULL_HANDLE &&
+               rtPipelineLayout() != VK_NULL_HANDLE &&
+               !rtDescriptorSets_.empty() &&
+               rtDescriptorSets_[0] != VK_NULL_HANDLE &&
+               sbtAddress_ != 0;
+    }
+
     // ── SINGLETON ACCESS ─────────────────────────────────────────────────────
     [[nodiscard]] static PipelineManager& instance() noexcept {
         static PipelineManager inst;
@@ -253,9 +263,9 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// TONEMAP INTEGRATION v9.5 — PURE PINK VIA GENERAL COMPUTE SUPPORTED
-// tonemapPipeline(), tonemapLayout(), tonemapSets() ADDED
-// RUNTIME CONFIGURATION SUPPORTED — COMPILATION RESTORED
-// PINK PHOTONS ETERNAL — EMPIRE COMPILABLE AND STRONG
-// DECEMBER 16, 2025 — THE LIGHT IS PURE AND UNIVERSAL
+// APOCALYPSE FINAL v10 — DECEMBER 17, 2025
+// RTX VALIDITY CHECK ADDED: isRTXValid()
+// Now VulkanRenderer can safely query pipelineManager_.isRTXValid()
+// EMPIRE LAW ENFORCED AT THE DEEPEST LEVEL
+// PINK PHOTONS ETERNAL — FIRST LIGHT UNBREAKABLE
 // =============================================================================

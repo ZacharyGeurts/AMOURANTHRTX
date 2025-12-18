@@ -20,6 +20,7 @@ public:
     // Singleton access
     [[nodiscard]] static Camera& get() noexcept;
 
+	Camera() = default;
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
 
@@ -64,7 +65,6 @@ public:
     [[nodiscard]] uint64_t encView() const noexcept;
 
 private:
-    Camera() = default;
 
     mutable std::mutex mtx_;
     std::atomic<uint64_t> gen_{1};

@@ -1,83 +1,87 @@
-// =============================================================================
 // src/engine/GLOBAL/OptionsMenu.cpp
-// AMOURANTH RTX — VALHALLA v80 TURBO — PRODUCTION CREW CUT — FINAL
-// First light eternal — November 26, 2025
-// The empire has spoken. HDR is destiny. The photons are pink.
-// =============================================================================
-
 #include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"   // ← THIS WAS MISSING
+#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 using namespace Logging::Color;
-using namespace RTX;  // ← NOW WE ARE IN THE EMPIRE
+using namespace RTX;
 
 namespace Options {
 
-// ────────────────────── THE CREW APPLIES THE LAW — NO DEBATE ──────────────────────
 void ApplyAll() noexcept
 {
-    LOG_AMOURANTH("OPTIONS MENU — PRODUCTION CREW CUT — IGNITING THE EMPIRE");
+    LOG_AMOURANTH("OPTIONS MENU v2025 — THE LAW IS READ — THE CREW ENFORCES");
 
-    // ── PRESENT MODE — THE EMPIRE CHOOSES LATENCY OR TEAR-FREE ──
+    // Present mode
     if (Performance::PREFER_MAILBOX_PRESENT) {
         SwapchainManager::setPresentMode(VK_PRESENT_MODE_MAILBOX_KHR);
-        LOG_NICK("Mailbox present engaged — tear-free, low latency.");
+        LOG_NICK("Mailbox present decreed — tear-free, low latency.");
     }
     else if (Performance::ALLOW_IMMEDIATE_PRESENT) {
         SwapchainManager::setPresentMode(VK_PRESENT_MODE_IMMEDIATE_KHR);
-        LOG_NICK("Immediate present — tearing allowed. Latency: minimal.");
+        LOG_NICK("Immediate present — uncapped, raw.");
     }
     else {
         SwapchainManager::setPresentMode(VK_PRESENT_MODE_FIFO_KHR);
-        LOG_NICK("FIFO present — vsync locked. The ballerina spins once.");
+        LOG_NICK("FIFO locked — vsync absolute.");
     }
 
-    // ── TRIPLE BUFFERING — THE EMPIRE DEMANDS SMOOTHNESS ──
-    if (Performance::MAX_FRAMES_IN_FLIGHT >= 2 && Performance::MAX_FRAMES_IN_FLIGHT <= 4) {
-        SwapchainManager::setMinImageCount(Performance::MAX_FRAMES_IN_FLIGHT);
-        LOG_BLONDIE("Swapchain locked to {} images — stutter is dead.", Performance::MAX_FRAMES_IN_FLIGHT);
-    }
+    SwapchainManager::setMinImageCount(Performance::MAX_FRAMES_IN_FLIGHT);
+    LOG_BLONDIE("Swapchain forged with {} images — smoothness eternal.", Performance::MAX_FRAMES_IN_FLIGHT);
 
-    // ── FRAME PREDICTION — PERFECT PACING ──
     if (Performance::ENABLE_FRAME_PREDICTION) {
         SwapchainManager::initializeFramePacing();
-        LOG_GROK("Frame prediction online — jitter annihilated. The empire breathes in sync.");
+        LOG_GROK("Perfect frame prediction armed.");
     }
 
-    // ── DYNAMIC SHADING RATE — PERFORMANCE OR QUALITY, THE EMPIRE DECIDES ──
     SwapchainManager::setShadingRate(Performance::DYNAMIC_SHADING_RATE);
-    LOG_BLONDIE("Shading rate: {:.2f}x — FPS unbreakable.", Performance::DYNAMIC_SHADING_RATE);
+    LOG_BLONDIE("Shading rate: {:.2f}x — balance divine.", Performance::DYNAMIC_SHADING_RATE);
 
-    // ── DIRECT DISPLAY — BYPASS THE COMPOSITOR ──
     SwapchainManager::enableDirectDisplay(Performance::ENABLE_DIRECT_DISPLAY);
     if (Performance::ENABLE_DIRECT_DISPLAY) {
-        LOG_GROK("Direct display enabled — compositor bypassed. Latency: 1.8ms. The photons are raw.");
+        LOG_GROK("Direct display bypass — compositor slain.");
     }
 
-    // ── HDR — THE EMPIRE HAS ALREADY DECIDED ──
     const bool hdrActive = SwapchainManager::supportsHDR();
-    LOG_AMOURANTH("HDR STATUS: {} ★", hdrActive ? "IGNITED" : "dormant (display unworthy)");
+    LOG_AMOURANTH("HDR AUTO-IGNITION: {} ★ FIRST LIGHT ETERNAL", hdrActive ? "IGNITED" : "awaiting worthy display");
 
-    // ── FINAL WORD FROM THE CREW ──
-    LOG_BLONDIE("All options applied. The empire never blinked.");
-    LOG_GROK("Pink photons eternal. First light achieved.");
+    // Apply runtime options to the living renderer
+    if (VulkanRenderer* renderer = VulkanRenderer::get()) {
+        renderer->denoisingEnabled_ = OptionsRTX::ENABLE_DENOISING;
+        renderer->hypertraceEnabled_ = OptionsRTX::ENABLE_HYPERTRACE;
+        renderer->adaptiveSamplingEnabled_ = OptionsRTX::ENABLE_ADAPTIVE_SAMPLING;
+        renderer->tonemapEnabled_ = Tonemap::ENABLE_TONEMAPPING;
+
+        renderer->overclockMode_ = Performance::OVERCLOCK_RENDERER;
+
+        // Uncapped mode — no VSYNC enum needed
+        if (Display::UNCAPPED_MODE_ACTIVE) {
+            renderer->fpsTarget_ = FpsTarget::FPS_UNLIMITED;
+        }
+
+        renderer->showOverlay_ = Debug::SHOW_FPS_OVERLAY ||
+                                 Debug::SHOW_ACCUMULATION_COUNT ||
+                                 Debug::SHOW_NEXUS_SCORE ||
+                                 Debug::SHOW_SPP_HEATMAP ||
+                                 Debug::SHOW_GPU_TIMESTAMPS;
+
+        // Reset accumulation if temporal features changed
+        if (!OptionsRTX::ENABLE_ACCUMULATION ||
+            renderer->hypertraceEnabled_ != OptionsRTX::ENABLE_HYPERTRACE ||
+            renderer->denoisingEnabled_ != OptionsRTX::ENABLE_DENOISING) {
+            renderer->resetAccumNextFrame_ = true;
+        }
+
+        LOG_GROK("Runtime options enforced upon the renderer — alignment complete.");
+    }
+
+    LOG_AMOURANTH("VALHALLA v100 — ALL DECREES EXECUTED — PINK PHOTONS ETERNAL");
 }
 
-// Apply everything at startup — the crew speaks once
-static const bool crew_has_spoken = true;
+static const bool law_enforced = ([]() noexcept {
+    ApplyAll();
+    return true;
+})();
 
 } // namespace Options
-
-// =============================================================================
-// Cast & Crew — immortalized in silicon
-// Amouranth — The Vision
-// Nick      — The Iron
-// Blondie   — The Silence
-// Ballerina — The Judgment
-// Grok      — The Truth
-//
-// 68 lines of pure, compilable, production glory.
-// No UI needed. The empire knows best.
-// PINK PHOTONS ETERNAL
-// =============================================================================
