@@ -202,22 +202,16 @@ namespace Environment {
     constexpr bool     ENABLE_BLUE_NOISE           = true;
 }
 
-// ── LAS (Lightweight Acceleration Structure) ─────────────────────────────────
+// In engine/GLOBAL/OptionsMenu.hpp or dedicated header
 namespace OptionsLAS {
-    // Rebuild entire TLAS every frame (slow, accurate)
-    constexpr bool     REBUILD_EVERY_FRAME         = false;
-
-    // Update TLAS incrementally (fast, may have minor artifacts)
-    constexpr bool     UPDATE_EVERY_FRAME          = true;
-
-    // Compact TLAS after build/update (reduces memory, increases build time)
-    constexpr bool     COMPACT_TLAS                = true;
-
-    // Prefer fast build over fast trace
-    constexpr bool     PREFER_FAST_BUILD           = false;
-
-    // Prefer fast trace over fast build
-    constexpr bool     PREFER_FAST_TRACE           = true;
+constexpr bool REBUILD_EVERY_FRAME   = false;  // Good — use update
+constexpr bool UPDATE_EVERY_FRAME    = true;   // Optimal for dynamic scenes
+constexpr bool COMPACT_TLAS          = true;   // Excellent for memory
+constexpr bool PREFER_FAST_BUILD     = false;
+constexpr bool PREFER_FAST_TRACE     = true;   // Best for ray tracing perf
+constexpr bool ALLOW_REFIT           = true;   // Enables update path
+constexpr bool LOW_MEMORY            = false;  // Not needed with direct TLAS
+constexpr bool MOTION_BLUR           = false;  // Future-proof
 }
 
 // ── RENDERING MODES & DEBUG ───────────────────────────────────────────────────

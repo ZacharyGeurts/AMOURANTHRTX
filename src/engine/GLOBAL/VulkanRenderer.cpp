@@ -386,7 +386,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
 
         envMapNeedsUpload_ = false;
-        createEnvMapDisplayPipeline();
         LOG_AMOURANTH("ENVMAP UPLOADED — SKY READY");
     }
 
@@ -394,6 +393,13 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     // BUILD TLAS — EVERY FRAME (direct geometry)
     // =====================================================================
     RTX::las().buildTLAS(cmd);
+
+    // =====================================================================
+    // LAZY ENVMAP DISPLAY PIPELINE CREATION — SAFE AFTER SWAPCHAIN EXISTS
+    // =====================================================================
+    if (envMapDisplayPipeline_ == VK_NULL_HANDLE && envMapImageView_.valid() && envMapSampler_.valid()) {
+        createEnvMapDisplayPipeline();  // Now swapchain views are valid — no invalid handle
+    }
 
     // =====================================================================
     // RENDER MODE DISPATCH — CLEAN FLOW WITH EARLY RETURNS
@@ -1157,7 +1163,7 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
 
     // If image view is missing — force envmap creation (ensures pink fallback if HDR fails)
     if (!envMapImageView_.valid()) {
-        LOG_INFO_CAT("RENDERER", "Envmap image view missing — forcing envmap creation with pink fallback");
+        LOG_INFO_CAT("RENDERER", "Envmap image view missing — so we create it");
         createEnvironmentMap();  // Always creates valid image/view/sampler (pink if HDR fails)
     }
 
@@ -2823,23 +2829,52 @@ void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
     width_  = static_cast<int>(w);
     height_ = static_cast<int>(h);
 
-    // FULL REBUILD: Recreate swapchain and ALL dependent resources
+    // =====================================================================
+    // 1. Wait for GPU idle — REQUIRED before destroying swapchain-dependent resources
+    // =====================================================================
+    vkDeviceWaitIdle(stone_device());
+
+    // =====================================================================
+    // 2. Recreate swapchain
+    // =====================================================================
     RTX::recreateSwapchain(w, h);
 
-    // Recreate all swapchain-dependent resources (images, command buffers, etc.)
+    // =====================================================================
+    // 3. Recreate all swapchain-dependent resources
+    // =====================================================================
     recreateSwapchainDependentResources();
 
-    // Force first-frame transitions after full rebuild
+    // =====================================================================
+    // 4. Re-update ALL descriptor sets that reference swapchain image views
+    //     This fixes validation error: invalid VkImageView after resize
+    // =====================================================================
+    const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
+    for (uint32_t i = 0; i < frames; ++i) {
+        // Tonemap descriptor set — writes to current swapchain image
+        VkImageView input = (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
+                            ? denoiserView_.get()
+                            : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[i].get() : rtOutputViews_[i].get());
+
+        updateTonemapDescriptor(i, input, stone_views()[i]);
+
+        // If you have other sets that bind swapchain views (e.g., envmap display, debug)
+        // update them here as well
+    }
+
+    // =====================================================================
+    // 5. Force first-frame transitions after full rebuild
+    // =====================================================================
     rtOutputNeedsTransition_     = true;
     depthNeedsTransition_        = true;
     accumulationNeedsTransition_ = true;
     nexusScoreNeedsInit_         = true;
-    swapchainNeedsPresentTransition_ = true;
 
-    // Reset accumulation — fresh convergence on new resolution
+    // =====================================================================
+    // 6. Reset accumulation — fresh convergence on new resolution
+    // =====================================================================
     requestAccumulationReset();
 
-    LOG_SUCCESS_CAT("RENDERER", "Full resize rebuild complete — {}×{} — all resources reborn — pink survives");
+    LOG_SUCCESS_CAT("RENDERER", "Full resize rebuild complete — {}×{} — all resources reborn — descriptors updated — pink survives");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

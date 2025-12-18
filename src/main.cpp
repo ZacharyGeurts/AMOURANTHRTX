@@ -596,8 +596,6 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) {
     VK_CHECK(vkQueueWaitIdle(stone_graphics_queue()));
     vkFreeCommandBuffers(stone_device(), commandPool, 1, &cmd);
 
-    renderer->createEnvMapDisplayPipeline();
-
     stone_seal_pipeline(&pipe);
     crownWorn = true;
 }
@@ -623,38 +621,70 @@ static void phase6_loadDefaultCube() {
         std::_Exit(1);
     }
     already_running = true;
+
+    LOG_FATAL_CAT("FATAL", "Apocalypse triggered: {} at {}:{}", reason, loc.file_name(), loc.line());
+
     auto& ctx = RTX::g_ctx();
 
-    if (VkDevice device = stone_device(); device != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(device);
+    VkDevice device = stone_device();
+    VkInstance instance = stone_instance();
 
-        if (VkSwapchainKHR sc = stone_swapchain(); sc) {
-            vkDestroySwapchainKHR(device, sc, nullptr);
-        }
+    // =====================================================================
+    // 1. Destroy swapchain-dependent objects first
+    // =====================================================================
+    if (VkSwapchainKHR sc = stone_swapchain(); sc != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(device, sc, nullptr);
+    }
 
-        if (ctx.commandPool_) vkDestroyCommandPool(device, ctx.commandPool_, nullptr);
-        if (ctx.computeCommandPool_) vkDestroyCommandPool(device, ctx.computeCommandPool_, nullptr);
-        if (ctx.transferCommandPool_) vkDestroyCommandPool(device, ctx.transferCommandPool_, nullptr);
-        if (ctx.pipelineCache_) vkDestroyPipelineCache(device, ctx.pipelineCache_, nullptr);
-        if (ctx.renderPass_) ctx.renderPass_.reset();
+    // Destroy command pools
+    if (ctx.commandPool_ && device) vkDestroyCommandPool(device, ctx.commandPool_, nullptr);
+    if (ctx.computeCommandPool_ && device) vkDestroyCommandPool(device, ctx.computeCommandPool_, nullptr);
+    if (ctx.transferCommandPool_ && device) vkDestroyCommandPool(device, ctx.transferCommandPool_, nullptr);
 
+    // Destroy pipeline cache
+    if (ctx.pipelineCache_ && device) vkDestroyPipelineCache(device, ctx.pipelineCache_, nullptr);
+
+    // Reset render pass (RAII handle)
+    if (ctx.renderPass_) ctx.renderPass_.reset();
+
+    // =====================================================================
+    // 2. Destroy device — validation layers now safe to release tracking
+    // =====================================================================
+    if (device != VK_NULL_HANDLE) {
         vkDestroyDevice(device, nullptr);
     }
 
+    // =====================================================================
+    // 3. NO vkDeviceWaitIdle() here — avoid validation layer race on shutdown
+    // =====================================================================
+
+    // Clean up acceleration structures
     RTX::las().reset();
 
+    // Mesh & textures
     g_mesh.reset();
     ctx.blueNoiseView_.reset();
 
+    // Icons
     if (g_base_icon) { SDL_DestroySurface(g_base_icon); g_base_icon = nullptr; }
     if (g_hdpi_icon) { SDL_DestroySurface(g_hdpi_icon); g_hdpi_icon = nullptr; }
 
-    if (ctx.window) { SDL_DestroyWindow(ctx.window); ctx.window = nullptr; }
-    if (ctx.surface_ && ctx.instance_) {
-        vkDestroySurfaceKHR(ctx.instance_, ctx.surface_, nullptr);
+    // Window & surface
+    if (ctx.window) {
+        SDL_DestroyWindow(ctx.window);
+        ctx.window = nullptr;
     }
-    if (ctx.instance_) vkDestroyInstance(ctx.instance_, nullptr);
 
+    if (ctx.surface_ && instance) {
+        vkDestroySurfaceKHR(instance, ctx.surface_, nullptr);
+    }
+
+    // Instance last
+    if (instance) {
+        vkDestroyInstance(instance, nullptr);
+    }
+
+    // Unload Vulkan & quit SDL
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
 

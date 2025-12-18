@@ -376,5 +376,5 @@ void SwapchainManager::enableDirectDisplay(bool enable) noexcept
 // FULLY FIXED — STONEKEY RE-SEALED ON RECREATE
 // X11 PRESENT MODE COMPATIBILITY IMPROVED
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN AND VISIBLE
-// DECEMBER 16, 2025 — THE LIGHT IS RESTORED AND UNIVERSAL
+// DECEMBER 18, 2025 — THE LIGHT IS RESTORED AND UNIVERSAL
 // =============================================================================

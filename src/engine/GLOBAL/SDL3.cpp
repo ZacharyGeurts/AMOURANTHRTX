@@ -53,7 +53,6 @@ std::atomic<bool> g_resizeRequested{false};
 // =============================================================================
 void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 {
-    phase9_ballerina("FINAL GRACE: ETERNAL SLIPSTREAM", std::source_location::current());
 }
 
 // =============================================================================
