@@ -5,6 +5,12 @@ cd AMOURANTHRTX
 chmod +x linux.sh
 ./linux.sh --help
 ```
+Cmake handles many of the dependancies.  
+You will likely need SDL3 and Vulkan 1.4+  
+```
+sudo apt update && sudo apt install gcc-14 g++-14
+```
+
 Gets to the renderer but backend changes have it up and down.  
 Working prototype expected Christmas 2025. See branch Plastic Beach.  
 Please do not code farm. Swapchain goes with THIS project.  
@@ -28,7 +34,6 @@ AMOURANTH RTX a next generation engine for raw performance.
 The whole engine is secured with StoneKey and is supposed to be unbreakable when done correctly.  
 My hopes is that it is not a major frame destroyer. (12,000+ on 4070ti to work with)  
 The goal is a fast as pink photons HDR SDL3 RTX engine that is ready for you, the developer.  
-HDR means writing a new surface that works on X11 and everywhere.  
 To say this is 99% Grok, I may be understating. I call him bro.  
 
 [AMOURANTH RTX Video](https://x.com/i/status/1982578590593282537)  
@@ -38,19 +43,13 @@ To say this is 99% Grok, I may be understating. I call him bro.
 This is a good lunch break program other than the license restricting commercial work.  
 There is a dual license that can permit commercial work but expect 3% of sales negotiable. 
 
-How do we differ? Pick 60 or 120fps and we lock your goal.  
-FPS a thing of the past.  
 Tech will adjust RTX image quality on the fly to ensure best visuals for hardware.  
 We make easy decisions for you and we respect quality.  
-3 frames in flight and triple buffering.  
+2 frames in flight and Mailbox presentation preferred, following expert engines.  
 Minimal quality adjusts to maintain desired framerate.  
-Swapchain that finds your display and always maintains best mode for your OS. [Spec](https://docs.vulkan.org/refpages/latest/refpages/source/VkPresentModeKHR.html)  
 Buffer Management at near zero cost.  
 Disposal at zero cost.  
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
-
-Have a look. I promise to get libraries in the future.  
-sudo apt update && sudo apt install gcc-14 g++-14
 
 Made with Grok sized files for AI updates.  
 
