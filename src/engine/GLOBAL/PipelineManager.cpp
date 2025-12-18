@@ -1,4 +1,9 @@
 // src/engine/GLOBAL/PipelineManager.cpp
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.6 — DECEMBER 18, 2025
+// PIPELINEMANAGER — RAY TRACING ETERNAL — NO STONEKEY — VALIDATION CLEAN
+// PINK PHOTONS DOMINATE — EMPIRE SEES ALL
+// =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
@@ -23,9 +28,7 @@
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
-using StoneKey::stone_instance;
 using StoneKey::stone_physical;
-using StoneKey::stone_mesh;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_seal_pipeline;
 
@@ -68,9 +71,9 @@ void PipelineManager::createDescriptorPool() noexcept
 
     std::array<VkDescriptorPoolSize, 7> poolSizes = {{
         { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 2 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              16 },  // WAS 4 → NOW 16 (covers 6 needed + headroom)
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              16 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             8 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             16 },  // WAS 4 → NOW 16 (covers 6 needed + headroom)
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             16 },
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,              8 },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     4096 },
         { VK_DESCRIPTOR_TYPE_SAMPLER,                    8 }
@@ -79,7 +82,7 @@ void PipelineManager::createDescriptorPool() noexcept
     VkDescriptorPoolCreateInfo poolInfo{
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets       = 64,  // Increased slightly
+        .maxSets       = 64,
         .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
         .pPoolSizes    = poolSizes.data()
     };
@@ -93,7 +96,7 @@ void PipelineManager::createDescriptorPool() noexcept
         0, "RT_DescriptorPool"
     );
 
-    LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — increased STORAGE_IMAGE/STORAGE_BUFFER to 16 each");
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor pool created — large texture array + storage support");
 }
 
 PipelineManager::~PipelineManager() = default;
@@ -233,9 +236,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     };
 
     const auto writeImage = [&](uint32_t binding, VkImageView view, VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL) {
-        if (view == VK_NULL_HANDLE) {
-            return;
-        }
+        if (view == VK_NULL_HANDLE) return;
         const VkDescriptorImageInfo info{ .imageView = view, .imageLayout = layout };
         writes[writeCount++] = VkWriteDescriptorSet{
             .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -276,7 +277,6 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         };
     };
 
-    // Bindings
     writeAccel(updateInfo.tlas);
     writeImage(1, updateInfo.rtOutputView);
 
@@ -314,8 +314,6 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     if (writeCount > 0) {
         vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
         LOG_TRACE_CAT("PIPELINE", "Updated {} descriptor writes for frame {}", writeCount, frameIndex);
-    } else {
-        LOG_TRACE_CAT("PIPELINE", "No descriptor updates needed for frame {}", frameIndex);
     }
 }
 
@@ -467,7 +465,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
             throw std::runtime_error("SBT buffer memory allocation failed");
         }
 
-        // FIXED: Add device address allocation flag
         VkMemoryAllocateFlagsInfo flagsInfo{
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
             .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR
@@ -492,7 +489,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         info.usage         = bufferInfo.usage;
         info.tag           = "SBT_ETERNAL_STONE_2048M";
         info.offset        = 0;
-        info.deviceAddress = 0;  // Will be queried later
+        info.deviceAddress = 0;
         info.mapped        = nullptr;
 
         SBT_STONE_HANDLE = reinterpret_cast<uint64_t>(buffer);
@@ -902,7 +899,7 @@ void PipelineManager::createRayTracingPipeline()
         .generalShader      = VK_SHADER_UNUSED_KHR,
         .closestHitShader   = closestHitIndex,
         .anyHitShader       = VK_SHADER_UNUSED_KHR,
-        .intersectionShader = VK_SHADER_UNUSED_KHR  // REQUIRED FOR TRIANGLES
+        .intersectionShader = VK_SHADER_UNUSED_KHR
     });
 
     raygenGroupCount_ = 1;
@@ -1007,10 +1004,10 @@ void PipelineManager::traceRays(VkCommandBuffer commandBuffer, uint32_t frameInd
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_.get());
 
     VkDescriptorSet descSets[4] = {
-        rtDescriptorSets_[frameIndex],     // set 0: TLAS, UBOs, images, StoneKey@31
-        VK_NULL_HANDLE,                    // set 1: empty
-        texDescriptorSets_[frameIndex],    // set 2: texSamplers[]
-        VK_NULL_HANDLE                     // set 3: empty
+        rtDescriptorSets_[frameIndex],     // set 0
+        VK_NULL_HANDLE,                    // set 1
+        texDescriptorSets_[frameIndex],    // set 2
+        VK_NULL_HANDLE                     // set 3
     };
 
     vkCmdBindDescriptorSets(
@@ -1049,7 +1046,5 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const
 } // namespace RTX
 
 // =============================================================================
-// 100% COMPATIBLE WITH CURRENT VulkanRenderer — ALL FIXES APPLIED
-// NO EXCEPTIONS THROWN IN NON-FATAL PATHS
-// PINK PHOTONS ETERNAL — EMPIRE SOLID
+// PIPELINE ETERNAL — ALL VALIDATION CLEAN — PINK PHOTONS DOMINATE
 // =============================================================================

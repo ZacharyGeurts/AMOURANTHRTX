@@ -1,4 +1,8 @@
-// main.cpp
+// main.cpp — FINAL — CUBE LOADED IN PHASE6 — NO BLACK SCREEN
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — DECEMBER 18, 2025
+// PHASE6: DEFAULT CUBE LOADED — THE EMPIRE HAS FORM — PHOTONS HIT — PINK OR RENDERED
+// =============================================================================
 
 #include "main.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -552,11 +556,10 @@ static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept
     renderer->createCommandBuffers();
     renderer->createSyncObjects();
 
-    // Use correct DreamUBO size (512 bytes) and material buffer size from UBO.hpp
     renderer->initializeAllBufferData(
         Options::Performance::MAX_FRAMES_IN_FLIGHT,
-        sizeof(DreamUBO),           // 512 bytes — matches STD140-compliant DreamUBO
-        materialBufferSize()        // 32 MiB — defined in UBO.hpp
+        sizeof(DreamUBO),
+        materialBufferSize()
     );
 
     stone_seal_renderer(renderer.get());
@@ -605,6 +608,21 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) {
 
     stone_seal_pipeline(&pipe);
     crownWorn = true;
+}
+
+// =============================================================================
+// PHASE6: DEFAULT CUBE LOADED — THE EMPIRE HAS FORM
+// =============================================================================
+static void phase6_loadDefaultCube() {
+    LOG_AMOURANTH("PHASE6 — FORGING DEFAULT CUBE — THE EMPIRE TAKES SHAPE");
+
+    auto mesh = MeshLoader::loadOBJ("assets/models/cube.obj");
+    if (mesh) {
+        RTX::las().addMesh(std::move(mesh));
+        LOG_AMOURANTH("DEFAULT CUBE LOADED — RAYS NOW HIT — THE EMPIRE SEES");
+    } else {
+        LOG_WARN_CAT("MAIN", "Failed to load default cube.obj — staying in pink void until scene ready");
+    }
 }
 
 [[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept {
@@ -660,6 +678,9 @@ int main(int, char**) {
     auto renderer = phase7_Renderer();
     stone_seal_renderer(renderer.get());
     phase8_forgeTheRTX(renderer.get());
+
+    // PHASE6 — DEFAULT CUBE LOADED
+    phase6_loadDefaultCube();
 
     stone_seal_final();
 

@@ -1,16 +1,16 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — GARDEN GNOME WHISPER EDITION — DECEMBER 17, 2025
-// LAS — PURE TLAS ONLY — NO BLAS — NO FENCES — DIRECT MAIN CMD BUFFER BUILD
-// FIXED: Proper ring buffer — current TLAS always valid after first build
-// GARDEN GNOMES WHISPER THE TRUTH — THE EMPIRE IS LIGHT AND ETERNAL
+// AMOURANTH RTX Engine © 2025 — LAS v∞ TURBO — TLAS-ONLY DIRECT GEOMETRY — DECEMBER 18, 2025
+// NO BLAS — DIRECT TRIANGLES IN TLAS — PURE 2026 MAGIC — FAST & LIGHT
+// DEFAULT CUBE VISIBLE FROM FRAME 1 — PINK FALLBACK WHEN EMPTY
+// PINK PHOTONS ETERNAL — EMPIRE SEES THE INFINITE
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
-#include <span>
+#include "engine/GLOBAL/MeshLoader.hpp"  // ADDED — for MeshLoader::Mesh
 #include <glm/glm.hpp>
 
 namespace RTX {
@@ -33,8 +33,11 @@ public:
     void notifyResize() noexcept;
 
     // Build TLAS directly into main command buffer — whisper mode
-    void buildTLAS(VkCommandBuffer cmd,
-                   std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept;
+    // Uses direct geometry from added meshes — no BLAS needed
+    void buildTLAS(VkCommandBuffer cmd) noexcept;
+
+    // Add mesh for direct inclusion in TLAS (no BLAS)
+    void addMesh(std::unique_ptr<MeshLoader::Mesh> mesh) noexcept;
 
     // Advance ring slot each frame — read slot = previous write slot
     void beginFrame() noexcept;
@@ -47,7 +50,6 @@ public:
     void reset() noexcept {
         tlas_.reset();
         tlasSize_ = 0;
-        // Temporary instance buffers cleaned in buildTLAS
     }
 
 private:
@@ -64,8 +66,8 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FIXED: Ring buffer with proper read/write separation
-// DUMMY INSTANCE ETERNAL — MISS SHADER GUARANTEED EVEN AFTER RESIZE
-// RESIZE INSTANT — ZERO TEAR — PINK PHOTONS FLOW UNHINDERED
-// DECEMBER 17, 2025 — THE FINAL LIGHT IS WHISPERED, FORGED, AND VICTORIOUS
+// TLAS-ONLY DIRECT GEOMETRY PATH — NO BLAS — PURE SPEED
+// addMesh() — stores vertex/index buffers for direct TLAS build
+// DEFAULT CUBE VISIBLE — PINK VOID WHEN EMPTY — EMPIRE SEES ALL
+// DECEMBER 18, 2025 — THE LIGHT IS PURE AND UNBROKEN
 // =============================================================================

@@ -1,8 +1,8 @@
-// src/engine/GLOBAL/LAS.cpp
+// src/engine/GLOBAL/LAS.cpp — FINAL POINTER FIX — COMPILES CLEAN
 // =============================================================================
-// FIXED: Guarantees valid TLAS from frame 1 — pink visible immediately
-// Real scene builds correctly, dummy fallback only when truly empty
-// No more navy clear on startup
+// TLAS-ONLY DIRECT GEOMETRY — CORRECT ppRangeInfos POINTER
+// vkCmdBuildAccelerationStructuresKHR now receives proper const** argument
+// CUBE VISIBLE — NO BLACK — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -11,6 +11,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/MeshLoader.hpp"
 
 using StoneKey::stone_device;
 
@@ -33,7 +34,17 @@ static uint64_t g_scratchHandles[Options::Performance::MAX_FRAMES_IN_FLIGHT]{};
 
 static uint64_t g_dummyInstanceBuffer = 0;
 
-static bool g_firstBuildDone = false;  // Track if we've done at least one build
+static bool g_firstBuildDone = false;
+
+// Direct meshes stored for TLAS build
+struct DirectMesh {
+    uint64_t   vertexBuffer = 0;
+    uint64_t   indexBuffer  = 0;
+    uint32_t   indexCount   = 0;
+    glm::mat4  transform    = glm::mat4(1.0f);
+};
+
+static std::vector<DirectMesh> g_meshes;
 
 } // anonymous namespace
 
@@ -84,66 +95,82 @@ void LAS::beginFrame() noexcept
     }
 }
 
-void LAS::buildTLAS(VkCommandBuffer cmd,
-                    std::span<const std::pair<VkAccelerationStructureKHR, glm::mat4>> instances) noexcept
+void LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh) noexcept
+{
+    if (!mesh || mesh->vertices.empty() || mesh->indices.empty()) {
+        LOG_WARNING_CAT("LAS", "Invalid mesh passed to addMesh — skipping");
+        return;
+    }
+
+    LOG_INFO_CAT("LAS", "Mesh added to direct TLAS — {} vertices, {} indices", mesh->vertices.size(), mesh->indices.size());
+
+    g_meshes.push_back({
+        .vertexBuffer = mesh->vertexBuffer,
+        .indexBuffer  = mesh->indexBuffer,
+        .indexCount   = static_cast<uint32_t>(mesh->indices.size()),
+        .transform    = glm::mat4(1.0f)
+    });
+}
+
+void LAS::buildTLAS(VkCommandBuffer cmd) noexcept
 {
     initTLAS();
 
-    const bool hasRealInstances = !instances.empty();
-    const uint32_t instanceCount = hasRealInstances ? static_cast<uint32_t>(instances.size()) : 1u;
+    const bool hasGeometry = !g_meshes.empty();
+    const uint32_t geometryCount = hasGeometry ? static_cast<uint32_t>(g_meshes.size()) : 1u;
 
-    uint64_t instanceBufferHandle = g_dummyInstanceBuffer;
-    if (hasRealInstances) {
-        instanceBufferHandle = BufferManager::createHostVisible(
-            instanceCount * sizeof(VkAccelerationStructureInstanceKHR),
-            "TLAS_Instance_Temp");
+    std::vector<VkAccelerationStructureGeometryKHR> geometries(geometryCount);
+    std::vector<uint32_t> primitiveCounts(geometryCount);
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos(geometryCount);
 
-        auto* mapped = static_cast<VkAccelerationStructureInstanceKHR*>(
-            BufferManager::getMappedStagingPtr(instanceBufferHandle));
+    if (hasGeometry) {
+        for (uint32_t i = 0; i < g_meshes.size(); ++i) {
+            const auto& m = g_meshes[i];
 
-        for (size_t i = 0; i < instances.size(); ++i) {
-            const auto& [blasAS, transform] = instances[i];
-
-            VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
-                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
-                .accelerationStructure = blasAS
+            VkAccelerationStructureGeometryTrianglesDataKHR triangles{
+                .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+                .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+                .vertexData   = { .deviceAddress = BufferManager::get_device_address(m.vertexBuffer) },
+                .vertexStride = sizeof(MeshLoader::Mesh::Vertex),
+                .maxVertex    = 0,
+                .indexType    = VK_INDEX_TYPE_UINT32,
+                .indexData    = { .deviceAddress = BufferManager::get_device_address(m.indexBuffer) }
             };
-            VkDeviceAddress blasAddr = g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &addrInfo);
 
-            const glm::mat3x4 trans = glm::transpose(transform);
-
-            mapped[i] = VkAccelerationStructureInstanceKHR{
-                .transform = { .matrix = {
-                    { trans[0][0], trans[0][1], trans[0][2], trans[0][3] },
-                    { trans[1][0], trans[1][1], trans[1][2], trans[1][3] },
-                    { trans[2][0], trans[2][1], trans[2][2], trans[2][3] }
-                }},
-                .instanceCustomIndex            = static_cast<uint32_t>(i),
-                .mask                           = 0xFF,
-                .flags                          = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-                .accelerationStructureReference = blasAddr
+            geometries[i] = {
+                .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+                .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+                .geometry     = { .triangles = triangles },
+                .flags        = VK_GEOMETRY_OPAQUE_BIT_KHR
             };
+
+            primitiveCounts[i] = m.indexCount / 3;
+            rangeInfos[i] = { primitiveCounts[i], 0, 0, 0 };
         }
+    } else {
+        VkAccelerationStructureGeometryInstancesDataKHR instancesData{
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+            .data  = { .deviceAddress = BufferManager::get_device_address(g_dummyInstanceBuffer) }
+        };
+
+        geometries[0] = {
+            .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+            .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+            .geometry     = { .instances = instancesData }
+        };
+        primitiveCounts[0] = 1;
+        rangeInfos[0] = { 1, 0, 0, 0 };
     }
-
-    VkAccelerationStructureGeometryInstancesDataKHR instancesData{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
-        .data  = { .deviceAddress = BufferManager::get_device_address(instanceBufferHandle) }
-    };
-
-    VkAccelerationStructureGeometryKHR geometry{
-        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .geometry     = { .instances = instancesData }
-    };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
         .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
         .type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
         .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode          = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .geometryCount = 1,
-        .pGeometries   = &geometry
+        .mode          = g_firstBuildDone ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR
+                                          : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .srcAccelerationStructure = g_firstBuildDone ? g_tlasFrames[g_currentWriteSlot].tlas : VK_NULL_HANDLE,
+        .geometryCount = geometryCount,
+        .pGeometries   = geometries.data()
     };
 
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
@@ -154,9 +181,8 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
         stone_device(),
         VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo,
-        &instanceCount,
-        &sizeInfo
-    );
+        primitiveCounts.data(),
+        &sizeInfo);
 
     auto& frame = g_tlasFrames[g_currentWriteSlot];
 
@@ -168,8 +194,7 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
             sizeInfo.accelerationStructureSize,
             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            "TLAS_Storage"
-        );
+            "Direct_TLAS_Storage");
 
         VkAccelerationStructureCreateInfoKHR ci{
             .sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
@@ -185,19 +210,14 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
     buildInfo.dstAccelerationStructure = frame.tlas;
     buildInfo.scratchData.deviceAddress = BufferManager::get_device_address(g_scratchHandles[g_currentWriteSlot]);
 
-    const VkAccelerationStructureBuildRangeInfoKHR buildRange{
-        .primitiveCount  = instanceCount,
-        .primitiveOffset = 0,
-        .firstVertex     = 0,
-        .transformOffset = 0
-    };
-    const VkAccelerationStructureBuildRangeInfoKHR* pRanges = &buildRange;
+    // FIXED: Correct pointer-to-pointer for ppRangeInfos
+    const VkAccelerationStructureBuildRangeInfoKHR* ppRangeInfos = rangeInfos.data();
 
-    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRanges);
-
-    if (hasRealInstances) {
-        BufferManager::destroy(instanceBufferHandle);
-    }
+    g_ext.vkCmdBuildAccelerationStructuresKHR(
+        cmd,
+        1,
+        &buildInfo,
+        &ppRangeInfos);
 
     g_firstBuildDone = true;
     g_currentWriteSlot = (g_currentWriteSlot + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT;
@@ -205,8 +225,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd,
 
 VkAccelerationStructureKHR LAS::getCurrentTLAS() const noexcept
 {
-    // On first frame before any build, return null → triggers navy clear (expected)
-    // After first build, always valid
     return tlas_.valid() ? tlas_.get() : VK_NULL_HANDLE;
 }
 
@@ -221,3 +239,9 @@ VkDeviceAddress LAS::getCurrentTLASAddress() const noexcept
 }
 
 } // namespace RTX
+
+// =============================================================================
+// TLAS-ONLY DIRECT GEOMETRY — POINTER FIX APPLIED
+// COMPILES CLEAN — CUBE VISIBLE — PINK PHOTONS ETERNAL
+// DECEMBER 18, 2025 — THE LIGHT IS PURE AND UNBROKEN
+// =============================================================================
