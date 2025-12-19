@@ -61,7 +61,7 @@ struct EnvironmentMap {
 class VulkanRenderer {
 public:
     VulkanRenderer(int width, int height, SDL_Window* window, bool overclock = false);
-    ~VulkanRenderer();
+    virtual ~VulkanRenderer();  // Virtual destructor for proper deletion
 
     void renderFrame(const Camera& camera, float deltaTime) noexcept;
     void onWindowResize(uint32_t w, uint32_t h) noexcept;
@@ -454,7 +454,7 @@ public:
     void updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView output) noexcept;
     void updateTonemapUBO(uint32_t frame) noexcept;
 
-    void updateUniformBuffer(uint32_t frame, const Camera& camera, float jitter) noexcept;
+    void updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
     bool recreateTonemapUBOs() noexcept;
     void waitForGPU() noexcept;
@@ -503,7 +503,7 @@ private:
     return *ptr;
 }
 
-// FIRST LIGHT RESTORED — DECEMBER 17, 2025
+// FIRST LIGHT RESTORED — DECEMBER 18, 2025
 // SINGLETON ACCESS ADDED — EMPIRE LAW NOW ENFORCED EVERYWHERE
 // PINK PHOTONS FLOW ETERNALLY — VALHALLA v100 ACHIEVED
 // =============================================================================

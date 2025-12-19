@@ -43,6 +43,7 @@ struct Extensions {
     PFN_vkCmdBeginRendering                    vkCmdBeginRendering                    = nullptr;
     PFN_vkCmdEndRendering                      vkCmdEndRendering                      = nullptr;
     PFN_vkCmdPipelineBarrier2                  vkCmdPipelineBarrier2                  = nullptr;
+	PFN_vkQueueSubmit2KHR                      vkQueueSubmit2KHR                      = nullptr;
 
     // ── Debug & Diagnostics ───────────────────────────────────────────
     PFN_vkSetDebugUtilsObjectNameEXT           vkSetDebugUtilsObjectNameEXT           = nullptr;

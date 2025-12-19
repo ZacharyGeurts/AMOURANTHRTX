@@ -10,6 +10,7 @@
 // =============================================================================
 // EXTENSIONS — CENTRALIZED LOADING — FULL VULKAN 1.4 COMPLIANCE
 // ALL FUNCTION POINTERS LOADED HERE — NO DUPLICATES — CLEAN LOGGING
+// NOW WITH vkQueueSubmit2KHR — SUBMISSION ETERNAL
 // DECEMBER 18, 2025
 // =============================================================================
 
@@ -94,6 +95,9 @@ void loadRTExtensions(VkInstance instance, VkDevice device)
     LOAD(vkCmdEndRendering);
     LOAD(vkCmdPipelineBarrier2);
 
+    // Synchronization 2 — Modern queue submission
+    LOAD(vkQueueSubmit2KHR);
+
     // Debug
     LOAD(vkSetDebugUtilsObjectNameEXT);
     LOAD(vkGetDeviceFaultInfoEXT);
@@ -157,12 +161,13 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
         printf("  BUFFER DEVICE ADDRESS: %s\n", g_ext.vkGetBufferDeviceAddress ? "ARMED — SBT ETERNAL" : "MISSING");
         printf("  COMPACTION SUPPORT: %s\n", g_ext.vkCmdCopyAccelerationStructureKHR ? "YES — LEAN PHOTONS" : "NO — FAT PHOTONS");
         printf("  DYNAMIC RENDERING: %s\n", g_ext.vkCmdBeginRendering ? "YES — CORE 1.3" : "NO");
+        printf("  SYNC2 SUBMISSION: %s\n", g_ext.vkQueueSubmit2KHR ? "ARMED — MODERN SUBMIT" : "MISSING");
     }
 }
 
 } // namespace RTX
 
 // =============================================================================
-// ALL EXTENSION LOADING CENTRALIZED — NO MORE SCATTERED POINTERS
-// THE EMPIRE IS CLEAN AND ETERNAL
+// ALL EXTENSION LOADING CENTRALIZED — INCLUDING vkQueueSubmit2KHR
+// THE EMPIRE SUBMITS IN MODERN FASHION — PINK PHOTONS ETERNAL
 // =============================================================================
