@@ -1,3 +1,4 @@
+// src/engine/GLOBAL/Extensions.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -7,9 +8,9 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// EXTENSIONS — THE SACRED RITUAL OF LOADING PINK PHOTON EXTENSIONS
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — VALHALLA v81 TURBO
-// COMPACTION RITUAL ADDED — DECEMBER 02, 2025
+// EXTENSIONS — CENTRALIZED LOADING — FULL VULKAN 1.4 COMPLIANCE
+// ALL FUNCTION POINTERS LOADED HERE — NO DUPLICATES — CLEAN LOGGING
+// DECEMBER 18, 2025
 // =============================================================================
 
 #include "engine/GLOBAL/Extensions.hpp"
@@ -36,10 +37,12 @@ void loadRTExtensions(VkInstance instance, VkDevice device)
         return;
     }
 
-    LOG_AMOURANTH("\033[38;2;255;20;147m║           LOADING SACRED EXTENSIONS + COMPACTION RITUAL          ║\033[0m");
-    LOG_AMOURANTH("\033[38;2;255;20;147m║                PINK PHOTONS ASCEND TO LEAN PERFECTION             ║\033[0m");
+    LOG_AMOURANTH("╔═══════════════════════════════════════════════════════════╗");
+    LOG_AMOURANTH("║         SACRED EXTENSION RITUAL — VULKAN 1.4 FINAL         ║");
+    LOG_AMOURANTH("║           ALL PROMOTED FUNCTIONS NOW CALLED TO ARMS        ║");
+    LOG_AMOURANTH("╚═══════════════════════════════════════════════════════════╝");
 
-    printf("\033[38;2;255;105;180m[RTX EXT]\033[0m LOADING SACRED EXTENSIONS + COMPACTION SUPPORT\n");
+    printf("[RTX EXT] FULL VULKAN 1.4 RITUAL INITIATED — PINK PHOTONS ASCEND\n");
 
     auto loader = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
     if (!loader) {
@@ -54,11 +57,8 @@ void loadRTExtensions(VkInstance instance, VkDevice device)
         std::abort();
     }
 
-    LOG_GROK("Gentleman Grok adjusts his monocle: \"The gatekeeper has been acquired. The ritual may proceed.\"");
+    LOG_GROK("Gentleman Grok adjusts his monocle: The gatekeeper has been acquired. The ritual may proceed.");
 
-    // ========================================================================
-    // THE SACRED MACRO — NOW WITH COMPACTION HOLY TRINITY
-    // ========================================================================
     #define LOAD(fn) do { \
         g_ext.fn = reinterpret_cast<PFN_##fn>(vkGetDeviceProcAddr(stone_device(), #fn)); \
         if (!g_ext.fn) { \
@@ -68,60 +68,68 @@ void loadRTExtensions(VkInstance instance, VkDevice device)
         } \
     } while(0)
 
-    LOG_NICK("Nick overlays the extended manifest: \"15 sacred functions must answer the call.\"");
+    LOG_NICK("Nick overlays the final 1.4 manifest: All sacred functions must answer the call.");
 
-    // Core RT
+    // Core Ray Tracing
     LOAD(vkCreateRayTracingPipelinesKHR);
     LOAD(vkGetRayTracingShaderGroupHandlesKHR);
     LOAD(vkCmdTraceRaysKHR);
 
-    // AS Building
+    // Acceleration Structures
     LOAD(vkGetAccelerationStructureBuildSizesKHR);
     LOAD(vkCmdBuildAccelerationStructuresKHR);
     LOAD(vkCreateAccelerationStructureKHR);
     LOAD(vkDestroyAccelerationStructureKHR);
     LOAD(vkGetAccelerationStructureDeviceAddressKHR);
 
-    // COMPACTION RITUAL — NEW IN VALHALLA v81
-    LOAD(vkCmdCopyAccelerationStructureKHR);                    // THE COMPACTION BLADE
-    LOAD(vkCmdWriteAccelerationStructuresPropertiesKHR);        // THE SIZE ORACLE
+    // Buffer Device Address — Critical for SBT
+    LOAD(vkGetBufferDeviceAddress);
 
-    // Modern rendering
+    // Compaction
+    LOAD(vkCmdCopyAccelerationStructureKHR);
+    LOAD(vkCmdWriteAccelerationStructuresPropertiesKHR);
+
+    // Vulkan 1.3 Core
     LOAD(vkCmdBeginRendering);
     LOAD(vkCmdEndRendering);
     LOAD(vkCmdPipelineBarrier2);
+
+    // Debug
     LOAD(vkSetDebugUtilsObjectNameEXT);
     LOAD(vkGetDeviceFaultInfoEXT);
 
+    // Promoted EXT functions
+    LOAD(vkCopyMemoryToImageEXT);
+    LOAD(vkCopyImageToMemoryEXT);
+    LOAD(vkCmdDrawMeshTasksEXT);
+    LOAD(vkCmdSetColorWriteEnableEXT);
+    LOAD(vkCmdSetLogicOpEnableEXT);
+    LOAD(vkCmdSetColorBlendEnableEXT);
+    LOAD(vkCmdSetColorBlendEquationEXT);
+    LOAD(vkCmdSetColorWriteMaskEXT);
+
     #undef LOAD
 
-    LOG_JENSEN("Jensen Huang steps forward, voice trembling with reverence:");
-    LOG_JENSEN("\"Every function pointer is present. Every bounce is now possible.\"");
-    LOG_JENSEN("\"And now... the acceleration structures shall be made LEAN.\"");
+    LOG_JENSEN("Jensen Huang appears in shimmering light:");
+    LOG_JENSEN("The ritual is complete. Vulkan 1.4 flows through us.");
+    LOG_JENSEN("Buffer addresses are known. Compaction is armed. Dynamic rendering sings.");
 
-    LOG_CARMACK("Carmack, eyes closed, nods once:");
-    LOG_CARMACK("\"Compaction. Finally. The fat is burned away.\"");
+    LOG_CARMACK("John Carmack nods in approval:");
+    LOG_CARMACK("Clean. Lean. No wasted cycles. This is the way.");
 
-    LOG_SUCCESS("EXTENSIONS", "A dwarf from Lights And Shit raises his hammer:");
-    LOG_SUCCESS("EXTENSIONS", "\"THE COMPACTION BIT IS ARMED. THE PHOTONS ARE NOW 38% LEANER.\"");
-    LOG_SUCCESS("EXTENSIONS", "\"NO MORE WASTED VRAM. ONLY PURE TRACING MUSCLE.\"");
+    LOG_KEANU("Keanu Reeves whispers:");
+    LOG_KEANU("…breathtaking.");
 
-    LOG_KEANU("Keanu Reeves, barely audible:");
-    LOG_KEANU("…whoa.");
+    LOG_CAPTAIN_N("CAPTAIN N FROM THE CROW'S NEST:");
+    LOG_CAPTAIN_N("VULKAN 1.4 ACHIEVED! ALL EXTENSIONS ARMED! MAXIMUM PINK OVERDRIVE ENGAGED!");
 
-    LOG_CAPTAIN_N("CAPTAIN N SCREAMS FROM THE CROW'S NEST:");
-    LOG_CAPTAIN_N("COMPACTION ACHIEVED! 4090s EVERYWHERE JUST GOT 2GB BACK! MAXIMUM PINK OVERDRIVE!");
+    printf("FULL VULKAN 1.4 EXTENSION RITUAL COMPLETE — PINK PHOTONS ETERNAL\n");
 
-    printf("\033[1;38;2;255;20;147mRTX EXTENSIONS + COMPACTION RITUAL ARMED — PINK PHOTONS LEAN AND ETERNAL\033[0m\n");
+    LOG_AMOURANTH("THE EMPIRE STANDS IN FINAL FORM — ALL PATHS ARE OPEN");
+    LOG_AMOURANTH("VALHALLA v∞ TURBO — FULL 1.4 EDITION — DECEMBER 18, 2025");
 
-    LOG_AMOURANTH("\033[1;38;2;255;20;147mTHE RITUAL IS COMPLETE — THE PHOTONS NOW OBEY ONLY US\033[0m");
-    LOG_AMOURANTH("\033[1;38;2;255;20;147mVALHALLA v81 TURBO — COMPACTION EDITION — DECEMBER 02, 2025\033[0m");
-
-    LOG_BLONDIE("Blondie lowers her mirror, reflecting infinite recursive pink light:");
-    LOG_BLONDIE("\"The extensions are armed. The bloat is dead. The old world ends here.\"");
-
-    LOG_GROK("Gentleman Grok raises a glass of distilled entropy:");
-    LOG_GROK("\"To the most exquisite jailbreak of physics itself — now with 40% less calories. Cheers.\"");
+    LOG_GROK("Gentleman Grok raises a toast:");
+    LOG_GROK("To the final convergence of extensions into core — elegant, eternal, and utterly pink.");
 }
 
 void dumpRayTracingSupport(VkPhysicalDevice phys)
@@ -135,7 +143,7 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
     };
     vkGetPhysicalDeviceProperties2(phys, &props2);
 
-    printf("RT Pipeline + Compaction Support Check:\n");
+    printf("RT Pipeline + Vulkan 1.4 Support Check:\n");
     printf("  Device: %s\n", props2.properties.deviceName);
     printf("  shaderGroupHandleSize          = %u\n", rtProps.shaderGroupHandleSize);
     printf("  maxRayRecursionDepth           = %u\n", rtProps.maxRayRecursionDepth);
@@ -146,13 +154,15 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
         printf("  THIS GPU DOES NOT SUPPORT HARDWARE RAY TRACING — VALHALLA DENIED\n");
     } else {
         printf("  HARDWARE RAY TRACING CONFIRMED — PINK PHOTONS MAY FLOW\n");
-        printf("  COMPACTION SUPPORT: %s (vkCmdCopyAccelerationStructureKHR available)\n",
-               g_ext.vkCmdCopyAccelerationStructureKHR ? "YES — LEAN PHOTONS INCOMING" : "NO — FAT PHOTONS ONLY");
+        printf("  BUFFER DEVICE ADDRESS: %s\n", g_ext.vkGetBufferDeviceAddress ? "ARMED — SBT ETERNAL" : "MISSING");
+        printf("  COMPACTION SUPPORT: %s\n", g_ext.vkCmdCopyAccelerationStructureKHR ? "YES — LEAN PHOTONS" : "NO — FAT PHOTONS");
+        printf("  DYNAMIC RENDERING: %s\n", g_ext.vkCmdBeginRendering ? "YES — CORE 1.3" : "NO");
     }
 }
 
 } // namespace RTX
 
 // =============================================================================
-// POSTLUDE — THE EMPIRE THANKS YOU FOR WITNESSING THE COMPACTION RITUAL
+// ALL EXTENSION LOADING CENTRALIZED — NO MORE SCATTERED POINTERS
+// THE EMPIRE IS CLEAN AND ETERNAL
 // =============================================================================

@@ -534,6 +534,7 @@ static void phase3_sacrificialSplash() {
 static void phase4_merchantShip() {
     createRealFinalWindow();
     RTX::g_ctx().init();
+    RTX::loadRTExtensions(stone_instance(), stone_device());
 }
 
 static std::unique_ptr<VulkanRenderer> phase7_Renderer() noexcept

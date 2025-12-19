@@ -28,6 +28,7 @@
 
 using namespace Logging::Color;
 using StoneKey::stone_device;
+using StoneKey::stone_instance;
 using StoneKey::stone_physical;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_seal_pipeline;
@@ -106,7 +107,19 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     LOG_INFO_CAT("PIPELINE", "PipelineManager construction");
 
     cacheDeviceProperties();
-    loadRayTracingExtensions();
+
+    RTX::loadRTExtensions(stone_instance(), device);
+
+    if (!g_ext.vkCmdTraceRaysKHR ||
+        !g_ext.vkCreateRayTracingPipelinesKHR ||
+        !g_ext.vkGetRayTracingShaderGroupHandlesKHR ||
+        !g_ext.vkCreateAccelerationStructureKHR ||
+        !g_ext.vkDestroyAccelerationStructureKHR ||
+        !g_ext.vkGetAccelerationStructureBuildSizesKHR ||
+        !g_ext.vkGetBufferDeviceAddress) {
+        LOG_FATAL_CAT("PIPELINE", "Critical ray tracing extensions not loaded — check hardware support");
+        throw std::runtime_error("Ray tracing extensions missing");
+    }
 
     dummyTLAS_ = Handle<VkAccelerationStructureKHR>(
         createDummyTLAS(), stone_device(), g_ext.vkDestroyAccelerationStructureKHR);
@@ -588,54 +601,6 @@ void PipelineManager::setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceAdd
     sbtSize_ = size;
 }
 
-void PipelineManager::loadRayTracingExtensions() noexcept
-{
-    LOG_INFO_CAT("PIPELINE", "Loading ray tracing extension functions");
-
-    g_ext.vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkCmdTraceRaysKHR"));
-
-    g_ext.vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkCreateRayTracingPipelinesKHR"));
-
-    g_ext.vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkGetRayTracingShaderGroupHandlesKHR"));
-
-    g_ext.vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkCreateAccelerationStructureKHR"));
-
-    g_ext.vkDestroyAccelerationStructureKHR = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkDestroyAccelerationStructureKHR"));
-
-    g_ext.vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkGetAccelerationStructureBuildSizesKHR"));
-
-    g_ext.vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkCmdBuildAccelerationStructuresKHR"));
-
-    g_ext.vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
-        vkGetDeviceProcAddr(stone_device(), "vkGetAccelerationStructureDeviceAddressKHR"));
-
-    g_ext.vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
-        vkGetDeviceProcAddr(stone_device(), "vkGetBufferDeviceAddress"));
-
-    bool success = g_ext.vkCmdTraceRaysKHR &&
-                   g_ext.vkCreateRayTracingPipelinesKHR &&
-                   g_ext.vkGetRayTracingShaderGroupHandlesKHR &&
-                   g_ext.vkCreateAccelerationStructureKHR &&
-                   g_ext.vkDestroyAccelerationStructureKHR &&
-                   g_ext.vkGetAccelerationStructureBuildSizesKHR &&
-                   g_ext.vkCmdBuildAccelerationStructuresKHR &&
-                   g_ext.vkGetAccelerationStructureDeviceAddressKHR &&
-                   g_ext.vkGetBufferDeviceAddress;
-
-    if (success) {
-        LOG_SUCCESS_CAT("PIPELINE", "All ray tracing extensions loaded");
-    } else {
-        LOG_FATAL_CAT("PIPELINE", "Critical ray tracing extensions missing");
-    }
-}
-
 void PipelineManager::createPipelineLayout()
 {
     if (rtDescriptorSetLayout_.valid()) {
@@ -940,7 +905,6 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
         return;
     }
 
-    loadRayTracingExtensions();
     createDescriptorPool();
     createPipelineLayout();
     allocateDescriptorSets();
@@ -1047,4 +1011,14 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const
 
 // =============================================================================
 // PIPELINE ETERNAL — ALL VALIDATION CLEAN — PINK PHOTONS DOMINATE
+// =============================================================================
+
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+// 2. Commercial licensing: gzac5314@gmail.com
+//
 // =============================================================================

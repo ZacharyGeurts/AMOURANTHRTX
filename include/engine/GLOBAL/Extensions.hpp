@@ -1,6 +1,6 @@
 // include/engine/GLOBAL/Extensions.hpp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -8,9 +8,9 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // =============================================================================
-// EXTENSIONS — THE SACRED RITUAL OF LOADING PINK PHOTON EXTENSIONS
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — VALHALLA v81 TURBO
-// COMPACTION + BUFFER DEVICE ADDRESS + FULL 1.4 SUPPORT — DECEMBER 05, 2025
+// EXTENSIONS — CENTRALIZED AND CLEAN — FULL VULKAN 1.4 COMPLIANCE
+// ALL FUNCTION POINTERS DECLARED ONCE — NO DUPLICATES — DECEMBER 18, 2025
+// PINK PHOTONS FLOW THROUGH A SINGLE, ETERNAL SOURCE
 // =============================================================================
 #pragma once
 
@@ -32,14 +32,14 @@ struct Extensions {
     PFN_vkDestroyAccelerationStructureKHR          vkDestroyAccelerationStructureKHR          = nullptr;
     PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
 
-    // ── BUFFER DEVICE ADDRESS — THE SOUL OF SBT AND MODERN RAY TRACING ───
+    // ── Buffer Device Address (Core 1.2+) — REQUIRED FOR SBT ─────────────
     PFN_vkGetBufferDeviceAddress                   vkGetBufferDeviceAddress                = nullptr;
 
-    // ── Compaction (KHR_ray_tracing_maintenance1) ──────────────────────
+    // ── Ray Tracing Maintenance 1 (Compaction) ─────────────────────────
     PFN_vkCmdCopyAccelerationStructureKHR             vkCmdCopyAccelerationStructureKHR             = nullptr;
     PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructuresPropertiesKHR = nullptr;
 
-    // ── Modern Rendering & Sync (Core 1.3+) ────────────────────────────
+    // ── Vulkan 1.3 Core — Dynamic Rendering & Synchronization 2 ────────
     PFN_vkCmdBeginRendering                    vkCmdBeginRendering                    = nullptr;
     PFN_vkCmdEndRendering                      vkCmdEndRendering                      = nullptr;
     PFN_vkCmdPipelineBarrier2                  vkCmdPipelineBarrier2                  = nullptr;
@@ -48,7 +48,7 @@ struct Extensions {
     PFN_vkSetDebugUtilsObjectNameEXT           vkSetDebugUtilsObjectNameEXT           = nullptr;
     PFN_vkGetDeviceFaultInfoEXT                vkGetDeviceFaultInfoEXT                = nullptr;
 
-    // ── Optional EXT Promoted to Core in 1.4 (keep for compatibility) ──
+    // ── Promoted from EXT to Core in 1.3/1.4 — Compatibility ─────────────
     PFN_vkCopyMemoryToImageEXT                 vkCopyMemoryToImageEXT                 = nullptr;
     PFN_vkCopyImageToMemoryEXT                 vkCopyImageToMemoryEXT                 = nullptr;
     PFN_vkCmdDrawMeshTasksEXT                  vkCmdDrawMeshTasksEXT                  = nullptr;
@@ -74,7 +74,7 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 } // namespace RTX
 
 // =============================================================================
-// SACRED MACROS — ONLY WHAT WE USE — LEAN AND ETERNAL
+// SACRED MACROS — LEAN AND CENTRALIZED
 // =============================================================================
 #define VK_CREATE_RT_PIPELINES(...)              RTX::g_ext.vkCreateRayTracingPipelinesKHR(__VA_ARGS__)
 #define VK_GET_RT_GROUP_HANDLES(...)             RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(__VA_ARGS__)
@@ -86,22 +86,19 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 #define VK_DESTROY_ACCELERATION_STRUCTURE(...)   RTX::g_ext.vkDestroyAccelerationStructureKHR(__VA_ARGS__)
 #define VK_GET_AS_DEVICE_ADDRESS(...)            RTX::g_ext.vkGetAccelerationStructureDeviceAddressKHR(__VA_ARGS__)
 
-// THE MISSING ONE — NOW ETERNAL
 #define VK_GET_BUFFER_DEVICE_ADDRESS(...)        RTX::g_ext.vkGetBufferDeviceAddress(__VA_ARGS__)
 
-// Compaction
 #define VK_CMD_COPY_ACCELERATION_STRUCTURE(cmd, info) \
     RTX::g_ext.vkCmdCopyAccelerationStructureKHR(cmd, info)
 
 #define VK_CMD_WRITE_AS_PROPERTIES(cmd, count, as, queryType, queryPool, query) \
     RTX::g_ext.vkCmdWriteAccelerationStructuresPropertiesKHR(cmd, count, as, queryType, queryPool, query)
 
-// Host image copy
 #define VK_COPY_MEMORY_TO_IMAGE(...)             RTX::g_ext.vkCopyMemoryToImageEXT(__VA_ARGS__)
 #define VK_COPY_IMAGE_TO_MEMORY(...)             RTX::g_ext.vkCopyImageToMemoryEXT(__VA_ARGS__)
 
 // =============================================================================
-// THE EMPIRE IS NOW COMPLETE — BUFFER DEVICE ADDRESS IS ARMED
-// PINK PHOTONS MAY NOW TRACE INTO VALHALLA WITH FULL ADDRESSING POWER
-// DECEMBER 05 2025 — FINAL LIGHT ETERNAL
+// ALL EXTENSIONS NOW LIVE IN THIS FILE — NO MORE SCATTERED DECLARATIONS
+// THE EMPIRE IS CLEAN, CENTRALIZED, AND ETERNAL
+// DECEMBER 18, 2025 — FINAL CONVERGENCE ACHIEVED
 // =============================================================================
