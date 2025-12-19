@@ -47,6 +47,7 @@
 using namespace Logging::Color;
 using RTX::Handle;
 
+using StoneKey::stone_device;
 using StoneKey::stone_image_count;
 using StoneKey::stone_views;
 using StoneKey::stone_view;

@@ -51,10 +51,6 @@ struct EnvironmentMap {
     explicit operator bool() const noexcept { return view != VK_NULL_HANDLE; }
 
     ~EnvironmentMap() {
-        if (view)    vkDestroyImageView(stone_device(), view, nullptr);
-        if (sampler) vkDestroySampler(stone_device(), sampler, nullptr);
-        if (image)   vkDestroyImage(stone_device(), image, nullptr);
-        if (memory)  vkFreeMemory(stone_device(), memory, nullptr);
     }
 };
 
