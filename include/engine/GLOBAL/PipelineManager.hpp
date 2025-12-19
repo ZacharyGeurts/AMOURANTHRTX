@@ -199,6 +199,8 @@ public:
     static void setShadingRate(float scaleFactor) noexcept;
     static void enableDirectDisplay(bool enable) noexcept;
 
+	void cacheDeviceProperties();
+	
     static inline bool s_crownForged = false;
 
 private:
@@ -244,7 +246,6 @@ private:
     Handle<VkDeviceMemory>            dummyAccelMemory_;
     Handle<VkAccelerationStructureKHR> dummyTLAS_;
 
-    void cacheDeviceProperties();
     void loadRayTracingExtensions() noexcept;
     VkAccelerationStructureKHR createDummyTLAS();
 

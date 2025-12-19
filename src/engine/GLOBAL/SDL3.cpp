@@ -430,14 +430,7 @@ void toggleFullscreen() noexcept
 
 void destroy() noexcept
 {
-    LOG_INFO_CAT("SDL3", "{}Returning photons to the void...{}", SAPPHIRE_BLUE, RESET);
-    g_vulkanRenderer.reset();
-    RTX::cleanupAll();
-    LOG_SUCCESS_CAT("SDL3", "{}Vulkan shutdown complete — Amouranth smiles{}", EMERALD_GREEN, RESET);
 
-    g_sdl_window.reset();
-    SDL_Quit();
-    LOG_SUCCESS_CAT("Dispose", "{}SDL3 shutdown complete — empire sleeps in pink light{}", AURORA_PINK, RESET);
 }
 
 } // namespace SDL3Window

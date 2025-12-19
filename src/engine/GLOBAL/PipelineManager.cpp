@@ -106,8 +106,6 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
     LOG_INFO_CAT("PIPELINE", "PipelineManager construction");
 
-    cacheDeviceProperties();
-
     RTX::loadRTExtensions(stone_instance(), device);
 
     if (!g_ext.vkCmdTraceRaysKHR ||
@@ -426,10 +424,19 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
+    // Force re-cache of ray tracing properties right at the start
+    cacheDeviceProperties();
+
     const auto& rtProps = StoneKey::stone_rtprops();
-    const VkDeviceSize handleSize  = rtProps.shaderGroupHandleSize;
-    const VkDeviceSize handleAlign = rtProps.shaderGroupHandleAlignment ? rtProps.shaderGroupHandleAlignment : 32u;
-    const VkDeviceSize baseAlign   = rtProps.shaderGroupBaseAlignment   ? rtProps.shaderGroupBaseAlignment   : 64u;
+    const VkDeviceSize handleSize = rtProps.shaderGroupHandleSize;
+
+    if (handleSize == 0) {
+        LOG_FATAL_CAT("PIPELINE", "shaderGroupHandleSize is still 0 after re-cache — ray tracing not supported on this device");
+        return;
+    }
+
+    const VkDeviceSize handleAlign = std::max(rtProps.shaderGroupHandleAlignment, 32u);
+    const VkDeviceSize baseAlign   = std::max(rtProps.shaderGroupBaseAlignment, 64u);
     const VkDeviceSize stride      = align_up(handleSize, handleAlign);
 
     const uint32_t RG = raygenGroupCount_;
@@ -437,21 +444,31 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     const uint32_t HG = hitGroupCount_;
     const uint32_t totalGroups = RG + MI + HG;
 
+    LOG_INFO_CAT("PIPELINE", "SBT groups — RayGen: {}, Miss: {}, Hit: {}, Total: {}", RG, MI, HG, totalGroups);
+
     if (totalGroups == 0) {
         LOG_FATAL_CAT("PIPELINE", "Zero shader groups — nothing to bind");
         return;
     }
 
-    const VkDeviceSize raygenOffset   = 0;
-    const VkDeviceSize missOffset     = align_up(RG * stride, baseAlign);
-    const VkDeviceSize hitOffset      = align_up(missOffset + MI * stride, baseAlign);
-    const VkDeviceSize callableOffset = align_up(hitOffset + HG * stride, baseAlign);
-    const VkDeviceSize requiredSize   = align_up(callableOffset, baseAlign);
+    // Vulkan 1.4 correct alignment
+    const VkDeviceSize raygenSize = align_up(RG * stride, baseAlign);
+    const VkDeviceSize missSize   = MI * stride;
+    const VkDeviceSize hitSize    = HG * stride;
+    const VkDeviceSize requiredSize = raygenSize + missSize + hitSize;
 
+    LOG_INFO_CAT("PIPELINE", "SBT size — handleSize: {}, stride: {}, raygen: {} bytes, miss: {} bytes, hit: {} bytes, total: {} bytes",
+                 handleSize, stride, raygenSize, missSize, hitSize, requiredSize);
+
+    if (requiredSize == 0) {
+        LOG_FATAL_CAT("PIPELINE", "Calculated requiredSize = 0 — aborting SBT creation");
+        return;
+    }
+
+    // Permanent 2048 MiB SBT buffer
     static uint64_t SBT_STONE_HANDLE = 0;
-
     if (SBT_STONE_HANDLE == 0) {
-        LOG_INFO_CAT("PIPELINE", "Creating 2048 MiB SBT buffer");
+        LOG_INFO_CAT("PIPELINE", "Creating permanent 2048 MiB SBT buffer");
 
         const VkDeviceSize stoneSize = 2048ULL * 1024 * 1024;
 
@@ -459,9 +476,8 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
             .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size        = stoneSize,
             .usage       = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
-                           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE
         };
 
@@ -474,13 +490,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         uint32_t memTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (memTypeIndex == ~0u) {
             vkDestroyBuffer(stone_device(), buffer, nullptr);
-            LOG_FATAL_CAT("PIPELINE", "No device-local memory for 2048 MiB SBT buffer");
-            throw std::runtime_error("SBT buffer memory allocation failed");
+            LOG_FATAL_CAT("PIPELINE", "No device-local memory for SBT buffer");
+            return;
         }
 
         VkMemoryAllocateFlagsInfo flagsInfo{
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR
+            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
         };
 
         VkMemoryAllocateInfo allocInfo{
@@ -500,7 +516,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         info.size          = stoneSize;
         info.aligned       = stoneSize;
         info.usage         = bufferInfo.usage;
-        info.tag           = "SBT_ETERNAL_STONE_2048M";
+        info.tag           = "SBT_ETERNAL_2048M";
         info.offset        = 0;
         info.deviceAddress = 0;
         info.mapped        = nullptr;
@@ -508,58 +524,60 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         SBT_STONE_HANDLE = reinterpret_cast<uint64_t>(buffer);
         BufferManager::s_buffers[SBT_STONE_HANDLE] = std::move(info);
 
-        LOG_SUCCESS_CAT("PIPELINE", "2048 MiB SBT buffer created — device address enabled");
+        LOG_SUCCESS_CAT("PIPELINE", "2048 MiB permanent SBT buffer created");
     }
 
     const auto* stone = BufferManager::get(SBT_STONE_HANDLE);
-    if (!stone || stone->buffer == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "SBT buffer not found");
-        throw std::runtime_error("SBT buffer invalid");
+    if (!stone) {
+        LOG_FATAL_CAT("PIPELINE", "Permanent SBT buffer missing");
+        return;
     }
 
     static std::atomic<VkDeviceSize> sbtAllocator{0};
     VkDeviceSize myOffset = sbtAllocator.fetch_add(requiredSize, std::memory_order_relaxed);
 
     if (myOffset + requiredSize > stone->size) {
-        LOG_FATAL_CAT("PIPELINE", "SBT allocation overflow — needed {} bytes, only {} left", requiredSize, stone->size - myOffset);
-        throw std::runtime_error("SBT allocation overflow");
+        LOG_FATAL_CAT("PIPELINE", "SBT allocation overflow — required {} bytes, available {} bytes", requiredSize, stone->size - myOffset);
+        return;
     }
 
     VkBufferDeviceAddressInfo addrInfo{
         .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = stone->buffer
     };
-    const VkDeviceAddress sbtBaseAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo) + myOffset;
+    VkDeviceAddress sbtBaseAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo) + myOffset;
 
-    std::vector<std::byte> handleStorage(totalGroups * handleSize);
+    const VkDeviceSize handleStorageSize = totalGroups * handleSize;
+    std::vector<uint8_t> handleStorage(handleStorageSize);
 
     VkResult result = g_ext.vkGetRayTracingShaderGroupHandlesKHR(
         stone_device(),
         rtPipeline_.get(),
         0,
         totalGroups,
-        handleStorage.size(),
+        handleStorageSize,
         handleStorage.data()
     );
 
     if (result != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", string_VkResult(result));
-        throw std::runtime_error("Shader group handles retrieval failed");
+        return;
     }
 
+    BufferManager::ensureStagingRing();
     void* stagingMapped = BufferManager::stagingPtr();
     if (!stagingMapped) {
-        LOG_FATAL_CAT("PIPELINE", "Global staging buffer not mapped");
-        throw std::runtime_error("Staging buffer not mapped");
+        LOG_FATAL_CAT("PIPELINE", "Staging buffer not mapped");
+        return;
     }
 
-    std::memcpy(stagingMapped, handleStorage.data(), handleStorage.size());
-    BufferManager::advanceStagingOffset(handleStorage.size());
+    std::memcpy(stagingMapped, handleStorage.data(), handleStorageSize);
+    BufferManager::advanceStagingOffset(handleStorageSize);
 
     VkBuffer stagingBuffer = BufferManager::getStagingBuffer();
 
     uint32_t handleIdx = 0;
-    const auto copySection = [&](uint32_t count, VkDeviceSize dstOffset) {
+    const auto copySection = [&](uint32_t count, VkDeviceSize dstOffset, const char* name) {
         if (count == 0) return;
         VkBufferCopy region{
             .srcOffset = handleIdx * handleSize,
@@ -567,14 +585,25 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
             .size      = count * handleSize
         };
         vkCmdCopyBuffer(cmd, stagingBuffer, stone->buffer, 1, &region);
+        LOG_INFO_CAT("PIPELINE", "Copied {} {} handles to SBT offset {}", count, name, myOffset + dstOffset);
         handleIdx += count;
     };
 
-    copySection(RG, raygenOffset);
-    copySection(MI, missOffset);
-    copySection(HG, hitOffset);
+    copySection(RG, 0,            "raygen");
+    copySection(MI, raygenSize,   "miss");
+    copySection(HG, raygenSize + missSize, "hit");
 
-    constexpr auto makeRegion = [](VkDeviceAddress base, VkDeviceSize offset, uint32_t count, VkDeviceSize s) noexcept {
+    VkMemoryBarrier2 barrier{
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask  = VK_PIPELINE_STAGE_TRANSFER_BIT,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+    };
+    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+    g_ext.vkCmdPipelineBarrier2(cmd, &dep);
+
+    const auto makeRegion = [](VkDeviceAddress base, VkDeviceSize offset, uint32_t count, VkDeviceSize s) noexcept {
         return VkStridedDeviceAddressRegionKHR{
             .deviceAddress = base + offset,
             .stride        = s,
@@ -582,15 +611,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         };
     };
 
-    raygenSbtRegion_   = makeRegion(sbtBaseAddr, raygenOffset,   RG, stride);
-    missSbtRegion_     = makeRegion(sbtBaseAddr, missOffset,     MI, stride);
-    hitSbtRegion_      = makeRegion(sbtBaseAddr, hitOffset,      HG, stride);
-    callableSbtRegion_ = makeRegion(sbtBaseAddr, callableOffset, 0,  stride);
+    raygenSbtRegion_   = makeRegion(sbtBaseAddr, 0,               RG, stride);
+    missSbtRegion_     = makeRegion(sbtBaseAddr, raygenSize,      MI, stride);
+    hitSbtRegion_      = makeRegion(sbtBaseAddr, raygenSize + missSize, HG, stride);
+    callableSbtRegion_ = makeRegion(sbtBaseAddr, 0,               0,  stride);
 
     setSBT(stone->buffer, stone->memory, sbtBaseAddr, requiredSize);
     sbtAddress_ = sbtBaseAddr;
 
-    LOG_SUCCESS_CAT("PIPELINE", "Shader binding table created");
+    LOG_SUCCESS_CAT("PIPELINE", "SBT created — {} groups, {} bytes at base 0x{:x}", totalGroups, requiredSize, sbtBaseAddr);
 }
 
 void PipelineManager::setSBT(VkBuffer buffer, VkDeviceMemory memory, VkDeviceAddress address, VkDeviceSize size) noexcept
@@ -795,17 +824,21 @@ void PipelineManager::createRayTracingPipeline()
     VkShaderModule hit    = load("assets/shaders/raytracing/closest_hit.spv");
 
     // Optional performance preset: disable hit shaders for uncapped mode
+    bool useHitShader = true;
     if (Options::CURRENT_PRESET == Options::Preset::UncappedPerformance) {
         if (hit) {
             vkDestroyShaderModule(stone_device(), hit, nullptr);
             hit = VK_NULL_HANDLE;
         }
+        useHitShader = false;
     }
 
     shaderModules_.clear();
     shaderModules_.emplace_back(raygen, stone_device(), vkDestroyShaderModule);
     shaderModules_.emplace_back(miss,   stone_device(), vkDestroyShaderModule);
-    if (hit) shaderModules_.emplace_back(hit, stone_device(), vkDestroyShaderModule);
+    if (useHitShader && hit) {
+        shaderModules_.emplace_back(hit, stone_device(), vkDestroyShaderModule);
+    }
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
@@ -848,7 +881,7 @@ void PipelineManager::createRayTracingPipeline()
 
     // Hit group — TRIANGLES HIT GROUP (optional)
     uint32_t closestHitIndex = VK_SHADER_UNUSED_KHR;
-    if (hit) {
+    if (useHitShader && hit) {
         stages.push_back({ 
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
@@ -867,9 +900,10 @@ void PipelineManager::createRayTracingPipeline()
         .intersectionShader = VK_SHADER_UNUSED_KHR
     });
 
+    // Set group counts BEFORE SBT creation
     raygenGroupCount_ = 1;
     missGroupCount_   = 1;
-    hitGroupCount_    = hit ? 1 : 0;
+    hitGroupCount_    = useHitShader ? 1 : 0;
 
     if (rtPipelineLayout_.get() == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Pipeline layout is null");
@@ -895,7 +929,7 @@ void PipelineManager::createRayTracingPipeline()
         [](VkDevice d, VkPipeline p, auto*) { vkDestroyPipeline(d, p, nullptr); });
 
     LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created — {} shaders (raygen, miss{})", 
-                    hit ? 3 : 2, hit ? ", closest hit" : "");
+                    useHitShader ? 3 : 2, useHitShader ? ", closest hit" : "");
 }
 
 void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd)
@@ -925,37 +959,31 @@ void PipelineManager::cacheDeviceProperties()
         throw std::runtime_error("No physical device");
     }
 
-    VkPhysicalDeviceProperties baseProps{};
-    vkGetPhysicalDeviceProperties(phys, &baseProps);
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
+    rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
 
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-    };
-
-    VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
-        .pNext = &rtProps
-    };
-
-    VkPhysicalDeviceProperties2 props2{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &asProps
-    };
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &rtProps;
 
     vkGetPhysicalDeviceProperties2(phys, &props2);
 
-    baseProps = props2.properties;
-
     if (rtProps.shaderGroupHandleSize == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Device {} lacks ray tracing support (handleSize=0)", baseProps.deviceName);
+        LOG_FATAL_CAT("PIPELINE", "Ray tracing not supported — shaderGroupHandleSize = 0");
         throw std::runtime_error("No ray tracing support");
     }
 
-    auto& ctx = RTX::g_ctx();
-    ctx.physicalDeviceProperties_ = baseProps;
-    ctx.rayTracingProps_          = rtProps;
+    LOG_INFO_CAT("PIPELINE", "Ray tracing properties — handleSize: {}, handleAlign: {}, baseAlign: {}",
+                 rtProps.shaderGroupHandleSize,
+                 rtProps.shaderGroupHandleAlignment,
+                 rtProps.shaderGroupBaseAlignment);
 
-    LOG_SUCCESS_CAT("PIPELINE", "Device properties cached — GPU: {}, RT Handle Size: {}", baseProps.deviceName, rtProps.shaderGroupHandleSize);
+    // ← THIS IS THE MISSING LINE
+    StoneKey::stone_seal_rtprops(rtProps);  // ← ADD THIS
+
+    auto& ctx = RTX::g_ctx();
+    ctx.physicalDeviceProperties_ = props2.properties;
+    ctx.rayTracingProps_ = rtProps;
 }
 
 void PipelineManager::traceRays(VkCommandBuffer commandBuffer, uint32_t frameIndex, uint32_t width, uint32_t height, uint32_t depth)

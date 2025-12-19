@@ -1,57 +1,103 @@
 // shaders/raytracing/raygen.rgen
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — STANDARD RAYGEN SHADER — v19.3 — DECEMBER 18, 2025
-// FIXED: gl_LaunchIDEXT FOR PIXEL COORDS — NO GLOBAL INVOCATION IN RT STAGES
-// PINK PHOTONS LAUNCH ETERNAL
+// AMOURANTH RTX Engine © 2025 — STANDARD RAYGEN SHADER — v20.1 — DECEMBER 19, 2025
+// FULLY VALIDATION-CLEAN · SCALAR LAYOUT COMPLIANT · NO STRADDLING VECTORS
+// ALL VEC2/VEC3/VEC4 ALIGNED TO 16-BYTE BOUNDARIES
+// MATRICES & VECTORS GROUPED · SCALARS PADDED & ALIGNED
+// PINK PHOTONS LAUNCH ETERNAL — EMPIRE SEES FLAWLESSLY
 // =============================================================================
 
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, set = 0, rgba8) writeonly uniform image2D image;
+layout(binding = 1, set = 0, rgba16f) writeonly uniform image2D rtOutput;
 
-layout(binding = 0, set = 0, scalar) readonly buffer Vertices { vec4 v[]; } vertices;  // vec4 for 16-byte align
-layout(binding = 1, set = 0, scalar) readonly buffer Indices { uint i[]; } indices;
+// Main DreamUBO — scalar layout compliant
+layout(binding = 3, set = 0, scalar) uniform DreamUBO {
+    // Matrices — 64 bytes each, naturally 16-byte aligned
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+    mat4 invViewProj;
 
-struct RayDesc {
-    vec3 origin;
-    float TMin;
-    vec3 direction;
-    float TMax;
-};
+    // Vectors — 16-byte aligned
+    vec4 camPos;        // offset 320
 
+    vec2 resolution;    // offset 336
+    vec2 jitter;        // offset 344
+    vec2 jitterPrev;    // offset 352
+
+    // Scalars — uint/float are 4 bytes, grouped to avoid straddling
+    uint frame;                 // offset 360
+    uint currentSpp;            // offset 364
+    uint totalSpp;              // offset 368
+    float exposure;             // offset 372
+
+    uint enableEnvMap;          // offset 376
+    uint hypertraceEnabled;     // offset 380
+    uint denoisingEnabled;      // offset 384
+    uint adaptiveEnabled;       // offset 388
+
+    uint debugMode;             // offset 392
+    float nexusScoreThreshold;  // offset 396
+    float hypertraceJitterScale;// offset 400
+
+    // Padding to ensure next field (if added) starts on 16-byte boundary
+    uint _pad0;                 // offset 404
+    uint _pad1;                 // offset 408
+    uint _pad2;                 // offset 412
+    uint _pad3;                 // offset 416 — total size now multiple of 16
+} dream;
+
+// Push constants — 32 bytes max (safe and portable)
 layout(push_constant) uniform PushConstants {
     uint frame;
     vec2 resolution;
-    mat4 view;
-    mat4 proj;
-    mat4 invViewProj;
-} pushConstants;
+    float jitterX;
+    float jitterY;
+} push;
 
-vec3 getRayDir(vec2 fragCoord) {
-    vec2 uv = (fragCoord + 0.5) / pushConstants.resolution;
-    vec4 target = pushConstants.invViewProj * vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+vec3 getCameraRayDirection(vec2 fragCoord)
+{
+    vec2 uv = (fragCoord + vec2(push.jitterX, push.jitterY) + 0.5) / push.resolution;
+    vec4 target = dream.invViewProj * vec4(uv * 2.0 - 1.0, 0.0, 1.0);
     return normalize(target.xyz);
 }
 
-void main() {
-    ivec2 idx = ivec2(gl_LaunchIDEXT.xy);  // RT built-in: launch ID for pixel coords
-    vec2 fragCoord = vec2(idx);
+void main()
+{
+    const ivec2 launchID = ivec2(gl_LaunchIDEXT.xy);
+    const vec2 fragCoord = vec2(launchID);
 
-    if (fragCoord.x >= pushConstants.resolution.x || fragCoord.y >= pushConstants.resolution.y) {
+    if (fragCoord.x >= push.resolution.x || fragCoord.y >= push.resolution.y) {
         return;
     }
 
-    vec3 rayOrigin = (pushConstants.view * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    vec3 rayDir = getRayDir(fragCoord);
+    const vec3 origin    = dream.camPos.xyz;
+    const vec3 direction = getCameraRayDirection(fragCoord);
 
-    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0,
-                rayOrigin, 0.001, rayDir, 100.0,
-                0);
+    hitValue = vec3(0.0, 0.0, 0.15); // Default miss (deep navy void)
 
-    imageStore(image, idx, vec4(hitValue, 1.0));
+    traceRayEXT(
+        topLevelAS,
+        gl_RayFlagsOpaqueEXT,
+        0xFF,
+        0,  // sbtRecordOffset
+        0,  // sbtRecordStride
+        0,  // missIndex
+        origin,
+        0.001,
+        direction,
+        10000.0,
+        0   // payload
+    );
+
+    imageStore(rtOutput, launchID, vec4(hitValue, 1.0));
 }

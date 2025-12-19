@@ -445,6 +445,7 @@ public:
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
 
     VkResult recordCommandBuffer(uint32_t frame) noexcept;
+	void createTransientCommandPool() noexcept;
     void createEnvMapDisplayPipeline() noexcept;
     void createEnvMapDescriptorPool() noexcept;
 
