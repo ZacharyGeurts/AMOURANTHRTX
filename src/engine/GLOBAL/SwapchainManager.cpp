@@ -33,7 +33,6 @@ using StoneKey::stone_height;
 namespace RTX {
 
 static constexpr uint32_t         IMAGE_COUNT   = 2;
-static constexpr VkPresentModeKHR DESIRED_MODE  = VK_PRESENT_MODE_FIFO_KHR;  // Solid by default (VSync)
 
 // ---------------------------------------------------------------------------
 // Smart HDR Detection — safe by default
@@ -170,62 +169,35 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h) noex
     vkGetPhysicalDeviceSurfacePresentModesKHR(stone_physical(), stone_surface(), &presentCount, modes.data());
 
     VkExtent2D extent = caps.currentExtent;
-    if (extent.width == UINT32_MAX) [[likely]] {
+    if (extent.width == UINT32_MAX) {
         extent = {
-            std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width),
+            std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width),
             std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height)
         };
     }
 
-    // Choose FIFO for maximum solidity (VSync on) — fallback to IMMEDIATE only if FIFO unavailable
+    // X11 SAFE: Force FIFO — most reliable
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    bool fifoFound = false;
-    for (VkPresentModeKHR mode : modes) {
-        if (mode == presentMode) {
-            fifoFound = true;
-            break;
-        }
-    }
-    if (!fifoFound) {
-        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-        if (std::find(modes.begin(), modes.end(), presentMode) == modes.end()) {
-            presentMode = VK_PRESENT_MODE_FIFO_KHR;  // Should always be supported
-        }
-        LOG_WARNING_CAT("SWAPCHAIN", "FIFO unavailable — using {} for solidity", presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
-    } else {
-        LOG_INFO_CAT("SWAPCHAIN", "Using FIFO for maximum solidity");
+    if (std::find(modes.begin(), modes.end(), presentMode) == modes.end()) {
+        LOG_WARNING_CAT("SWAPCHAIN", "FIFO present mode not supported — falling back to first available mode");
+        presentMode = modes[0];
     }
 
-    uint32_t imageCount = IMAGE_COUNT;
+    uint32_t imageCount = 2;
     imageCount = std::max(imageCount, caps.minImageCount);
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
 
-    bool hdrEnabled = (currentColorSpace_ == VK_COLOR_SPACE_HDR10_ST2084_EXT);
-
+    // Prefer standard sRGB format — safe and universal
     VkSurfaceFormatKHR chosen = formats[0];
-
-    if (hdrEnabled) {
-        for (const auto& f : formats) {
-            if (f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 &&
-                f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
-                chosen = f;
-                break;
-            }
-        }
-    }
-
-    if (chosen.colorSpace != VK_COLOR_SPACE_HDR10_ST2084_EXT) {
-        for (const auto& f : formats) {
-            if (f.format == VK_FORMAT_B8G8R8A8_UNORM &&
-                f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                chosen = f;
-                break;
-            }
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            chosen = f;
+            break;
         }
     }
 
     QueueFamilyIndices qf = findQueueFamilies(stone_physical(), stone_surface());
-    std::array<uint32_t, 2> indices = { qf.graphicsFamily.value(), qf.presentFamily.value() };
+    uint32_t queueFamilyIndices[2] = { qf.graphicsFamily.value(), qf.presentFamily.value() };
 
     VkSwapchainCreateInfoKHR ci{
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -235,32 +207,29 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h) noex
         .imageColorSpace  = chosen.colorSpace,
         .imageExtent      = extent,
         .imageArrayLayers = 1,
-        .imageUsage       = VK_IMAGE_USAGE_STORAGE_BIT |
-                            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                            VK_IMAGE_USAGE_SAMPLED_BIT |
-                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .imageSharingMode = (qf.graphicsFamily == qf.presentFamily) ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
+        .queueFamilyIndexCount = (qf.graphicsFamily == qf.presentFamily) ? 0u : 2u,
+        .pQueueFamilyIndices  = (qf.graphicsFamily == qf.presentFamily) ? nullptr : queueFamilyIndices,
         .preTransform     = caps.currentTransform,
         .compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode      = presentMode,
         .clipped          = VK_TRUE,
-        .oldSwapchain     = VK_NULL_HANDLE
+        .oldSwapchain     = swapchain_.valid() ? swapchain_.get() : VK_NULL_HANDLE
     };
 
-    if (qf.graphicsFamily != qf.presentFamily) [[unlikely]] {
-        ci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
-        ci.queueFamilyIndexCount = 2;
-        ci.pQueueFamilyIndices   = indices.data();
-    } else {
-        ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    }
-
+    VkSwapchainKHR old = swapchain_.get();
     VkSwapchainKHR raw = VK_NULL_HANDLE;
     VK_CHECK(vkCreateSwapchainKHR(stone_device(), &ci, nullptr, &raw));
 
-    swapchain_          = Handle<VkSwapchainKHR>(raw, stone_device());
-    swapchainExtent_    = extent;
-    swapchainFormat_    = chosen.format;
-    currentColorSpace_  = chosen.colorSpace;
+    if (old != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(stone_device(), old, nullptr);
+    }
+
+    swapchain_ = Handle<VkSwapchainKHR>(raw, stone_device());
+    swapchainExtent_ = extent;
+    swapchainFormat_ = chosen.format;
+    currentColorSpace_ = chosen.colorSpace;
     currentPresentMode_ = presentMode;
 
     uint32_t count = 0;
@@ -268,15 +237,7 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h) noex
     swapchainImages_.resize(count);
     vkGetSwapchainImagesKHR(stone_device(), raw, &count, swapchainImages_.data());
 
-    const char* formatName = (chosen.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32) ? "HDR10" :
-                             (chosen.format == VK_FORMAT_B8G8R8A8_UNORM) ? "sRGB" : "Driver Default";
-
-    const char* modeName = (presentMode == VK_PRESENT_MODE_FIFO_KHR) ? "FIFO" :
-                           (presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) ? "IMMEDIATE" : "MAILBOX";
-
-    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} — {} images — {} — Format: {} — HDR: {}",
-                  extent.width, extent.height, count, modeName, formatName,
-                  (hdrEnabled ? "ON" : "OFF"));
+    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} — {} images — FIFO — sRGB — X11 SAFE", extent.width, extent.height, count);
 }
 
 // ---------------------------------------------------------------------------
@@ -376,5 +337,5 @@ void SwapchainManager::enableDirectDisplay(bool enable) noexcept
 // FULLY FIXED — STONEKEY RE-SEALED ON RECREATE
 // X11 PRESENT MODE COMPATIBILITY IMPROVED
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN AND VISIBLE
-// DECEMBER 18, 2025 — THE LIGHT IS RESTORED AND UNIVERSAL
+// DECEMBER 19, 2025 — THE LIGHT IS RESTORED AND UNIVERSAL
 // =============================================================================

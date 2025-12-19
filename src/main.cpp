@@ -207,8 +207,13 @@ static void phase4_merchantShip() noexcept
     RTX::g_ctx().setSize(w, h);
     SDL_ShowWindow(win);
 
+    // X11 BLACK SCREEN FIX — Force compositor to recognize Vulkan surface
+    SDL_SetWindowOpacity(win, 0.99f);
+    SDL_SetWindowOpacity(win, 1.0f);
+    SDL_PumpEvents();
+
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) || !surface) {
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
         phase9_ballerina("Vulkan surface creation failed", std::source_location::current());
     }
     stone_seal_surface(surface);
@@ -221,12 +226,14 @@ static void phase4_merchantShip() noexcept
     RTX::g_ctx().init();
     RTX::loadRTExtensions(stone_instance(), stone_device());
 
-    // Critical: Cache ray tracing properties NOW (after device sealing)
+    // Critical: Cache ray tracing properties AFTER device sealing
     RTX::pipeline().cacheDeviceProperties();
 
     createTransientCommandPool();
 
     RTX::SwapchainManager::create(win, w, h);
+
+    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — EMPIRE AWAKENS — PINK PHOTONS READY");
 }
 
 // =============================================================================
@@ -412,6 +419,10 @@ void Application::run() noexcept
         if (toggleFS) SDL3Window::toggleFullscreen();
 
         INPUT.pumpEvents(g_deltaTime, [this](int mode) { currentRenderMode_ = mode; }, stone_window());
+
+        // CRITICAL X11 FIX — Force compositor update every frame
+        // Without this, SDL3 + Vulkan on X11 can show black window forever
+        SDL_PumpEvents();
 
         if (renderer_ && renderer_->isAlive() && stone_swapchain() != VK_NULL_HANDLE) {
             const uint32_t frameIndex = renderer_->frameNumber();

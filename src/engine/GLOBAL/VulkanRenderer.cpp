@@ -415,6 +415,33 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         performTonemapPass(cmd, slot, imageIndex);
     }
 
+    // FINAL DEBUG — COPY SACRED PINK FROM RT OUTPUT TO SWAPCHAIN
+    // This guarantees we see what ray tracing wrote
+    {
+        VkImage src = rtOutputImages_[slot].get();
+
+        transitionImage(cmd, src, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkImageCopy copyRegion{};
+        copyRegion.srcSubresource = copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copyRegion.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+
+        vkCmdCopyImage(cmd,
+            src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &copyRegion);
+
+        transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    }
+
 submit_frame:
     vkEndCommandBuffer(cmd);
 
@@ -1327,11 +1354,20 @@ void VulkanRenderer::transitionImageForShaderRead(VkCommandBuffer cmd, VkImage i
 
 void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t frameIndex)
 {
+    // Force transition RT output to GENERAL on first use
+    static bool rtOutputTransitioned = false;
+    if (!rtOutputTransitioned) {
+        for (const auto& img : rtOutputImages_) {
+            transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                            0, VK_ACCESS_SHADER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+        }
+        rtOutputTransitioned = true;
+    }
+
     if (RTX::las().getCurrentTLAS() == VK_NULL_HANDLE) {
         const VkClearColorValue navy = { { 0.0f, 0.0f, 0.15f, 1.0f } };
-        const VkImageSubresourceRange range = {
-            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
-        };
+        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdClearColorImage(cmd,
             rtOutputImages_[frameIndex].get(),
@@ -1362,11 +1398,11 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
         uint32_t totalSpp;
         uint32_t hypertrace;
         uint32_t _pad;
-    } push = {};
+    } push{};
 
     push.frame      = frameNumber_;
     push.totalSpp   = currentSpp_;
-    push.hypertrace = Options::OptionsRTX::ENABLE_HYPERTRACE ? 1u : 0u;  // Respect options
+    push.hypertrace = Options::OptionsRTX::ENABLE_HYPERTRACE ? 1u : 0u;
 
     vkCmdPushConstants(cmd,
         RTX::pipeline().rtPipelineLayout(),
@@ -1384,21 +1420,20 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
         &RTX::pipeline().callableRegion(),
         currentExtent().width,
         currentExtent().height,
-        1u
-    );
+        1u);
 
     VkMemoryBarrier2 barrier{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask  = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
         .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
     };
 
     VkDependencyInfo depInfo{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .memoryBarrierCount = 1,
-        .pMemoryBarriers = &barrier
+        .pMemoryBarriers    = &barrier
     };
 
     RTX::g_ext.vkCmdPipelineBarrier2(cmd, &depInfo);
