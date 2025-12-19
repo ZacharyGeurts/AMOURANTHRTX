@@ -5,36 +5,66 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0, rgba16f) uniform readonly image2D imgCurrent;
 layout(set = 0, binding = 1, rgba16f) uniform readonly image2D imgHistory;
 layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D imgOutput;
-layout(set = 0, binding = 3, r32f) uniform readonly image2D imgDepth;
+layout(set = 0, binding = 3, r32f)    uniform readonly image2D imgDepth;
 
 layout(set = 0, binding = 4, std140) uniform DreamUBO {
-    float time;
-    uint frame;
-    uint spp;
-    uint totalSpp;
-    float exposure;
-    uint enableEnvMap;
-    uint hypertrace;
-    uint denoising;
-    uint adaptive;
-    uint debugMode;
-    float envIntensity;
-    float envRotation;
+    float     time;
+    uint      frame;
+    uint      currentSpp;
+    uint      totalSpp;
+    float     exposure;
+    uint      enableEnvMap;
+    uint      hypertraceEnabled;
+    uint      denoisingEnabled;
+    uint      adaptiveEnabled;
+    uint      debugMode;
+    float     envIntensity;
+    float     envRotation;
 
-    vec2 resolution;
-    vec2 jitter;
-    vec2 jitterPrev;
-    float nexusScoreThreshold;
-    float pad0;
+    vec2      resolution;
+    vec2      jitter;
+    vec2      jitterPrev;
+    float     nexusScoreThreshold;
+    float     hypertraceJitterScale;
+    float     _pad0;
+    float     _pad1;
 
-    mat4 view;
-    mat4 proj;
-    mat4 invView;
-    mat4 invProj;
+    mat4      view;
+    mat4      proj;
+    mat4      invView;
+    mat4      invProj;
 
-    vec4 camPos;
+    vec4      camPos;
+    vec4      camDir;
+    float     fov;
+    float     aperture;
+    float     focusDistance;
+    uint      _pad2;
 
-    float finalPadding[4];
+    uint      materialCount;
+    uint      activeMaterialIndex;
+    float     metallicOverride;
+    float     roughnessOverride;
+    float     emissiveIntensity;
+    uint      enableBlueNoise;
+    uint      enableTAA;
+    float     taaAlpha;
+
+    vec3      sunDirection;
+    float     sunIntensity;
+    vec3      sunColor;
+    float     fogDensity;
+    vec3      fogColor;
+    float     _pad3;
+
+    uint      showNexusScore;
+    uint      showSppHeatmap;
+    uint      showAccumulationCount;
+    uint      showGpuTimestamps;
+    float     debugFloat1;
+    float     debugFloat2;
+    float     debugFloat3;
+    float     debugFloat4;
 } ubo;
 
 vec3 reproject(ivec2 pix) {
@@ -42,14 +72,18 @@ vec3 reproject(ivec2 pix) {
     float depth = imageLoad(imgDepth, pix).r;
     vec4 ndcCurr = vec4(uv * 2.0 - 1.0, depth, 1.0);
 
+    // Remove previous frame jitter from current NDC
     ndcCurr.xy -= ubo.jitterPrev;
 
+    // Reproject using previous frame's matrices
     vec4 clipPrev = ubo.proj * ubo.view * ubo.invView * ubo.invProj * ndcCurr;
     if (clipPrev.w <= 0.0) {
         return vec3(-1.0);
     }
 
     vec3 ndcPrev = clipPrev.xyz / clipPrev.w;
+
+    // Add current frame jitter back
     ndcPrev.xy += ubo.jitter;
 
     vec2 reprojUV = ndcPrev.xy * 0.5 + 0.5;
@@ -69,12 +103,19 @@ void main() {
         return;
     }
 
+    // Optional early-out if TAA is disabled
+    if (ubo.enableTAA == 0u) {
+        vec3 currColor = imageLoad(imgCurrent, pix).rgb;
+        imageStore(imgOutput, pix, vec4(currColor, 1.0));
+        return;
+    }
+
     vec3 currColor = imageLoad(imgCurrent, pix).rgb;
     float currDepth = imageLoad(imgDepth, pix).r;
 
     vec3 reproj = reproject(pix);
     vec3 historyColor = vec3(0.0);
-    bool validHistory = reproj.z > 0.0;
+    bool validHistory = (reproj.z > 0.0);
 
     if (validHistory) {
         ivec2 historyPix = ivec2(reproj.xy * ubo.resolution);
@@ -86,9 +127,11 @@ void main() {
         }
     }
 
-    float alpha = validHistory ? 0.1 : 1.0;
+    // Use the TAA alpha defined in the new UBO
+    float alpha = validHistory ? ubo.taaAlpha : 1.0;
     vec3 accumColor = mix(historyColor, currColor, alpha);
 
+    // Simple variance clipping (catrom-style)
     vec3 dev = abs(currColor - accumColor);
     accumColor = clamp(accumColor, currColor - 3.0 * dev, currColor + 3.0 * dev);
 

@@ -354,6 +354,43 @@ uint64_t stagingBuffer() noexcept { return reinterpret_cast<uint64_t>(getStaging
 
 VkBuffer getStagingBuffer() noexcept { ensureStagingRing(); return g_stagingRingInstance.buffer; }
 
+// ── NEW: HOST-VISIBLE MAPPING & FLUSH SUPPORT — FOR UBO PERSISTENT ACCESS ──
+void* map(uint64_t handle) noexcept {
+    auto it = s_buffers.find(handle);
+    if (it == s_buffers.end()) {
+        LOG_WARNING("BufferManager::map — Invalid handle {:#x}", handle);
+        return nullptr;
+    }
+    if (!it->second.mapped) {
+        LOG_WARNING("BufferManager::map — Handle {:#x} is not host-visible (device-local buffer)", handle);
+        return nullptr;
+    }
+    return it->second.mapped;
+}
+
+void flush(uint64_t handle) noexcept {
+    auto it = s_buffers.find(handle);
+    if (it == s_buffers.end()) {
+        LOG_WARNING("BufferManager::flush — Invalid handle {:#x}", handle);
+        return;
+    }
+    if (!it->second.mapped) {
+        // Device-local: no flush needed
+        return;
+    }
+
+    // Flush the range for coherence (safe even if already coherent)
+    VkMappedMemoryRange range{};
+    range.sType  = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    range.memory = it->second.memory;
+    range.offset = it->second.offset;
+    range.size   = VK_WHOLE_SIZE;  // Or it->second.size for precision
+
+    if (vkFlushMappedMemoryRanges(stone_device(), 1, &range) != VK_SUCCESS) {
+        LOG_ERROR("BufferManager::flush — Failed for handle {:#x}", handle);
+    }
+}
+
 // ── LIFECYCLE ──
 void destroy(uint64_t handle) noexcept {
     s_buffers.erase(handle);

@@ -1605,6 +1605,24 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
     const VkBufferUsageFlags ssboUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
+    // Prepare default UBO data to avoid garbage/initial black screen
+    DreamUBO defaultDream{};
+    TonemapUBO defaultTonemap{};
+
+    // Set essential defaults to prevent off-screen rendering or invalid state
+    defaultDream.resolution = glm::vec2(1920.0f, 1080.0f);  // Match shader expectation
+    defaultDream.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    defaultDream.proj = glm::perspective(glm::radians(60.0f), 1920.0f / 1080.0f, 0.1f, 100.0f);
+    defaultDream.invView = glm::inverse(defaultDream.view);
+    defaultDream.invProj = glm::inverse(defaultDream.proj);
+    defaultDream.camPos = glm::vec4(0.0f, 0.0f, 5.0f, 1.0f);
+    defaultDream.enableTAA = 1;  // Ensure TAA is on by default if needed
+    defaultDream.taaAlpha = 0.1f;
+
+    defaultTonemap.exposure = 1.0f;
+    defaultTonemap.enabled = 1;
+    defaultTonemap.type = 0;  // ACES
+
     for (uint32_t i = 0; i < frames; ++i)
     {
         // DreamUBO — host-visible, persistently mapped
@@ -1612,22 +1630,40 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
         if (!uniformBufferEncs_[i]) {
             LOG_FATAL("Failed to create DreamUBO {} — THE EMPIRE CANNOT DREAM", i);
         }
+        // Immediately populate with defaults to avoid black screen from garbage data
+        if (auto* ptr = BufferManager::map(uniformBufferEncs_[i])) {
+            std::memcpy(ptr, &defaultDream, sizeof(DreamUBO));
+            BufferManager::flush(uniformBufferEncs_[i]);  // Ensure coherent if needed
+        } else {
+            LOG_ERROR("Failed to map/initialize DreamUBO[{}] — potential black screen risk", i);
+        }
 
         // TonemapUBO — host-visible, persistently mapped
         tonemapUniformEncs_[i] = BufferManager::createTonemapUBO(std::format("TonemapUBO[{}]", i));
         if (!tonemapUniformEncs_[i]) {
             LOG_FATAL("Failed to create TonemapUBO {}", i);
         }
+        // Immediately populate with defaults
+        if (auto* ptr = BufferManager::map(tonemapUniformEncs_[i])) {
+            std::memcpy(ptr, &defaultTonemap, sizeof(TonemapUBO));
+            BufferManager::flush(tonemapUniformEncs_[i]);
+        } else {
+            LOG_ERROR("Failed to map/initialize TonemapUBO[{}] — tonemapping may fail", i);
+        }
 
-        // Device-local SSBOs
+        // Device-local SSBOs (no initial data needed, will be updated later)
         materialBufferEncs_[i]  = BufferManager::create(materialBufferSize(), ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Materials");
         dimensionBufferEncs_[i] = BufferManager::create(256, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "DimensionData");
+
+        if (!materialBufferEncs_[i] || !dimensionBufferEncs_[i]) {
+            LOG_ERROR("Failed to create SSBO for frame {} — materials/dimensions may be invalid", i);
+        }
     }
 
-    // DO NOT populate here — commandBuffers_ not created yet!
-    // First real frame will write correct data via updateUniformBuffer/updateTonemapUniform
+    // Note: Full updates still happen per-frame via updateUniformBuffer/updateTonemapUniform
+    // But defaults ensure no initial garbage -> black/undefined screen
 
-    LOG_AMOURANTH("DREAM & TONEMAP UBOs UPGRADED — PERSISTENTLY MAPPED — ENCRYPTIE BOI MODE — PULSING PINK VOID — SASQUATCH IS STONED AND STRONK");
+    LOG_AMOURANTH("DREAM & TONEMAP UBOs UPGRADED — PERSISTENTLY MAPPED — INITIALIZED WITH DEFAULTS — NO MORE BLACK VOID — SASQUATCH SEES PINK PHOTONS");
 }
 
 void VulkanRenderer::createCommandBuffers() noexcept

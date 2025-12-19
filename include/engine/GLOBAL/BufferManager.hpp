@@ -46,7 +46,7 @@ namespace BufferManager {
         std::string        tag;
         VkDeviceSize       offset        = 0;
         VkDeviceAddress    deviceAddress = 0;
-		void*              mapped        = nullptr;
+        void*              mapped        = nullptr;
     };
 
     [[nodiscard]] VkBuffer getMainPoolBuffer() noexcept;
@@ -82,6 +82,11 @@ namespace BufferManager {
     [[nodiscard]] uint64_t stagingBuffer() noexcept;
 
     void ensureStagingRing() noexcept;
+
+    // ── NEW: HOST-VISIBLE MAPPING & FLUSH SUPPORT — FOR UBO PERSISTENT ACCESS ──
+    [[nodiscard]] void* map(uint64_t handle) noexcept;
+    void flush(uint64_t handle) noexcept;
+    void unmap(uint64_t handle) noexcept;  // No-op for persistent maps
 
     void destroy(uint64_t handle) noexcept;
     void purge_all() noexcept;
