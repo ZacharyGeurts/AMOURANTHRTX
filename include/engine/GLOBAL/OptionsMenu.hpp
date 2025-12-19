@@ -15,7 +15,7 @@ namespace Options {
 
 // ── CURRENT PRESET ───────────────────────────────────────────────────────────
 enum class Preset { BestQuality, UncappedPerformance };
-constexpr Preset CURRENT_PRESET = Preset::UncappedPerformance;
+constexpr Preset CURRENT_PRESET = Preset::BestQuality;
 
 // ── SPLASH SCREEN ────────────────────────────────────────────────────────────
 namespace Splash {

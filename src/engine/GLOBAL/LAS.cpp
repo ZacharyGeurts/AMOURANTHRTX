@@ -79,16 +79,18 @@ static void createForcedPinkBillboard() noexcept
 
     LOG_AMOURANTH("FORGING SACRED PINK FULL-SCREEN BILLBOARD — THE EMPIRE DEMANDS LIGHT — NO BLACK VOID");
 
-    // Full-screen quad in NDC space (no transform needed)
+    // Full vertex matching MeshLoader::Mesh::Vertex
     struct Vertex {
         float pos[3];
+        float normal[3];
+        float uv[2];
     };
 
     Vertex vertices[4] = {
-        {{-1.0f, -1.0f, 0.0f}},
-        {{-1.0f,  1.0f, 0.0f}},
-        {{ 1.0f,  1.0f, 0.0f}},
-        {{ 1.0f, -1.0f, 0.0f}}
+        {{-1.0f, -1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f}},
+        {{-1.0f,  1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f}},
+        {{ 1.0f,  1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {1.0f, 0.0f}},
+        {{ 1.0f, -1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {1.0f, 1.0f}}
     };
 
     uint32_t indices[6] = {0, 1, 2, 0, 2, 3};
@@ -96,7 +98,6 @@ static void createForcedPinkBillboard() noexcept
     VkDeviceSize vertexSize = sizeof(Vertex) * 4;
     VkDeviceSize indexSize  = sizeof(uint32_t) * 6;
 
-    // Create device-local buffers
     g_forcedPinkVertexBuffer = BufferManager::create(vertexSize,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "ForcedPink_Vertices");
@@ -105,11 +106,9 @@ static void createForcedPinkBillboard() noexcept
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "ForcedPink_Indices");
 
-    // Upload via staging
     BufferManager::uploadToBuffer(g_forcedPinkVertexBuffer, vertices, vertexSize);
     BufferManager::uploadToBuffer(g_forcedPinkIndexBuffer, indices, indexSize);
 
-    // Add as mesh (transform identity)
     g_meshes.push_back({
         .vertexBuffer = g_forcedPinkVertexBuffer,
         .indexBuffer  = g_forcedPinkIndexBuffer,
@@ -119,9 +118,9 @@ static void createForcedPinkBillboard() noexcept
     });
 
     g_forcedPinkCreated = true;
-    g_firstBuildDone = false;  // Force rebuild
+    g_firstBuildDone = false;
 
-    LOG_SUCCESS_CAT("LAS", "SACRED PINK BILLBOARD FORGED — FULL-SCREEN — THE VOID IS BANISHED");
+    LOG_SUCCESS_CAT("LAS", "SACRED PINK BILLBOARD FORGED — FULL VERTEX — LIGHT GUARANTEED");
 }
 
 } // anonymous namespace

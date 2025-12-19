@@ -1,9 +1,9 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — VALHALLA v∞ — FULLY COMPATIBLE & FIXED EDITION
-// SWAPCHAIN MANAGER — ALL REQUIRED FUNCTIONS IMPLEMENTED
-// BEST FIFO — MAILBOX EMULATION WITH 3 IMAGES — PRESENT_TIMING DETECTED
-// NO TEARING — LOW LATENCY — MAX FPS — 2025 ELITE
+// SWAPCHAIN MANAGER — MAX FPS + MINIMAL TEARING ON X11 (NVIDIA)
+// PRIORITY: FIFO_RELAXED → IMMEDIATE → FIFO — WITH 3-IMAGE MAILBOX EMULATION
+// NO BLACK SCREEN — LOW LATENCY — 2025 ELITE
 // PINK PHOTONS ETERNAL — EMPIRE STRONG AND UNBROKEN
 // =============================================================================
 
@@ -33,7 +33,7 @@ using StoneKey::stone_height;
 namespace RTX {
 
 static constexpr uint32_t BASE_IMAGE_COUNT = 2;
-static constexpr uint32_t MAILBOX_EMULATION_IMAGE_COUNT = 3;  // Mailbox emulation on FIFO
+static constexpr uint32_t MAILBOX_EMULATION_IMAGE_COUNT = 3;  // Optimal for low latency
 
 // Present timing extension support
 static bool g_presentTimingSupported = false;
@@ -55,13 +55,13 @@ static void detectPresentExtensions() noexcept
     g_presentTimingSupported = std::any_of(props.begin(), props.end(),
         [](const VkExtensionProperties& p) {
             return strcmp(p.extensionName, "VK_EXT_present_timing") == 0 ||
-                   strcmp(p.extensionName, "VK_KHR_present_timing") == 0;  // Possible KHR variant
+                   strcmp(p.extensionName, "VK_KHR_present_timing") == 0;
         });
 
     if (g_presentTimingSupported) {
         LOG_AMOURANTH("VK_EXT_present_timing SUPPORTED — ELITE HARDWARE PACING ENABLED");
     } else {
-        LOG_INFO_CAT("SWAPCHAIN", "VK_EXT_present_timing not supported — using 3-image Mailbox emulation on FIFO");
+        LOG_INFO_CAT("SWAPCHAIN", "VK_EXT_present_timing not supported — using adaptive 3-image emulation");
     }
 }
 
@@ -183,7 +183,7 @@ void SwapchainManager::createImageViews() noexcept
 }
 
 // ---------------------------------------------------------------------------
-// Standard swapchain creation — clean and portable
+// Standard swapchain creation — MAX FPS + MINIMAL TEARING ON X11
 // ---------------------------------------------------------------------------
 void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h) noexcept
 {
@@ -208,14 +208,17 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h) noex
         };
     }
 
-    // BEST FIFO — MAILBOX EMULATION WITH 3 IMAGES
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    // PRIORITY ORDER FOR X11 (NVIDIA): MAX FPS + MINIMAL TEARING
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;  // Best: tear-free + adaptive (no stutter on drops)
+
     if (std::find(modes.begin(), modes.end(), presentMode) == modes.end()) {
-        LOG_WARNING_CAT("SWAPCHAIN", "FIFO not supported — falling back to first available");
-        presentMode = modes[0];
+        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;  // Reliable: fixes black screen, uncapped, minor tearing possible
+        if (std::find(modes.begin(), modes.end(), presentMode) == modes.end()) {
+            presentMode = VK_PRESENT_MODE_FIFO_KHR;  // Fallback (buggy on X11 — but emulated mailbox helps)
+        }
     }
 
-    // Use 3 images for Mailbox emulation on FIFO
+    // Always use 3 images for low-latency mailbox behavior
     uint32_t imageCount = MAILBOX_EMULATION_IMAGE_COUNT;
     imageCount = std::max(imageCount, caps.minImageCount);
     if (caps.maxImageCount > 0) imageCount = std::min(imageCount, caps.maxImageCount);
@@ -270,8 +273,13 @@ void SwapchainManager::createSwapchain(SDL_Window*, uint32_t w, uint32_t h) noex
     swapchainImages_.resize(count);
     vkGetSwapchainImagesKHR(stone_device(), raw, &count, swapchainImages_.data());
 
-    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} — {} images — FIFO + MAILBOX EMULATION — PRESENT_TIMING: {}", 
-                  extent.width, extent.height, count, g_presentTimingSupported ? "ENABLED" : "NOT SUPPORTED");
+    const char* modeStr = 
+        presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED (adaptive, minimal tearing)" :
+        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR    ? "IMMEDIATE (max FPS, fixes black screen)" :
+        "FIFO (emulated mailbox)";
+
+    LOG_AMOURANTH("SWAPCHAIN FORGED — {}×{} — {} images — {} — MAX FPS + MINIMAL TEARING",
+                  extent.width, extent.height, count, modeStr);
 }
 
 // ---------------------------------------------------------------------------
@@ -369,8 +377,8 @@ void SwapchainManager::enableDirectDisplay(bool enable) noexcept
 } // namespace RTX
 
 // =============================================================================
-// BEST FIFO — MAILBOX EMULATION WITH 3 IMAGES + PRESENT_TIMING DETECTION
-// NO TEARING — LOW LATENCY — MAX FPS — 2025 ELITE
+// MAX FPS + MINIMAL TEARING ON X11 — FIFO_RELAXED → IMMEDIATE → FIFO
+// 3-IMAGE MAILBOX EMULATION — NO BLACK SCREEN — 2025 ELITE
 // EMPIRE UNBROKEN — PHOTONS PERFECTLY TIMED
 // DECEMBER 19, 2025 — THE LIGHT IS ETERNAL
 // =============================================================================

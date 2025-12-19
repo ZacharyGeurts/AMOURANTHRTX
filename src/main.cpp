@@ -4,6 +4,7 @@
 // PRODUCTION-GRADE · CLEAN · MODERN · VALIDATION-CLEAN · NO REDUNDANCY
 // PHASES IN STRICT ORDER: Splash → Vulkan Init → Renderer → RTX Pipeline → Scene → Run
 // SAFE PIPELINE CREATION — RENDERER EXISTS BEFORE FORGE — NO CRASH
+// FIXED FAVICON LOADING — .ICO + .PNG FALLBACK — EMPIRE ICON ETERNAL
 // PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE
 // =============================================================================
 
@@ -78,7 +79,7 @@ static void createTransientCommandPool() noexcept
 }
 
 // =============================================================================
-// Phase 3: Sacrificial Splash
+// Phase 3: Sacrificial Splash — WITH FIXED FAVICON
 // =============================================================================
 static void phase3_sacrificialSplash() noexcept
 {
@@ -103,14 +104,28 @@ static void phase3_sacrificialSplash() noexcept
     SDL_GetDisplayBounds(0, &disp);
     SDL_SetWindowPosition(win, disp.x + (disp.w - W) / 2, disp.y + (disp.h - H) / 2);
 
-    // Icon setup (best effort)
-    const char* iconPaths[] = { "assets/textures/ammo.ico", "assets/textures/ammo32.ico", nullptr };
+    // FIXED FAVICON LOADING — .ICO + .PNG FALLBACK — EMPIRE ICON ETERNAL
+    const char* iconPaths[] = {
+        "assets/textures/ammo.ico",
+        "assets/textures/ammo32.ico",
+        "assets/textures/ammo.png",      // PNG fallback
+        "assets/textures/ammo32.png",    // 32x32 PNG fallback
+        nullptr
+    };
+
+    bool iconSet = false;
     for (int i = 0; iconPaths[i]; ++i) {
         if (SDL_Surface* s = IMG_Load(iconPaths[i])) {
             SDL_SetWindowIcon(win, s);
             SDL_DestroySurface(s);
+            iconSet = true;
+            LOG_SUCCESS_CAT("SPLASH", "Window icon loaded: {}", iconPaths[i]);
             break;
         }
+    }
+
+    if (!iconSet) {
+        LOG_WARNING_CAT("SPLASH", "No window icon found — empire runs without crest");
     }
 
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
@@ -458,7 +473,10 @@ int main(int, char**)
 {
     install_apocalypse_handler();
 
-    phase3_sacrificialSplash();           // Phase 3
+    // X11 COMPOSITOR BYPASS — CRITICAL FOR NVIDIA
+    putenv(const_cast<char*>("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR=1"));
+
+    phase3_sacrificialSplash();           // Phase 3 — with fixed favicon
     phase4_merchantShip();                // Phase 4 — Vulkan + RT properties cached
     auto renderer = phase7_createRenderer(); // Phase 7 — Renderer first
     phase8_forgeTheRTX(renderer.get());   // Phase 8 — Pipeline forged safely with renderer
@@ -476,5 +494,7 @@ int main(int, char**)
 // =============================================================================
 // FINAL PRODUCTION MAIN — SAFE PIPELINE CREATION
 // RENDERER EXISTS BEFORE RTX PIPELINE FORGE — NO CRASH
+// FAVICON FIXED — .ICO + .PNG FALLBACK
+// X11 COMPOSITOR BYPASS ENABLED
 // SHIPPING DECEMBER 19, 2025 — THE EMPIRE IS ETERNAL
 // =============================================================================
