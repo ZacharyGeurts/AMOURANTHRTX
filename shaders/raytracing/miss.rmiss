@@ -1,17 +1,21 @@
+// shaders/raytracing/miss.rmiss
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — STANDARD MISS SHADER — v19.3 — DECEMBER 18, 2025
+// SKY GRADIENT — VOID PINK — EMPIRE ETERNAL (UNCHANGED)
+// =============================================================================
+
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-layout(location = 0) rayPayloadInEXT vec3 payload;
-layout(set = 0, binding = 7) uniform sampler2D envMap;
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
+layout(location = 1) rayPayloadEXT bool hitSomething;
 
-void main()
-{
+void main() {
     vec3 dir = normalize(gl_WorldRayDirectionEXT);
 
-    float theta = atan(dir.z, dir.x);
-    float phi   = asin(dir.y);
-    vec2 uv = vec2(theta, phi) * vec2(0.1591f, 0.3183f) + 0.5f;
-    uv.y = 1.0f - uv.y;
+    // Simple sky gradient
+    vec3 sky = mix(vec3(0.5, 0.7, 1.0), vec3(1.0, 1.0, 1.0), dir.y * 0.5 + 0.5);
 
-    payload = texture(envMap, uv).rgb;
+    hitValue = sky;
+    hitSomething = false;
 }

@@ -1,14 +1,57 @@
-#version 460 core
+// shaders/raytracing/raygen.rgen
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — STANDARD RAYGEN SHADER — v19.3 — DECEMBER 18, 2025
+// FIXED: gl_LaunchIDEXT FOR PIXEL COORDS — NO GLOBAL INVOCATION IN RT STAGES
+// PINK PHOTONS LAUNCH ETERNAL
+// =============================================================================
+
+#version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_scalar_block_layout : require
 
-// Payload (not used, but required)
-layout(location = 0) rayPayloadEXT vec3 payload;
+layout(location = 0) rayPayloadEXT vec3 hitValue;
 
-// RT output image – binding 1 (matches your rtOutputViews)
-layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D outColor;
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 1, set = 0, rgba8) writeonly uniform image2D image;
 
-void main()
-{
-    // Pure hot pink — no ray tracing, no envmap, no nothing
-    imageStore(outColor, ivec2(gl_LaunchIDEXT.xy), vec4(1.0, 0.0, 0.8, 1.0));
+layout(binding = 0, set = 0, scalar) readonly buffer Vertices { vec4 v[]; } vertices;  // vec4 for 16-byte align
+layout(binding = 1, set = 0, scalar) readonly buffer Indices { uint i[]; } indices;
+
+struct RayDesc {
+    vec3 origin;
+    float TMin;
+    vec3 direction;
+    float TMax;
+};
+
+layout(push_constant) uniform PushConstants {
+    uint frame;
+    vec2 resolution;
+    mat4 view;
+    mat4 proj;
+    mat4 invViewProj;
+} pushConstants;
+
+vec3 getRayDir(vec2 fragCoord) {
+    vec2 uv = (fragCoord + 0.5) / pushConstants.resolution;
+    vec4 target = pushConstants.invViewProj * vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+    return normalize(target.xyz);
+}
+
+void main() {
+    ivec2 idx = ivec2(gl_LaunchIDEXT.xy);  // RT built-in: launch ID for pixel coords
+    vec2 fragCoord = vec2(idx);
+
+    if (fragCoord.x >= pushConstants.resolution.x || fragCoord.y >= pushConstants.resolution.y) {
+        return;
+    }
+
+    vec3 rayOrigin = (pushConstants.view * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    vec3 rayDir = getRayDir(fragCoord);
+
+    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0,
+                rayOrigin, 0.001, rayDir, 100.0,
+                0);
+
+    imageStore(image, idx, vec4(hitValue, 1.0));
 }

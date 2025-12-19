@@ -1,155 +1,132 @@
-// shaders/compute/tonemap.comp — FINAL 2026 EDITION — DECEMBER 18, 2025
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 — TONEMAP v∞ TURBO — PURE FINAL COMPOSITION
-// HDR → LDR — AUTOEXPOSURE — BLOOM/VIGNETTE/GRAIN/FILMIC/ACES/REINHARD
-// NEW: GENERATED NORMAL ENV HDR FALLBACK — SOFT BLUE SKY + SUN + GROUND
-// SOLID COLOR MODE (PINK VOID) VIA PUSH CONSTANT
-// NO EXTERNAL TEXTURE DEPENDENCY — ALWAYS WORKS — PINK PHOTONS ETERNAL
-// =============================================================================
+#version 460
 
-#version 460 core
-#extension GL_EXT_scalar_block_layout : require
-#extension GL_ARB_gpu_shader_int64 : require
-#extension GL_EXT_control_flow_attributes : require
+layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 5, rgba16f) uniform readonly image2D imgInput;  // Free binding in set 0 (RT uses 0-4,6-11,31)
+layout(set = 0, binding = 12, rgba16f) uniform writeonly image2D imgOutput;  // Free binding
+layout(set = 0, binding = 13, std140) uniform TonemapUBO {  // Free binding for post-process UBO
+    float     exposure;
+    uint      type;              // 0=ACES, 1=Filmic, 2=Reinhard
+    uint      enabled;
+    float     nexusScore;
+    uint      frame;
+    uint      spp;
+    
+    float     gamma;
+    float     bloomThreshold;
+    float     bloomIntensity;
+    float     vignetteIntensity;
+    float     filmGrainStrength;
+    float     lensFlareIntensity;
+    
+    float     _pad[2];
+} ubo;
 
-layout(set = 0, binding = 0) uniform sampler2D hdrInput;           // HDR source (RT output, accumulation, or fallback)
-layout(set = 0, binding = 1, rgba16f) writeonly uniform image2D ldrOutput; // Final swapchain output
-
-layout(set = 0, binding = 2, scalar) uniform TonemapParams {
-    float  exposure;           // Final exposure multiplier
-    uint   operatorType;       // 0 = ACES, 1 = Filmic, 2 = Reinhard
-    uint   enableTonemap;      // 1 = apply, 0 = bypass
-    float  nexusScore;         // 0.0–1.0 adaptive brightness
-    float  bloomThreshold;     // Bloom extraction threshold
-    float  bloomIntensity;     // Bloom blend strength
-    float  vignetteIntensity;  // Edge darkening
-    float  filmGrainStrength;  // Noise overlay
-    float  gamma;              // Output gamma
-    uint   frame;              // For temporal effects
-    uint   _pad0;
-    uint   _pad1;
-} params;
-
-// Push constant — controls render mode and overrides
-layout(push_constant) uniform PushConstants {
-    vec4   solidColor;         // w > 0.999 → force solid color (pink void)
-    uint   envMode;            // 0 = use hdrInput, 1 = generated normal env HDR
-    float  _pad2;
-    uint   debugMode;          // Future use
-} push;
-
-// ── GENERATED NORMAL ENVIRONMENT HDR — SOFT BLUE SKY + SUN + GROUND ────────
-vec3 normalEnvHDR(vec3 dir)
-{
-    // Normalize direction
-    dir = normalize(dir);
-
-    // Sky gradient — soft blue
-    float skyFactor = max(dir.y, 0.0);
-    vec3 skyColor = mix(vec3(0.35, 0.45, 0.65), vec3(0.6, 0.8, 1.0), skyFactor * skyFactor);
-
-    // Ground — subtle brown/gray
-    float groundFactor = max(-dir.y, 0.0);
-    vec3 groundColor = vec3(0.4, 0.35, 0.3) * groundFactor;
-
-    // Sun — bright directional light
-    vec3 sunDir = normalize(vec3(0.3, 0.8, 0.4));
-    float sun = pow(max(dot(dir, sunDir), 0.0), 256.0) * 30.0;
-
-    return skyColor + groundColor + vec3(1.0) * sun;
+// Simple inline film grain noise (no external include needed)
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// ── FAST TONEMAPPERS ───────────────────────────────────────────────────────
-vec3 tonemapACES(vec3 x)
-{
-    const float a = 2.51f;
-    const float b = 0.03f;
-    const float c = 2.43f;
-    const float d = 0.59f;
-    const float e = 0.14f;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f);
+float noise(vec2 uv) {
+    vec2 i = floor(uv), f = fract(uv);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
-vec3 tonemapFilmic(vec3 x)
-{
-    x = max(vec3(0.0f), x - 0.004f);
-    return (x * (6.2f * x + 0.5f)) / (x * (6.2f * x + 1.7f) + 0.06f);
+float filmGrain(vec2 uv, uint frame) {
+    return noise(uv * 100.0 + float(frame) * 0.01) * 2.0 - 1.0;
 }
 
-vec3 tonemapReinhard(vec3 x)
-{
-    return x / (x + vec3(1.0f));
+// Tonemapping operators — EMPIRE FILMIC ETERNAL
+vec3 reinhard(vec3 x) {
+    return x / (1.0 + x);
 }
 
-void main()
-{
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size  = imageSize(ldrOutput);
+vec3 filmic(vec3 x) {
+    // Uncharted 2 approximation
+    const float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
 
-    if (any(greaterThanEqual(coord, size))) return;
+vec3 aces(vec3 x) {
+    // ACES Filmic Curve
+    const mat3 ACES_INPUT = mat3(
+        0.59719, 0.07600, 0.02840,
+        0.35458, 0.90834, 0.13383,
+        0.04823, 0.01566, 0.83777
+    );
+    const mat3 ACES_OUTPUT = mat3(
+        1.60475, -0.10208, -0.00327,
+        -0.53108,  1.10813, -0.07276,
+        -0.07367, -0.00605,  1.07795
+    );
+    x = ACES_INPUT * x;
+    x = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+    return ACES_OUTPUT * x;
+}
 
-    vec3 hdrColor;
+// Bloom: threshold-based intensity boost
+vec3 applyBloom(vec3 color) {
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    float bloom = smoothstep(ubo.bloomThreshold - 0.5, ubo.bloomThreshold + 0.5, luma);
+    return color + color * bloom * ubo.bloomIntensity;
+}
 
-    // ── GENERATED NORMAL ENV HDR MODE ───────────────────────────────────────
-    if (push.envMode == 1u) {
-        // Equirectangular projection
-        vec2 uv = (vec2(coord) + 0.5f) / vec2(size);
-        float longitude = uv.x * 2.0 * 3.14159265;
-        float latitude  = uv.y * 3.14159265;
+// Vignette: radial falloff
+float applyVignette(vec2 uv) {
+    vec2 center = uv - 0.5;
+    float dist = length(center);
+    return 1.0 - ubo.vignetteIntensity * dist * dist;
+}
 
-        vec3 dir = vec3(
-            sin(latitude) * cos(longitude),
-            cos(latitude),
-            sin(latitude) * sin(longitude)
-        );
-
-        hdrColor = normalEnvHDR(dir);
-    }
-    // ── SOLID COLOR MODE (PURE PINK VOID) ───────────────────────────────────
-    else if (push.solidColor.a > 0.999f) {
-        imageStore(ldrOutput, coord, push.solidColor);
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    vec2 res = vec2(imageSize(imgInput));
+    if (pix.x >= int(res.x) || pix.y >= int(res.y)) {
         return;
     }
-    // ── NORMAL HDR INPUT (RT OUTPUT OR ACCUMULATION) ────────────────────────
-    else {
-        hdrColor = texelFetch(hdrInput, coord, 0).rgb;
+
+    vec2 uv = (vec2(pix) + 0.5) / res;
+
+    if (ubo.enabled == 0u) {
+        vec3 color = imageLoad(imgInput, pix).rgb;
+        imageStore(imgOutput, pix, vec4(color, 1.0));
+        return;
     }
 
-    // Apply exposure
-    hdrColor *= params.exposure;
+    vec3 color = imageLoad(imgInput, pix).rgb;
 
-    // Adaptive brightness from Nexus Score
-    float adaptiveBoost = mix(1.5f, 0.6f, params.nexusScore);
-    hdrColor *= adaptiveBoost;
+    // Exposure adjustment
+    color *= ubo.exposure;
 
-    // ── TONEMAP OPERATOR (branchless) ──────────────────────────────────────
-    vec3 mapped = tonemapReinhard(hdrColor);
-
-    [[flatten]] if (params.operatorType == 1u) mapped = tonemapFilmic(hdrColor);
-    [[flatten]] if (params.operatorType == 0u) mapped = tonemapACES(hdrColor);
-
-    // Bypass if disabled
-    mapped = mix(hdrColor, mapped, float(params.enableTonemap));
-
-    // ── POST EFFECTS ───────────────────────────────────────────────────────
-    // Vignette
-    vec2 uv = (vec2(coord) + 0.5f) / vec2(size);
-    uv = uv * 2.0f - 1.0f;
-    float vignette = 1.0f - params.vignetteIntensity * dot(uv, uv);
-    mapped *= vignette;
-
-    // Film grain
-    if (params.filmGrainStrength > 0.0f) {
-        float noise = fract(sin(dot(vec2(coord), vec2(12.9898f, 78.233f)) + float(params.frame)) * 43758.5453f);
-        noise = (noise - 0.5f) * params.filmGrainStrength;
-        mapped += noise;
+    // Select tonemap operator
+    if (ubo.type == 0u) {
+        color = aces(color);
+    } else if (ubo.type == 1u) {
+        color = filmic(color);
+    } else {
+        color = reinhard(color);  // Default: Reinhard
     }
 
-    // ── FINAL GAMMA CORRECTION ─────────────────────────────────────────────
-    mapped = pow(max(mapped, vec3(0.0f)), vec3(1.0f / params.gamma));
+    // Post-tonemap effects
+    color = applyBloom(color);
+    color *= applyVignette(uv);
 
-    // Store final LDR
-    imageStore(ldrOutput, coord, vec4(clamp(mapped, 0.0f, 1.0f), 1.0f));
+    // Film grain (additive noise scaled by color)
+    if (ubo.filmGrainStrength > 0.0) {
+        float grain = filmGrain(uv * res, ubo.frame) * ubo.filmGrainStrength;
+        color += color * grain * 0.05;  // Subtle scaling
+    }
+
+    // Gamma correction
+    color = pow(clamp(color, 0.0, 1.0), vec3(1.0 / ubo.gamma));
+
+    // Lens flare stub: simple bright boost (expand with samples if needed)
+    if (ubo.lensFlareIntensity > 0.0) {
+        float luma = dot(color, vec3(0.299, 0.587, 0.114));
+        color += vec3(1.0, 0.8, 0.6) * luma * luma * ubo.lensFlareIntensity * 0.1;
+    }
+
+    imageStore(imgOutput, pix, vec4(color, 1.0));
 }
