@@ -1,7 +1,8 @@
 // src/engine/GLOBAL/BufferManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.4 — DECEMBER 18, 2025
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.7 — DECEMBER 19, 2025
 // BUFFERMANAGER — CHUNKED POOL — 1 GiB CHUNKS — DRIVER RESERVE 4.5 GiB — SEAMLESS
+// uploadToBuffer FIXED — USES g_ctx().graphicsFamily() & g_ctx().graphicsQueue()
 // PINK PHOTONS ETERNAL — EMPIRE OWNS THE VRAM — COMPILABLE
 // =============================================================================
 
@@ -131,7 +132,9 @@ void ensureMainPool() noexcept
                            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
                            VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                           VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                           VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                           VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE
         };
 
@@ -336,6 +339,92 @@ uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept
     return handle;
 }
 
+// ── NEW: uploadToBuffer — FORCED PINK BILLBOARD SUPPORT — LAS GUARANTEED LIGHT ──
+void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexcept
+{
+    auto it = s_buffers.find(handle);
+    if (it == s_buffers.end()) {
+        LOG_WARNING("BufferManager::uploadToBuffer — Invalid handle {:#x}", handle);
+        return;
+    }
+
+    const BufferInfo& info = it->second;
+    if (info.size < size) {
+        LOG_WARNING("BufferManager::uploadToBuffer — Data size {} exceeds buffer size {}", size, info.size);
+        return;
+    }
+
+    // Create staging buffer
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory stagingMem = VK_NULL_HANDLE;
+
+    VkBufferCreateInfo bci{};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size = size;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &staging));
+
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(stone_device(), staging, &req);
+
+    VkMemoryAllocateInfo mai{};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &stagingMem));
+    VK_CHECK(vkBindBufferMemory(stone_device(), staging, stagingMem, 0));
+
+    void* mapped;
+    VK_CHECK(vkMapMemory(stone_device(), stagingMem, 0, size, 0, &mapped));
+    memcpy(mapped, data, size);
+    vkUnmapMemory(stone_device(), stagingMem);
+
+    // One-time copy command
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+
+    VkCommandPoolCreateInfo pci{};
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = RTX::g_ctx().graphicsFamily();  // Fixed
+    VK_CHECK(vkCreateCommandPool(stone_device(), &pci, nullptr, &pool));
+
+    VkCommandBufferAllocateInfo cai{};
+    cai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cai.commandPool = pool;
+    cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cai.commandBufferCount = 1;
+    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &cai, &cmd));
+
+    VkCommandBufferBeginInfo cbi{};
+    cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cbi));
+
+    VkBufferCopy copy{};
+    copy.size = size;
+    copy.dstOffset = info.offset;
+    vkCmdCopyBuffer(cmd, staging, info.buffer, 1, &copy);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+    VK_CHECK(vkQueueSubmit(RTX::g_ctx().graphicsQueue(), 1, &si, VK_NULL_HANDLE));  // Fixed
+    VK_CHECK(vkQueueWaitIdle(RTX::g_ctx().graphicsQueue()));  // Fixed
+
+    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+    vkDestroyCommandPool(stone_device(), pool, nullptr);
+    vkDestroyBuffer(stone_device(), staging, nullptr);
+    vkFreeMemory(stone_device(), stagingMem, nullptr);
+
+    LOG_TRACE_CAT("BUFFER", "Uploaded {} bytes to handle {:#x}", size, handle);
+}
+
 // ── MAIN POOL BUFFER ACCESSOR (first chunk — for legacy) ──
 VkBuffer getMainPoolBuffer() noexcept
 {
@@ -497,3 +586,11 @@ void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, Vk
 }
 
 } // namespace BufferManager
+
+// =============================================================================
+// FINAL PRODUCTION BUFFERMANAGER — uploadToBuffer FIXED
+// USES RTX::g_ctx().graphicsFamily() & RTX::g_ctx().graphicsQueue()
+// FORCED PINK SUPPORT — LAS NEVER BLACK
+// EMPIRE UNBROKEN — PHOTONS GUARANTEED
+// DECEMBER 19, 2025 — THE LIGHT IS SECURED
+// =============================================================================

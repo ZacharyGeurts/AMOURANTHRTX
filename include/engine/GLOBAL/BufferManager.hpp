@@ -91,6 +91,7 @@ namespace BufferManager {
     void destroy(uint64_t handle) noexcept;
     void purge_all() noexcept;
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
+	void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexcept;
 
     extern std::unordered_map<uint64_t, BufferInfo> s_buffers;
 

@@ -2,7 +2,8 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — Main Entry Point
 // PRODUCTION-GRADE · CLEAN · MODERN · VALIDATION-CLEAN · NO REDUNDANCY
-// PHASES IN STRICT ORDER: Splash → Vulkan Init → RT Properties → Renderer → RTX Pipeline → Scene → Run
+// PHASES IN STRICT ORDER: Splash → Vulkan Init → Renderer → RTX Pipeline → Scene → Run
+// SAFE PIPELINE CREATION — RENDERER EXISTS BEFORE FORGE — NO CRASH
 // PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE
 // =============================================================================
 
@@ -277,10 +278,15 @@ static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
 }
 
 // =============================================================================
-// Phase 8: Forge RTX Pipeline
+// Phase 8: Forge RTX Pipeline — SAFE (renderer required)
 // =============================================================================
 static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
 {
+    if (!renderer) {
+        LOG_FATAL_CAT("MAIN", "phase8_forgeTheRTX called with null renderer — cannot forge pipeline");
+        phase9_ballerina("Renderer not ready for pipeline forge", std::source_location::current());
+    }
+
     static bool crownWorn = false;
     if (crownWorn) return;
 
@@ -396,7 +402,7 @@ private:
     glm::mat4 proj_;
     std::chrono::steady_clock::time_point lastFrameTime_;
     bool quit_ = false;
-    int currentRenderMode_ = 1;
+    int currentRenderMode_ = 0;  // Start in normal mode (0)
     std::unique_ptr<VulkanRenderer> renderer_;
 };
 
@@ -421,15 +427,11 @@ void Application::run() noexcept
         INPUT.pumpEvents(g_deltaTime, [this](int mode) { currentRenderMode_ = mode; }, stone_window());
 
         // CRITICAL X11 FIX — Force compositor update every frame
-        // Without this, SDL3 + Vulkan on X11 can show black window forever
         SDL_PumpEvents();
 
         if (renderer_ && renderer_->isAlive() && stone_swapchain() != VK_NULL_HANDLE) {
-            const uint32_t frameIndex = renderer_->frameNumber();
-            VkCommandBuffer cmd = renderer_->commandBuffers()[frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT];
-
             if (currentRenderMode_ == 1) {
-                g_mode1.renderFrame(cmd, frameIndex, g_deltaTime);
+                g_mode1.renderFrame(renderer_->commandBuffers()[renderer_->frameNumber() % Options::Performance::MAX_FRAMES_IN_FLIGHT], renderer_->frameNumber(), g_deltaTime);
             } else {
                 renderer_->renderFrame(CAM, g_deltaTime);
             }
@@ -450,7 +452,7 @@ void Application::run() noexcept
 }
 
 // =============================================================================
-// Entry Point — Phases in Order
+// Entry Point — Phases in Order — SAFE PIPELINE CREATION
 // =============================================================================
 int main(int, char**)
 {
@@ -458,8 +460,8 @@ int main(int, char**)
 
     phase3_sacrificialSplash();           // Phase 3
     phase4_merchantShip();                // Phase 4 — Vulkan + RT properties cached
-    auto renderer = phase7_createRenderer(); // Phase 7
-    phase8_forgeTheRTX(renderer.get());   // Phase 8
+    auto renderer = phase7_createRenderer(); // Phase 7 — Renderer first
+    phase8_forgeTheRTX(renderer.get());   // Phase 8 — Pipeline forged safely with renderer
     phase6_loadDefaultCube();             // Phase 6 — scene geometry
 
     stone_seal_final();
@@ -472,6 +474,7 @@ int main(int, char**)
 }
 
 // =============================================================================
-// FINAL PRODUCTION MAIN — CLEAN · ORDERED · REDUNDANCY-FREE
+// FINAL PRODUCTION MAIN — SAFE PIPELINE CREATION
+// RENDERER EXISTS BEFORE RTX PIPELINE FORGE — NO CRASH
 // SHIPPING DECEMBER 19, 2025 — THE EMPIRE IS ETERNAL
 // =============================================================================

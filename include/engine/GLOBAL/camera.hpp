@@ -2,8 +2,8 @@
 // =============================================================================
 // AMOURANTH RTX © 2025 — EXTENDED CAMERA HEADER — FULLY FEATURED
 // NOW WITH: forward(), aperture(), focusDistance(), DOF support
-// INTEGRATED WITH OptionsMenu::Camera — CENTRALIZED CONFIGURATION
-// PURE HEADER — ZERO STONEKEY DEPENDENCY IN INTERFACE
+// CENTRALIZED CONFIGURATION VIA OptionsMenu::Camera
+// PURE HEADER — ZERO STONEKEY DEPENDENCY
 // PINK PHOTONS FLOW WITH DEPTH OF FIELD — THE EMPIRE SEES CLEARLY
 // =============================================================================
 
@@ -20,11 +20,11 @@ public:
     // Singleton access
     [[nodiscard]] static Camera& get() noexcept;
 
-	Camera() = default;
+    Camera() = default;
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
 
-    // Initialization — uses OptionsMenu::Camera defaults
+    // Initialization — uses centralized OptionsMenu defaults
     void init(glm::vec3 pos = {}, 
               float fov = 0.0f,
               float aperture = 0.0f,
@@ -60,12 +60,7 @@ public:
     [[nodiscard]] glm::mat4 view() const noexcept;
     [[nodiscard]] glm::mat4 proj(float aspect) const noexcept;
 
-    // StoneKey-encrypted access (anti-cheat / stream-safe)
-    [[nodiscard]] uint64_t encPos()  const noexcept;
-    [[nodiscard]] uint64_t encView() const noexcept;
-
 private:
-
     mutable std::mutex mtx_;
     std::atomic<uint64_t> gen_{1};
 
@@ -78,25 +73,19 @@ private:
     float fov_              =  75.0f;
 
     // Depth of Field parameters
-    float aperture_         = 16.0f;      // f-stop (lower = more blur)
-    float focusDistance_    = 10.0f;      // distance to focal plane
+    float aperture_         = 16.0f;
+    float focusDistance_    = 10.0f;
 
     mutable glm::mat4 view_{1.0f};
-    mutable uint64_t  encView_{0};
     mutable uint64_t  cachedGen_{0};
 
     void updateVectors() noexcept;
     void ensureCached() const noexcept;
-
-    // Encryption — implemented in .cpp with access to kStone1/kStone2
-    static uint64_t encrypt(const glm::vec3& v, uint64_t g) noexcept;
-    static uint64_t encryptMat4(const glm::mat4& m, uint64_t g) noexcept;
 };
 
 // =============================================================================
-// THE ONE TRUE GLOBAL CAMERA — DEFINED ONCE IN camera.cpp
-// USE: CAM.pos(), CAM.forward(), CAM.aperture(), CAM.focusDistance()
-// ALL BEHAVIOR DRIVEN BY OptionsMenu::Camera
+// THE ONE TRUE GLOBAL CAMERA — ACCESS VIA CAM
+// ALL CONFIG FROM Options::Camera — INITIALIZED AT STARTUP
 // =============================================================================
 
 extern Camera& CAM;

@@ -1,62 +1,17 @@
 // shaders/raytracing/raygen.rgen
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — STANDARD RAYGEN SHADER — v20.1 — DECEMBER 19, 2025
-// FULLY VALIDATION-CLEAN · SCALAR LAYOUT COMPLIANT · NO STRADDLING VECTORS
-// ALL VEC2/VEC3/VEC4 ALIGNED TO 16-BYTE BOUNDARIES
-// MATRICES & VECTORS GROUPED · SCALARS PADDED & ALIGNED
-// PINK PHOTONS LAUNCH ETERNAL — EMPIRE SEES FLAWLESSLY
+// AMOURANTH RTX Engine © 2025 — PURE PINK DEBUG RAYGEN — v21.0 — DECEMBER 19, 2025
+// FORCES SACRED PINK ON EVERY PIXEL — NO RAY TRACING — DIRECT WRITE
+// IF YOU SEE PINK → PIPELINE WORKS. IF BLACK → IMAGE LAYOUT OR BINDING ISSUE
+// PINK PHOTONS ETERNAL — THE EMPIRE SEES COLOR
 // =============================================================================
 
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : require
-#extension GL_EXT_buffer_reference2 : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
+// Only need the output image — no TLAS, no UBO
+layout(binding = 1, set = 0, rgba16f) uniform writeonly image2D rtOutput;
 
-layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, set = 0, rgba16f) writeonly uniform image2D rtOutput;
-
-// Main DreamUBO — scalar layout compliant
-layout(binding = 3, set = 0, scalar) uniform DreamUBO {
-    // Matrices — 64 bytes each, naturally 16-byte aligned
-    mat4 view;
-    mat4 proj;
-    mat4 invView;
-    mat4 invProj;
-    mat4 invViewProj;
-
-    // Vectors — 16-byte aligned
-    vec4 camPos;        // offset 320
-
-    vec2 resolution;    // offset 336
-    vec2 jitter;        // offset 344
-    vec2 jitterPrev;    // offset 352
-
-    // Scalars — uint/float are 4 bytes, grouped to avoid straddling
-    uint frame;                 // offset 360
-    uint currentSpp;            // offset 364
-    uint totalSpp;              // offset 368
-    float exposure;             // offset 372
-
-    uint enableEnvMap;          // offset 376
-    uint hypertraceEnabled;     // offset 380
-    uint denoisingEnabled;      // offset 384
-    uint adaptiveEnabled;       // offset 388
-
-    uint debugMode;             // offset 392
-    float nexusScoreThreshold;  // offset 396
-    float hypertraceJitterScale;// offset 400
-
-    // Padding to ensure next field (if added) starts on 16-byte boundary
-    uint _pad0;                 // offset 404
-    uint _pad1;                 // offset 408
-    uint _pad2;                 // offset 412
-    uint _pad3;                 // offset 416 — total size now multiple of 16
-} dream;
-
-// Push constants — 32 bytes max (safe and portable)
 layout(push_constant) uniform PushConstants {
     uint frame;
     vec2 resolution;
@@ -64,40 +19,18 @@ layout(push_constant) uniform PushConstants {
     float jitterY;
 } push;
 
-vec3 getCameraRayDirection(vec2 fragCoord)
-{
-    vec2 uv = (fragCoord + vec2(push.jitterX, push.jitterY) + 0.5) / push.resolution;
-    vec4 target = dream.invViewProj * vec4(uv * 2.0 - 1.0, 0.0, 1.0);
-    return normalize(target.xyz);
-}
-
 void main()
 {
-    const ivec2 launchID = ivec2(gl_LaunchIDEXT.xy);
-    const vec2 fragCoord = vec2(launchID);
+    ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
 
-    if (fragCoord.x >= push.resolution.x || fragCoord.y >= push.resolution.y) {
+    // Safety bounds check
+    if (pixel.x >= int(push.resolution.x) || pixel.y >= int(push.resolution.y)) {
         return;
     }
 
-    const vec3 origin    = dream.camPos.xyz;
-    const vec3 direction = getCameraRayDirection(fragCoord);
+    // SACRED PINK — FULL INTENSITY
+    vec4 sacredPink = vec4(1.0, 0.0, 0.5, 1.0);  // Hot pink — impossible to miss
 
-    hitValue = vec3(0.0, 0.0, 0.15); // Default miss (deep navy void)
-
-    traceRayEXT(
-        topLevelAS,
-        gl_RayFlagsOpaqueEXT,
-        0xFF,
-        0,  // sbtRecordOffset
-        0,  // sbtRecordStride
-        0,  // missIndex
-        origin,
-        0.001,
-        direction,
-        10000.0,
-        0   // payload
-    );
-
-    imageStore(rtOutput, launchID, vec4(hitValue, 1.0));
+    // Direct write — no ray tracing needed
+    imageStore(rtOutput, pixel, sacredPink);
 }

@@ -351,98 +351,103 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     // RENDER MODE DISPATCH
     if (activeRenderMode_ == 1) {
-        // Pure pink void mode
-        // (implementation unchanged)
-        goto submit_frame;
-    }
+        // PURE PINK VOID MODE — FORCE SACRED PINK VIA BLIT FROM RT OUTPUT (CLEARED TO PINK)
+        VkClearColorValue sacredPink{{1.0f, 0.0f, 0.5f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    // Full RTX path
-    updateUniformBuffer(slot, camera, deltaTime);
-    updateTonemapUniform(slot);
-    currentFrame_.store(slot);
+        // Clear RT output to sacred pink
+        vkCmdClearColorImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_GENERAL, &sacredPink, 1, &range);
+    } else {
+        // Full RTX path
+        updateUniformBuffer(slot, camera, deltaTime);
+        updateTonemapUniform(slot);
+        currentFrame_.store(slot);
 
-    // Update RT descriptors
-    {
-        RTX::RTDescriptorUpdate desc{};
-        desc.tlas = RTX::las().getCurrentTLAS();
-        if (!desc.tlas) desc.tlas = pipelineManager_.dummyTLAS();
+        // Update RT descriptors
+        {
+            RTX::RTDescriptorUpdate desc{};
+            desc.tlas = RTX::las().getCurrentTLAS();
+            if (!desc.tlas) desc.tlas = pipelineManager_.dummyTLAS();
 
-        desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
-        desc.uboSize = sizeof(DreamUBO);
-        desc.rtOutputView = rtOutputViews_[slot].get();
+            desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
+            desc.uboSize = sizeof(DreamUBO);
+            desc.rtOutputView = rtOutputViews_[slot].get();
 
-        if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
-            desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
-        }
-
-        if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_ != VK_NULL_HANDLE) {
-            desc.nexusScoreViews = { hypertraceScoreView_, hypertraceScoreView_ };
-        }
-
-        if (!materialBufferEncs_.empty()) {
-            const auto* matBuf = BufferManager::get(materialBufferEncs_[0]);
-            if (matBuf) {
-                desc.materialsBuffer = matBuf->buffer;
-                desc.materialsSize = materialBufferSize();
+            if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
+                desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
             }
+
+            if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_ != VK_NULL_HANDLE) {
+                desc.nexusScoreViews = { hypertraceScoreView_, hypertraceScoreView_ };
+            }
+
+            if (!materialBufferEncs_.empty()) {
+                const auto* matBuf = BufferManager::get(materialBufferEncs_[0]);
+                if (matBuf) {
+                    desc.materialsBuffer = matBuf->buffer;
+                    desc.materialsSize = materialBufferSize();
+                }
+            }
+
+            if (Options::Environment::ENABLE_ENV_MAP && pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
+                desc.envSampler = pipelineManager_.envMapSampler_.get();
+                desc.envImageView = pipelineManager_.envMapImageView_.get();
+            }
+
+            pipelineManager_.updateRTDescriptorSet(slot, desc);
         }
 
-        if (Options::Environment::ENABLE_ENV_MAP && pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
-            desc.envSampler = pipelineManager_.envMapSampler_.get();
-            desc.envImageView = pipelineManager_.envMapImageView_.get();
+        recordRayTracingCommands(cmd, slot);
+
+        if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
+            recordAccumulationPass(cmd, slot);
         }
 
-        pipelineManager_.updateRTDescriptorSet(slot, desc);
+        if (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_) {
+            updateDenoiserDescriptors();
+            performDenoisingPass(cmd);
+        }
+
+        if (Options::Tonemap::ENABLE_TONEMAPPING && tonemapEnabled_) {
+            VkImageView input = (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
+                                ? denoiserView_.get()
+                                : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[slot].get() : rtOutputViews_[slot].get());
+
+            updateTonemapDescriptor(slot, input, stone_views()[imageIndex]);
+            performTonemapPass(cmd, slot, imageIndex);
+        }
     }
 
-    recordRayTracingCommands(cmd, slot);
-
-    if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
-        recordAccumulationPass(cmd, slot);
-    }
-
-    if (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_) {
-        updateDenoiserDescriptors();
-        performDenoisingPass(cmd);
-    }
-
-    if (Options::Tonemap::ENABLE_TONEMAPPING && tonemapEnabled_) {
-        VkImageView input = (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
-                            ? denoiserView_.get()
-                            : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[slot].get() : rtOutputViews_[slot].get());
-
-        updateTonemapDescriptor(slot, input, stone_views()[imageIndex]);
-        performTonemapPass(cmd, slot, imageIndex);
-    }
-
-    // FINAL DEBUG — COPY SACRED PINK FROM RT OUTPUT TO SWAPCHAIN
-    // This guarantees we see what ray tracing wrote
+    // FINAL BLIT TO SWAPCHAIN — UNIVERSAL & RELIABLE (LIKE THE WORKING ENGINE)
     {
         VkImage src = rtOutputImages_[slot].get();
 
+        // Transition RT output to TRANSFER_SRC
         transitionImage(cmd, src, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                         VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
+        // Transition swapchain to TRANSFER_DST
         transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         0, VK_ACCESS_TRANSFER_WRITE_BIT,
                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-        VkImageCopy copyRegion{};
-        copyRegion.srcSubresource = copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copyRegion.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1 };
+        VkImageBlit blit{};
+        blit.srcSubresource = blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        blit.srcOffsets[1] = { static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1 };
+        blit.dstOffsets[1] = { static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1 };
 
-        vkCmdCopyImage(cmd,
+        vkCmdBlitImage(cmd,
             src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &copyRegion);
+            1, &blit, VK_FILTER_LINEAR);
 
+        // Transition back to PRESENT_SRC_KHR
         transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                         VK_ACCESS_TRANSFER_WRITE_BIT, 0,
                         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
     }
 
-submit_frame:
     vkEndCommandBuffer(cmd);
 
     submitAndPresent(slot, imageIndex);
@@ -997,7 +1002,7 @@ void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
         .pSignalSemaphoreInfos    = &signalInfo
     };
 
-    // Submit to graphics queue — no fence returned, no extra wait
+    // Submit to graphics queue
     VkResult submitResult = RTX::g_ext.vkQueueSubmit2KHR(stone_graphics_queue(), 1, &submit, inFlightFences_[slot]);
     if (submitResult != VK_SUCCESS) {
         LOG_ERROR_CAT("RENDERER", "Queue submit failed: {}", string_VkResult(submitResult));
@@ -1014,7 +1019,6 @@ void VulkanRenderer::submitAndPresent(uint32_t slot, uint32_t imageIndex)
 
     VkResult r = vkQueuePresentKHR(stone_present_queue(), &present);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
-        // Resize handled elsewhere — no device wait here
         RTX::recreateSwapchain(stone_width(), stone_height());
     } else if (r != VK_SUCCESS) {
         LOG_ERROR_CAT("RENDERER", "Queue present failed: {}", string_VkResult(r));

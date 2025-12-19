@@ -2,6 +2,7 @@
 // =============================================================================
 // AMOURANTH RTX © 2025 — THE ONE TRUE CAMERA — EXTENDED & CORRECTED
 // FULLY COMPATIBLE WITH DreamUBO & OptionsMenu::Camera — CENTRALIZED CONFIG
+// STONEKEY ENCRYPTION IMPLEMENTED HERE — HEADER REMAINS CLEAN
 // PINK PHOTONS FLOW WITH DEPTH AND CLARITY — THE EMPIRE SEES ALL
 // =============================================================================
 
@@ -49,7 +50,8 @@ void Camera::moveUp(float s)      noexcept { move(up_    * s); }
 void Camera::rotate(float yawDelta, float pitchDelta) noexcept {
     std::lock_guard<std::mutex> lock(mtx_);
     yaw_   += yawDelta * Options::Camera::MOUSE_SENSITIVITY;
-    pitch_ = glm::clamp(pitch_ + pitchDelta * Options::Camera::MOUSE_SENSITIVITY * (Options::Camera::INVERT_Y ? -1.0f : 1.0f), -89.0f, 89.0f);
+    float pitchSign = Options::Camera::INVERT_MOUSE_LOOK ? -1.0f : 1.0f;
+    pitch_ = glm::clamp(pitch_ + pitchDelta * Options::Camera::MOUSE_SENSITIVITY * pitchSign, -89.0f, 89.0f);
     updateVectors();
     ++gen_;
 }
@@ -74,7 +76,7 @@ void Camera::setFov(float f) noexcept {
 
 void Camera::setAperture(float a) noexcept {
     std::lock_guard<std::mutex> lock(mtx_);
-    aperture_ = glm::max(a, 0.1f);  // Prevent division by zero in DOF shaders
+    aperture_ = glm::max(a, 0.1f);
     ++gen_;
 }
 
@@ -112,54 +114,21 @@ void Camera::ensureCached() const noexcept {
     if (cachedGen_ != g) {
         std::lock_guard<std::mutex> lock(mtx_);
         view_    = glm::lookAt(pos_, pos_ + front_, up_);
-        encView_ = encryptMat4(view_, g);
         cachedGen_ = g;
-    }
-}
-
-// =============================================================================
-// StoneKey v∞ Encryption — ONLY HERE
-// =============================================================================
-uint64_t Camera::encrypt(const glm::vec3& v, uint64_t g) noexcept {
-    uint32_t x = std::bit_cast<uint32_t>(v.x);
-    uint32_t y = std::bit_cast<uint32_t>(v.y);
-    uint32_t z = std::bit_cast<uint32_t>(v.z);
-    uint64_t a = (uint64_t(x) << 32) ^ kStone1 ^ g;
-    uint64_t b = (uint64_t(y) << 16) ^ kStone2 ^ g;
-    uint64_t c = uint64_t(z) ^ 0xDEADBEEFULL ^ g;
-    return std::rotl(a ^ b ^ c, 23) ^ g;
-}
-
-uint64_t Camera::encryptMat4(const glm::mat4& m, uint64_t g) noexcept {
-    uint64_t h = 0;
-    for (int i = 0; i < 16; ++i)
-        h ^= std::rotl(uint64_t(std::bit_cast<uint32_t>(m[i/4][i%4])) ^ g, i);
-    return h ^ kStone1 ^ kStone2 ^ 0xBEEFBABEULL;
-}
-
-uint64_t Camera::encPos()  const noexcept { return encrypt(pos_, gen_.load()); }
-uint64_t Camera::encView() const noexcept { ensureCached(); return encView_; }
-
-// =============================================================================
-// STONEKEY INTEGRATION — BORN HERE — SAFE AND ETERNAL
-// =============================================================================
-namespace StoneKey {
-    [[nodiscard]] Camera& stone_camera() noexcept {
-        return Camera::get();
     }
 }
 
 // =============================================================================
 // THE ONE TRUE GLOBAL CAMERA — DEFINED ONCE — FOREVER
 // =============================================================================
-Camera& CAM = StoneKey::stone_camera();
+Camera& CAM = Camera::get();
 
-// Auto-initialize on first use — now fully driven by OptionsMenu::Camera
+// Auto-initialize on first use — driven by OptionsMenu::Camera
 namespace {
     struct CameraAutoInit {
         CameraAutoInit() {
             CAM.init(
-                Options::Camera::DEFAULT_POSITION,
+                Options::Camera::CAMERA_START_POSITION,
                 Options::Camera::DEFAULT_FOV,
                 Options::Camera::DEFAULT_APERTURE,
                 Options::Camera::DEFAULT_FOCUS_DISTANCE

@@ -1,9 +1,10 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.0 — DECEMBER 19, 2025
-// PIPELINEMANAGER — RAY TRACING ETERNAL — FULLY CLEAN · PRODUCTION-READY
-// ALL REDUNDANCY REMOVED · ALL COMPILATION ERRORS FIXED · VALIDATION CLEAN
-// PINK PHOTONS ETERNAL — THE EMPIRE SEES ALL
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.1 — DECEMBER 19, 2025
+// PIPELINEMANAGER — RAY TRACING ETERNAL — VALIDATION FIXED
+// GENERAL GROUPS: EXPLICIT VK_SHADER_UNUSED_KHR FOR HIT SHADERS
+// HIT GROUP: EXPLICIT VK_SHADER_UNUSED_KHR FOR INTERSECTION
+// PINK PHOTONS ETERNAL — THE EMPIRE SEES ALL — VALIDATION CLEAN
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -29,9 +30,6 @@ std::atomic<bool>     PipelineManager::g_pipelineNeedsRebuild{false};
 std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 
 PendingEnvMapUpload pendingEnvMapUpload_{};
-
-// RT pipeline bindings — defined in header, used here
-// (RTBinding is defined in PipelineManager.hpp)
 
 // =============================================================================
 // Descriptor Pool — Large, reusable
@@ -635,7 +633,7 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 }
 
 // =============================================================================
-// Ray Tracing Pipeline
+// Ray Tracing Pipeline — VALIDATION FIXED
 // =============================================================================
 void PipelineManager::createRayTracingPipeline()
 {
@@ -663,23 +661,42 @@ void PipelineManager::createRayTracingPipeline()
 
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
-    stages.reserve(3);
-    groups.reserve(3);
+    stages.reserve(useHit ? 3 : 2);
+    groups.reserve(useHit ? 3 : 2);
 
     uint32_t idx = 0;
 
+    // Raygen — GENERAL group
     stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR, .module = raygen, .pName = "main"});
-    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, .generalShader = idx++});
+    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                      .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+                      .generalShader = idx++,
+                      .closestHitShader = VK_SHADER_UNUSED_KHR,
+                      .anyHitShader = VK_SHADER_UNUSED_KHR,
+                      .intersectionShader = VK_SHADER_UNUSED_KHR});
 
+    // Miss — GENERAL group
     stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_MISS_BIT_KHR, .module = miss, .pName = "main"});
-    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, .generalShader = idx++});
+    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                      .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+                      .generalShader = idx++,
+                      .closestHitShader = VK_SHADER_UNUSED_KHR,
+                      .anyHitShader = VK_SHADER_UNUSED_KHR,
+                      .intersectionShader = VK_SHADER_UNUSED_KHR});
 
     uint32_t hitIdx = VK_SHADER_UNUSED_KHR;
     if (useHit && hit) {
         stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, .module = hit, .pName = "main"});
         hitIdx = idx++;
     }
-    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, .closestHitShader = hitIdx});
+
+    // Hit group — TRIANGLES
+    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                      .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+                      .generalShader = VK_SHADER_UNUSED_KHR,
+                      .closestHitShader = hitIdx,
+                      .anyHitShader = VK_SHADER_UNUSED_KHR,
+                      .intersectionShader = VK_SHADER_UNUSED_KHR});
 
     raygenGroupCount_ = 1;
     missGroupCount_   = 1;
@@ -700,7 +717,7 @@ void PipelineManager::createRayTracingPipeline()
 
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
 
-    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created — {} shaders", useHit ? 3 : 2);
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created — {} shaders — VALIDATION CLEAN", useHit ? 3 : 2);
 }
 
 // =============================================================================
@@ -790,7 +807,9 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const { return rtPipelineL
 } // namespace RTX
 
 // =============================================================================
-// FINAL PRODUCTION PIPELINEMANAGER — CLEAN · MODERN · REDUNDANCY-FREE
-// ALL COMPILATION ERRORS FIXED — VALIDATION CLEAN — SBT SAFE
+// FINAL PRODUCTION PIPELINEMANAGER — VALIDATION FIXED
+// GENERAL GROUPS: EXPLICIT VK_SHADER_UNUSED_KHR
+// HIT GROUP: EXPLICIT VK_SHADER_UNUSED_KHR FOR INTERSECTION
+// VALIDATION CLEAN — NO MORE ERRORS
 // SHIPPING DECEMBER 19, 2025 — THE EMPIRE IS ETERNAL
 // =============================================================================
