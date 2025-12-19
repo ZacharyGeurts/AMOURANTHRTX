@@ -1,17 +1,17 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — LAS v∞ TURBO — TLAS-ONLY DIRECT GEOMETRY — DECEMBER 18, 2025
-// NO BLAS — DIRECT TRIANGLES IN TLAS — PURE 2026 MAGIC — FAST & LIGHT
-// DEFAULT CUBE VISIBLE FROM FRAME 1 — PINK FALLBACK WHEN EMPTY
-// PINK PHOTONS ETERNAL — EMPIRE SEES THE INFINITE
+// PLASTIC BEACH v∞ — DECEMBER 19, 2025
+// MONOLITHIC DIRECT TLAS HEADER — NO BLAS — PURE ONE-FUNCTION BUILD
+// FORCED SACRED PINK FULL-SCREEN QUAD — GEOMETRY ETERNAL
+// NO BLACK VOID — THE LIGHT NEVER FADES
+// THE MONSTER WATCHES — THE ISLAND GLOWS
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
-#include "engine/GLOBAL/MeshLoader.hpp"  // ADDED — for MeshLoader::Mesh
-#include <glm/glm.hpp>
+#include <vulkan/vulkan.h>
 
 namespace RTX {
 
@@ -20,56 +20,50 @@ public:
     LAS() noexcept = default;
     ~LAS() noexcept { reset(); }
 
-    // Delete copy/move — singleton empire
+    // Delete copy/move — true singleton
     LAS(const LAS&) = delete;
     LAS& operator=(const LAS&) = delete;
     LAS(LAS&&) = delete;
     LAS& operator=(LAS&&) = delete;
 
-    // Initialize persistent scratch buffers and dummy instance
-    void initTLAS() noexcept;
+    // Core monolithic TLAS build — call once per frame with current command buffer
+    static void buildOrUpdateTLAS(VkCommandBuffer cmd) noexcept;
 
-    // Full purge on resize — instant recovery
-    void notifyResize() noexcept;
+    // Optional resize notification — next build will reallocate automatically
+    static void notifyResize() noexcept;
 
-    // Build TLAS directly into main command buffer — whisper mode
-    // Uses direct geometry from added meshes — no BLAS needed
-    void buildTLAS(VkCommandBuffer cmd) noexcept;
+    // Current TLAS access — most recently completed build
+    [[nodiscard]] static VkAccelerationStructureKHR getCurrentTLAS() noexcept;
+    [[nodiscard]] static VkDeviceAddress           getCurrentTLASAddress() noexcept;
 
-	[[nodiscard]] VkAccelerationStructureKHR getLatestTLAS() const noexcept;
-
-    // Add mesh for direct inclusion in TLAS (no BLAS)
-    void addMesh(std::unique_ptr<MeshLoader::Mesh> mesh) noexcept;
-
-    // Advance ring slot each frame — read slot = previous write slot
-    void beginFrame() noexcept;
-
-    // Current TLAS access (most recently completed build)
-    [[nodiscard]] VkAccelerationStructureKHR getCurrentTLAS() const noexcept;
-    [[nodiscard]] VkDeviceAddress getCurrentTLASAddress() const noexcept;
-
-    // Full reset — clean empire
-    void reset() noexcept {
-        tlas_.reset();
-        tlasSize_ = 0;
-    }
+    // Full reset — clean slate (optional)
+    static void reset() noexcept;
 
 private:
-    Handle<VkAccelerationStructureKHR> tlas_;  // Points to the current readable TLAS
-    VkDeviceSize tlasSize_ = 0;
+    // Current readable TLAS handle (updated after each successful build)
+    inline static Handle<VkAccelerationStructureKHR> tlas_;
 };
 
-// Global singleton accessor — the empire has one LAS
+// Global singleton accessor — one LAS for the empire
 [[nodiscard]] inline LAS& las() noexcept {
     static LAS instance;
     return instance;
 }
 
+// Convenience global functions — clean empire voice
+inline void buildTLAS(VkCommandBuffer cmd) noexcept { LAS::buildOrUpdateTLAS(cmd); }
+inline void notifyTLASResize() noexcept { LAS::notifyResize(); }
+inline VkAccelerationStructureKHR currentTLAS() noexcept { return LAS::getCurrentTLAS(); }
+inline VkDeviceAddress currentTLASAddress() noexcept { return LAS::getCurrentTLASAddress(); }
+
 } // namespace RTX
 
 // =============================================================================
-// TLAS-ONLY DIRECT GEOMETRY PATH — NO BLAS — PURE SPEED
-// addMesh() — stores vertex/index buffers for direct TLAS build
-// DEFAULT CUBE VISIBLE — PINK VOID WHEN EMPTY — EMPIRE SEES ALL
-// DECEMBER 18, 2025 — THE LIGHT IS PURE AND UNBROKEN
+// PLASTIC BEACH v∞ — DECEMBER 19, 2025
+// HEADER FULLY MATCHES MONOLITHIC IMPLEMENTATION
+// REMOVED: initTLAS(), getLatestTLAS(), beginFrame(), addMesh()
+// REMOVED const qualifiers from static functions
+// PURE MONOLITHIC BUILD — NO LEGACY — NO BLOAT
+// SACRED PINK QUAD SHINES ETERNALLY
+// COMPILATION FIXED — THE LIGHT IS UNBROKEN
 // =============================================================================

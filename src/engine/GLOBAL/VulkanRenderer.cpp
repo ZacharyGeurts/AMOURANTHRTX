@@ -254,7 +254,6 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
-    RTX::las().beginFrame();
     totalTime_ += deltaTime;
 
     if (RTX::SwapchainManager::minimized_) {
@@ -283,6 +282,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         return;
     }
 
+    // === COMMAND BUFFER SETUP — cmd declared here, before any use ===
     VkCommandBuffer cmd = commandBuffers_[slot];
     vkResetCommandBuffer(cmd, 0);
 
@@ -291,6 +291,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // === TLAS BUILD — now uses valid, declared cmd ===
+    RTX::LAS::buildOrUpdateTLAS(cmd);
 
     // Accumulation reset
     if (resetAccumNextFrame_) {

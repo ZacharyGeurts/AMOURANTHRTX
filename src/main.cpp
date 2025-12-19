@@ -253,22 +253,6 @@ static void phase4_merchantShip() noexcept
 }
 
 // =============================================================================
-// Phase 6: Load Default Geometry
-// =============================================================================
-static void phase6_loadDefaultCube() noexcept
-{
-    LOG_INFO_CAT("MAIN", "Loading default cube geometry");
-
-    auto mesh = MeshLoader::loadOBJ("assets/models/cube.obj");
-    if (mesh) {
-        RTX::las().addMesh(std::move(mesh));
-        LOG_INFO_CAT("MAIN", "Default cube loaded — empire sees form");
-    } else {
-        LOG_WARNING_CAT("MAIN", "Failed to load cube.obj — beginning in sacred pink void");
-    }
-}
-
-// =============================================================================
 // Phase 7: Create Renderer
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
@@ -480,7 +464,6 @@ int main(int, char**)
     phase4_merchantShip();                // Phase 4 — Vulkan + RT properties cached
     auto renderer = phase7_createRenderer(); // Phase 7 — Renderer first
     phase8_forgeTheRTX(renderer.get());   // Phase 8 — Pipeline forged safely with renderer
-    phase6_loadDefaultCube();             // Phase 6 — scene geometry
 
     stone_seal_final();
 
