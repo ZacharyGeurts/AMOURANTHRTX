@@ -90,7 +90,7 @@ static void phase3_sacrificialSplash() noexcept
     constexpr const char* TITLE = "AMOURANTH RTX - Candy Cane";
     constexpr const char* IMAGE_PATH = "assets/textures/ammo.png";
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) return;
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) return;
 
     SDL_Window* win = SDL_CreateWindow(TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!win) {
