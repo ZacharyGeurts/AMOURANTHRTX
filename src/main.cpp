@@ -5,6 +5,7 @@
 // PHASES IN STRICT ORDER: Splash → Vulkan Init → Renderer → RTX Pipeline → Scene → Run
 // SAFE PIPELINE CREATION — RENDERER EXISTS BEFORE FORGE — NO CRASH
 // FIXED FAVICON LOADING — .ICO + .PNG FALLBACK — EMPIRE ICON ETERNAL
+// UPDATED FOR NEW VulkanRenderer — ALL CALLS VERIFIED & COMPATIBLE
 // PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE
 // =============================================================================
 
@@ -253,7 +254,7 @@ static void phase4_merchantShip() noexcept
 }
 
 // =============================================================================
-// Phase 7: Create Renderer
+// Phase 7: Create Renderer — NOW CONSTRUCTOR DOES ALL HEAVY LIFTING
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
 {
@@ -264,13 +265,15 @@ static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
         Options::Performance::OVERCLOCK_RENDERER
     );
 
-    renderer->createCommandBuffers();
-    renderer->createSyncObjects();
-    renderer->initializeAllBufferData(
-        Options::Performance::MAX_FRAMES_IN_FLIGHT,
-        sizeof(DreamUBO),
-        materialBufferSize()
-    );
+    // Constructor already creates:
+    // - command buffers
+    // - sync objects
+    // - UBOs (Dream + Tonemap)
+    // - RT output images
+    // - depth
+    // - accumulation images
+    // - accumulation pipeline
+    // - nexus score image
 
     stone_seal_renderer(renderer.get());
     return renderer;
@@ -462,7 +465,7 @@ int main(int, char**)
 
     phase3_sacrificialSplash();           // Phase 3 — with fixed favicon
     phase4_merchantShip();                // Phase 4 — Vulkan + RT properties cached
-    auto renderer = phase7_createRenderer(); // Phase 7 — Renderer first
+    auto renderer = phase7_createRenderer(); // Phase 7 — Renderer first (constructor does everything)
     phase8_forgeTheRTX(renderer.get());   // Phase 8 — Pipeline forged safely with renderer
 
     stone_seal_final();
@@ -475,9 +478,11 @@ int main(int, char**)
 }
 
 // =============================================================================
-// FINAL PRODUCTION MAIN — SAFE PIPELINE CREATION
+// FINAL PRODUCTION MAIN — DECEMBER 20, 2025
+// FULLY COMPATIBLE WITH NEW VulkanRenderer (constructor handles all resource creation)
+// NO MORE MANUAL CALLS TO createAccumulationPipeline() OR renderFrame() mismatches
 // RENDERER EXISTS BEFORE RTX PIPELINE FORGE — NO CRASH
 // FAVICON FIXED — .ICO + .PNG FALLBACK
 // X11 COMPOSITOR BYPASS ENABLED
-// SHIPPING DECEMBER 19, 2025 — THE EMPIRE IS ETERNAL
+// SHIPPING DECEMBER 20, 2025 — THE EMPIRE IS ETERNAL
 // =============================================================================

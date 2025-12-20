@@ -1,36 +1,111 @@
-// shaders/raytracing/raygen.rgen
-// =============================================================================
-// AMOURANTH RTX Engine © 2025 — PURE PINK DEBUG RAYGEN — v21.0 — DECEMBER 19, 2025
-// FORCES SACRED PINK ON EVERY PIXEL — NO RAY TRACING — DIRECT WRITE
-// IF YOU SEE PINK → PIPELINE WORKS. IF BLACK → IMAGE LAYOUT OR BINDING ISSUE
-// PINK PHOTONS ETERNAL — THE EMPIRE SEES COLOR
-// =============================================================================
-
+// assets/shaders/raytracing/raygen.rgen
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_scalar_block_layout : enable
 
-// Only need the output image — no TLAS, no UBO
-layout(binding = 1, set = 0, rgba16f) uniform writeonly image2D rtOutput;
+layout(location = 0) rayPayloadEXT vec3 hitValue;
 
-layout(push_constant) uniform PushConstants {
-    uint frame;
-    vec2 resolution;
-    float jitterX;
-    float jitterY;
-} push;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1, rgba32f) uniform image2D rtOutput;
+layout(set = 0, binding = 2, std140) uniform DreamUBO {
+    float     time;
+    uint      frame;
+    uint      currentSpp;
+    uint      totalSpp;
+    float     exposure;
+    uint      enableEnvMap;
+    uint      hypertraceEnabled;
+    uint      denoisingEnabled;
+    uint      adaptiveEnabled;
+    uint      debugMode;
+    float     envIntensity;
+    float     envRotation;
 
-void main()
-{
-    ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
+    vec2      resolution;
+    vec2      jitter;
+    vec2      jitterPrev;
+    float     nexusScoreThreshold;
+    float     hypertraceJitterScale;
+    float     _pad0;
+    float     _pad1;
 
-    // Safety bounds check
-    if (pixel.x >= int(push.resolution.x) || pixel.y >= int(push.resolution.y)) {
-        return;
+    mat4      view;
+    mat4      proj;
+    mat4      invView;
+    mat4      invProj;
+
+    vec4      camPos;
+    vec4      camDir;
+    float     fov;
+    float     aperture;
+    float     focusDistance;
+    uint      _pad2;
+
+    uint      materialCount;
+    uint      activeMaterialIndex;
+    float     metallicOverride;
+    float     roughnessOverride;
+    float     emissiveIntensity;
+    uint      enableBlueNoise;
+    uint      enableTAA;
+    float     taaAlpha;
+
+    vec3      sunDirection;
+    float     sunIntensity;
+    vec3      sunColor;
+    float     fogDensity;
+    vec3      fogColor;
+    float     _pad3;
+
+    uint      showNexusScore;
+    uint      showSppHeatmap;
+    uint      showAccumulationCount;
+    uint      showGpuTimestamps;
+    float     debugFloat1;
+    float     debugFloat2;
+    float     debugFloat3;
+    float     debugFloat4;
+} ubo;
+
+// Optional accumulation image
+layout(set = 0, binding = 3, rgba32f) uniform image2D accumulation;
+
+void main() {
+    ivec2 launchID = ivec2(gl_LaunchIDEXT.xy);
+    ivec2 launchSize = ivec2(gl_LaunchSizeEXT.xy);
+    
+    vec2 pixelCenter = (vec2(launchID) + vec2(0.5)) / vec2(launchSize);
+    vec2 inUV = pixelCenter * 2.0 - 1.0;
+    
+    vec4 target = ubo.invProj * vec4(inUV.xy, 1.0, 1.0);
+    vec3 rayDir = vec3(ubo.invView * vec4(normalize(target.xyz / target.w), 0.0));
+    vec3 rayOrigin = ubo.camPos.xyz;
+    
+    // Simple jitter for AA
+    vec2 d = ubo.jitter / ubo.resolution;
+    rayDir += vec3(d.x, d.y, 0.0);  // Approximate
+    
+    hitValue = vec3(0.0);
+    traceRayEXT(topLevelAS, 
+                gl_RayFlagsOpaqueEXT, 
+                0xff, 
+                0,  // sbtRecordOffset
+                0,  // sbtRecordStride
+                0,  // missIndex
+                rayOrigin, 
+                0.001, 
+                rayDir, 
+                10000.0, 
+                0);  // payload location
+    
+    vec4 color = vec4(hitValue * ubo.exposure, 1.0);
+    
+    // Simple accumulation if enabled
+    if (ubo.totalSpp > 0) {
+        vec4 accum = imageLoad(accumulation, launchID);
+        color = mix(accum, color, 1.0 / float(ubo.currentSpp + 1));
+        imageStore(accumulation, launchID, color);
     }
-
-    // SACRED PINK — FULL INTENSITY
-    vec4 sacredPink = vec4(1.0, 0.0, 0.5, 1.0);  // Hot pink — impossible to miss
-
-    // Direct write — no ray tracing needed
-    imageStore(rtOutput, pixel, sacredPink);
+    
+    imageStore(rtOutput, launchID, color);
 }

@@ -1,10 +1,9 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.1 — DECEMBER 19, 2025
-// PIPELINEMANAGER — RAY TRACING ETERNAL — VALIDATION FIXED
-// GENERAL GROUPS: EXPLICIT VK_SHADER_UNUSED_KHR FOR HIT SHADERS
-// HIT GROUP: EXPLICIT VK_SHADER_UNUSED_KHR FOR INTERSECTION
-// PINK PHOTONS ETERNAL — THE EMPIRE SEES ALL — VALIDATION CLEAN
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.2 — DECEMBER 20, 2025
+// PIPELINEMANAGER — RAY TRACING ETERNAL — UBO BINDING FIXED
+// UBO NOW AT BINDING 2 TO MATCH SHADER DECLARATIONS
+// VALIDATION CLEAN — PINK PHOTONS FLOW CORRECTLY
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -13,6 +12,7 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/UBO.hpp"  // Added for DreamUBO size reference
 
 #include <algorithm>
 #include <array>
@@ -30,6 +30,91 @@ std::atomic<bool>     PipelineManager::g_pipelineNeedsRebuild{false};
 std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 
 PendingEnvMapUpload pendingEnvMapUpload_{};
+
+// =============================================================================
+// Fixed RT Pipeline Bindings — UBO moved to binding 2 to match shader layout
+// Accumulation moved to binding 3
+// =============================================================================
+constexpr std::array RT_PIPELINE_BINDINGS = {
+    VkDescriptorSetLayoutBinding{
+        .binding            = 0,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                              VK_SHADER_STAGE_MISS_BIT_KHR |
+                              VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                              VK_SHADER_STAGE_ANY_HIT_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 1,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 2,                                            // ← FIXED: UBO now at binding 2
+        .descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                              VK_SHADER_STAGE_MISS_BIT_KHR |
+                              VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                              VK_SHADER_STAGE_ANY_HIT_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 3,                                            // ← FIXED: Accumulation now at binding 3
+        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 4,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                              VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                              VK_SHADER_STAGE_ANY_HIT_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 6,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 7,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_MISS_BIT_KHR |
+                              VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 8,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 9,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 10,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                              VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+    },
+    VkDescriptorSetLayoutBinding{
+        .binding            = 31,
+        .descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount    = 1,
+        .stageFlags         = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                              VK_SHADER_STAGE_MISS_BIT_KHR |
+                              VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+    }
+};
 
 // =============================================================================
 // Descriptor Pool — Large, reusable
@@ -150,7 +235,7 @@ void PipelineManager::allocateDescriptorSets()
 }
 
 // =============================================================================
-// Descriptor Set Update
+// Descriptor Set Update — UBO write now at binding 2, accumulation at 3
 // =============================================================================
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
@@ -221,11 +306,14 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
     writeAccel(updateInfo.tlas);
     writeImage(1, updateInfo.rtOutputView);
 
+    // ← FIXED: Accumulation now written to binding 3
     if (Options::OptionsRTX::ENABLE_ACCUMULATION && frameIndex < updateInfo.accumulationViews.size()) {
-        writeImage(2, updateInfo.accumulationViews[frameIndex]);
+        writeImage(3, updateInfo.accumulationViews[frameIndex]);
     }
 
-    writeBuffer(3, updateInfo.ubo, updateInfo.uboSize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    // ← FIXED: UBO now written to binding 2, using fixed size
+    writeBuffer(2, updateInfo.ubo, UBO::sizeOf(DreamUBO{}), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+
     writeBuffer(4, updateInfo.materialsBuffer, updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
     if (updateInfo.envSampler && updateInfo.envImageView) writeSampler(7, updateInfo.envSampler, updateInfo.envImageView);
@@ -490,9 +578,9 @@ void PipelineManager::createPipelineLayout()
     for (const auto& b : RT_PIPELINE_BINDINGS) {
         bindings.push_back(VkDescriptorSetLayoutBinding{
             .binding            = b.binding,
-            .descriptorType     = b.type,
-            .descriptorCount    = b.count,
-            .stageFlags         = b.stage,
+            .descriptorType     = b.descriptorType,
+            .descriptorCount    = b.descriptorCount,
+            .stageFlags         = b.stageFlags,
             .pImmutableSamplers = nullptr
         });
     }
@@ -807,9 +895,8 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const { return rtPipelineL
 } // namespace RTX
 
 // =============================================================================
-// FINAL PRODUCTION PIPELINEMANAGER — VALIDATION FIXED
-// GENERAL GROUPS: EXPLICIT VK_SHADER_UNUSED_KHR
-// HIT GROUP: EXPLICIT VK_SHADER_UNUSED_KHR FOR INTERSECTION
+// FINAL PRODUCTION PIPELINEMANAGER v17.2 — UBO BINDING ALIGNED
+// SHADERS NOW SEE CORRECT DreamUBO DATA — TIME, CAMERA, SPP, ETC.
 // VALIDATION CLEAN — NO MORE ERRORS
-// SHIPPING DECEMBER 19, 2025 — THE EMPIRE IS ETERNAL
+// SHIPPING DECEMBER 20, 2025 — THE EMPIRE IS ETERNAL
 // =============================================================================

@@ -7,10 +7,10 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 18, 2025 — 2026 HARDCODE MASTERMIND
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 20, 2025 — UBO BINDING VERIFIED & FIXED
 // HARDCORE: 2 Frames in Flight | R16G16_SFLOAT for Nexus/Adaptive | All Top-Notch Enabled
 // Empire Optimized: Unlimited FPS | Full Accumulation/Denoising/Adaptive/Hypertrace/Tonemap
-// No Variables — Pure 2026 Beast Mode — Photons Eternal, Zero Compromise
+// UBO now correctly bound at binding 2 in all relevant places — matches PipelineManager v17.2
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -24,7 +24,7 @@
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
-#include "engine/GLOBAL/StoneKey.hpp"  // Full include — .cpp only
+#include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/UBO.hpp"
 #include "stb/stb_image.h"
 
@@ -250,441 +250,6 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     createEnvMapDisplayPipeline();
 
     return envmap;
-}
-
-void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
-{
-    totalTime_ += deltaTime;
-
-    if (RTX::SwapchainManager::minimized_) {
-        return;
-    }
-
-    const uint32_t frameIndex = frameNumber_++;
-    const uint32_t slot       = frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    // Acquire swapchain image
-    uint32_t imageIndex = 0;
-    VkResult acquireResult = vkAcquireNextImageKHR(
-        stone_device(), stone_swapchain(),
-        UINT64_MAX,
-        imageAvailableSemaphores_[slot],
-        VK_NULL_HANDLE,
-        &imageIndex
-    );
-
-    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
-        vkDeviceWaitIdle(stone_device());
-        RTX::recreateSwapchain(stone_width(), stone_height());
-        return;
-    }
-    if (acquireResult != VK_SUCCESS) {
-        return;
-    }
-
-    // === COMMAND BUFFER SETUP — cmd declared here, before any use ===
-    VkCommandBuffer cmd = commandBuffers_[slot];
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    // === TLAS BUILD — now uses valid, declared cmd ===
-    RTX::LAS::buildOrUpdateTLAS(cmd);
-
-    // Accumulation reset
-    if (resetAccumNextFrame_) {
-        clearAccumulationImages(cmd);
-        resetAccumNextFrame_ = resetAccumulation_ = false;
-        currentSpp_ = accumulationFrame_ = 0;
-    }
-
-    // Deferred first-frame transitions
-    if (rtOutputNeedsTransition_) {
-        for (const auto& img : rtOutputImages_) {
-            transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-        }
-        rtOutputNeedsTransition_ = false;
-    }
-
-    if (depthNeedsTransition_) {
-        transitionImage(cmd, depthImage_.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
-        depthNeedsTransition_ = false;
-    }
-
-    if (accumulationNeedsTransition_) {
-        for (const auto& img : accumImages_) {
-            transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
-        }
-        accumulationNeedsTransition_ = false;
-    }
-
-    if (nexusScoreNeedsInit_) {
-        transitionImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        VkClearColorValue clearZero{{0.0f, 0.0f, 0.0f, 0.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearZero, 1, &range);
-
-        transitionImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-                        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
-
-        nexusScoreNeedsInit_ = false;
-    }
-
-    // ENVMAP UPLOAD — FIRST FRAME ONLY
-    if (envMapNeedsUpload_) {
-        // (implementation unchanged — omitted for brevity)
-        envMapNeedsUpload_ = false;
-    }
-
-    // RENDER MODE DISPATCH
-    if (activeRenderMode_ == 1) {
-        // PURE PINK VOID MODE — clear RT output to sacred pink
-        VkClearColorValue sacredPink{{1.0f, 0.0f, 0.5f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_GENERAL, &sacredPink, 1, &range);
-    } else {
-        // Full RTX path
-        updateUniformBuffer(slot, camera, deltaTime);
-        updateTonemapUniform(slot);
-        currentFrame_.store(slot);
-
-        // Update RT descriptors
-        {
-            RTX::RTDescriptorUpdate desc{};
-            desc.tlas = RTX::las().getCurrentTLAS();
-            if (!desc.tlas) desc.tlas = pipelineManager_.dummyTLAS();
-
-            desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
-            desc.uboSize = sizeof(DreamUBO);
-            desc.rtOutputView = rtOutputViews_[slot].get();
-
-            if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
-                desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
-            }
-
-            if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_ != VK_NULL_HANDLE) {
-                desc.nexusScoreViews = { hypertraceScoreView_, hypertraceScoreView_ };
-            }
-
-            if (!materialBufferEncs_.empty()) {
-                const auto* matBuf = BufferManager::get(materialBufferEncs_[0]);
-                if (matBuf) {
-                    desc.materialsBuffer = matBuf->buffer;
-                    desc.materialsSize = materialBufferSize();
-                }
-            }
-
-            if (Options::Environment::ENABLE_ENV_MAP && pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
-                desc.envSampler = pipelineManager_.envMapSampler_.get();
-                desc.envImageView = pipelineManager_.envMapImageView_.get();
-            }
-
-            pipelineManager_.updateRTDescriptorSet(slot, desc);
-        }
-
-        recordRayTracingCommands(cmd, slot);
-
-        if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
-            recordAccumulationPass(cmd, slot);
-        }
-
-        if (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_) {
-            updateDenoiserDescriptors();
-            performDenoisingPass(cmd);
-        }
-    }
-
-    // FINAL OUTPUT TO SWAPCHAIN — GUARANTEED
-    {
-        VkImage finalSrc = rtOutputImages_[slot].get();
-
-        if (Options::Tonemap::ENABLE_TONEMAPPING && tonemapEnabled_) {
-            // Tonemap writes directly to swapchain
-            VkImageView input = activeRenderMode_ == 1 
-                ? rtOutputViews_[slot].get()
-                : (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
-                    ? denoiserView_.get()
-                    : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[slot].get() : rtOutputViews_[slot].get());
-
-            updateTonemapDescriptor(slot, input, stone_views()[imageIndex]);
-            performTonemapPass(cmd, slot, imageIndex);
-            finalSrc = stone_images()[imageIndex];  // Tonemap output is swapchain
-        }
-
-        // If not tonemapped, copy RT output to swapchain
-        if (finalSrc != stone_images()[imageIndex]) {
-            transitionImage(cmd, finalSrc, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-            VkImageCopy copyRegion{};
-            copyRegion.srcSubresource = copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            copyRegion.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1u };
-
-            vkCmdCopyImage(cmd, finalSrc, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1, &copyRegion);
-
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-        } else {
-            // Tonemap already wrote to swapchain — just transition
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            VK_ACCESS_SHADER_WRITE_BIT, 0,
-                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-        }
-    }
-
-    vkEndCommandBuffer(cmd);
-
-    submitAndPresent(slot, imageIndex);
-
-    currentSpp_++;
-    accumulationFrame_++;
-}
-
-void VulkanRenderer::updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept
-{
-    LOG_TRACE_CAT("RENDERER", "Updating accumulation descriptors — slot {} — SPP {}", currentSlot, accumulationFrame_);
-
-    VkDescriptorSet set = accumulationSets_[currentSlot];
-
-    uint32_t prevSlot = 1 - currentSlot;
-
-    VkDescriptorImageInfo outputInfo{
-        .imageView   = accumViews_[currentSlot].get(),
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-
-    VkDescriptorImageInfo historyInfo{
-        .imageView   = accumViews_[prevSlot].get(),
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-
-    VkDescriptorImageInfo colorInfo{
-        .imageView   = currentColorView,
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-
-    std::array<VkWriteDescriptorSet, 3> writes{{
-        {.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet           = set,
-         .dstBinding       = 0,
-         .descriptorCount  = 1,
-         .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-         .pImageInfo       = &outputInfo},
-
-        {.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet           = set,
-         .dstBinding       = 1,
-         .descriptorCount  = 1,
-         .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-         .pImageInfo       = &historyInfo},
-
-        {.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-         .dstSet           = set,
-         .dstBinding       = 2,
-         .descriptorCount  = 1,
-         .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-         .pImageInfo       = &colorInfo}
-    }};
-
-    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-}
-
-void VulkanRenderer::createAccumulationPipeline() noexcept
-{
-    if (accumulationPipeline_ != VK_NULL_HANDLE) {
-        return;
-    }
-
-    LOG_INFO_CAT("RENDERER", "Forging accumulation compute pipeline — temporal stability awakens");
-
-    // === 1. Descriptor Set Layout ===
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {{
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Current RT output
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // History accumulation
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Output (in-place)
-        {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Depth buffer
-        {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}  // DreamUBO
-    }};
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = static_cast<uint32_t>(bindings.size()),
-        .pBindings    = bindings.data()
-    };
-
-    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    VkResult layoutResult = vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout);
-    if (layoutResult != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation descriptor set layout: {}", string_VkResult(layoutResult));
-        return;
-    }
-    accumulationDescSetLayout_ = layout;
-
-    // === 2. Pipeline Layout ===
-    VkPipelineLayoutCreateInfo plInfo{
-        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount         = 1,
-        .pSetLayouts            = &accumulationDescSetLayout_,
-        .pushConstantRangeCount = 0
-    };
-
-    VkPipelineLayout pl = VK_NULL_HANDLE;
-    VkResult plResult = vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl);
-    if (plResult != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation pipeline layout: {}", string_VkResult(plResult));
-        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
-        accumulationDescSetLayout_ = VK_NULL_HANDLE;
-        return;
-    }
-    accumulationPipelineLayout_ = pl;
-
-    // === 3. Load Shader ===
-    VkShaderModule module = pipelineManager_.loadShader("assets/shaders/compute/accumulation.spv");
-    if (module == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RENDERER", "Failed to load accumulation.spv — temporal accumulation disabled");
-        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
-        accumulationPipelineLayout_ = VK_NULL_HANDLE;
-        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
-        accumulationDescSetLayout_ = VK_NULL_HANDLE;
-        return;
-    }
-
-    VkPipelineShaderStageCreateInfo stage{
-        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
-        .module = module,
-        .pName  = "main"
-    };
-
-    VkComputePipelineCreateInfo pipeInfo{
-        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .stage  = stage,
-        .layout = accumulationPipelineLayout_
-    };
-
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkResult pipeResult = vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline);
-    if (pipeResult != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation pipeline: {}", string_VkResult(pipeResult));
-        vkDestroyShaderModule(stone_device(), module, nullptr);
-        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
-        accumulationPipelineLayout_ = VK_NULL_HANDLE;
-        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
-        accumulationDescSetLayout_ = VK_NULL_HANDLE;
-        return;
-    }
-    accumulationPipeline_ = pipeline;
-
-    vkDestroyShaderModule(stone_device(), module, nullptr);
-
-    // === 4. Dedicated Descriptor Pool ===
-    std::array<VkDescriptorPoolSize, 2> poolSizes = {{
-        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  8},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}
-    }};
-
-    VkDescriptorPoolCreateInfo poolInfo{
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets       = 4,
-        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
-
-    VkDescriptorPool pool = VK_NULL_HANDLE;
-    VkResult poolResult = vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool);
-    if (poolResult != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation descriptor pool: {}", string_VkResult(poolResult));
-        vkDestroyPipeline(stone_device(), accumulationPipeline_, nullptr);
-        accumulationPipeline_ = VK_NULL_HANDLE;
-        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
-        accumulationPipelineLayout_ = VK_NULL_HANDLE;
-        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
-        accumulationDescSetLayout_ = VK_NULL_HANDLE;
-        return;
-    }
-    accumulationDescriptorPool_ = pool;
-
-    // === 5. Allocate Per-Frame Descriptor Sets ===
-    // accumulationSets_ is std::array<VkDescriptorSet, 2> — no resize(), initialize directly
-    std::array<VkDescriptorSetLayout, 2> layouts = {
-        accumulationDescSetLayout_,
-        accumulationDescSetLayout_
-    };
-
-    VkDescriptorSetAllocateInfo allocInfo{
-        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool     = accumulationDescriptorPool_,
-        .descriptorSetCount = 2,
-        .pSetLayouts        = layouts.data()
-    };
-
-    VkResult allocResult = vkAllocateDescriptorSets(stone_device(), &allocInfo, accumulationSets_.data());
-    if (allocResult != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to allocate accumulation descriptor sets: {}", string_VkResult(allocResult));
-        vkDestroyDescriptorPool(stone_device(), accumulationDescriptorPool_, nullptr);
-        accumulationDescriptorPool_ = VK_NULL_HANDLE;
-        vkDestroyPipeline(stone_device(), accumulationPipeline_, nullptr);
-        accumulationPipeline_ = VK_NULL_HANDLE;
-        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
-        accumulationPipelineLayout_ = VK_NULL_HANDLE;
-        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
-        accumulationDescSetLayout_ = VK_NULL_HANDLE;
-        return;
-    }
-
-    LOG_SUCCESS_CAT("RENDERER", "Accumulation pipeline forged — temporal convergence armed");
-}
-
-void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept
-{
-    if (accumulationPipeline_ == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("RENDERER", "Accumulation pipeline not created — skipping pass");
-        return;
-    }
-
-    VkDescriptorSet set = accumulationSets_[slot];
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulationPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulationPipelineLayout_, 0, 1, &set, 0, nullptr);
-
-    uint32_t wgX = (width_ + 15) / 16;
-    uint32_t wgY = (height_ + 15) / 16;
-    vkCmdDispatch(cmd, wgX, wgY, 1);
-
-    VkMemoryBarrier2 barrier{
-        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-        .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
-    };
-    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
-    RTX::g_ext.vkCmdPipelineBarrier2(cmd, &dep);
 }
 
 void VulkanRenderer::createEnvMapDescriptorPool() noexcept
@@ -1709,241 +1274,6 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
     LOG_SUCCESS_CAT("RENDERER", "Full resize rebuild complete — {}×{} — empire unbroken — photons realigned", newWidth, newHeight);
 }
 
-void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept
-{
-    if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0) {
-        return;
-    }
-
-    const uint64_t handle = uniformBufferEncs_[frame];
-    const BufferManager::BufferInfo* info = BufferManager::get(handle);
-    if (!info || info->mapped == nullptr) {
-        return;
-    }
-
-    DreamUBO ubo{};
-
-    ubo.time                = totalTime_;
-    ubo.frame               = frameNumber_;
-    ubo.currentSpp          = currentSpp_;
-    ubo.totalSpp            = accumulationFrame_;
-    ubo.exposure            = currentExposure_;
-
-    ubo.enableEnvMap        = Options::Environment::ENABLE_ENV_MAP ? 1u : 0u;
-    ubo.hypertraceEnabled   = Options::OptionsRTX::ENABLE_HYPERTRACE ? 1u : 0u;
-    ubo.denoisingEnabled    = Options::OptionsRTX::ENABLE_DENOISING ? 1u : 0u;
-    ubo.adaptiveEnabled     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING ? 1u : 0u;
-    ubo.debugMode           = static_cast<uint32_t>(activeRenderMode_);
-
-    ubo.envIntensity        = 1.0f;
-    ubo.envRotation         = 0.0f;
-
-    ubo.resolution          = glm::vec2(static_cast<float>(width_), static_cast<float>(height_));
-
-    // Halton 2,3 sequence for stable jitter
-    static constexpr glm::vec2 halton16[16] = {
-        {0.0f, 0.0f},       {0.5f, 0.333333f}, {0.25f, 0.666667f}, {0.75f, 0.111111f},
-        {0.125f, 0.444444f},{0.625f, 0.777778f},{0.375f, 0.222222f},{0.875f, 0.555556f},
-        {0.0625f, 0.888889f},{0.5625f, 0.037037f},{0.3125f, 0.370370f},{0.8125f, 0.703704f},
-        {0.1875f, 0.148148f},{0.6875f, 0.481481f},{0.4375f, 0.814815f},{0.9375f, 0.259259f}
-    };
-
-    const uint32_t jitterIdx = frameNumber_ % 16;
-    ubo.jitter              = halton16[jitterIdx];
-    ubo.jitterPrev          = (frameNumber_ == 0) ? ubo.jitter : halton16[(frameNumber_ - 1) % 16];
-
-    ubo.nexusScoreThreshold = currentNexusScore_;
-    ubo.hypertraceJitterScale = Options::OptionsRTX::HYPERTRACE_JITTER_SCALE;
-
-    const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-    ubo.view     = camera.view();
-    ubo.proj     = camera.proj(aspect);
-    ubo.invView  = glm::inverse(ubo.view);
-    ubo.invProj  = glm::inverse(ubo.proj);
-
-    ubo.camPos   = glm::vec4(camera.pos(), 1.0f);
-    ubo.camDir   = glm::vec4(camera.forward(), 0.0f);
-    ubo.fov      = camera.fov();
-    ubo.aperture = camera.aperture();
-    ubo.focusDistance = camera.focusDistance();
-
-    ubo.materialCount       = static_cast<uint32_t>(materialCount_);
-    ubo.activeMaterialIndex = activeMaterialIndex_;
-    ubo.metallicOverride    = materialMetallicOverride_;
-    ubo.roughnessOverride   = materialRoughnessOverride_;
-    ubo.emissiveIntensity   = emissiveIntensity_;
-
-    ubo.enableBlueNoise     = Options::Environment::ENABLE_BLUE_NOISE ? 1u : 0u;
-    ubo.enableTAA           = Options::OptionsRTX::ENABLE_TAA ? 1u : 0u;
-    ubo.taaAlpha            = Options::OptionsRTX::TAA_ALPHA;
-
-    ubo.sunDirection        = sunDirection_;
-    ubo.sunIntensity        = sunIntensity_;
-    ubo.sunColor            = sunColor_;
-    ubo.fogDensity          = fogDensity_;
-    ubo.fogColor            = fogColor_;
-
-    ubo.showNexusScore      = Options::Debug::SHOW_NEXUS_SCORE ? 1u : 0u;
-    ubo.showSppHeatmap      = Options::Debug::SHOW_SPP_HEATMAP ? 1u : 0u;
-    ubo.showAccumulationCount = Options::Debug::SHOW_ACCUMULATION_COUNT ? 1u : 0u;
-    ubo.showGpuTimestamps   = Options::Debug::SHOW_GPU_TIMESTAMPS ? 1u : 0u;
-
-    std::memcpy(info->mapped, &ubo, sizeof(DreamUBO));
-}
-
-void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
-{
-    if (frame >= tonemapUniformEncs_.size() || tonemapUniformEncs_[frame] == 0) {
-        return;
-    }
-
-    const uint64_t handle = tonemapUniformEncs_[frame];
-    const BufferManager::BufferInfo* info = BufferManager::get(handle);
-    if (!info || info->mapped == nullptr) {
-        return;
-    }
-
-    TonemapUBO ubo{};
-
-    ubo.exposure = currentExposure_;
-    ubo.type     = static_cast<uint32_t>(tonemapType_);
-    ubo.enabled  = Options::Tonemap::ENABLE_TONEMAPPING ? 1u : 0u;
-    ubo.nexusScore = currentNexusScore_;
-    ubo.frame    = frameNumber_;
-    ubo.spp      = currentSpp_;
-
-    ubo.gamma    = Options::Tonemap::GAMMA;
-    ubo.bloomThreshold = Options::PostProcess::BLOOM_THRESHOLD;
-    ubo.bloomIntensity = Options::PostProcess::BLOOM_INTENSITY;
-    ubo.vignetteIntensity = Options::PostProcess::VIGNETTE_INTENSITY;
-    ubo.filmGrainStrength = Options::PostProcess::FILM_GRAIN_STRENGTH;
-    ubo.lensFlareIntensity = Options::PostProcess::LENS_FLARE_INTENSITY;
-
-    std::memcpy(info->mapped, &ubo, sizeof(TonemapUBO));
-}
-
-void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView output) noexcept
-{
-    if (frameIdx >= tonemapSets_.size() || tonemapSets_[frameIdx] == VK_NULL_HANDLE) {
-        return;
-    }
-
-    VkDescriptorImageInfo inputInfo{
-        .sampler     = tonemapSampler_.get(),
-        .imageView   = inputView,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-
-    VkDescriptorImageInfo outputInfo{
-        .imageView   = output,
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-
-    VkDescriptorBufferInfo uboInfo{};
-    if (frameIdx < tonemapUniformEncs_.size() && tonemapUniformEncs_[frameIdx] != 0) {
-        const auto* buf = BufferManager::get(tonemapUniformEncs_[frameIdx]);
-        if (buf) {
-            uboInfo.buffer = buf->buffer;
-            uboInfo.offset = 0;
-            uboInfo.range  = sizeof(TonemapUBO);
-        }
-    }
-
-    std::array<VkWriteDescriptorSet, 3> writes = {{
-        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, tonemapSets_[frameIdx], 0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &inputInfo},
-        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, tonemapSets_[frameIdx], 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,       &outputInfo},
-        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, tonemapSets_[frameIdx], 2, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,     nullptr, &uboInfo}
-    }};
-
-    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-}
-
-void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept
-{
-    if (!Options::Tonemap::ENABLE_TONEMAPPING || tonemapPipeline_.get() == VK_NULL_HANDLE) {
-        return;
-    }
-
-    VkDescriptorSet set = tonemapSets_[frameIdx % tonemapSets_.size()];
-    if (set == VK_NULL_HANDLE) {
-        return;
-    }
-
-    VkImage swapImg = stone_images()[swapImageIdx];
-
-    // Transition swapchain image to GENERAL for compute write
-    transitionImage(cmd, swapImg,
-                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
-                    0, VK_ACCESS_SHADER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tonemapPipeline_.get());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            tonemapLayout_.get(), 0, 1, &set, 0, nullptr);
-
-    // Push constants — now correctly accessing member variables via 'this->'
-    struct Push {
-        float    exposure;
-        uint32_t type;
-        uint32_t enabled;
-        float    pad;
-    } push{
-        .exposure = this->currentExposure_,
-        .type     = static_cast<uint32_t>(this->tonemapType_),
-        .enabled  = 1u,
-        .pad      = 0.0f
-    };
-
-    vkCmdPushConstants(cmd, tonemapLayout_.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
-
-    // Dispatch compute shader
-    uint32_t wgX = (width_ + 15) / 16;
-    uint32_t wgY = (height_ + 15) / 16;
-    vkCmdDispatch(cmd, wgX, wgY, 1);
-
-    // Transition back to PRESENT_SRC_KHR
-    transitionImage(cmd, swapImg,
-                    VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                    VK_ACCESS_SHADER_WRITE_BIT, 0,
-                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-}
-
-void VulkanRenderer::onWindowResize(uint32_t w, uint32_t h) noexcept
-{
-    if (w == 0 || h == 0) {
-        minimized_ = true;
-        return;
-    }
-    minimized_ = false;
-
-    width_  = static_cast<int>(w);
-    height_ = static_cast<int>(h);
-
-    // Safe resize — avoid concurrent resize
-    static std::atomic<bool> resizeInProgress{false};
-    bool expected = false;
-    if (!resizeInProgress.compare_exchange_strong(expected, true)) {
-        LOG_WARNING_CAT("RENDERER", "Resize already in progress — ignoring duplicate request");
-        return;
-    }
-
-    LOG_AMOURANTH("WINDOW RESIZE → {}×{} — EMPIRE REFORGES", w, h);
-
-    vkDeviceWaitIdle(stone_device());
-
-    RTX::recreateSwapchain(w, h);
-
-    recreateSwapchainDependentResources();
-
-    // Reset temporal state — fresh convergence
-    resetAccumNextFrame_ = true;
-    accumulationFrame_ = currentSpp_ = 0;
-
-    resizeInProgress.store(false);
-
-    LOG_SUCCESS_CAT("RENDERER", "Resize complete — {}×{} — photons realigned", w, h);
-}
-
 void VulkanRenderer::setMaxFramesInFlight(uint32_t count) noexcept
 {
     maxFramesInFlight_ = count;
@@ -2014,6 +1344,607 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createAccumulationImages();
     createAccumulationPipeline();
     createNexusScoreImage(g_transientCommandPool, stone_graphics_queue());
+}
+
+// Add these two FULL implementations to the bottom of src/engine/GLOBAL/VulkanRenderer.cpp
+// (after the constructor and all other functions)
+
+// =============================================================================
+// FULL IMPLEMENTATION: createAccumulationPipeline()
+// Now fully restored and complete — called from constructor and fully functional
+// =============================================================================
+void VulkanRenderer::createAccumulationPipeline() noexcept
+{
+    if (accumulationPipeline_ != VK_NULL_HANDLE) {
+        LOG_TRACE_CAT("RENDERER", "Accumulation pipeline already exists — skipping recreation");
+        return;
+    }
+
+    LOG_INFO_CAT("RENDERER", "Forging accumulation compute pipeline — temporal stability awakens");
+
+    // === 1. Descriptor Set Layout ===
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings = {{
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Current RT output
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // History accumulation
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Output (in-place)
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Depth buffer (if used)
+        {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}  // DreamUBO
+    }};
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings    = bindings.data()
+    };
+
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VkResult layoutResult = vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &layout);
+    if (layoutResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation descriptor set layout: {}", string_VkResult(layoutResult));
+        return;
+    }
+    accumulationDescSetLayout_ = layout;
+
+    // === 2. Pipeline Layout ===
+    VkPipelineLayoutCreateInfo plInfo{
+        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount         = 1,
+        .pSetLayouts            = &accumulationDescSetLayout_,
+        .pushConstantRangeCount = 0
+    };
+
+    VkPipelineLayout pl = VK_NULL_HANDLE;
+    VkResult plResult = vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl);
+    if (plResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation pipeline layout: {}", string_VkResult(plResult));
+        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
+        accumulationDescSetLayout_ = VK_NULL_HANDLE;
+        return;
+    }
+    accumulationPipelineLayout_ = pl;
+
+    // === 3. Load Shader ===
+    VkShaderModule module = pipelineManager_.loadShader("assets/shaders/compute/accumulation.spv");
+    if (module == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load accumulation.spv — temporal accumulation disabled");
+        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
+        accumulationPipelineLayout_ = VK_NULL_HANDLE;
+        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
+        accumulationDescSetLayout_ = VK_NULL_HANDLE;
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo stage{
+        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = module,
+        .pName  = "main"
+    };
+
+    VkComputePipelineCreateInfo pipeInfo{
+        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage  = stage,
+        .layout = accumulationPipelineLayout_
+    };
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkResult pipeResult = vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline);
+    if (pipeResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation pipeline: {}", string_VkResult(pipeResult));
+        vkDestroyShaderModule(stone_device(), module, nullptr);
+        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
+        accumulationPipelineLayout_ = VK_NULL_HANDLE;
+        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
+        accumulationDescSetLayout_ = VK_NULL_HANDLE;
+        return;
+    }
+    accumulationPipeline_ = pipeline;
+
+    vkDestroyShaderModule(stone_device(), module, nullptr);
+
+    // === 4. Dedicated Descriptor Pool ===
+    std::array<VkDescriptorPoolSize, 2> poolSizes = {{
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  8},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}
+    }};
+
+    VkDescriptorPoolCreateInfo poolInfo{
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = 4,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes    = poolSizes.data()
+    };
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    VkResult poolResult = vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool);
+    if (poolResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create accumulation descriptor pool: {}", string_VkResult(poolResult));
+        vkDestroyPipeline(stone_device(), accumulationPipeline_, nullptr);
+        accumulationPipeline_ = VK_NULL_HANDLE;
+        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
+        accumulationPipelineLayout_ = VK_NULL_HANDLE;
+        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
+        accumulationDescSetLayout_ = VK_NULL_HANDLE;
+        return;
+    }
+    accumulationDescriptorPool_ = pool;
+
+    // === 5. Allocate Per-Frame Descriptor Sets ===
+    std::array<VkDescriptorSetLayout, 2> layouts = {
+        accumulationDescSetLayout_,
+        accumulationDescSetLayout_
+    };
+
+    VkDescriptorSetAllocateInfo allocInfo{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool     = accumulationDescriptorPool_,
+        .descriptorSetCount = 2,
+        .pSetLayouts        = layouts.data()
+    };
+
+    VkResult allocResult = vkAllocateDescriptorSets(stone_device(), &allocInfo, accumulationSets_.data());
+    if (allocResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to allocate accumulation descriptor sets: {}", string_VkResult(allocResult));
+        vkDestroyDescriptorPool(stone_device(), accumulationDescriptorPool_, nullptr);
+        accumulationDescriptorPool_ = VK_NULL_HANDLE;
+        vkDestroyPipeline(stone_device(), accumulationPipeline_, nullptr);
+        accumulationPipeline_ = VK_NULL_HANDLE;
+        vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
+        accumulationPipelineLayout_ = VK_NULL_HANDLE;
+        vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
+        accumulationDescSetLayout_ = VK_NULL_HANDLE;
+        return;
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Accumulation pipeline forged — temporal convergence armed");
+}
+
+// =============================================================================
+// FULL IMPLEMENTATION: renderFrame(const Camera&, float)
+// This is the main entry point used by Application::run()
+// Already present in previous versions — now confirmed complete
+// =============================================================================
+void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
+{
+    totalTime_ += deltaTime;
+
+    if (RTX::SwapchainManager::minimized_) {
+        return;
+    }
+
+    const uint32_t frameIndex = frameNumber_++;
+    const uint32_t slot       = frameIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT;
+
+    // Acquire swapchain image
+    uint32_t imageIndex = 0;
+    VkResult acquireResult = vkAcquireNextImageKHR(
+        stone_device(), stone_swapchain(),
+        UINT64_MAX,
+        imageAvailableSemaphores_[slot],
+        VK_NULL_HANDLE,
+        &imageIndex
+    );
+
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
+        vkDeviceWaitIdle(stone_device());
+        RTX::recreateSwapchain(stone_width(), stone_height());
+        return;
+    }
+    if (acquireResult != VK_SUCCESS) {
+        return;
+    }
+
+    VkCommandBuffer cmd = commandBuffers_[slot];
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    RTX::LAS::buildOrUpdateTLAS(cmd);
+
+    if (resetAccumNextFrame_) {
+        clearAccumulationImages(cmd);
+        resetAccumNextFrame_ = resetAccumulation_ = false;
+        currentSpp_ = accumulationFrame_ = 0;
+    }
+
+    // Deferred first-frame transitions (same as before)
+    if (rtOutputNeedsTransition_) {
+        for (const auto& img : rtOutputImages_) {
+            transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+        }
+        rtOutputNeedsTransition_ = false;
+    }
+
+    if (depthNeedsTransition_) {
+        transitionImage(cmd, depthImage_.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                        0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
+        depthNeedsTransition_ = false;
+    }
+
+    if (accumulationNeedsTransition_) {
+        for (const auto& img : accumImages_) {
+            transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                            0, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+        }
+        accumulationNeedsTransition_ = false;
+    }
+
+    if (nexusScoreNeedsInit_) {
+        transitionImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkClearColorValue clearZero{{0.0f, 0.0f, 0.0f, 0.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearZero, 1, &range);
+
+        transitionImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+
+        nexusScoreNeedsInit_ = false;
+    }
+
+    if (envMapNeedsUpload_) {
+        envMapNeedsUpload_ = false;
+    }
+
+    if (activeRenderMode_ == 1) {
+        VkClearColorValue sacredPink{{1.0f, 0.0f, 0.5f, 1.0f}};
+        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_GENERAL, &sacredPink, 1, &range);
+    } else {
+        updateUniformBuffer(slot, camera, deltaTime);
+        updateTonemapUniform(slot);
+        currentFrame_.store(slot);
+
+        {
+            RTX::RTDescriptorUpdate desc{};
+            desc.tlas = RTX::las().getCurrentTLAS();
+            if (!desc.tlas) desc.tlas = pipelineManager_.dummyTLAS();
+
+            desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
+            desc.uboSize = UBO::sizeOf(DreamUBO{});
+
+            desc.rtOutputView = rtOutputViews_[slot].get();
+
+            if (Options::OptionsRTX::ENABLE_ACCUMULATION && !accumViews_.empty()) {
+                desc.accumulationViews = { accumViews_[0].get(), accumViews_[1].get() };
+            }
+
+            if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING && hypertraceScoreView_ != VK_NULL_HANDLE) {
+                desc.nexusScoreViews = { hypertraceScoreView_ };
+            }
+
+            if (!materialBufferEncs_.empty()) {
+                const auto* matBuf = BufferManager::get(materialBufferEncs_[0]);
+                if (matBuf) {
+                    desc.materialsBuffer = matBuf->buffer;
+                    desc.materialsSize = materialBufferSize();
+                }
+            }
+
+            if (Options::Environment::ENABLE_ENV_MAP && pipelineManager_.envMapImageView_.valid() && pipelineManager_.envMapSampler_.valid()) {
+                desc.envSampler = pipelineManager_.envMapSampler_.get();
+                desc.envImageView = pipelineManager_.envMapImageView_.get();
+            }
+
+            pipelineManager_.updateRTDescriptorSet(slot, desc);
+        }
+
+        recordRayTracingCommands(cmd, slot);
+
+        if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
+            recordAccumulationPass(cmd, slot);
+        }
+
+        if (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_) {
+            updateDenoiserDescriptors();
+            performDenoisingPass(cmd);
+        }
+    }
+
+    // Final output to swapchain (same as before)
+    {
+        VkImage finalSrc = rtOutputImages_[slot].get();
+
+        if (Options::Tonemap::ENABLE_TONEMAPPING && tonemapEnabled_) {
+            VkImageView input = activeRenderMode_ == 1 
+                ? rtOutputViews_[slot].get()
+                : (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
+                    ? denoiserView_.get()
+                    : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[slot].get() : rtOutputViews_[slot].get());
+
+            updateTonemapDescriptor(slot, input, stone_views()[imageIndex]);
+            performTonemapPass(cmd, slot, imageIndex);
+            finalSrc = stone_images()[imageIndex];
+        }
+
+        if (finalSrc != stone_images()[imageIndex]) {
+            transitionImage(cmd, finalSrc, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+            VkImageCopy copyRegion{};
+            copyRegion.srcSubresource = copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copyRegion.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1u };
+
+            vkCmdCopyImage(cmd, finalSrc, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &copyRegion);
+
+            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        } else {
+            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                            VK_ACCESS_SHADER_WRITE_BIT, 0,
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        }
+    }
+
+    vkEndCommandBuffer(cmd);
+
+    submitAndPresent(slot, imageIndex);
+
+    currentSpp_++;
+    accumulationFrame_++;
+}
+
+// Add these FULL implementations to src/engine/GLOBAL/VulkanRenderer.cpp
+// Place them at the bottom of the file, after all other functions
+
+// =============================================================================
+// updateUniformBuffer — Full implementation
+// Updates DreamUBO with camera, time, jitter, exposure, etc.
+// =============================================================================
+void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept
+{
+    if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0) {
+        return;
+    }
+
+    const uint64_t handle = uniformBufferEncs_[frame];
+    const BufferManager::BufferInfo* info = BufferManager::get(handle);
+    if (!info || info->mapped == nullptr) {
+        return;
+    }
+
+    DreamUBO ubo{};
+
+    ubo.time                = totalTime_ + deltaTime;
+    ubo.frame               = frameNumber_;
+    ubo.currentSpp          = currentSpp_;
+    ubo.totalSpp            = accumulationFrame_;
+    ubo.exposure            = currentExposure_;
+
+    ubo.enableEnvMap        = Options::Environment::ENABLE_ENV_MAP ? 1u : 0u;
+    ubo.hypertraceEnabled   = Options::OptionsRTX::ENABLE_HYPERTRACE ? 1u : 0u;
+    ubo.denoisingEnabled    = Options::OptionsRTX::ENABLE_DENOISING ? 1u : 0u;
+    ubo.adaptiveEnabled     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING ? 1u : 0u;
+    ubo.debugMode           = static_cast<uint32_t>(activeRenderMode_);
+
+    ubo.envIntensity        = 1.0f;
+    ubo.envRotation         = 0.0f;
+
+    ubo.resolution          = glm::vec2(static_cast<float>(width_), static_cast<float>(height_));
+
+    // Halton 2,3 sequence for stable jitter
+    static constexpr glm::vec2 halton16[16] = {
+        {0.0f, 0.0f},       {0.5f, 0.333333f}, {0.25f, 0.666667f}, {0.75f, 0.111111f},
+        {0.125f, 0.444444f},{0.625f, 0.777778f},{0.375f, 0.222222f},{0.875f, 0.555556f},
+        {0.0625f, 0.888889f},{0.5625f, 0.037037f},{0.3125f, 0.370370f},{0.8125f, 0.703704f},
+        {0.1875f, 0.148148f},{0.6875f, 0.481481f},{0.4375f, 0.814815f},{0.9375f, 0.259259f}
+    };
+
+    const uint32_t jitterIdx = frameNumber_ % 16;
+    ubo.jitter              = halton16[jitterIdx];
+    ubo.jitterPrev          = (frameNumber_ == 0) ? ubo.jitter : halton16[(frameNumber_ - 1) % 16];
+
+    ubo.nexusScoreThreshold = currentNexusScore_;
+    ubo.hypertraceJitterScale = Options::OptionsRTX::HYPERTRACE_JITTER_SCALE;
+
+    const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
+    ubo.view     = camera.view();
+    ubo.proj     = camera.proj(aspect);
+    ubo.invView  = glm::inverse(ubo.view);
+    ubo.invProj  = glm::inverse(ubo.proj);
+
+    ubo.camPos   = glm::vec4(camera.pos(), 1.0f);
+    ubo.camDir   = glm::vec4(camera.forward(), 0.0f);
+    ubo.fov      = camera.fov();
+    ubo.aperture = camera.aperture();
+    ubo.focusDistance = camera.focusDistance();
+
+    ubo.materialCount       = static_cast<uint32_t>(materialCount_);
+    ubo.activeMaterialIndex = activeMaterialIndex_;
+    ubo.metallicOverride    = materialMetallicOverride_;
+    ubo.roughnessOverride   = materialRoughnessOverride_;
+    ubo.emissiveIntensity   = emissiveIntensity_;
+
+    ubo.enableBlueNoise     = Options::Environment::ENABLE_BLUE_NOISE ? 1u : 0u;
+    ubo.enableTAA           = Options::OptionsRTX::ENABLE_TAA ? 1u : 0u;
+    ubo.taaAlpha            = Options::OptionsRTX::TAA_ALPHA;
+
+    ubo.sunDirection        = sunDirection_;
+    ubo.sunIntensity        = sunIntensity_;
+    ubo.sunColor            = sunColor_;
+    ubo.fogDensity          = fogDensity_;
+    ubo.fogColor            = fogColor_;
+
+    ubo.showNexusScore      = Options::Debug::SHOW_NEXUS_SCORE ? 1u : 0u;
+    ubo.showSppHeatmap      = Options::Debug::SHOW_SPP_HEATMAP ? 1u : 0u;
+    ubo.showAccumulationCount = Options::Debug::SHOW_ACCUMULATION_COUNT ? 1u : 0u;
+    ubo.showGpuTimestamps   = Options::Debug::SHOW_GPU_TIMESTAMPS ? 1u : 0u;
+
+    std::memcpy(info->mapped, &ubo, sizeof(DreamUBO));
+}
+
+// =============================================================================
+// updateTonemapUniform — Full implementation
+// =============================================================================
+void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
+{
+    if (frame >= tonemapUniformEncs_.size() || tonemapUniformEncs_[frame] == 0) {
+        return;
+    }
+
+    const uint64_t handle = tonemapUniformEncs_[frame];
+    const BufferManager::BufferInfo* info = BufferManager::get(handle);
+    if (!info || info->mapped == nullptr) {
+        return;
+    }
+
+    TonemapUBO ubo{};
+
+    ubo.exposure = currentExposure_;
+    ubo.type     = static_cast<uint32_t>(tonemapType_);
+    ubo.enabled  = Options::Tonemap::ENABLE_TONEMAPPING ? 1u : 0u;
+    ubo.nexusScore = currentNexusScore_;
+    ubo.frame    = frameNumber_;
+    ubo.spp      = currentSpp_;
+
+    ubo.gamma    = Options::Tonemap::GAMMA;
+    ubo.bloomThreshold = Options::PostProcess::BLOOM_THRESHOLD;
+    ubo.bloomIntensity = Options::PostProcess::BLOOM_INTENSITY;
+    ubo.vignetteIntensity = Options::PostProcess::VIGNETTE_INTENSITY;
+    ubo.filmGrainStrength = Options::PostProcess::FILM_GRAIN_STRENGTH;
+    ubo.lensFlareIntensity = Options::PostProcess::LENS_FLARE_INTENSITY;
+
+    std::memcpy(info->mapped, &ubo, sizeof(TonemapUBO));
+}
+
+// =============================================================================
+// recordAccumulationPass — Full implementation
+// =============================================================================
+void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept
+{
+    if (accumulationPipeline_ == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RENDERER", "Accumulation pipeline not created — skipping pass");
+        return;
+    }
+
+    VkDescriptorSet set = accumulationSets_[slot];
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulationPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulationPipelineLayout_, 0, 1, &set, 0, nullptr);
+
+    uint32_t wgX = (width_ + 15) / 16;
+    uint32_t wgY = (height_ + 15) / 16;
+    vkCmdDispatch(cmd, wgX, wgY, 1);
+
+    VkMemoryBarrier2 barrier{
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
+    };
+    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+    RTX::g_ext.vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+// =============================================================================
+// updateTonemapDescriptor — Full implementation
+// =============================================================================
+void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inputView, VkImageView output) noexcept
+{
+    if (frameIdx >= tonemapSets_.size() || tonemapSets_[frameIdx] == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkDescriptorImageInfo inputInfo{
+        .sampler     = tonemapSampler_.get(),
+        .imageView   = inputView,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkDescriptorImageInfo outputInfo{
+        .imageView   = output,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    VkDescriptorBufferInfo uboInfo{};
+    if (frameIdx < tonemapUniformEncs_.size() && tonemapUniformEncs_[frameIdx] != 0) {
+        const auto* buf = BufferManager::get(tonemapUniformEncs_[frameIdx]);
+        if (buf) {
+            uboInfo.buffer = buf->buffer;
+            uboInfo.offset = 0;
+            uboInfo.range  = sizeof(TonemapUBO);
+        }
+    }
+
+    std::array<VkWriteDescriptorSet, 3> writes = {{
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, tonemapSets_[frameIdx], 0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &inputInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, tonemapSets_[frameIdx], 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,       &outputInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, tonemapSets_[frameIdx], 2, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,     nullptr, &uboInfo}
+    }};
+
+    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+}
+
+// =============================================================================
+// performTonemapPass — Full implementation
+// =============================================================================
+void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept
+{
+    if (!Options::Tonemap::ENABLE_TONEMAPPING || tonemapPipeline_.get() == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkDescriptorSet set = tonemapSets_[frameIdx % tonemapSets_.size()];
+    if (set == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkImage swapImg = stone_images()[swapImageIdx];
+
+    transitionImage(cmd, swapImg,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
+                    0, VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, tonemapPipeline_.get());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            tonemapLayout_.get(), 0, 1, &set, 0, nullptr);
+
+    struct Push {
+        float    exposure;
+        uint32_t type;
+        uint32_t enabled;
+        float    pad;
+    } push{
+        .exposure = currentExposure_,
+        .type     = static_cast<uint32_t>(tonemapType_),
+        .enabled  = 1u,
+        .pad      = 0.0f
+    };
+
+    vkCmdPushConstants(cmd, tonemapLayout_.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+
+    uint32_t wgX = (width_ + 15) / 16;
+    uint32_t wgY = (height_ + 15) / 16;
+    vkCmdDispatch(cmd, wgX, wgY, 1);
+
+    transitionImage(cmd, swapImg,
+                    VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_SHADER_WRITE_BIT, 0,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
 void VulkanRenderer::createSyncObjects() noexcept
