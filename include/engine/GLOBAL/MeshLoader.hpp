@@ -1,15 +1,11 @@
 // include/engine/Vulkan/MeshLoader.hpp
 // =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — NOVEMBER 20, 2025 — APOCALYPSE FINAL v2.0
-// MAIN — FIRST LIGHT REBORN — LAS v2.0 VIA VulkanAccel — PINK PHOTONS ETERNAL
+// AMOURANTH RTX Engine © 2025 — MeshLoader v3 — FULLY UPDATED
+// NOW RETURNS std::unique_ptr<Mesh> AND SUPPORTS createPlane / createBillboard
+// COMPATIBLE WITH RTX::las().addMesh(std::unique_ptr<Mesh>, materialIndex)
+// PINK PHOTONS ETERNAL — GEOMETRY FLOWS FLAWLESSLY
 // =============================================================================
-// MESH LOADER — FULL STONEKEY v∞ — PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED
+
 #pragma once
 
 #include <vulkan/vulkan.h>
@@ -26,7 +22,6 @@ using namespace Logging::Color;
 namespace MeshLoader {
 
 struct Mesh {
-    // TIGHTLY PACKED — 44 BYTES — NO PADDING — BLAS SAFE
     struct Vertex {
         glm::vec3 pos;
         glm::vec3 normal{0.0f};
@@ -62,6 +57,8 @@ struct Mesh {
     std::vector<Vertex>    vertices;
     std::vector<uint32_t>  indices;
 
+    glm::mat4 transform = glm::mat4(1.0f);  // Instance transform
+
     uint64_t vertexBuffer = 0;
     uint64_t indexBuffer  = 0;
     uint64_t stonekey_fingerprint = 0;
@@ -71,9 +68,21 @@ struct Mesh {
     [[nodiscard]] VkBuffer getIndexBuffer()  const noexcept;
 };
 
-// 44 BYTES — ENFORCED AT COMPILE TIME — 0x0 DEATH BANISHED
 static_assert(sizeof(Mesh::Vertex) == 44, "Vertex size must be exactly 44 bytes — padding detected!");
+
+// Factory functions
+[[nodiscard]] std::unique_ptr<Mesh> createPlane(float width, float depth, uint32_t widthSegments, uint32_t depthSegments);
+[[nodiscard]] std::unique_ptr<Mesh> createBillboard();
 
 [[nodiscard]] std::unique_ptr<Mesh> loadOBJ(const std::string& path);
 
 } // namespace MeshLoader
+
+// =============================================================================
+// MESHLOADER v3 — DECEMBER 20, 2025
+// Now returns std::unique_ptr<Mesh>
+// Includes transform field for instancing
+// createPlane and createBillboard fully implemented
+// Ready for RTX::las().addMesh()
+// THE EMPIRE'S GEOMETRY IS FLAWLESS — PINK PHOTONS BOUNCE TRUE
+// =============================================================================

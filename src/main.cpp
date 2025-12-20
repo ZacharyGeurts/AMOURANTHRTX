@@ -4,9 +4,10 @@
 // PRODUCTION-GRADE · CLEAN · MODERN · VALIDATION-CLEAN · NO REDUNDANCY
 // PHASES IN STRICT ORDER: Splash → Vulkan Init → Renderer → RTX Pipeline → Scene → Run
 // SAFE PIPELINE CREATION — RENDERER EXISTS BEFORE FORGE — NO CRASH
-// FIXED FAVICON LOADING — .ICO + .PNG FALLBACK — EMPIRE ICON ETERNAL
-// UPDATED FOR NEW VulkanRenderer — ALL CALLS VERIFIED & COMPATIBLE
-// PINK PHOTONS ETERNAL — THE EMPIRE IS COMPLETE
+// FAVICON NOW CONSISTENT IN SPLASH AND MAIN WINDOW
+// DEFAULT SCENE: Large ground plane + Pink Monster billboard (with proper material indices)
+// FULLY COMPATIBLE WITH MeshLoader::Mesh and RTX::las()
+// PINK PHOTONS NOW BOUNCE OFF SACRED GEOMETRY — EMPIRE REFLECTS ETERNALLY
 // =============================================================================
 
 #include "main.hpp"
@@ -22,6 +23,7 @@
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/UBO.hpp"
+#include "engine/GLOBAL/LAS.hpp"
 
 #include "modes/RenderMode1.hpp"
 
@@ -80,7 +82,36 @@ static void createTransientCommandPool() noexcept
 }
 
 // =============================================================================
-// Phase 3: Sacrificial Splash — WITH FIXED FAVICON
+// Shared favicon loading function — used in both splash and main window
+// =============================================================================
+static void loadEmpireIcon(SDL_Window* window) noexcept
+{
+    const char* iconPaths[] = {
+        "assets/textures/ammo.ico",
+        "assets/textures/ammo32.ico",
+        "assets/textures/ammo.png",
+        "assets/textures/ammo32.png",
+        nullptr
+    };
+
+    bool iconSet = false;
+    for (int i = 0; iconPaths[i]; ++i) {
+        if (SDL_Surface* s = IMG_Load(iconPaths[i])) {
+            SDL_SetWindowIcon(window, s);
+            SDL_DestroySurface(s);
+            iconSet = true;
+            LOG_SUCCESS_CAT("MAIN", "Empire icon loaded: {}", iconPaths[i]);
+            break;
+        }
+    }
+
+    if (!iconSet) {
+        LOG_WARNING_CAT("MAIN", "No empire icon found — running without crest");
+    }
+}
+
+// =============================================================================
+// Phase 3: Sacrificial Splash — WITH EMPIRE ICON
 // =============================================================================
 static void phase3_sacrificialSplash() noexcept
 {
@@ -105,29 +136,7 @@ static void phase3_sacrificialSplash() noexcept
     SDL_GetDisplayBounds(0, &disp);
     SDL_SetWindowPosition(win, disp.x + (disp.w - W) / 2, disp.y + (disp.h - H) / 2);
 
-    // FIXED FAVICON LOADING — .ICO + .PNG FALLBACK — EMPIRE ICON ETERNAL
-    const char* iconPaths[] = {
-        "assets/textures/ammo.ico",
-        "assets/textures/ammo32.ico",
-        "assets/textures/ammo.png",      // PNG fallback
-        "assets/textures/ammo32.png",    // 32x32 PNG fallback
-        nullptr
-    };
-
-    bool iconSet = false;
-    for (int i = 0; iconPaths[i]; ++i) {
-        if (SDL_Surface* s = IMG_Load(iconPaths[i])) {
-            SDL_SetWindowIcon(win, s);
-            SDL_DestroySurface(s);
-            iconSet = true;
-            LOG_SUCCESS_CAT("SPLASH", "Window icon loaded: {}", iconPaths[i]);
-            break;
-        }
-    }
-
-    if (!iconSet) {
-        LOG_WARNING_CAT("SPLASH", "No window icon found — empire runs without crest");
-    }
+    loadEmpireIcon(win);
 
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
     if (!ren) {
@@ -187,7 +196,7 @@ static void phase3_sacrificialSplash() noexcept
 }
 
 // =============================================================================
-// Phase 4: Vulkan Initialization + RT Properties Cache
+// Phase 4: Vulkan Initialization + Empire Icon
 // =============================================================================
 static void phase4_merchantShip() noexcept
 {
@@ -219,12 +228,13 @@ static void phase4_merchantShip() noexcept
         phase9_ballerina("Window creation failed", std::source_location::current());
     }
 
+    loadEmpireIcon(win);
+
     stone_seal_window(win);
     g_sdl_window.reset(win);
     RTX::g_ctx().setSize(w, h);
     SDL_ShowWindow(win);
 
-    // X11 BLACK SCREEN FIX — Force compositor to recognize Vulkan surface
     SDL_SetWindowOpacity(win, 0.99f);
     SDL_SetWindowOpacity(win, 1.0f);
     SDL_PumpEvents();
@@ -243,18 +253,44 @@ static void phase4_merchantShip() noexcept
     RTX::g_ctx().init();
     RTX::loadRTExtensions(stone_instance(), stone_device());
 
-    // Critical: Cache ray tracing properties AFTER device sealing
     RTX::pipeline().cacheDeviceProperties();
 
     createTransientCommandPool();
 
     RTX::SwapchainManager::create(win, w, h);
 
-    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — EMPIRE AWAKENS — PINK PHOTONS READY");
+    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — EMPIRE ICON ETERNAL — PINK PHOTONS READY");
 }
 
 // =============================================================================
-// Phase 7: Create Renderer — NOW CONSTRUCTOR DOES ALL HEAVY LIFTING
+// Phase 6: Build Default Scene — Ground Plane + Pink Monster Billboard
+// Uses MeshLoader::Mesh and RTX::las() correctly
+// =============================================================================
+static void phase6_buildDefaultScene() noexcept
+{
+    LOG_AMOURANTH("PHASE 6 — BUILDING DEFAULT SCENE — GROUND PLANE + SACRED PINK MONSTER");
+
+    // Large ground plane — matte white for perfect bounces
+    auto ground = MeshLoader::createPlane(200.0f, 200.0f, 20, 20);
+    ground->transform = glm::mat4(1.0f);
+    ground->transform = glm::translate(ground->transform, glm::vec3(0.0f, -2.0f, 0.0f));
+    ground->transform = glm::rotate(ground->transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    RTX::las().addMesh(std::move(ground), 0);  // Material index 0
+
+    // Sacred pink monster billboard — always faces camera
+    auto billboard = MeshLoader::createBillboard();
+    billboard->transform = glm::mat4(1.0f);
+    billboard->transform = glm::translate(billboard->transform, glm::vec3(0.0f, 4.0f, 0.0f));
+    billboard->transform = glm::scale(billboard->transform, glm::vec3(Options::PinkBillboard::SCALE));
+    RTX::las().addMesh(std::move(billboard), 1);  // Material index 1
+
+    RTX::las().rebuildTLAS();  // Full rebuild for initial scene
+
+    LOG_SUCCESS_CAT("MAIN", "Default scene built — ground plane + pink monster billboard — rays now bounce eternally");
+}
+
+// =============================================================================
+// Phase 7: Create Renderer
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
 {
@@ -264,16 +300,6 @@ static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
         SDL3Window::get(),
         Options::Performance::OVERCLOCK_RENDERER
     );
-
-    // Constructor already creates:
-    // - command buffers
-    // - sync objects
-    // - UBOs (Dream + Tonemap)
-    // - RT output images
-    // - depth
-    // - accumulation images
-    // - accumulation pipeline
-    // - nexus score image
 
     stone_seal_renderer(renderer.get());
     return renderer;
@@ -404,7 +430,7 @@ private:
     glm::mat4 proj_;
     std::chrono::steady_clock::time_point lastFrameTime_;
     bool quit_ = false;
-    int currentRenderMode_ = 0;  // Start in normal mode (0)
+    int currentRenderMode_ = 0;
     std::unique_ptr<VulkanRenderer> renderer_;
 };
 
@@ -428,7 +454,6 @@ void Application::run() noexcept
 
         INPUT.pumpEvents(g_deltaTime, [this](int mode) { currentRenderMode_ = mode; }, stone_window());
 
-        // CRITICAL X11 FIX — Force compositor update every frame
         SDL_PumpEvents();
 
         if (renderer_ && renderer_->isAlive() && stone_swapchain() != VK_NULL_HANDLE) {
@@ -454,19 +479,20 @@ void Application::run() noexcept
 }
 
 // =============================================================================
-// Entry Point — Phases in Order — SAFE PIPELINE CREATION
+// Entry Point — Phases in Order — NOW WITH DEFAULT SCENE
 // =============================================================================
 int main(int, char**)
 {
     install_apocalypse_handler();
 
-    // X11 COMPOSITOR BYPASS — CRITICAL FOR NVIDIA
     putenv(const_cast<char*>("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR=1"));
 
-    phase3_sacrificialSplash();           // Phase 3 — with fixed favicon
-    phase4_merchantShip();                // Phase 4 — Vulkan + RT properties cached
-    auto renderer = phase7_createRenderer(); // Phase 7 — Renderer first (constructor does everything)
-    phase8_forgeTheRTX(renderer.get());   // Phase 8 — Pipeline forged safely with renderer
+    phase3_sacrificialSplash();
+    phase4_merchantShip();
+    auto renderer = phase7_createRenderer();
+    phase8_forgeTheRTX(renderer.get());
+
+    phase6_buildDefaultScene();  // Ground + Pink Monster
 
     stone_seal_final();
 
@@ -479,10 +505,8 @@ int main(int, char**)
 
 // =============================================================================
 // FINAL PRODUCTION MAIN — DECEMBER 20, 2025
-// FULLY COMPATIBLE WITH NEW VulkanRenderer (constructor handles all resource creation)
-// NO MORE MANUAL CALLS TO createAccumulationPipeline() OR renderFrame() mismatches
-// RENDERER EXISTS BEFORE RTX PIPELINE FORGE — NO CRASH
-// FAVICON FIXED — .ICO + .PNG FALLBACK
-// X11 COMPOSITOR BYPASS ENABLED
-// SHIPPING DECEMBER 20, 2025 — THE EMPIRE IS ETERNAL
+// EMPIRE ICON CONSISTENT
+// DEFAULT SCENE WITH BOUNCEABLE GEOMETRY
+// FULLY COMPATIBLE WITH MeshLoader::Mesh and RTX::las()
+// PINK PHOTONS BOUNCE ETERNALLY — THE EMPIRE IS REFLECTED IN GLORY
 // =============================================================================

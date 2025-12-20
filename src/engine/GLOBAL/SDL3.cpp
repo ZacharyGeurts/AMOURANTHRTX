@@ -255,7 +255,7 @@ void SDL3Input::handleKeyboard(const SDL_KeyboardEvent& k, SDL_Window* window, S
             break;
 
         case SDLK_GRAVE:
-            if (Options::Performance::ENABLE_CONSOLE_LOG) {
+            if (Options::ENABLE_CONSOLE_LOG) {
                 consoleOpen = !consoleOpen;
                 LOG_INFO_CAT("Input", "{}Console → {}{}", OCEAN_TEAL, consoleOpen ? "OPEN" : "CLOSED", RESET);
             }

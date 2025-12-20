@@ -1544,7 +1544,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     };
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    RTX::LAS::buildOrUpdateTLAS(cmd);
+    RTX::las().buildOrUpdateTLAS(cmd);
 
     if (resetAccumNextFrame_) {
         clearAccumulationImages(cmd);
