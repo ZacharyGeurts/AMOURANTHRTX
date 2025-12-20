@@ -99,11 +99,11 @@ namespace Environment {
     constexpr bool     ENABLE_VOLUMETRIC_FOG       = true;
     constexpr float    FOG_DENSITY                 = 0.02f;
     constexpr bool     ENABLE_SKY_ATMOSPHERE       = true;
-    constexpr float    SUN_INTENSITY               = 10.0f;
+    constexpr float    SUN_INTENSITY               = 40.0f;
     constexpr bool     ENABLE_GOD_RAYS             = true;
     constexpr uint32_t GOD_RAYS_SAMPLES            = 64;
     constexpr bool     ENABLE_BLUE_NOISE           = true;
-    constexpr float    ENVIRONMENT_EXPOSURE        = 1.0f;
+    constexpr float    ENVIRONMENT_EXPOSURE        = 4.0f;
 }
 
 // ── LIGHT ACCELERATION STRUCTURE (LAS) CONFIGURATION ─────────────────────────

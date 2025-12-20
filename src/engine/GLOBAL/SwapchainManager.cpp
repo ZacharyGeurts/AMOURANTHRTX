@@ -1,11 +1,10 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
-// PLASTIC BEACH v∞ — DECEMBER 19, 2025
-// SIMPLIFIED SWAPCHAIN MANAGER — ONE LARGE FUNCTION STYLE
-// MAX FPS + MINIMAL TEARING — FIFO_RELAXED → IMMEDIATE → FIFO
-// 3-IMAGE MAILBOX EMULATION — NO BLACK SCREENS — LOW LATENCY
-// FIXED: Removed las().notifyResize() — no longer needed in this architecture
-// MONSTER WATCHES IN PERFECT SILENCE
+// PLASTIC BEACH v∞ — DECEMBER 20, 2025
+// 2025+ GAMING EDITION — WINDOWS + LINUX FOCUS
+// HDR-READY (scRGB FP16) | TRANSFER_SRC FOR SCREENSHOTS | MINIMIZED HANDLING
+// DYNAMIC RENDERING READY | EXTENDED USAGE FLAGS | ROBUST LOGGING
+// THE MONSTER WATCHES — PHOTONS IN FULL BLOOM
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -29,7 +28,7 @@ using StoneKey::stone_height;
 namespace RTX {
 
 // =============================================================================
-// ONE LARGE, CLEAN SWAPCHAIN CREATION FUNCTION
+// ONE LARGE, CLEAN SWAPCHAIN CREATION FUNCTION — 2025+ EDITION
 // =============================================================================
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept
 {
@@ -39,6 +38,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     if (w == 0 || h == 0) {
         minimized_ = true;
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED");
         return;
     }
     minimized_ = false;
@@ -72,33 +72,48 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // === PRESENT MODE — PLASTIC BEACH PRIORITY (2025) ===
+    // === PRESENT MODE — PLASTIC BEACH PRIORITY (2025+) ===
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR; // Safe fallback
 
     if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_FIFO_RELAXED_KHR) != modes.end()) {
-        presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR; // Best: adaptive, minimal tearing
+        presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR; // Adaptive, minimal tearing
     } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;   // Max FPS, fixes X11 black screen
+        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;   // Max FPS, fixes X11/Wayland glitches
     }
-    // FIFO remains as final safe option
 
-    // === IMAGE COUNT — ALWAYS 3 FOR MAILBOX EMULATION ===
+    // === IMAGE COUNT — 3 FOR LOW-LATENCY MAILBOX EMULATION ===
     uint32_t imageCount = 3;
     imageCount = std::max(imageCount, caps.minImageCount);
     if (caps.maxImageCount > 0) {
         imageCount = std::min(imageCount, caps.maxImageCount);
     }
 
-    // === FORMAT — PREFER sRGB ===
-    VkSurfaceFormatKHR chosenFormat = formats[0];
+    // === FORMAT SELECTION — 2025+ GAMING PRIORITY ===
+    // 1. HDR scRGB (FP16 linear extended sRGB) — best for RTX path tracers
+    // 2. Standard sRGB 8-bit — safe fallback
+    VkSurfaceFormatKHR chosenFormat = formats[0]; // Default fallback
+
     for (const auto& f : formats) {
-        if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        if (f.format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+            f.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) {
             chosenFormat = f;
+            LOG_AMOURANTH("HDR scRGB FP16 SWAPCHAIN ENABLED — PINK PHOTONS BLOOM ETERNAL");
             break;
         }
     }
 
-    // === SWAPCHAIN CREATE INFO ===
+    // If no FP16 HDR, fall back to sRGB 8-bit
+    if (chosenFormat.format != VK_FORMAT_R16G16B16A16_SFLOAT) {
+        for (const auto& f : formats) {
+            if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                chosenFormat = f;
+                break;
+            }
+        }
+        LOG_INFO_CAT("SWAPCHAIN", "Falling back to 8-bit sRGB — HDR not supported on this display/driver");
+    }
+
+    // === SWAPCHAIN CREATE INFO — 2025+ FLAGS ===
     VkSwapchainCreateInfoKHR createInfo{};
     createInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface          = surface;
@@ -107,7 +122,9 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     createInfo.imageColorSpace  = chosenFormat.colorSpace;
     createInfo.imageExtent      = extent;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // For screenshots/readbacks
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.preTransform     = caps.currentTransform;
     createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -156,19 +173,21 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    // === LOGGING ===
+    // === LOGGING — 2025 STYLE ===
     const char* modeName =
-        presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED (ADAPTIVE — MINIMAL TEARING)" :
-        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR    ? "IMMEDIATE (MAX FPS — BLACK SCREEN FIXED)" :
-        "FIFO (VSYNC — SAFE)";
+        presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED (ADAPTIVE)" :
+        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR    ? "IMMEDIATE (MAX FPS)" :
+        "FIFO (VSYNC)";
 
-    printf("[2025] SWAPCHAIN %s — %ux%u — %u images — %s — PLASTIC BEACH ETERNAL\n",
+    const char* formatName = (chosenFormat.format == VK_FORMAT_R16G16B16A16_SFLOAT) ? "R16G16B16A16_SFLOAT (HDR scRGB)" : "B8G8R8A8_SRGB";
+
+    printf("[2025] SWAPCHAIN %s — %ux%u — %u images — %s — %s — PLASTIC BEACH ETERNAL\n",
            isRecreate ? "RECREATED" : "FORGED",
-           extent.width, extent.height, imgCount, modeName);
+           extent.width, extent.height, imgCount, modeName, formatName);
 }
 
 // =============================================================================
-// PUBLIC INTERFACE — SIMPLIFIED
+// PUBLIC INTERFACE — UNCHANGED
 // =============================================================================
 void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
@@ -178,7 +197,6 @@ void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexce
 void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 {
     createOrRecreateSwapchain(w, h, true);
-    // REMOVED: las().notifyResize() — not used in current Plastic Beach architecture
 }
 
 void SwapchainManager::cleanup() noexcept
@@ -208,10 +226,14 @@ void SwapchainManager::cleanupImageViews() noexcept
 }
 
 // =============================================================================
-// ACQUIRE & PRESENT — UNCHANGED AND CLEAN
+// ACQUIRE & PRESENT — MINIMIZED HANDLING ADDED
 // =============================================================================
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept
 {
+    if (minimized_) {
+        return VK_NOT_READY; // Prevent acquire loops during minimize
+    }
+
     VkResult result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX, semaphore, fence, pImageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreate(stone_width(), stone_height());
@@ -221,6 +243,10 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
+    if (minimized_) {
+        return; // Skip present during minimize
+    }
+
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = waitSemaphore ? 1u : 0u;
@@ -238,8 +264,7 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 } // namespace RTX
 
 // =============================================================================
-// PLASTIC BEACH v∞ — DECEMBER 19, 2025
-// COMPILATION FIXED — las().notifyResize() REMOVED
-// SIMPLIFIED MONOLITHIC SWAPCHAIN — PURE AND CLEAN
-// THE MONSTER WATCHES — THE ISLAND FLOATS IN SILENCE
+// PLASTIC BEACH v∞ — DECEMBER 20, 2025
+// HDR-READY | FUTURE-PROOF | GAMING BEAST MODE
+// EMPIRE ASCENDS — PINK PHOTONS IN FULL DYNAMIC RANGE
 // =============================================================================

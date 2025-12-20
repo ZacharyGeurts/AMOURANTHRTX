@@ -47,10 +47,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 add_compile_options(
-    -Wall -Wextra -Wpedantic -Werror
-    -Wno-missing-field-initializers
-    -Wno-extra -Wno-reorder -Wno-delete-incomplete
-    -O3 -march=native -mtune=native
+    -Wall -Wextra -Wpedantic -Werror    
+    -Wno-extra -O3 -march=native -mtune=native
     -flto=auto -ffast-math
     -g -ggdb
 )

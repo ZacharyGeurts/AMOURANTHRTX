@@ -289,7 +289,7 @@ enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error
 // 1. HYPER-VIVID ANSI COLORS
 // ========================================================================
 namespace Color {
-	inline constexpr const char* OKLAHOMA_RED                   = "\033[38;2;153;0;0m";
+    inline constexpr const char* OKLAHOMA_RED                   = "\033[38;2;153;0;0m";
     inline constexpr const char* OKLAHOMA_RED_BOLD              = "\033[1;38;2;153;0;0;48;2;255;255;255m";
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
@@ -315,7 +315,7 @@ namespace Color {
     inline constexpr std::string_view LILAC_LAVENDER            = "\033[38;5;183m";
     inline constexpr std::string_view SPEARMINT_MINT            = "\033[38;5;122m";
     inline constexpr std::string_view THERMO_PINK               = "\033[1;38;5;213m";
-	inline constexpr std::string_view COLOR_PINK                = "\033[1;38;5;213m";
+    inline constexpr std::string_view COLOR_PINK                = "\033[1;38;5;213m";
     inline constexpr std::string_view COSMIC_VOID               = "\033[38;5;232m";
     inline constexpr std::string_view QUASAR_BLUE               = "\033[1;38;5;39m";
     inline constexpr std::string_view NEBULA_VIOLET             = "\033[1;38;5;141m";
@@ -336,8 +336,8 @@ namespace Color {
     inline constexpr std::string_view BRONZE_BROWN              = "\033[38;5;94m";
     inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
     inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
-	inline constexpr std::string_view INVIS_BLACK               = "\033[1;38;5;0m";
-	inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;198m";;
+    inline constexpr std::string_view INVIS_BLACK               = "\033[1;38;5;0m";
+    inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;198m";;
     inline constexpr std::string_view BLOOD_ORANGE              = "\033[1;38;5;202m";
     inline constexpr std::string_view CYBER_LIME                = "\033[1;38;5;118m";
     inline constexpr std::string_view TOXIC_NEON                = "\033[1;38;5;154m";
@@ -364,7 +364,7 @@ namespace Color {
     inline constexpr std::string_view RADIANT_ROSE              = "\033[1;38;5;211m";
     inline constexpr std::string_view ELECTRO_PURPLE            = "\033[1;38;5;165m";
     inline constexpr std::string_view CRIMSON_RED               = "\033[38;5;9m";
-	inline constexpr std::string_view ABANDON_SHIP              = "\033[1;5;91m";
+    inline constexpr std::string_view ABANDON_SHIP              = "\033[1;5;91m";
 
     // ── STANDARD 16 COLORS (YOU ALREADY KNOW THESE) ─────────────────────────────
     inline constexpr std::string_view BLACK       = "\033[38;5;0m";
@@ -505,12 +505,12 @@ public:
 private:
     using Entry = std::tuple<uint64_t, std::source_location, LogLevel, std::string, std::string, std::chrono::steady_clock::time_point>;
 
-    Logger() : logFile_("amouranth_engine.log", std::ios::out | std::ios::app),
-               firstLogTime_{},
+    Logger() : firstLogTime_{},
+               logFile_("amouranth_engine.log", std::ios::out | std::ios::app),
                messageQueue_{},
                queueMutex_{},
-               asyncEnabled_{false},
-               flusher_{} {
+               flusher_{},
+               asyncEnabled_{false} {
         auto now = std::chrono::steady_clock::now();
         firstLogTime_ = now;
         printMessage(std::source_location::current(), LogLevel::Success, "Logger",

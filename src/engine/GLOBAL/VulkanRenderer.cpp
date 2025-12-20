@@ -1988,12 +1988,12 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     : window_(window),
       width_(width),
       height_(height),
-      overclockMode_(overclock),
+      activeRenderMode_(Options::RenderMode::DEFAULT_MODE),
       hypertraceEnabled_(Options::OptionsRTX::ENABLE_HYPERTRACE),
       denoisingEnabled_(Options::OptionsRTX::ENABLE_DENOISING),
       adaptiveSamplingEnabled_(Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING),
-      tonemapEnabled_(Options::Tonemap::ENABLE_TONEMAPPING),
-      activeRenderMode_(Options::RenderMode::DEFAULT_MODE)
+      overclockMode_(overclock),
+      tonemapEnabled_(Options::Tonemap::ENABLE_TONEMAPPING)
 {
     s_instance = this;
 

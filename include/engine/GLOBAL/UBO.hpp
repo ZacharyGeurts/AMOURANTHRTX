@@ -21,7 +21,7 @@ struct alignas(16) DreamUBO
     uint32_t  frame               = 0;
     uint32_t  currentSpp          = 0;
     uint32_t  totalSpp            = 0;
-    float     exposure            = 1.0f;
+    float     exposure            = 4.0f;
     uint32_t  enableEnvMap        = 1;
     uint32_t  hypertraceEnabled   = 1;
     uint32_t  denoisingEnabled    = 1;
@@ -84,7 +84,7 @@ static_assert(alignof(DreamUBO) == 16, "DreamUBO must be 16-byte aligned");
 // =============================================================================
 struct alignas(16) TonemapUBO
 {
-    float     exposure            = 1.0f;
+    float     exposure            = 4.0f;
     uint32_t  type                = 0;           // 0=ACES, 1=Filmic, 2=Reinhard
     uint32_t  enabled             = 1;
     float     nexusScore          = 0.0f;
