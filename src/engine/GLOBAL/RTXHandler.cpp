@@ -37,36 +37,6 @@ namespace RTX {
 Context g_context_instance{};
 
 // =============================================================================
-// Global Transient Command Pool — Throw-away command buffers
-// =============================================================================
-static VkCommandPool g_transientCommandPool = VK_NULL_HANDLE;
-
-static void createTransientCommandPool() noexcept
-{
-    if (g_transientCommandPool != VK_NULL_HANDLE) return;
-
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RTX", "Attempted to create transient command pool with null device — skipping");
-        return;
-    }
-
-    VkCommandPoolCreateInfo info{
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-    };
-
-    VkResult result = vkCreateCommandPool(stone_device(), &info, nullptr, &g_transientCommandPool);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("RTX", "Failed to create transient command pool: {}", string_VkResult(result));
-        return;
-    }
-
-    LOG_INFO_CAT("RTX", "Transient command pool created — throw-away command buffers enabled");
-}
-
-// =============================================================================
 // Global Descriptor Pool — Large, Long-Lived, Update-After-Bind Capable
 // =============================================================================
 static void createGlobalDescriptorPool() noexcept
@@ -462,7 +432,6 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
     stone_seal_compute_queue(g_ctx().computeQueue_);
 
     // Now safe to create global resources
-    createTransientCommandPool();
     createGlobalDescriptorPool();
 
     LOG_INFO_CAT("RTX", "Logical device and queues created successfully");

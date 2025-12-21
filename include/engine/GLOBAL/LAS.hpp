@@ -1,8 +1,9 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — LAS v3 Header — DECEMBER 20, 2025
-// UPDATED TO SUPPORT DYNAMIC MESH ADDING WITH MATERIAL INDICES
-// COMPATIBLE WITH main.cpp AND MeshLoader
+// AMOURANTH RTX Engine © 2025 — LAS v8 Header — DECEMBER 20, 2025
+// FULLY UPDATED FOR BLAS + DYNAMIC MESH SUPPORT
+// COMPATIBLE WITH MeshLoader::Mesh AND main.cpp DEFAULT SCENE
+// PINK PHOTONS BOUNCE ETERNALLY OFF REAL GEOMETRY
 // =============================================================================
 
 #pragma once
@@ -10,6 +11,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include <vulkan/vulkan.h>
 #include <memory>
+#include <vector>
 
 namespace MeshLoader {
     struct Mesh;
@@ -26,14 +28,14 @@ public:
 
     void buildOrUpdateTLAS(VkCommandBuffer cmd) noexcept;
 
-    // New public API
+    // Public API for scene building
     void addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialIndex) noexcept;
     void rebuildTLAS() noexcept;
     void notifyResize() noexcept;
     void reset() noexcept;
 
-    VkAccelerationStructureKHR getCurrentTLAS() noexcept;
-    VkDeviceAddress getCurrentTLASAddress() noexcept;
+    [[nodiscard]] VkAccelerationStructureKHR getCurrentTLAS() const noexcept;
+    [[nodiscard]] VkDeviceAddress getCurrentTLASAddress() const noexcept;
 
 private:
     Handle<VkAccelerationStructureKHR> tlas_;

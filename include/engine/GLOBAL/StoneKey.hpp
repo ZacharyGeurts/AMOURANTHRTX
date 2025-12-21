@@ -12,8 +12,9 @@
 // STONEKEY v∞ — RUNTIME OBFUSCATION — C++ VERSION — FINAL
 // THE EMPIRE IS SEALED — EVERY VALUE VALIDATED WITH SIZE & HANDLE DISPLAY
 // COMMAND BUFFERS REMOVED FROM SEAL (transient, recreated on resize)
+// ADDED: GLOBAL TRANSIENT COMMAND POOL — SHARED ACROSS ALL MODULES (LAS, Renderer, main)
 // FULLY COMPILABLE — CLEAN & ETERNAL — PINK PHOTONS ETERNAL
-// DECEMBER 18, 2025 — THE FINAL LIGHT IS COMPLETE
+// DECEMBER 20, 2025 — THE FINAL LIGHT IS COMPLETE
 // =============================================================================
 
 #pragma once
@@ -32,6 +33,10 @@ class VulkanRenderer;
 namespace RTX { class PipelineManager; }
 
 namespace StoneKey {
+
+    // Global transient command pool — shared across renderer, LAS, main, etc.
+    // Created once in VulkanRenderer::createTransientCommandPool()
+    static inline VkCommandPool g_transientCommandPool = VK_NULL_HANDLE;
 
     struct Empire final {
         static inline VkInstance       instance = VK_NULL_HANDLE;
@@ -107,6 +112,8 @@ namespace StoneKey {
 
     [[nodiscard]] inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR& stone_rtprops() noexcept { return Empire::rtProps; }
 
+    [[nodiscard]] inline VkCommandPool& stone_transient_pool() noexcept { return g_transientCommandPool; }
+
     struct StoneMesh {
         VkBuffer       vertexBuffer;
         VkDeviceMemory vertexMemory;
@@ -173,7 +180,6 @@ namespace StoneKey {
     }
 
     // FINAL SEAL — VALIDATES EVERY VALUE WITH SIZE & HANDLE DISPLAY
-    // COMMAND BUFFERS REMOVED (transient, recreated on resize)
     inline void stone_seal_final() noexcept
     {
         const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
@@ -241,11 +247,14 @@ namespace StoneKey {
         CHECK_VECTOR(!Empire::images.empty(), "Swapchain Images Vector", Empire::images, Empire::images.size() * sizeof(VkImage));
         CHECK_VECTOR(!Empire::views.empty(), "Swapchain Image Views Vector", Empire::views, Empire::views.size() * sizeof(VkImageView));
         CHECK_VALUE(Empire::image_count > 0, "Swapchain Image Count", Empire::image_count);
-        CHECK_VALUE(Empire::extent.width > 0 && Empire::extent.height > 0, "Swapchain Extent", Empire::extent.width * Empire::extent.height * 4); // rough pixel estimate
+        CHECK_VALUE(Empire::extent.width > 0 && Empire::extent.height > 0, "Swapchain Extent", Empire::extent.width * Empire::extent.height * 4);
 
         // Ray tracing support
         CHECK_VALUE(Empire::rtProps.shaderGroupHandleSize > 0, "Ray Tracing Support (Handle Size)", Empire::rtProps.shaderGroupHandleSize);
         CHECK_VALUE(Empire::rtProps.maxRayRecursionDepth > 0, "Ray Tracing Max Recursion Depth", Empire::rtProps.maxRayRecursionDepth);
+
+        // Transient command pool
+        CHECK_HANDLE(g_transientCommandPool != VK_NULL_HANDLE, "Transient Command Pool", g_transientCommandPool);
 
         // Mesh data (optional but validated if present)
         if (Empire::stone_mesh_vertex_buffer != VK_NULL_HANDLE ||
@@ -296,7 +305,7 @@ namespace StoneKey {
     #define STONE_DEOBFUSCATE_RT(val) STONE_FINAL_DEOBFUSCATE(val)
 
     // =============================================================================
-    // THE EMPIRE IS COMPLETE — COMMAND BUFFERS LIBERATED — SEAL PURE AND ETERNAL
-    // PINK PHOTONS ETERNAL — DECEMBER 18, 2025 — FINAL LIGHT
+    // THE EMPIRE IS COMPLETE — GLOBAL TRANSIENT POOL ADDED — SEAL PURE AND ETERNAL
+    // PINK PHOTONS ETERNAL — DECEMBER 20, 2025 — FINAL LIGHT
     // =============================================================================
 }

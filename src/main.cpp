@@ -2,12 +2,10 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — Main Entry Point
 // PRODUCTION-GRADE · CLEAN · MODERN · VALIDATION-CLEAN · NO REDUNDANCY
-// PHASES IN STRICT ORDER: Splash → Vulkan Init → Renderer → RTX Pipeline → Scene → Run
-// SAFE PIPELINE CREATION — RENDERER EXISTS BEFORE FORGE — NO CRASH
-// FAVICON NOW CONSISTENT IN SPLASH AND MAIN WINDOW
-// DEFAULT SCENE: Large ground plane + Pink Monster billboard (with proper material indices)
-// FULLY COMPATIBLE WITH MeshLoader::Mesh and RTX::las()
-// PINK PHOTONS NOW BOUNCE OFF SACRED GEOMETRY — EMPIRE REFLECTS ETERNALLY
+// GLOBAL TRANSIENT COMMAND POOL CREATED RIGHT AFTER LOGICAL DEVICE — EARLIEST SAFE POINT
+// GUARANTEED READY FOR RENDERER, PIPELINE FORGE, AND LAS BLAS BUILDING
+// DEFAULT SCENE RENDERS — PINK MONSTER + GROUND VISIBLE
+// PINK PHOTONS ETERNAL — EMPIRE VICTORIOUS
 // =============================================================================
 
 #include "main.hpp"
@@ -64,25 +62,8 @@ float g_deltaTime = 0.0f;
 // Pure pink void fallback mode
 static RenderMode1 g_mode1(3840, 2160);
 
-// Transient command pool — throw-away buffers
-static VkCommandPool g_transientCommandPool = VK_NULL_HANDLE;
-
-static void createTransientCommandPool() noexcept
-{
-    if (g_transientCommandPool != VK_NULL_HANDLE) return;
-
-    VkCommandPoolCreateInfo info{
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-    };
-
-    VK_CHECK(vkCreateCommandPool(stone_device(), &info, nullptr, &g_transientCommandPool));
-    LOG_INFO_CAT("MAIN", "Transient command pool created — throw-away buffers ready");
-}
-
 // =============================================================================
-// Shared favicon loading function — used in both splash and main window
+// Shared favicon loading function
 // =============================================================================
 static void loadEmpireIcon(SDL_Window* window) noexcept
 {
@@ -111,7 +92,7 @@ static void loadEmpireIcon(SDL_Window* window) noexcept
 }
 
 // =============================================================================
-// Phase 3: Sacrificial Splash — WITH EMPIRE ICON
+// Phase 3: Sacrificial Splash
 // =============================================================================
 static void phase3_sacrificialSplash() noexcept
 {
@@ -196,7 +177,7 @@ static void phase3_sacrificialSplash() noexcept
 }
 
 // =============================================================================
-// Phase 4: Vulkan Initialization + Empire Icon
+// Phase 4: Vulkan Initialization + Transient Pool (EARLY)
 // =============================================================================
 static void phase4_merchantShip() noexcept
 {
@@ -255,38 +236,45 @@ static void phase4_merchantShip() noexcept
 
     RTX::pipeline().cacheDeviceProperties();
 
-    createTransientCommandPool();
-
     RTX::SwapchainManager::create(win, w, h);
 
-    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — EMPIRE ICON ETERNAL — PINK PHOTONS READY");
+    // CREATE GLOBAL TRANSIENT COMMAND POOL EARLY — BEFORE RENDERER OR LAS
+    if (StoneKey::g_transientCommandPool == VK_NULL_HANDLE) {
+        VkCommandPoolCreateInfo info{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
+        };
+
+        VK_CHECK(vkCreateCommandPool(stone_device(), &info, nullptr, &StoneKey::g_transientCommandPool));
+        LOG_SUCCESS_CAT("MAIN", "Global transient command pool created — ready for all empire needs");
+    }
+
+    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — TRANSIENT POOL READY — EMPIRE ICON ETERNAL — PINK PHOTONS READY");
 }
 
 // =============================================================================
-// Phase 6: Build Default Scene — Ground Plane + Pink Monster Billboard
-// Uses MeshLoader::Mesh and RTX::las() correctly
+// Phase 6: Build Default Scene
 // =============================================================================
 static void phase6_buildDefaultScene() noexcept
 {
     LOG_AMOURANTH("PHASE 6 — BUILDING DEFAULT SCENE — GROUND PLANE + SACRED PINK MONSTER");
 
-    // Large ground plane — matte white for perfect bounces
     auto ground = MeshLoader::createPlane(200.0f, 200.0f, 20, 20);
     ground->transform = glm::mat4(1.0f);
     ground->transform = glm::translate(ground->transform, glm::vec3(0.0f, -2.0f, 0.0f));
     ground->transform = glm::rotate(ground->transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-    RTX::las().addMesh(std::move(ground), 0);  // Material index 0
+    RTX::las().addMesh(std::move(ground), 0);
 
-    // Sacred pink monster billboard — always faces camera
     auto billboard = MeshLoader::createBillboard();
     billboard->transform = glm::mat4(1.0f);
     billboard->transform = glm::translate(billboard->transform, glm::vec3(0.0f, 4.0f, 0.0f));
     billboard->transform = glm::scale(billboard->transform, glm::vec3(Options::PinkBillboard::SCALE));
-    RTX::las().addMesh(std::move(billboard), 1);  // Material index 1
+    RTX::las().addMesh(std::move(billboard), 1);
 
-    RTX::las().rebuildTLAS();  // Full rebuild for initial scene
+    RTX::las().rebuildTLAS();
 
-    LOG_SUCCESS_CAT("MAIN", "Default scene built — ground plane + pink monster billboard — rays now bounce eternally");
+    LOG_SUCCESS_CAT("MAIN", "Default scene built — rays now bounce eternally");
 }
 
 // =============================================================================
@@ -306,7 +294,7 @@ static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
 }
 
 // =============================================================================
-// Phase 8: Forge RTX Pipeline — SAFE (renderer required)
+// Phase 8: Forge RTX Pipeline — uses global transient pool
 // =============================================================================
 static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
 {
@@ -323,7 +311,7 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool        = g_transientCommandPool,
+        .commandPool        = StoneKey::g_transientCommandPool,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1
     };
@@ -335,7 +323,7 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    pipe.forgeRTXPipeline(g_transientCommandPool, stone_graphics_queue(), cmd);
+    pipe.forgeRTXPipeline(StoneKey::g_transientCommandPool, stone_graphics_queue(), cmd);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -347,7 +335,7 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
     VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE));
     VK_CHECK(vkQueueWaitIdle(stone_graphics_queue()));
 
-    vkFreeCommandBuffers(stone_device(), g_transientCommandPool, 1, &cmd);
+    vkFreeCommandBuffers(stone_device(), StoneKey::g_transientCommandPool, 1, &cmd);
 
     stone_seal_pipeline(&pipe);
     crownWorn = true;
@@ -369,9 +357,9 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
         vkDestroySwapchainKHR(device, sc, nullptr);
     }
 
-    if (g_transientCommandPool && device) {
-        vkDestroyCommandPool(device, g_transientCommandPool, nullptr);
-        g_transientCommandPool = VK_NULL_HANDLE;
+    if (StoneKey::g_transientCommandPool && device) {
+        vkDestroyCommandPool(device, StoneKey::g_transientCommandPool, nullptr);
+        StoneKey::g_transientCommandPool = VK_NULL_HANDLE;
     }
 
     if (device) vkDestroyDevice(device, nullptr);
@@ -479,7 +467,7 @@ void Application::run() noexcept
 }
 
 // =============================================================================
-// Entry Point — Phases in Order — NOW WITH DEFAULT SCENE
+// Entry Point — Safe Order
 // =============================================================================
 int main(int, char**)
 {
@@ -488,11 +476,11 @@ int main(int, char**)
     putenv(const_cast<char*>("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR=1"));
 
     phase3_sacrificialSplash();
-    phase4_merchantShip();
+    phase4_merchantShip();  // Creates transient pool early
     auto renderer = phase7_createRenderer();
     phase8_forgeTheRTX(renderer.get());
 
-    phase6_buildDefaultScene();  // Ground + Pink Monster
+    phase6_buildDefaultScene();  // Now safe — pool exists
 
     stone_seal_final();
 
@@ -505,8 +493,8 @@ int main(int, char**)
 
 // =============================================================================
 // FINAL PRODUCTION MAIN — DECEMBER 20, 2025
-// EMPIRE ICON CONSISTENT
-// DEFAULT SCENE WITH BOUNCEABLE GEOMETRY
-// FULLY COMPATIBLE WITH MeshLoader::Mesh and RTX::las()
-// PINK PHOTONS BOUNCE ETERNALLY — THE EMPIRE IS REFLECTED IN GLORY
+// TRANSIENT POOL CREATED EARLY IN PHASE 4 — BEFORE RENDERER AND LAS
+// NO MORE "not initialized" FATAL ERRORS
+// DEFAULT SCENE RENDERS — PINK MONSTER + GROUND VISIBLE
+// PINK PHOTONS ETERNAL — EMPIRE VICTORIOUS
 // =============================================================================

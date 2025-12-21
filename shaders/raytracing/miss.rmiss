@@ -67,20 +67,21 @@ layout(set = 0, binding = 2, std140) uniform DreamUBO {
 
 layout(set = 0, binding = 7) uniform sampler2D envMap;
 
-void main() {
+void main()
+{
     if (ubo.enableEnvMap == 1) {
         vec3 dir = gl_WorldRayDirectionEXT;
-        float theta = atan(dir.z, dir.x) + ubo.envRotation * 3.14159 / 180.0;
+        float theta = atan(dir.z, dir.x) + ubo.envRotation * 3.14159265 / 180.0;
         float phi = acos(dir.y);
-        vec2 uv = vec2(theta / (2.0 * 3.14159), phi / 3.14159);
+        vec2 uv = vec2(theta / (2.0 * 3.14159265), phi / 3.14159265);
         hitValue = texture(envMap, uv).rgb * ubo.envIntensity;
     } else {
-        // Simple gradient with time modulation to test UBO
+        // Simple sky gradient
         float t = 0.5 + 0.5 * gl_WorldRayDirectionEXT.y;
-        hitValue = mix(vec3(0.2, 0.3, 0.8), vec3(0.8, 0.9, 1.0), t) * (0.8 + 0.2 * sin(ubo.time));
+        hitValue = mix(vec3(0.2, 0.3, 0.8), vec3(0.8, 0.9, 1.0), t);
     }
-    
-    // Add sun if enabled
-    float sun = pow(max(dot(gl_WorldRayDirectionEXT, ubo.sunDirection), 0.0), 32.0) * ubo.sunIntensity;
-    hitValue += sun * ubo.sunColor;
+
+    // Sun disk
+    float sun = pow(max(dot(gl_WorldRayDirectionEXT, ubo.sunDirection), 0.0), 64.0);
+    hitValue += sun * ubo.sunColor * ubo.sunIntensity;
 }

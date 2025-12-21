@@ -2,6 +2,9 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
 
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
@@ -67,45 +70,64 @@ layout(set = 0, binding = 2, std140) uniform DreamUBO {
     float     debugFloat4;
 } ubo;
 
-// Optional accumulation image
+// Optional accumulation image (binding 3)
 layout(set = 0, binding = 3, rgba32f) uniform image2D accumulation;
 
-void main() {
-    ivec2 launchID = ivec2(gl_LaunchIDEXT.xy);
-    ivec2 launchSize = ivec2(gl_LaunchSizeEXT.xy);
-    
-    vec2 pixelCenter = (vec2(launchID) + vec2(0.5)) / vec2(launchSize);
-    vec2 inUV = pixelCenter * 2.0 - 1.0;
-    
-    vec4 target = ubo.invProj * vec4(inUV.xy, 1.0, 1.0);
-    vec3 rayDir = vec3(ubo.invView * vec4(normalize(target.xyz / target.w), 0.0));
+// Optional nexus score image (binding 6)
+layout(set = 0, binding = 6, r16f) uniform image2D nexusScore;
+
+// Env map (binding 7)
+layout(set = 0, binding = 7) uniform sampler2D envMap;
+
+// Blue noise (binding 8)
+layout(set = 0, binding = 8) uniform sampler2D blueNoise;
+
+// Density / additional textures (binding 9)
+layout(set = 0, binding = 9) uniform sampler2D densityTex;
+
+void main()
+{
+    vec2 launchID = gl_LaunchIDEXT.xy;
+    vec2 launchSize = gl_LaunchSizeEXT.xy;
+
+    vec2 pixelCenter = launchID + vec2(0.5);
+    vec2 uv = pixelCenter / launchSize;
+    vec2 ndc = uv * 2.0 - 1.0;
+
+    // Apply jitter
+    vec2 jitteredNDC = ndc + ubo.jitter / launchSize;
+
+    vec4 near = ubo.invProj * vec4(jitteredNDC, -1.0, 1.0);
+    vec4 far  = ubo.invProj * vec4(jitteredNDC,  1.0, 1.0);
+
+    near /= near.w;
+    far  /= far.w;
+
     vec3 rayOrigin = ubo.camPos.xyz;
-    
-    // Simple jitter for AA
-    vec2 d = ubo.jitter / ubo.resolution;
-    rayDir += vec3(d.x, d.y, 0.0);  // Approximate
-    
+    vec3 rayDir    = normalize((ubo.invView * far - ubo.invView * near).xyz);
+
     hitValue = vec3(0.0);
-    traceRayEXT(topLevelAS, 
-                gl_RayFlagsOpaqueEXT, 
-                0xff, 
-                0,  // sbtRecordOffset
-                0,  // sbtRecordStride
-                0,  // missIndex
-                rayOrigin, 
-                0.001, 
-                rayDir, 
-                10000.0, 
-                0);  // payload location
-    
-    vec4 color = vec4(hitValue * ubo.exposure, 1.0);
-    
-    // Simple accumulation if enabled
+
+    traceRayEXT(topLevelAS,
+                gl_RayFlagsOpaqueEXT,
+                0xFF,
+                0, // sbtRecordOffset
+                0, // sbtRecordStride
+                0, // missIndex
+                rayOrigin,
+                0.001,
+                rayDir,
+                10000.0,
+                0); // payload
+
+    vec3 color = hitValue * ubo.exposure;
+
+    // Simple accumulation
     if (ubo.totalSpp > 0) {
-        vec4 accum = imageLoad(accumulation, launchID);
+        vec3 accum = imageLoad(accumulation, ivec2(launchID)).rgb;
         color = mix(accum, color, 1.0 / float(ubo.currentSpp + 1));
-        imageStore(accumulation, launchID, color);
+        imageStore(accumulation, ivec2(launchID), vec4(color, 1.0));
     }
-    
-    imageStore(rtOutput, launchID, color);
+
+    imageStore(rtOutput, ivec2(launchID), vec4(color, 1.0));
 }

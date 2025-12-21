@@ -66,8 +66,7 @@ using StoneKey::stone_seal_extent;
 using StoneKey::stone_physical;
 using StoneKey::stone_pipeline;
 using StoneKey::stone_seal_swapchain;
-
-static VkCommandPool g_transientCommandPool = VK_NULL_HANDLE;
+using StoneKey::g_transientCommandPool;
 
 VulkanRenderer* VulkanRenderer::get() noexcept { return s_instance; }
 
@@ -609,19 +608,21 @@ void VulkanRenderer::waitForGPU() noexcept
 
 void VulkanRenderer::clearAccumulationImages(VkCommandBuffer cmd)
 {
-    VkClearColorValue zero{{0.0f, 0.0f, 0.0f, 0.0f}};
+    // ONLY clear on explicit reset — not every frame
+    if (!resetAccumNextFrame_) return;
+
+    VkClearColorValue navy{{0.0f, 0.0f, 0.15f, 1.0f}};  // Debug color so we know it's clearing
     VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
     for (auto& img : rtOutputImages_) {
-        vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+        vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &navy, 1, &range);
     }
     for (auto& img : accumImages_) {
-        vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+        vkCmdClearColorImage(cmd, img.get(), VK_IMAGE_LAYOUT_GENERAL, &navy, 1, &range);
     }
 
-    // Raw handle — no .valid() or .get()
     if (hypertraceScoreImage_ != VK_NULL_HANDLE) {
-        vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+        vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_GENERAL, &navy, 1, &range);
     }
 }
 
