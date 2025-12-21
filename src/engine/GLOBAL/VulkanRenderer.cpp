@@ -7,7 +7,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 20, 2025 — UBO BINDING VERIFIED & FIXED
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 21, 2025 — GENERIC UNIFORM BUFFERS
 // HARDCORE: 2 Frames in Flight | R16G16_SFLOAT for Nexus/Adaptive | All Top-Notch Enabled
 // Empire Optimized: Unlimited FPS | Full Accumulation/Denoising/Adaptive/Hypertrace/Tonemap
 // UBO now correctly bound at binding 2 in all relevant places — matches PipelineManager v17.2
@@ -25,7 +25,6 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/UBO.hpp"
 #include "stb/stb_image.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -67,6 +66,144 @@ using StoneKey::stone_physical;
 using StoneKey::stone_pipeline;
 using StoneKey::stone_seal_swapchain;
 using StoneKey::g_transientCommandPool;
+
+// =============================================================================
+// MATERIAL STRUCT — STD140 COMPLIANT — USED IN SHADERS AND DEFAULT SCENE
+// =============================================================================
+struct alignas(16) Material
+{
+    glm::vec3 albedo          = glm::vec3(1.0f);     // Base color
+    float     roughness       = 1.0f;               // 0.0 = smooth, 1.0 = rough
+    float     metallic        = 0.0f;               // 0.0 = dielectric, 1.0 = metal
+    float     emissiveStrength = 0.0f;              // Multiplier for emissive
+    float     alpha           = 1.0f;               // Opacity (for billboard)
+    float     alphaCutoff     = 0.5f;               // Alpha test threshold
+    uint32_t  textureIndex    = 0;                  // Index into texture array (set 2)
+    uint32_t  _pad0           = 0;
+    glm::vec3 emissiveColor   = glm::vec3(0.0f);
+    float     _pad1           = 0.0f;
+};
+
+static_assert(sizeof(Material) == 64, "Material must be exactly 64 bytes (4 vec4s)");
+
+// Default materials for our scene
+namespace DefaultMaterials {
+    constexpr Material GROUND_PLANE = {
+        .albedo           = glm::vec3(0.8f, 0.8f, 0.8f),  // Light gray matte
+        .roughness        = 0.9f,
+        .metallic         = 0.0f,
+        .emissiveStrength = 0.0f,
+        .alpha            = 1.0f,
+        .alphaCutoff      = 0.0f,
+        .textureIndex     = 0,
+        .emissiveColor    = glm::vec3(0.0f)
+    };
+
+    constexpr Material PINK_MONSTER = {
+        .albedo           = glm::vec3(1.0f, 0.0f, 0.5f),  // Sacred pink
+        .roughness        = 0.7f,
+        .metallic         = 0.0f,
+        .emissiveStrength = 2.0f,                        // Glows strongly
+        .alpha            = 1.0f,
+        .alphaCutoff      = 0.5f,                        // Alpha test for monster texture
+        .textureIndex     = 1,                           // Uses monster.png from texture array
+        .emissiveColor    = glm::vec3(1.0f, 0.0f, 0.5f)   // Emissive pink
+    };
+}
+
+// =============================================================================
+// CAMERA SCENE DATA — 512 BYTES — STD140 COMPLIANT — THE EMPIRE'S VISION
+// =============================================================================
+struct alignas(16) CameraSceneData
+{
+    float     time                = 0.0f;
+    uint32_t  frame               = 0;
+    uint32_t  currentSpp          = 0;
+    uint32_t  totalSpp            = 0;
+    float     exposure            = 4.0f;
+    uint32_t  enableEnvMap        = 1;
+    uint32_t  hypertraceEnabled   = 1;
+    uint32_t  denoisingEnabled    = 1;
+    uint32_t  adaptiveEnabled     = 1;
+    uint32_t  debugMode           = 0;
+    float     envIntensity        = 1.0f;
+    float     envRotation         = 0.0f;
+
+    glm::vec2 resolution          = glm::vec2(1920.0f, 1080.0f);
+    glm::vec2 jitter              = glm::vec2(0.0f);
+    glm::vec2 jitterPrev          = glm::vec2(0.0f);
+    float     nexusScoreThreshold = 0.15f;
+    float     hypertraceJitterScale = 420.0f;
+    float     _pad0               = 0.0f;
+    float     _pad1               = 0.0f;
+
+    glm::mat4 view                = glm::mat4(1.0f);
+    glm::mat4 proj                = glm::mat4(1.0f);
+    glm::mat4 invView             = glm::mat4(1.0f);
+    glm::mat4 invProj             = glm::mat4(1.0f);
+
+    glm::vec4 camPos              = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    glm::vec4 camDir              = glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
+    float     fov                 = 60.0f;
+    float     aperture            = 16.0f;
+    float     focusDistance       = 10.0f;
+    uint32_t  _pad2               = 0;
+
+    uint32_t  materialCount       = 2;                 // Now fixed: ground + pink monster
+    uint32_t  activeMaterialIndex = 0;
+    float     metallicOverride    = -1.0f;
+    float     roughnessOverride   = -1.0f;
+    float     emissiveIntensity   = 1.0f;
+    uint32_t  enableBlueNoise     = 1;
+    uint32_t  enableTAA           = 1;
+    float     taaAlpha            = 0.1f;
+
+    glm::vec3 sunDirection        = glm::vec3(0.3f, 0.8f, 0.5f);
+    float     sunIntensity        = 40.0f;
+    glm::vec3 sunColor            = glm::vec3(1.0f, 0.95f, 0.9f);
+    float     fogDensity          = 0.02f;
+    glm::vec3 fogColor            = glm::vec3(0.7f, 0.8f, 0.9f);
+    float     _pad3               = 0.0f;
+
+    uint32_t  showNexusScore      = 1;
+    uint32_t  showSppHeatmap      = 1;
+    uint32_t  showAccumulationCount = 1;
+    uint32_t  showGpuTimestamps   = 0;
+    float     debugFloat1         = 0.0f;
+    float     debugFloat2         = 0.0f;
+    float     debugFloat3         = 0.0f;
+    float     debugFloat4         = 0.0f;
+};
+
+static_assert(sizeof(CameraSceneData) == 512, "CameraSceneData must be exactly 512 bytes");
+static_assert(alignof(CameraSceneData) == 16, "CameraSceneData must be 16-byte aligned");
+
+// =============================================================================
+// TONEMAP DATA — 64 BYTES — STD140 COMPLIANT — FINAL OUTPUT CONTROL
+// =============================================================================
+struct alignas(16) TonemapData
+{
+    float     exposure            = 4.0f;
+    uint32_t  type                = 0;           // 0=ACES, 1=Filmic, 2=Reinhard
+    uint32_t  enabled             = 1;
+    float     nexusScore          = 0.0f;
+    uint32_t  frame               = 0;
+    uint32_t  spp                 = 0;
+    
+    float     gamma               = 2.2f;
+    float     bloomThreshold      = 1.0f;
+    float     bloomIntensity      = 0.8f;
+    float     vignetteIntensity   = 0.4f;
+    float     filmGrainStrength   = 0.05f;
+    float     lensFlareIntensity  = 0.3f;
+    
+    float     _pad[2]             = {0.0f, 0.0f};
+};
+
+static_assert(sizeof(TonemapData) == 64, "TonemapData must be exactly 64 bytes");
+static_assert(alignof(TonemapData) == 16, "TonemapData must be 16-byte aligned");
+
+constexpr VkDeviceSize MATERIAL_BUFFER_SIZE = 32ULL * 1024 * 1024;  // 32 MiB — empire scale
 
 VulkanRenderer* VulkanRenderer::get() noexcept { return s_instance; }
 
@@ -529,7 +666,6 @@ void VulkanRenderer::createRTOutputImages() noexcept
     if (!allSuccess || rtOutputViews_.size() != frames) {
         LOG_FATAL_CAT("RENDERER", "RT OUTPUT IMAGE CREATION FAILED — {} views (expected {}) — EMPIRE CANNOT RENDER",
             rtOutputViews_.size(), frames);
-        phase9_ballerina("RT OUTPUT FAILURE — EMPIRE IS BLIND");
     }
 
     // Mark for first-frame transition — safe whisper mode
@@ -1039,8 +1175,8 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
         return;
     }
 
-    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — {} frames | DreamUBO: {} bytes | TonemapUBO: {} bytes | Materials: {} bytes",
-                  frames, sizeof(DreamUBO), sizeof(TonemapUBO), materialBufferSize());
+    LOG_AMOURANTH("INITIALIZING ALL BUFFER DATA — {} frames | CameraSceneData: {} bytes | TonemapData: {} bytes | Materials: {} bytes",
+                  frames, sizeof(CameraSceneData), sizeof(TonemapData), MATERIAL_BUFFER_SIZE);
 
     // DESTROY OLD
     for (auto h : uniformBufferEncs_)   if (h) BufferManager::destroy(h);
@@ -1055,19 +1191,19 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
     const VkBufferUsageFlags ssboUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-    // Prepare default UBO data to avoid garbage/initial black screen
-    DreamUBO defaultDream{};
-    TonemapUBO defaultTonemap{};
+    // Prepare default data to avoid garbage/initial black screen
+    CameraSceneData defaultScene{};
+    TonemapData defaultTonemap{};
 
     // Set essential defaults to prevent off-screen rendering or invalid state
-    defaultDream.resolution = glm::vec2(1920.0f, 1080.0f);  // Match shader expectation
-    defaultDream.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    defaultDream.proj = glm::perspective(glm::radians(60.0f), 1920.0f / 1080.0f, 0.1f, 100.0f);
-    defaultDream.invView = glm::inverse(defaultDream.view);
-    defaultDream.invProj = glm::inverse(defaultDream.proj);
-    defaultDream.camPos = glm::vec4(0.0f, 0.0f, 5.0f, 1.0f);
-    defaultDream.enableTAA = 1;  // Ensure TAA is on by default if needed
-    defaultDream.taaAlpha = 0.1f;
+    defaultScene.resolution = glm::vec2(1920.0f, 1080.0f);  // Match shader expectation
+    defaultScene.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    defaultScene.proj = glm::perspective(glm::radians(60.0f), 1920.0f / 1080.0f, 0.1f, 100.0f);
+    defaultScene.invView = glm::inverse(defaultScene.view);
+    defaultScene.invProj = glm::inverse(defaultScene.proj);
+    defaultScene.camPos = glm::vec4(0.0f, 0.0f, 5.0f, 1.0f);
+    defaultScene.enableTAA = 1;  // Ensure TAA is on by default if needed
+    defaultScene.taaAlpha = 0.1f;
 
     defaultTonemap.exposure = 1.0f;
     defaultTonemap.enabled = 1;
@@ -1075,34 +1211,34 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
     for (uint32_t i = 0; i < frames; ++i)
     {
-        // DreamUBO — host-visible, persistently mapped
-        uniformBufferEncs_[i] = BufferManager::createDreamUBO(std::format("DreamUBO[{}]", i));
+        // CameraSceneData — host-visible, persistently mapped
+        uniformBufferEncs_[i] = BufferManager::createSmallUniform(sizeof(CameraSceneData), std::format("CameraSceneData[{}]", i));
         if (!uniformBufferEncs_[i]) {
-            LOG_FATAL("Failed to create DreamUBO {} — THE EMPIRE CANNOT DREAM", i);
+            LOG_FATAL("Failed to create CameraSceneData {} — THE EMPIRE CANNOT DREAM", i);
         }
         // Immediately populate with defaults to avoid black screen from garbage data
         if (auto* ptr = BufferManager::map(uniformBufferEncs_[i])) {
-            std::memcpy(ptr, &defaultDream, sizeof(DreamUBO));
+            std::memcpy(ptr, &defaultScene, sizeof(CameraSceneData));
             BufferManager::flush(uniformBufferEncs_[i]);  // Ensure coherent if needed
         } else {
-            LOG_ERROR("Failed to map/initialize DreamUBO[{}] — potential black screen risk", i);
+            LOG_ERROR("Failed to map/initialize CameraSceneData[{}] — potential black screen risk", i);
         }
 
-        // TonemapUBO — host-visible, persistently mapped
-        tonemapUniformEncs_[i] = BufferManager::createTonemapUBO(std::format("TonemapUBO[{}]", i));
+        // TonemapData — host-visible, persistently mapped
+        tonemapUniformEncs_[i] = BufferManager::createSmallUniform(sizeof(TonemapData), std::format("TonemapData[{}]", i));
         if (!tonemapUniformEncs_[i]) {
-            LOG_FATAL("Failed to create TonemapUBO {}", i);
+            LOG_FATAL("Failed to create TonemapData {}", i);
         }
         // Immediately populate with defaults
         if (auto* ptr = BufferManager::map(tonemapUniformEncs_[i])) {
-            std::memcpy(ptr, &defaultTonemap, sizeof(TonemapUBO));
+            std::memcpy(ptr, &defaultTonemap, sizeof(TonemapData));
             BufferManager::flush(tonemapUniformEncs_[i]);
         } else {
-            LOG_ERROR("Failed to map/initialize TonemapUBO[{}] — tonemapping may fail", i);
+            LOG_ERROR("Failed to map/initialize TonemapData[{}] — tonemapping may fail", i);
         }
 
         // Device-local SSBOs (no initial data needed, will be updated later)
-        materialBufferEncs_[i]  = BufferManager::create(materialBufferSize(), ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Materials");
+        materialBufferEncs_[i]  = BufferManager::create(MATERIAL_BUFFER_SIZE, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Materials");
         dimensionBufferEncs_[i] = BufferManager::create(256, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "DimensionData");
 
         if (!materialBufferEncs_[i] || !dimensionBufferEncs_[i]) {
@@ -1113,7 +1249,7 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     // Note: Full updates still happen per-frame via updateUniformBuffer/updateTonemapUniform
     // But defaults ensure no initial garbage -> black/undefined screen
 
-    LOG_AMOURANTH("DREAM & TONEMAP UBOs UPGRADED — PERSISTENTLY MAPPED — INITIALIZED WITH DEFAULTS — NO MORE BLACK VOID — SASQUATCH SEES PINK PHOTONS");
+    LOG_AMOURANTH("CAMERA SCENE & TONEMAP DATA UPGRADED — PERSISTENTLY MAPPED — INITIALIZED WITH DEFAULTS — NO MORE BLACK VOID — SASQUATCH SEES PINK PHOTONS");
 }
 
 void VulkanRenderer::createCommandBuffers() noexcept
@@ -1332,7 +1468,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createSyncObjects();
     createCommandBuffers();
 
-	createDefaultMaterials();
+    createDefaultMaterials();
 
     createTonemapSampler();
     createTonemapDescriptorPool();
@@ -1340,7 +1476,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createTonemapDescriptorSets();
     recreateTonemapUBOs();
 
-    initializeAllBufferData(Options::Performance::MAX_FRAMES_IN_FLIGHT, sizeof(DreamUBO), materialBufferSize());
+    initializeAllBufferData(Options::Performance::MAX_FRAMES_IN_FLIGHT, sizeof(CameraSceneData), MATERIAL_BUFFER_SIZE);
 
     createRTOutputImages();
     createDepthResources();
@@ -1349,13 +1485,10 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createNexusScoreImage(g_transientCommandPool, stone_graphics_queue());
 }
 
-// Add these two FULL implementations to the bottom of src/engine/GLOBAL/VulkanRenderer.cpp
-// (after the constructor and all other functions)
-
-// =============================================================================
+// ──────────────────────────────────────────────────────────────────────────────
 // FULL IMPLEMENTATION: createAccumulationPipeline()
 // Now fully restored and complete — called from constructor and fully functional
-// =============================================================================
+// ──────────────────────────────────────────────────────────────────────────────
 void VulkanRenderer::createAccumulationPipeline() noexcept
 {
     if (accumulationPipeline_ != VK_NULL_HANDLE) {
@@ -1371,7 +1504,7 @@ void VulkanRenderer::createAccumulationPipeline() noexcept
         {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // History accumulation
         {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Output (in-place)
         {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // Depth buffer (if used)
-        {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}  // DreamUBO
+        {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}  // CameraSceneData
     }};
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{
@@ -1614,7 +1747,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             if (!desc.tlas) desc.tlas = pipelineManager_.dummyTLAS();
 
             desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
-            desc.uboSize = UBO::sizeOf(DreamUBO{});
+            desc.uboSize = sizeof(CameraSceneData);
 
             desc.rtOutputView = rtOutputViews_[slot].get();
 
@@ -1718,24 +1851,24 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
         return;
     }
 
-    DreamUBO ubo{};
+    CameraSceneData data{};
 
-    ubo.time                = totalTime_ + deltaTime;
-    ubo.frame               = frameNumber_;
-    ubo.currentSpp          = currentSpp_;
-    ubo.totalSpp            = accumulationFrame_;
-    ubo.exposure            = currentExposure_;
+    data.time                = totalTime_ + deltaTime;
+    data.frame               = frameNumber_;
+    data.currentSpp          = currentSpp_;
+    data.totalSpp            = accumulationFrame_;
+    data.exposure            = currentExposure_;
 
-    ubo.enableEnvMap        = Options::Environment::ENABLE_ENV_MAP ? 1u : 0u;
-    ubo.hypertraceEnabled   = Options::OptionsRTX::ENABLE_HYPERTRACE ? 1u : 0u;
-    ubo.denoisingEnabled    = Options::OptionsRTX::ENABLE_DENOISING ? 1u : 0u;
-    ubo.adaptiveEnabled     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING ? 1u : 0u;
-    ubo.debugMode           = static_cast<uint32_t>(activeRenderMode_);
+    data.enableEnvMap        = Options::Environment::ENABLE_ENV_MAP ? 1u : 0u;
+    data.hypertraceEnabled   = Options::OptionsRTX::ENABLE_HYPERTRACE ? 1u : 0u;
+    data.denoisingEnabled    = Options::OptionsRTX::ENABLE_DENOISING ? 1u : 0u;
+    data.adaptiveEnabled     = Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING ? 1u : 0u;
+    data.debugMode           = static_cast<uint32_t>(activeRenderMode_);
 
-    ubo.envIntensity        = 1.0f;
-    ubo.envRotation         = 0.0f;
+    data.envIntensity        = 1.0f;
+    data.envRotation         = 0.0f;
 
-    ubo.resolution          = glm::vec2(static_cast<float>(width_), static_cast<float>(height_));
+    data.resolution          = glm::vec2(static_cast<float>(width_), static_cast<float>(height_));
 
     // Halton 2,3 sequence for stable jitter
     static constexpr glm::vec2 halton16[16] = {
@@ -1746,46 +1879,46 @@ void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, f
     };
 
     const uint32_t jitterIdx = frameNumber_ % 16;
-    ubo.jitter              = halton16[jitterIdx];
-    ubo.jitterPrev          = (frameNumber_ == 0) ? ubo.jitter : halton16[(frameNumber_ - 1) % 16];
+    data.jitter              = halton16[jitterIdx];
+    data.jitterPrev          = (frameNumber_ == 0) ? data.jitter : halton16[(frameNumber_ - 1) % 16];
 
-    ubo.nexusScoreThreshold = currentNexusScore_;
-    ubo.hypertraceJitterScale = Options::OptionsRTX::HYPERTRACE_JITTER_SCALE;
+    data.nexusScoreThreshold = currentNexusScore_;
+    data.hypertraceJitterScale = Options::OptionsRTX::HYPERTRACE_JITTER_SCALE;
 
     const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-    ubo.view     = camera.view();
-    ubo.proj     = camera.proj(aspect);
-    ubo.invView  = glm::inverse(ubo.view);
-    ubo.invProj  = glm::inverse(ubo.proj);
+    data.view     = camera.view();
+    data.proj     = camera.proj(aspect);
+    data.invView  = glm::inverse(data.view);
+    data.invProj  = glm::inverse(data.proj);
 
-    ubo.camPos   = glm::vec4(camera.pos(), 1.0f);
-    ubo.camDir   = glm::vec4(camera.forward(), 0.0f);
-    ubo.fov      = camera.fov();
-    ubo.aperture = camera.aperture();
-    ubo.focusDistance = camera.focusDistance();
+    data.camPos   = glm::vec4(camera.pos(), 1.0f);
+    data.camDir   = glm::vec4(camera.forward(), 0.0f);
+    data.fov      = camera.fov();
+    data.aperture = camera.aperture();
+    data.focusDistance = camera.focusDistance();
 
-    ubo.materialCount       = static_cast<uint32_t>(materialCount_);
-    ubo.activeMaterialIndex = activeMaterialIndex_;
-    ubo.metallicOverride    = materialMetallicOverride_;
-    ubo.roughnessOverride   = materialRoughnessOverride_;
-    ubo.emissiveIntensity   = emissiveIntensity_;
+    data.materialCount       = static_cast<uint32_t>(materialCount_);
+    data.activeMaterialIndex = activeMaterialIndex_;
+    data.metallicOverride    = materialMetallicOverride_;
+    data.roughnessOverride   = materialRoughnessOverride_;
+    data.emissiveIntensity   = emissiveIntensity_;
 
-    ubo.enableBlueNoise     = Options::Environment::ENABLE_BLUE_NOISE ? 1u : 0u;
-    ubo.enableTAA           = Options::OptionsRTX::ENABLE_TAA ? 1u : 0u;
-    ubo.taaAlpha            = Options::OptionsRTX::TAA_ALPHA;
+    data.enableBlueNoise     = Options::Environment::ENABLE_BLUE_NOISE ? 1u : 0u;
+    data.enableTAA           = Options::OptionsRTX::ENABLE_TAA ? 1u : 0u;
+    data.taaAlpha            = Options::OptionsRTX::TAA_ALPHA;
 
-    ubo.sunDirection        = sunDirection_;
-    ubo.sunIntensity        = sunIntensity_;
-    ubo.sunColor            = sunColor_;
-    ubo.fogDensity          = fogDensity_;
-    ubo.fogColor            = fogColor_;
+    data.sunDirection        = sunDirection_;
+    data.sunIntensity        = sunIntensity_;
+    data.sunColor            = sunColor_;
+    data.fogDensity          = fogDensity_;
+    data.fogColor            = fogColor_;
 
-    ubo.showNexusScore      = Options::Debug::SHOW_NEXUS_SCORE ? 1u : 0u;
-    ubo.showSppHeatmap      = Options::Debug::SHOW_SPP_HEATMAP ? 1u : 0u;
-    ubo.showAccumulationCount = Options::Debug::SHOW_ACCUMULATION_COUNT ? 1u : 0u;
-    ubo.showGpuTimestamps   = Options::Debug::SHOW_GPU_TIMESTAMPS ? 1u : 0u;
+    data.showNexusScore      = Options::Debug::SHOW_NEXUS_SCORE ? 1u : 0u;
+    data.showSppHeatmap      = Options::Debug::SHOW_SPP_HEATMAP ? 1u : 0u;
+    data.showAccumulationCount = Options::Debug::SHOW_ACCUMULATION_COUNT ? 1u : 0u;
+    data.showGpuTimestamps   = Options::Debug::SHOW_GPU_TIMESTAMPS ? 1u : 0u;
 
-    std::memcpy(info->mapped, &ubo, sizeof(DreamUBO));
+    std::memcpy(info->mapped, &data, sizeof(CameraSceneData));
 }
 
 // =============================================================================
@@ -1803,23 +1936,23 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
         return;
     }
 
-    TonemapUBO ubo{};
+    TonemapData data{};
 
-    ubo.exposure = currentExposure_;
-    ubo.type     = static_cast<uint32_t>(tonemapType_);
-    ubo.enabled  = Options::Tonemap::ENABLE_TONEMAPPING ? 1u : 0u;
-    ubo.nexusScore = currentNexusScore_;
-    ubo.frame    = frameNumber_;
-    ubo.spp      = currentSpp_;
+    data.exposure = currentExposure_;
+    data.type     = static_cast<uint32_t>(tonemapType_);
+    data.enabled  = Options::Tonemap::ENABLE_TONEMAPPING ? 1u : 0u;
+    data.nexusScore = currentNexusScore_;
+    data.frame    = frameNumber_;
+    data.spp      = currentSpp_;
 
-    ubo.gamma    = Options::Tonemap::GAMMA;
-    ubo.bloomThreshold = Options::PostProcess::BLOOM_THRESHOLD;
-    ubo.bloomIntensity = Options::PostProcess::BLOOM_INTENSITY;
-    ubo.vignetteIntensity = Options::PostProcess::VIGNETTE_INTENSITY;
-    ubo.filmGrainStrength = Options::PostProcess::FILM_GRAIN_STRENGTH;
-    ubo.lensFlareIntensity = Options::PostProcess::LENS_FLARE_INTENSITY;
+    data.gamma    = Options::Tonemap::GAMMA;
+    data.bloomThreshold = Options::PostProcess::BLOOM_THRESHOLD;
+    data.bloomIntensity = Options::PostProcess::BLOOM_INTENSITY;
+    data.vignetteIntensity = Options::PostProcess::VIGNETTE_INTENSITY;
+    data.filmGrainStrength = Options::PostProcess::FILM_GRAIN_STRENGTH;
+    data.lensFlareIntensity = Options::PostProcess::LENS_FLARE_INTENSITY;
 
-    std::memcpy(info->mapped, &ubo, sizeof(TonemapUBO));
+    std::memcpy(info->mapped, &data, sizeof(TonemapData));
 }
 
 // =============================================================================
@@ -1908,7 +2041,7 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
         if (buf) {
             uboInfo.buffer = buf->buffer;
             uboInfo.offset = 0;
-            uboInfo.range  = sizeof(TonemapUBO);
+            uboInfo.range  = sizeof(TonemapData);
         }
     }
 
@@ -2144,16 +2277,16 @@ bool VulkanRenderer::recreateTonemapUBOs() noexcept
 
     // Recreate host-visible
     for (uint32_t i = 0; i < frames; ++i) {
-        tonemapUniformEncs_[i] = BufferManager::createHostVisible(sizeof(TonemapUBO), std::format("TonemapUBO[{}]", i));
+        tonemapUniformEncs_[i] = BufferManager::createSmallUniform(sizeof(TonemapData), std::format("TonemapData[{}]", i));
         if (tonemapUniformEncs_[i] == 0) {
-            LOG_FATAL_CAT("RENDERER", "Failed to recreate TonemapUBO[{}]", i);
+            LOG_FATAL_CAT("RENDERER", "Failed to recreate TonemapData[{}]", i);
             return false;
         }
     }
 
     // Update descriptors
     for (uint32_t i = 0; i < frames; ++i) {
-        updateTonemapUBO(i);
+        updateTonemapUniform(i);
     }
 
     return true;
@@ -2248,41 +2381,10 @@ VulkanRenderer::~VulkanRenderer()
 {
 }
 
-void VulkanRenderer::updateTonemapUBO(uint32_t frame) noexcept
-{
-    if (frame >= tonemapUniformEncs_.size() || tonemapUniformEncs_[frame] == 0) {
-        return;
-    }
-
-    const uint64_t handle = tonemapUniformEncs_[frame];
-    const BufferManager::BufferInfo* info = BufferManager::get(handle);
-    if (!info || info->mapped == nullptr) {
-        return;
-    }
-
-    TonemapUBO ubo{};
-
-    ubo.exposure = currentExposure_;
-    ubo.type     = static_cast<uint32_t>(tonemapType_);
-    ubo.enabled  = Options::Tonemap::ENABLE_TONEMAPPING ? 1u : 0u;
-    ubo.nexusScore = currentNexusScore_;
-    ubo.frame    = frameNumber_;
-    ubo.spp      = currentSpp_;
-
-    ubo.gamma    = Options::Tonemap::GAMMA;
-    ubo.bloomThreshold = Options::PostProcess::BLOOM_THRESHOLD;
-    ubo.bloomIntensity = Options::PostProcess::BLOOM_INTENSITY;
-    ubo.vignetteIntensity = Options::PostProcess::VIGNETTE_INTENSITY;
-    ubo.filmGrainStrength = Options::PostProcess::FILM_GRAIN_STRENGTH;
-    ubo.lensFlareIntensity = Options::PostProcess::LENS_FLARE_INTENSITY;
-
-    std::memcpy(info->mapped, &ubo, sizeof(TonemapUBO));
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Final Status
 // ──────────────────────────────────────────────────────────────────────────────
 /*
- * December 18, 2025 — 2026 HARDCODE MASTERMIND — 2 FRAMES | R16G16_SFLOAT NEXUS | ALL TOP-NOTCH ENABLED
+ * December 21, 2025 — 2026 HARDCODE MASTERMIND — 2 FRAMES | R16G16_SFLOAT NEXUS | ALL TOP-NOTCH ENABLED
  * Empire Optimized: Unlimited FPS | Full Features | Half-Float RT/Accum/Denoise | Photons Eternal.
  */

@@ -21,7 +21,6 @@
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/camera.hpp"
-#include "engine/GLOBAL/UBO.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 
 #include "modes/RenderMode1.hpp"

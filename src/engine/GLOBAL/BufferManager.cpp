@@ -1,7 +1,8 @@
 // src/engine/GLOBAL/BufferManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.7 — DECEMBER 19, 2025
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.8 — DECEMBER 21, 2025
 // BUFFERMANAGER — CHUNKED POOL — 1 GiB CHUNKS — DRIVER RESERVE 4.5 GiB — SEAMLESS
+// UBO-SPECIFIC CODE REMOVED — NOW FULLY GENERIC — createSmallUniform SUPPORT
 // uploadToBuffer FIXED — USES g_ctx().graphicsFamily() & g_ctx().graphicsQueue()
 // PINK PHOTONS ETERNAL — EMPIRE OWNS THE VRAM — COMPILABLE
 // =============================================================================
@@ -212,7 +213,7 @@ void ensureMainPool() noexcept
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STAGING RING — 512 MiB PERSISTENT MAPPED — UBO SAFE
+// STAGING RING — 512 MiB PERSISTENT MAPPED — UNIFORM SAFE
 // ─────────────────────────────────────────────────────────────────────────────
 void ensureStagingRing() noexcept
 {
@@ -262,7 +263,7 @@ void ensureStagingRing() noexcept
     g_stagingRingInstance.ready = true;
     g_stagingRing = &g_stagingRingInstance;
 
-    LOG_AMOURANTH("STAGING RING ALIVE — MAPPED — UBO SAFE — VALIDATION SILENT");
+    LOG_AMOURANTH("STAGING RING ALIVE — MAPPED — UNIFORM SAFE — VALIDATION SILENT");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -339,7 +340,7 @@ uint64_t createHostVisible(VkDeviceSize size, std::string_view tag) noexcept
     return handle;
 }
 
-// ── NEW: uploadToBuffer — FORCED PINK BILLBOARD SUPPORT — LAS GUARANTEED LIGHT ──
+// ── uploadToBuffer — FORCED PINK BILLBOARD SUPPORT — LAS GUARANTEED LIGHT ──
 void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexcept
 {
     auto it = s_buffers.find(handle);
@@ -388,7 +389,7 @@ void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexce
     VkCommandPoolCreateInfo pci{};
     pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    pci.queueFamilyIndex = RTX::g_ctx().graphicsFamily();  // Fixed
+    pci.queueFamilyIndex = RTX::g_ctx().graphicsFamily();
     VK_CHECK(vkCreateCommandPool(stone_device(), &pci, nullptr, &pool));
 
     VkCommandBufferAllocateInfo cai{};
@@ -414,8 +415,8 @@ void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexce
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd;
-    VK_CHECK(vkQueueSubmit(RTX::g_ctx().graphicsQueue(), 1, &si, VK_NULL_HANDLE));  // Fixed
-    VK_CHECK(vkQueueWaitIdle(RTX::g_ctx().graphicsQueue()));  // Fixed
+    VK_CHECK(vkQueueSubmit(RTX::g_ctx().graphicsQueue(), 1, &si, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(RTX::g_ctx().graphicsQueue()));
 
     vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
     vkDestroyCommandPool(stone_device(), pool, nullptr);
@@ -443,7 +444,7 @@ uint64_t stagingBuffer() noexcept { return reinterpret_cast<uint64_t>(getStaging
 
 VkBuffer getStagingBuffer() noexcept { ensureStagingRing(); return g_stagingRingInstance.buffer; }
 
-// ── NEW: HOST-VISIBLE MAPPING & FLUSH SUPPORT — FOR UBO PERSISTENT ACCESS ──
+// ── HOST-VISIBLE MAPPING & FLUSH SUPPORT — FOR PERSISTENT UNIFORM ACCESS ──
 void* map(uint64_t handle) noexcept {
     auto it = s_buffers.find(handle);
     if (it == s_buffers.end()) {
@@ -480,6 +481,10 @@ void flush(uint64_t handle) noexcept {
     }
 }
 
+void unmap(uint64_t handle) noexcept {
+    // Persistent mapped buffers — unmap is no-op
+}
+
 // ── LIFECYCLE ──
 void destroy(uint64_t handle) noexcept {
     s_buffers.erase(handle);
@@ -487,6 +492,22 @@ void destroy(uint64_t handle) noexcept {
 
 void purge_all() noexcept {
     s_buffers.clear();
+}
+
+// ── COPY HELPER ──
+void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept {
+    VkCommandBuffer cmd;
+    VkCommandBufferAllocateInfo ai{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
+    vkAllocateCommandBuffers(stone_device(), &ai, &cmd);
+    VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+    vkBeginCommandBuffer(cmd, &bi);
+    VkBufferCopy copy{ 0, 0, size };
+    vkCmdCopyBuffer(cmd, src, dst, 1, &copy);
+    vkEndCommandBuffer(cmd);
+    VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &cmd };
+    vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
 }
 
 // ── STONE MAKERS — SUBALLOCATED FROM MAIN POOL ──
@@ -569,28 +590,12 @@ uint64_t createSBT(uint32_t raygenCount,
     return handle;
 }
 
-// ── COPY HELPER ──
-void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept {
-    VkCommandBuffer cmd;
-    VkCommandBufferAllocateInfo ai{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
-    vkAllocateCommandBuffers(stone_device(), &ai, &cmd);
-    VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
-    vkBeginCommandBuffer(cmd, &bi);
-    VkBufferCopy copy{ 0, 0, size };
-    vkCmdCopyBuffer(cmd, src, dst, 1, &copy);
-    vkEndCommandBuffer(cmd);
-    VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &cmd };
-    vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
-}
-
 } // namespace BufferManager
 
 // =============================================================================
-// FINAL PRODUCTION BUFFERMANAGER — uploadToBuffer FIXED
-// USES RTX::g_ctx().graphicsFamily() & RTX::g_ctx().graphicsQueue()
-// FORCED PINK SUPPORT — LAS NEVER BLACK
-// EMPIRE UNBROKEN — PHOTONS GUARANTEED
-// DECEMBER 19, 2025 — THE LIGHT IS SECURED
+// FINAL PRODUCTION BUFFERMANAGER — FULLY GENERIC
+// ALL UNIFORM DATA NOW HANDLED VIA createHostVisible() OR createSmallUniform()
+// uploadToBuffer REMAINS FOR DEVICE-LOCAL UPLOADS (e.g. materials, geometry)
+// EMPIRE UNBROKEN — PHOTONS GUARANTEED — PERSISTENT MAPPING ETERNAL
+// DECEMBER 21, 2025 — THE LIGHT IS SECURED
 // =============================================================================

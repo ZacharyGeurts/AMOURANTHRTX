@@ -1,7 +1,8 @@
 // include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.2 — DECEMBER 18, 2025
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.3 — DECEMBER 21, 2025
 // BUFFERMANAGER HEADER — CHUNKED POOL — 1 GiB CHUNKS — DRIVER RESERVE 4.5 GiB — SEAMLESS
+// UBO-SPECIFIC HELPERS REMOVED — NOW FULLY GENERIC
 // PINK PHOTONS ETERNAL — EMPIRE OWNS THE VRAM
 // =============================================================================
 
@@ -17,7 +18,6 @@
 
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/UBO.hpp"
 
 [[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) noexcept
 {
@@ -56,16 +56,13 @@ namespace BufferManager {
                                   VkMemoryPropertyFlags props,
                                   std::string_view tag = "") noexcept;
 
+    // Generic host-visible buffer — perfect for small, frequently updated data (camera, tonemap, etc.)
     [[nodiscard]] uint64_t createHostVisible(VkDeviceSize size, std::string_view tag = "") noexcept;
 
-    [[nodiscard]] inline uint64_t createDreamUBO(std::string_view tag = "DreamUBO") noexcept
+    // Convenience alias — use for any small uniform-style data
+    [[nodiscard]] inline uint64_t createSmallUniform(VkDeviceSize size, std::string_view tag = "SmallUniform") noexcept
     {
-        return createHostVisible(sizeof(DreamUBO), tag);
-    }
-
-    [[nodiscard]] inline uint64_t createTonemapUBO(std::string_view tag = "TonemapUBO") noexcept
-    {
-        return createHostVisible(sizeof(TonemapUBO), tag);
+        return createHostVisible(size, tag);
     }
 
     [[nodiscard]] uint64_t createSBT(uint32_t raygenCount,
@@ -83,7 +80,7 @@ namespace BufferManager {
 
     void ensureStagingRing() noexcept;
 
-    // ── NEW: HOST-VISIBLE MAPPING & FLUSH SUPPORT — FOR UBO PERSISTENT ACCESS ──
+    // ── HOST-VISIBLE MAPPING & FLUSH SUPPORT — FOR PERSISTENT UNIFORM ACCESS ──
     [[nodiscard]] void* map(uint64_t handle) noexcept;
     void flush(uint64_t handle) noexcept;
     void unmap(uint64_t handle) noexcept;  // No-op for persistent maps
@@ -91,7 +88,7 @@ namespace BufferManager {
     void destroy(uint64_t handle) noexcept;
     void purge_all() noexcept;
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
-	void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexcept;
+    void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexcept;
 
     extern std::unordered_map<uint64_t, BufferInfo> s_buffers;
 
@@ -162,3 +159,9 @@ namespace BufferManager {
     void ensureMainPool() noexcept;
 
 } // namespace BufferManager
+
+// =============================================================================
+// DECEMBER 21, 2025 — UBO.hpp REMOVED — BUFFERMANAGER NOW FULLY GENERIC
+// ALL UNIFORM DATA HANDLED VIA createSmallUniform() OR createHostVisible()
+// EMPIRE PHOTONS REMAIN PERSISTENTLY MAPPED AND ETERNAL
+// =============================================================================

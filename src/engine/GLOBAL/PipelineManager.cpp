@@ -1,8 +1,8 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v18.0 — DECEMBER 21, 2025
-// PIPELINEMANAGER — FULLY ALIGNED WITH LAS + BLAS + UBO + DEFAULT MATERIALS
-// UBO AT BINDING 2 — MATERIALS AT BINDING 4 — TEXTURE ARRAY SET 2
+// PIPELINEMANAGER — FULLY ALIGNED WITH LAS + BLAS + UNIFORM BUFFERS + DEFAULT MATERIALS
+// UNIFORM BUFFERS AT BINDING 2 — MATERIALS AT BINDING 4 — TEXTURE ARRAY SET 2
 // SUPPORTS ANY-HIT (ALPHA TEST) — DEFAULT SCENE RENDERS PERFECTLY
 // PINK PHOTONS BOUNCE WITH GLORY — EMPIRE ETERNAL
 // =============================================================================
@@ -13,7 +13,6 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/UBO.hpp"
 
 #include <algorithm>
 #include <array>
@@ -35,7 +34,7 @@ std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 // Set 0:
 //   0: TLAS
 //   1: RT Output
-//   2: DreamUBO
+//   2: CameraSceneData (uniform)
 //   3: Accumulation
 //   4: Materials (storage)
 //   6: Nexus Score
@@ -712,7 +711,7 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const { return rtPipelineL
 
 // =============================================================================
 // FINAL PRODUCTION PIPELINEMANAGER v18.0 — DECEMBER 21, 2025
-// FULLY ALIGNED WITH LAS, BLAS, UBO, AND DEFAULT MATERIALS
+// FULLY ALIGNED WITH LAS, BLAS, UNIFORM BUFFERS, AND DEFAULT MATERIALS
 // SUPPORTS ANY-HIT (ALPHA TEST) — TEXTURE ARRAY SET 2
 // DEFAULT SCENE RENDERS PERFECTLY — PINK MONSTER GLOWS
 // PINK PHOTONS ETERNAL — EMPIRE VICTORIOUS
