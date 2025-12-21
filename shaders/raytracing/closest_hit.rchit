@@ -67,50 +67,54 @@ layout(set = 0, binding = 2, std140) uniform DreamUBO {
     float     debugFloat4;
 } ubo;
 
-// Material struct matching UBO.hpp
+// Material struct — matches UBO.hpp exactly (64 bytes, std140)
 struct Material {
-    vec3      albedo;
-    float     roughness;
-    float     metallic;
-    float     emissiveStrength;
-    float     alpha;
-    float     alphaCutoff;
-    uint      textureIndex;
-    uint      _pad0;
-    vec3      emissiveColor;
-    float     _pad1;
+    vec3 albedo;
+    float roughness;
+    float metallic;
+    float emissiveStrength;
+    float alpha;
+    float alphaCutoff;
+    uint textureIndex;
+    uint _pad0;
+    vec3 emissiveColor;
+    float _pad1;
 };
 
 layout(set = 0, binding = 4, std140) readonly buffer Materials {
     Material materials[];
 } matBuffer;
 
-// Texture array (set 2)
+// Texture array for monster.png and others (set 2)
 layout(set = 2, binding = 0) uniform sampler2D textures[1024];
 
 void main()
 {
     uint matIndex = gl_InstanceCustomIndexEXT;
+
+    // Safety clamp
     if (matIndex >= ubo.materialCount) {
         matIndex = 0;
     }
 
     Material mat = matBuffer.materials[matIndex];
 
-    // Simple normal from ray direction (good enough for plane + billboard)
-    vec3 normal = -gl_WorldRayDirectionEXT;
-    normal = normalize(normal);
+    // Simple normal from ray direction (good for plane + billboard)
+    vec3 normal = -normalize(gl_WorldRayDirectionEXT);
 
+    // Basic lighting
     float ndotl = max(dot(normal, ubo.sunDirection), 0.0);
     vec3 diffuse = mat.albedo * ndotl * ubo.sunColor * ubo.sunIntensity;
 
+    // Emissive
     vec3 emissive = mat.emissiveColor * mat.emissiveStrength * ubo.emissiveIntensity;
 
+    // Base color
     vec3 color = mat.albedo;
 
     // Texture sampling
     if (mat.textureIndex > 0 && mat.textureIndex < 1024) {
-        // Simple UV from barycentrics
+        // Simple UV from barycentric coordinates
         vec3 bary = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
         vec2 uv = bary.x * vec2(0.0, 0.0) + bary.y * vec2(1.0, 0.0) + bary.z * vec2(0.5, 1.0);
         color *= texture(textures[nonuniformEXT(mat.textureIndex)], uv).rgb;
@@ -118,6 +122,7 @@ void main()
 
     vec3 finalColor = diffuse + emissive + color * 0.1; // Small ambient
 
+    // Debug modulation
     if (ubo.debugMode == 1) {
         finalColor *= (0.8 + 0.2 * sin(ubo.time * 2.0));
     }

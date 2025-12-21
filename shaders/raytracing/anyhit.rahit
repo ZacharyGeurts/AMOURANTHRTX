@@ -1,62 +1,111 @@
+// assets/shaders/raytracing/anyhit.rahit
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_nonuniform_qualifier : enable
 
-// Payload is required even if not used in any-hit
-layout(location = 0) rayPayloadInEXT vec3 payload;
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
+hitAttributeEXT vec3 attribs;
 
-layout(binding = 3, set = 0) uniform sampler2D billboardTex;  // monster.webp
+layout(set = 0, binding = 2, std140) uniform DreamUBO {
+    float     time;
+    uint      frame;
+    uint      currentSpp;
+    uint      totalSpp;
+    float     exposure;
+    uint      enableEnvMap;
+    uint      hypertraceEnabled;
+    uint      denoisingEnabled;
+    uint      adaptiveEnabled;
+    uint      debugMode;
+    float     envIntensity;
+    float     envRotation;
 
-hitAttributeEXT vec2 hitAttribs;
+    vec2      resolution;
+    vec2      jitter;
+    vec2      jitterPrev;
+    float     nexusScoreThreshold;
+    float     hypertraceJitterScale;
+    float     _pad0;
+    float     _pad1;
 
-layout(push_constant) uniform PushConstants {
-    mat4  invView;
-    mat4  invProj;
-    float totalTime;
-    uint  spp;
-    uint  frameSeed;
-    uint  forceEnvOnly;
-    float jitterStrength;
-    uint  maxRecursion;
-    uint  useEnvSky;
-    uint  flipEnvV;
-    uint  showHotPink;
-    float environmentExposure;
-    float skyIntensity;
-    float environmentRotationY;
-    vec3  billboardBaseColor;
-    float billboardRoughness;
-    float billboardMetallic;
-    uint  billboardUseAlphaBlend;   // 0 = alpha test (cutout), 1 = accept all (future blend)
-    float billboardAlphaCutoff;     // Threshold for alpha test
-} push;
+    mat4      view;
+    mat4      proj;
+    mat4      invView;
+    mat4      invProj;
+
+    vec4      camPos;
+    vec4      camDir;
+    float     fov;
+    float     aperture;
+    float     focusDistance;
+    uint      _pad2;
+
+    uint      materialCount;
+    uint      activeMaterialIndex;
+    float     metallicOverride;
+    float     roughnessOverride;
+    float     emissiveIntensity;
+    uint      enableBlueNoise;
+    uint      enableTAA;
+    float     taaAlpha;
+
+    vec3      sunDirection;
+    float     sunIntensity;
+    vec3      sunColor;
+    float     fogDensity;
+    vec3      fogColor;
+    float     _pad3;
+
+    uint      showNexusScore;
+    uint      showSppHeatmap;
+    uint      showAccumulationCount;
+    uint      showGpuTimestamps;
+    float     debugFloat1;
+    float     debugFloat2;
+    float     debugFloat3;
+    float     debugFloat4;
+} ubo;
+
+struct Material {
+    vec3      albedo;
+    float     roughness;
+    float     metallic;
+    float     emissiveStrength;
+    float     alpha;
+    float     alphaCutoff;
+    uint      textureIndex;
+    uint      _pad0;
+    vec3      emissiveColor;
+    float     _pad1;
+};
+
+layout(set = 0, binding = 4, std140) readonly buffer Materials {
+    Material materials[];
+} matBuffer;
+
+layout(set = 2, binding = 0) uniform sampler2D textures[1024];
 
 void main()
 {
-    // Barycentric coordinates from hit attributes
-    vec3 bary = vec3(1.0f - hitAttribs.x - hitAttribs.y, hitAttribs.x, hitAttribs.y);
+    uint matIndex = gl_InstanceCustomIndexEXT;
 
-    // Interpolate UVs matching billboard vertex layout:
-    // v0: (0,1) bottom-left
-    // v1: (0,0) top-left
-    // v2: (1,0) top-right
-    // v3: (1,1) bottom-right (not needed for barycentric interpolation)
-    vec2 uv = bary.x * vec2(0.0f, 1.0f) +  // v0
-              bary.y * vec2(0.0f, 0.0f) +  // v1
-              bary.z * vec2(1.0f, 0.0f);   // v2
-
-    // Vulkan textures are Y-down → flip V to match intended UV orientation
-    uv.y = 1.0f - uv.y;
-
-    // Sample only the alpha channel
-    float alpha = texture(billboardTex, uv).a;
-
-    // Alpha test (cutout) mode — default for sharp edges on monster.webp
-    if (push.billboardUseAlphaBlend == 0u) {
-        if (alpha < push.billboardAlphaCutoff) {
-            ignoreIntersectionEXT;  // Transparent pixel → ignore hit, ray continues
-        }
+    if (matIndex >= ubo.materialCount) {
+        matIndex = 0;
     }
 
-    // If billboardUseAlphaBlend == 1u, do nothing → accept all hits (for future true blending)
-    // Note: True alpha blending in primary visibility requires OIT or sorting — not supported here
+    Material mat = matBuffer.materials[matIndex];
+
+    // Alpha test only for materials that have a texture and alpha cutoff
+    if (mat.textureIndex > 0 && mat.textureIndex < 1024 && mat.alphaCutoff > 0.0) {
+        // Simple UV from barycentric coordinates
+        vec3 bary = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
+        vec2 uv = bary.x * vec2(0.0, 0.0) + bary.y * vec2(1.0, 0.0) + bary.z * vec2(0.5, 1.0);
+
+        float alpha = texture(textures[nonuniformEXT(mat.textureIndex)], uv).a;
+
+        if (alpha < mat.alphaCutoff) {
+            ignoreIntersectionEXT;
+        }
+    }
 }

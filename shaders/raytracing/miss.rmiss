@@ -83,5 +83,5 @@ void main()
 
     // Sun disk
     float sun = pow(max(dot(gl_WorldRayDirectionEXT, ubo.sunDirection), 0.0), 64.0);
-    hitValue += sun * ubo.sunColor * ubo.sunIntensity;
+    hitValue += sun * ubo.sunColor * ubo.sunIntensity * 10.0;
 }

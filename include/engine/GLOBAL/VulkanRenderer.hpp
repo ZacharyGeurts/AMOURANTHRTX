@@ -68,6 +68,7 @@ public:
 
     void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept;
     void updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept;
+	void createDefaultMaterials() noexcept;
 
     bool isAlive() const noexcept;
     bool swapchainNeedsPresentTransition_ = false;
@@ -485,6 +486,7 @@ public:
     static VulkanRenderer* get() noexcept;
 private:
     static inline VulkanRenderer* s_instance = nullptr;
+	uint64_t defaultMaterialsHandle_ = 0; 
 };
 
 // =============================================================================

@@ -1332,6 +1332,8 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createSyncObjects();
     createCommandBuffers();
 
+	createDefaultMaterials();
+
     createTonemapSampler();
     createTonemapDescriptorPool();
     createTonemapDescriptorSetLayout();
@@ -1501,11 +1503,6 @@ void VulkanRenderer::createAccumulationPipeline() noexcept
     LOG_SUCCESS_CAT("RENDERER", "Accumulation pipeline forged — temporal convergence armed");
 }
 
-// =============================================================================
-// FULL IMPLEMENTATION: renderFrame(const Camera&, float)
-// This is the main entry point used by Application::run()
-// Already present in previous versions — now confirmed complete
-// =============================================================================
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     totalTime_ += deltaTime;
@@ -1553,7 +1550,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         currentSpp_ = accumulationFrame_ = 0;
     }
 
-    // Deferred first-frame transitions (same as before)
+    // Deferred first-frame transitions
     if (rtOutputNeedsTransition_) {
         for (const auto& img : rtOutputImages_) {
             transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
@@ -1610,6 +1607,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         updateTonemapUniform(slot);
         currentFrame_.store(slot);
 
+        // === RT DESCRIPTOR UPDATE WITH DEFAULT MATERIALS ===
         {
             RTX::RTDescriptorUpdate desc{};
             desc.tlas = RTX::las().getCurrentTLAS();
@@ -1628,11 +1626,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 desc.nexusScoreViews = { hypertraceScoreView_ };
             }
 
-            if (!materialBufferEncs_.empty()) {
-                const auto* matBuf = BufferManager::get(materialBufferEncs_[0]);
+            // Use default materials buffer (created in constructor)
+            if (defaultMaterialsHandle_ != 0) {
+                const auto* matBuf = BufferManager::get(defaultMaterialsHandle_);
                 if (matBuf) {
                     desc.materialsBuffer = matBuf->buffer;
-                    desc.materialsSize = materialBufferSize();
+                    desc.materialsSize = sizeof(Material) * 2;  // Ground + Pink Monster
                 }
             }
 
@@ -1656,7 +1655,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
     }
 
-    // Final output to swapchain (same as before)
+    // Final output to swapchain
     {
         VkImage finalSrc = rtOutputImages_[slot].get();
 
@@ -1707,13 +1706,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
     accumulationFrame_++;
 }
 
-// Add these FULL implementations to src/engine/GLOBAL/VulkanRenderer.cpp
-// Place them at the bottom of the file, after all other functions
-
-// =============================================================================
-// updateUniformBuffer — Full implementation
-// Updates DreamUBO with camera, time, jitter, exposure, etc.
-// =============================================================================
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept
 {
     if (frame >= uniformBufferEncs_.size() || uniformBufferEncs_[frame] == 0) {
@@ -1858,6 +1850,35 @@ void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) 
     };
     VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
     RTX::g_ext.vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+void VulkanRenderer::createDefaultMaterials() noexcept
+{
+    if (defaultMaterialsHandle_ != 0) return; // Already created
+
+    LOG_AMOURANTH("FORGING DEFAULT MATERIALS — GROUND + PINK MONSTER");
+
+    std::array<Material, 2> materials = {
+        DefaultMaterials::GROUND_PLANE,
+        DefaultMaterials::PINK_MONSTER
+    };
+
+    defaultMaterialsHandle_ = BufferManager::create(
+        sizeof(Material) * 2,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        "Default_Materials"
+    );
+
+    if (defaultMaterialsHandle_ == 0) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create default materials buffer");
+        return;
+    }
+
+    // Upload immediately
+    BufferManager::uploadToBuffer(defaultMaterialsHandle_, materials.data(), sizeof(Material) * 2);
+
+    LOG_SUCCESS_CAT("RENDERER", "Default materials uploaded — ground (mat 0), pink monster (mat 1)");
 }
 
 // =============================================================================
