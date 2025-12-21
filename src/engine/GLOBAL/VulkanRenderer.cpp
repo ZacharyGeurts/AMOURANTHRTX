@@ -1626,12 +1626,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 desc.nexusScoreViews = { hypertraceScoreView_ };
             }
 
-            // Use default materials buffer (created in constructor)
+            // Bind default materials (ground + pink monster)
             if (defaultMaterialsHandle_ != 0) {
                 const auto* matBuf = BufferManager::get(defaultMaterialsHandle_);
                 if (matBuf) {
                     desc.materialsBuffer = matBuf->buffer;
-                    desc.materialsSize = sizeof(Material) * 2;  // Ground + Pink Monster
+                    desc.materialsSize = sizeof(Material) * 2;
                 }
             }
 
@@ -1854,7 +1854,9 @@ void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) 
 
 void VulkanRenderer::createDefaultMaterials() noexcept
 {
-    if (defaultMaterialsHandle_ != 0) return; // Already created
+    if (defaultMaterialsHandle_ != 0) {
+        return; // Already created
+    }
 
     LOG_AMOURANTH("FORGING DEFAULT MATERIALS — GROUND + PINK MONSTER");
 
@@ -1875,7 +1877,6 @@ void VulkanRenderer::createDefaultMaterials() noexcept
         return;
     }
 
-    // Upload immediately
     BufferManager::uploadToBuffer(defaultMaterialsHandle_, materials.data(), sizeof(Material) * 2);
 
     LOG_SUCCESS_CAT("RENDERER", "Default materials uploaded — ground (mat 0), pink monster (mat 1)");

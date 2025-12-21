@@ -4,7 +4,8 @@
 // PRODUCTION-GRADE · CLEAN · MODERN · VALIDATION-CLEAN · NO REDUNDANCY
 // GLOBAL TRANSIENT COMMAND POOL CREATED RIGHT AFTER LOGICAL DEVICE — EARLIEST SAFE POINT
 // GUARANTEED READY FOR RENDERER, PIPELINE FORGE, AND LAS BLAS BUILDING
-// DEFAULT SCENE RENDERS — PINK MONSTER + GROUND VISIBLE
+// DEFAULT MATERIALS FORGED IMMEDIATELY AFTER RENDERER CREATION
+// DEFAULT SCENE RENDERS — PINK MONSTER + GROUND VISIBLE WITH LIGHTING
 // PINK PHOTONS ETERNAL — EMPIRE VICTORIOUS
 // =============================================================================
 
@@ -478,9 +479,13 @@ int main(int, char**)
     phase3_sacrificialSplash();
     phase4_merchantShip();  // Creates transient pool early
     auto renderer = phase7_createRenderer();
+
+    // Forge default materials right after renderer creation — before first frame
+    renderer->createDefaultMaterials();
+
     phase8_forgeTheRTX(renderer.get());
 
-    phase6_buildDefaultScene();  // Now safe — pool exists
+    phase6_buildDefaultScene();
 
     stone_seal_final();
 
@@ -492,9 +497,9 @@ int main(int, char**)
 }
 
 // =============================================================================
-// FINAL PRODUCTION MAIN — DECEMBER 20, 2025
-// TRANSIENT POOL CREATED EARLY IN PHASE 4 — BEFORE RENDERER AND LAS
-// NO MORE "not initialized" FATAL ERRORS
-// DEFAULT SCENE RENDERS — PINK MONSTER + GROUND VISIBLE
+// FINAL PRODUCTION MAIN — DECEMBER 21, 2025
+// DEFAULT MATERIALS FORGED EARLY — NO BLACK SCREEN
+// TRANSIENT POOL READY — LAS WORKS
+// PINK MONSTER GLOWS — GROUND LIT
 // PINK PHOTONS ETERNAL — EMPIRE VICTORIOUS
 // =============================================================================
