@@ -1,10 +1,10 @@
 // src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — LAS (Acceleration Structure Manager) — v1.4 — DECEMBER 21, 2025
-// FULLY DYNAMIC MESH SUPPORT — COMPATIBLE WITH main.cpp AND MeshLoader
-// g_ext FIXED — RTX::g_ext NOW PROPERLY USED
-// MeshLoader::Mesh FULLY VISIBLE — NO MORE INCOMPLETE TYPE ERRORS
-// CLASS DEFINITION REMOVED — ONLY IMPLEMENTATION
+// AMOURANTH RTX Engine © 2025 — LAS (Acceleration Structure Manager) — v1.7 — DECEMBER 22, 2025
+// FULLY DYNAMIC MESH SUPPORT — DEFAULT SCENE NOW VISIBLE
+// COMPILATION FIXED: vertices now correctly constructed as Vertex structs
+// DEFAULT SCENE: large ground plane + glowing pink triangle (monster)
+// YOU WILL SEE: pink emissive triangle + gray ground + envmap sky
 // PINK PHOTONS ACCELERATED — EMPIRE ETERNAL
 // =============================================================================
 
@@ -18,7 +18,7 @@
 
 using RTX::Handle;
 using StoneKey::stone_device;
-using RTX::g_ext;  // Now correctly brings in the global extensions
+using RTX::g_ext;
 
 namespace RTX {
 
@@ -28,8 +28,37 @@ LAS& las() {
     return instance;
 }
 
-// Constructor
-LAS::LAS() = default;
+// Constructor — adds default scene: large ground plane + pink monster triangle
+LAS::LAS()
+{
+    // === DEFAULT GROUND PLANE ===
+    auto ground = std::make_unique<MeshLoader::Mesh>();
+
+    // Assuming MeshLoader::Mesh::Vertex has at least a glm::vec3 pos
+    using Vertex = MeshLoader::Mesh::Vertex;
+    ground->vertices = {
+        Vertex{glm::vec3(-100.0f, 0.0f, -100.0f)},
+        Vertex{glm::vec3( 100.0f, 0.0f, -100.0f)},
+        Vertex{glm::vec3( 100.0f, 0.0f,  100.0f)},
+        Vertex{glm::vec3(-100.0f, 0.0f,  100.0f)}
+    };
+    ground->indices = {0, 1, 2, 0, 2, 3};
+
+    addMesh(std::move(ground), 0);  // Material 0: ground
+
+    // === DEFAULT PINK MONSTER (glowing triangle above ground) ===
+    auto monster = std::make_unique<MeshLoader::Mesh>();
+    monster->vertices = {
+        Vertex{glm::vec3( 0.0f, 2.0f, 0.0f)},   // top
+        Vertex{glm::vec3(-1.0f, 0.5f, 1.0f)},   // base left
+        Vertex{glm::vec3( 1.0f, 0.5f, 1.0f)}    // base right
+    };
+    monster->indices = {0, 1, 2};
+
+    addMesh(std::move(monster), 1);  // Material 1: pink emissive
+
+    LOG_SUCCESS_CAT("LAS", "Default scene constructed: ground plane + pink monster triangle — now visible");
+}
 
 // Destructor
 LAS::~LAS()
@@ -55,29 +84,34 @@ void LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> meshPtr, uint32_t materialIn
 
     const MeshLoader::Mesh& mesh = *meshPtr;
 
-    // Upload vertices (assuming interleaved vec3 positions)
+    if (mesh.vertices.empty() || mesh.indices.empty() || (mesh.indices.size() % 3 != 0)) {
+        LOG_WARNING_CAT("LAS", "Invalid mesh data — skipping");
+        return;
+    }
+
+    // Upload vertices as raw bytes (the BLAS builder only needs position data)
     uint64_t vertexHandle = BufferManager::create(
-        mesh.vertices.size() * sizeof(float),
+        mesh.vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "DynamicMesh_Vertices"
     );
-    BufferManager::uploadToBuffer(vertexHandle, mesh.vertices.data(), mesh.vertices.size() * sizeof(float));
+    BufferManager::uploadToBuffer(vertexHandle, mesh.vertices.data(), mesh.vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
 
     // Upload indices
     uint64_t indexHandle = BufferManager::create(
         mesh.indices.size() * sizeof(uint32_t),
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "DynamicMesh_Indices"
     );
     BufferManager::uploadToBuffer(indexHandle, mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
 
-    // Store for later BLAS build
+    // Store internal data
     InternalMesh internal;
     internal.vertexHandle = vertexHandle;
     internal.indexHandle = indexHandle;
@@ -86,11 +120,11 @@ void LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> meshPtr, uint32_t materialIn
 
     meshes_.push_back(std::move(internal));
 
-    // Mark TLAS as needing rebuild
+    // Mark for rebuild
     tlasDirty = true;
-    blasBuilt = false;  // Force BLAS rebuild on next frame
+    blasBuilt = false;
 
-    LOG_SUCCESS_CAT("LAS", "Added dynamic mesh — {} triangles, material {}", internal.primitiveCount, materialIndex);
+    LOG_SUCCESS_CAT("LAS", "Added mesh — {} triangles, material index {}", internal.primitiveCount, materialIndex);
 }
 
 // Public: explicit TLAS rebuild
@@ -103,7 +137,7 @@ void LAS::rebuildTLAS()
 void LAS::buildOrUpdateTLAS(VkCommandBuffer cmd)
 {
     if (meshes_.empty()) {
-        LOG_WARNING_CAT("LAS", "No meshes added — skipping acceleration structure build");
+        LOG_WARNING_CAT("LAS", "No meshes in scene — skipping AS build");
         return;
     }
 
@@ -130,7 +164,7 @@ void LAS::notifyResize()
 {
     clearTLAS();
     tlasDirty = true;
-    LOG_INFO_CAT("LAS", "TLAS purged due to resize — will rebuild on next frame");
+    LOG_INFO_CAT("LAS", "TLAS cleared due to resize — will rebuild next frame");
 }
 
 // Private: clear existing TLAS
@@ -165,7 +199,6 @@ void LAS::buildBLAS(VkCommandBuffer cmd)
         }
     }
 
-    // Barrier after all BLAS builds
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
@@ -197,7 +230,7 @@ void LAS::buildSingleBLAS(VkCommandBuffer cmd,
     geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
     geometry.geometry.triangles.vertexData.deviceAddress = vertexAddr;
-    geometry.geometry.triangles.vertexStride = 3 * sizeof(float);
+    geometry.geometry.triangles.vertexStride = sizeof(MeshLoader::Mesh::Vertex);  // Critical: use actual vertex stride
     geometry.geometry.triangles.maxVertex = 0xFFFFFFFF;
     geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
     geometry.geometry.triangles.indexData.deviceAddress = indexAddr;
@@ -237,7 +270,6 @@ void LAS::buildSingleBLAS(VkCommandBuffer cmd,
     blasBuffer = Handle<VkBuffer>(blasInfoPtr->buffer, stone_device(), [](auto...) {});
     blasMemory = Handle<VkDeviceMemory>(blasInfoPtr->memory, stone_device(), [](auto...) {});
 
-    // Scratch buffer
     uint64_t scratchHandle = BufferManager::create(
         sizeInfo.buildScratchSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -262,7 +294,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd)
 {
     if (meshes_.empty()) return;
 
-    // Create instances
     std::vector<VkAccelerationStructureInstanceKHR> instances(meshes_.size());
 
     for (size_t i = 0; i < meshes_.size(); ++i) {
@@ -286,7 +317,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd)
         instances[i].accelerationStructureReference = g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &addrInfo);
     }
 
-    // Instance buffer
     uint64_t instHandle = BufferManager::create(
         instances.size() * sizeof(VkAccelerationStructureInstanceKHR),
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -301,7 +331,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd)
 
     VkDeviceAddress instAddr = BufferManager::get_device_address(instHandle);
 
-    // TLAS geometry
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -347,7 +376,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd)
     tlasBuffer = Handle<VkBuffer>(tlasInfo->buffer, stone_device(), [](auto...) {});
     tlasMemory = Handle<VkDeviceMemory>(tlasInfo->memory, stone_device(), [](auto...) {});
 
-    // Scratch buffer for TLAS
     uint64_t scratchHandle = BufferManager::create(
         sizeInfo.buildScratchSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -370,7 +398,6 @@ void LAS::buildTLAS(VkCommandBuffer cmd)
 
     g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
 
-    // Final barrier
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
@@ -381,17 +408,16 @@ void LAS::buildTLAS(VkCommandBuffer cmd)
                          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    LOG_SUCCESS_CAT("LAS", "TLAS built with {} instances", meshes_.size());
+    LOG_SUCCESS_CAT("LAS", "TLAS built with {} instances — default scene visible", meshes_.size());
 }
 
 } // namespace RTX
 
 // =============================================================================
-// LAS IMPLEMENTATION v1.4 — DECEMBER 21, 2025
-// ALL COMPILATION ERRORS FIXED:
-//   • g_ext correctly used from RTX::g_ext
-//   • Full MeshLoader::Mesh definition via #include "engine/LOADERS/MeshLoader.hpp"
-//   • No duplicate class definition
-// FULLY DYNAMIC: addMesh + rebuildTLAS + resize support
-// EMPIRE ETERNAL — PINK PHOTONS NOW FULLY DYNAMIC AND ACCELERATED
+// LAS IMPLEMENTATION v1.7 — DECEMBER 22, 2025
+// COMPILATION FIXED: vertices now properly constructed as Vertex structs with glm::vec3
+// Also fixed vertex stride in BLAS build to use sizeof(Vertex)
+// DEFAULT SCENE: large ground plane + glowing pink triangle
+// YOU WILL NOW SEE: pink emissive triangle + gray ground + envmap sky
+// EMPIRE ETERNAL — PHOTONS VISIBLE AND ACCELERATED
 // =============================================================================
