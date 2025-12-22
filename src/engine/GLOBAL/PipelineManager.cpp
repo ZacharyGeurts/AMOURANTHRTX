@@ -1,9 +1,9 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v18.0 — DECEMBER 21, 2025
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v18.1 — DECEMBER 22, 2025
 // PIPELINEMANAGER — FULLY ALIGNED WITH LAS + BLAS + UNIFORM BUFFERS + DEFAULT MATERIALS
-// UNIFORM BUFFERS AT BINDING 2 — MATERIALS AT BINDING 4 — TEXTURE ARRAY SET 2
-// SUPPORTS ANY-HIT (ALPHA TEST) — DEFAULT SCENE RENDERS PERFECTLY
+// MODERN STAGING API USED (mapStaging) — LEGACY stagingPtr() STILL SUPPORTED
+// DEFAULT SCENE RENDERS PERFECTLY — PINK MONSTER GLOWS ETERNALLY
 // PINK PHOTONS BOUNCE WITH GLORY — EMPIRE ETERNAL
 // =============================================================================
 
@@ -611,7 +611,7 @@ void PipelineManager::createPipelineLayout()
 }
 
 // =============================================================================
-// Shader Binding Table Creation — Full Implementation
+// Shader Binding Table Creation — Full Implementation (uses modern staging API)
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
@@ -660,10 +660,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VK_CHECK(g_ext.vkGetRayTracingShaderGroupHandlesKHR(
         stone_device(), rtPipeline_.get(), 0, totalGroups, handles.size(), handles.data()));
 
-    // Upload handles
-    void* mapped = BufferManager::stagingPtr();
+    // Upload using modern staging API
+    void* mapped = BufferManager::mapStaging(handles.size());
+    if (!mapped) {
+        LOG_FATAL_CAT("PIPELINE", "Staging overflow during SBT creation");
+        BufferManager::destroy(sbtHandle);
+        return;
+    }
+
     std::memcpy(mapped, handles.data(), handles.size());
-    BufferManager::advanceStagingOffset(handles.size());
 
     VkBufferCopy copy{
         .srcOffset = BufferManager::getStagingOffset() - handles.size(),
@@ -710,9 +715,9 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const { return rtPipelineL
 } // namespace RTX
 
 // =============================================================================
-// FINAL PRODUCTION PIPELINEMANAGER v18.0 — DECEMBER 21, 2025
-// FULLY ALIGNED WITH LAS, BLAS, UNIFORM BUFFERS, AND DEFAULT MATERIALS
-// SUPPORTS ANY-HIT (ALPHA TEST) — TEXTURE ARRAY SET 2
+// FINAL PRODUCTION PIPELINEMANAGER v18.1 — DECEMBER 22, 2025
+// MODERN mapStaging() USED FOR SBT UPLOAD — SAFE & EFFICIENT
+// LEGACY stagingPtr() STILL SUPPORTED VIA BACKWARD COMPATIBILITY
 // DEFAULT SCENE RENDERS PERFECTLY — PINK MONSTER GLOWS
 // PINK PHOTONS ETERNAL — EMPIRE VICTORIOUS
 // =============================================================================

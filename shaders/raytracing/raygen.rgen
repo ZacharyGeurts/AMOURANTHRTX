@@ -4,7 +4,6 @@
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 
-// Payload declared as EXT (writable in raygen)
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
@@ -79,7 +78,6 @@ void main()
 
     vec2 uv = (launchID + vec2(0.5)) / launchSize;
     vec2 ndc = uv * 2.0 - 1.0;
-
     vec2 jitteredNDC = ndc + ubo.jitter / launchSize;
 
     vec4 near = ubo.invProj * vec4(jitteredNDC, -1.0, 1.0);
@@ -90,7 +88,6 @@ void main()
     vec3 rayOrigin = ubo.camPos.xyz;
     vec3 rayDir    = normalize(far.xyz - near.xyz);
 
-    // Initialize payload to black
     hitValue = vec3(0.0);
 
     traceRayEXT(topLevelAS,
@@ -107,10 +104,12 @@ void main()
 
     vec3 color = hitValue * ubo.exposure;
 
-    // Envmap fallback for miss rays
-    if (ubo.enableEnvMap == 1 && length(color) < 0.001) {
+    // Environment map fallback on miss
+    if (ubo.enableEnvMap == 1 && length(hitValue) < 0.01) {
         vec3 dir = normalize(rayDir);
-        vec2 envUV = vec2(atan(dir.z, dir.x) * 0.1591 + 0.5, acos(dir.y) * 0.3183);
+        float theta = acos(dir.y);
+        float phi = atan(dir.z, dir.x);
+        vec2 envUV = vec2(phi * 0.1591 + 0.5, theta * 0.3183);
         color = texture(envMap, envUV).rgb * ubo.envIntensity;
     }
 
