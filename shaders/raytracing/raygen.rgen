@@ -4,10 +4,11 @@
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 
+// Payload declared as EXT (writable in raygen)
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
-layout(set = 0, binding = 1, rgba32f) uniform image2D rtOutput;
+layout(set = 0, binding = 1, rgba16f) uniform image2D rtOutput;
 layout(set = 0, binding = 2, std140) uniform DreamUBO {
     float     time;
     uint      frame;
@@ -68,52 +69,58 @@ layout(set = 0, binding = 2, std140) uniform DreamUBO {
     float     debugFloat4;
 } ubo;
 
-layout(set = 0, binding = 3, rgba32f) uniform image2D accumulation;
+layout(set = 0, binding = 3, rgba16f) uniform image2D accumulation;
 layout(set = 0, binding = 7) uniform sampler2D envMap;
 
 void main()
 {
-    vec2 launchID = gl_LaunchIDEXT.xy;
-    vec2 launchSize = gl_LaunchSizeEXT.xy;
+    const vec2 launchID = gl_LaunchIDEXT.xy;
+    const vec2 launchSize = gl_LaunchSizeEXT.xy;
 
-    vec2 pixelCenter = launchID + vec2(0.5);
-    vec2 uv = pixelCenter / launchSize;
+    vec2 uv = (launchID + vec2(0.5)) / launchSize;
     vec2 ndc = uv * 2.0 - 1.0;
 
-    // Apply jitter
     vec2 jitteredNDC = ndc + ubo.jitter / launchSize;
 
     vec4 near = ubo.invProj * vec4(jitteredNDC, -1.0, 1.0);
     vec4 far  = ubo.invProj * vec4(jitteredNDC,  1.0, 1.0);
-
     near /= near.w;
     far  /= far.w;
 
     vec3 rayOrigin = ubo.camPos.xyz;
-    vec3 rayDir    = normalize((ubo.invView * far - ubo.invView * near).xyz);
+    vec3 rayDir    = normalize(far.xyz - near.xyz);
 
+    // Initialize payload to black
     hitValue = vec3(0.0);
 
     traceRayEXT(topLevelAS,
                 gl_RayFlagsOpaqueEXT,
                 0xFF,
-                0, // sbtRecordOffset
-                0, // sbtRecordStride
-                0, // missIndex
+                0,
+                0,
+                0,
                 rayOrigin,
                 0.001,
                 rayDir,
                 10000.0,
-                0); // payload
+                0);
 
     vec3 color = hitValue * ubo.exposure;
 
-    // Accumulation
-    if (ubo.currentSpp > 0) {
-        vec3 accum = imageLoad(accumulation, ivec2(launchID)).rgb;
-        color = mix(accum, color, 1.0 / float(ubo.currentSpp + 1));
-        imageStore(accumulation, ivec2(launchID), vec4(color, 1.0));
+    // Envmap fallback for miss rays
+    if (ubo.enableEnvMap == 1 && length(color) < 0.001) {
+        vec3 dir = normalize(rayDir);
+        vec2 envUV = vec2(atan(dir.z, dir.x) * 0.1591 + 0.5, acos(dir.y) * 0.3183);
+        color = texture(envMap, envUV).rgb * ubo.envIntensity;
     }
 
+    // Temporal accumulation
+    if (ubo.currentSpp > 0) {
+        vec3 prev = imageLoad(accumulation, ivec2(launchID)).rgb;
+        float alpha = 1.0 / float(ubo.currentSpp + 1);
+        color = mix(prev, color, alpha);
+    }
+
+    imageStore(accumulation, ivec2(launchID), vec4(color, 1.0));
     imageStore(rtOutput, ivec2(launchID), vec4(color, 1.0));
 }

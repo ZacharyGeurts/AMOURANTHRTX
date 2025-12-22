@@ -67,7 +67,7 @@ layout(set = 0, binding = 2, std140) uniform DreamUBO {
     float     debugFloat4;
 } ubo;
 
-// Material struct — matches UBO.hpp exactly (64 bytes, std140)
+// Material struct — matches C++ exactly (64 bytes, std140)
 struct Material {
     vec3 albedo;
     float roughness;
@@ -85,46 +85,52 @@ layout(set = 0, binding = 4, std140) readonly buffer Materials {
     Material materials[];
 } matBuffer;
 
-// Texture array for monster.png and others (set 2)
+// Texture array (set 2, binding 0)
 layout(set = 2, binding = 0) uniform sampler2D textures[1024];
 
 void main()
 {
+    // Instance custom index gives us the material index (set in LAS)
     uint matIndex = gl_InstanceCustomIndexEXT;
 
-    // Safety clamp
-    if (matIndex >= ubo.materialCount) {
-        matIndex = 0;
-    }
+    // Clamp to valid range
+    matIndex = min(matIndex, ubo.materialCount - 1);
 
     Material mat = matBuffer.materials[matIndex];
 
-    // Simple normal from ray direction (good for plane + billboard)
-    vec3 normal = -normalize(gl_WorldRayDirectionEXT);
+    // Reconstruct world normal from barycentric coordinates
+    // For correct lighting on both sides of the ground plane
+    const vec3 bary = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
+    vec3 normal = normalize(cross(gl_WorldRayDirectionEXT, gl_WorldRayOriginEXT)); // placeholder
+    // Proper normal reconstruction requires vertex normals — for now use face normal from ray
+    normal = -normalize(gl_WorldRayDirectionEXT); // simple backface lighting
 
-    // Basic lighting
+    // Basic directional lighting
     float ndotl = max(dot(normal, ubo.sunDirection), 0.0);
     vec3 diffuse = mat.albedo * ndotl * ubo.sunColor * ubo.sunIntensity;
 
-    // Emissive
+    // Emissive (pink monster glow)
     vec3 emissive = mat.emissiveColor * mat.emissiveStrength * ubo.emissiveIntensity;
 
-    // Base color
+    // Base albedo (ground is gray, monster is pink)
     vec3 color = mat.albedo;
 
-    // Texture sampling
+    // Texture support (monster.png for material 1)
     if (mat.textureIndex > 0 && mat.textureIndex < 1024) {
-        // Simple UV from barycentric coordinates
-        vec3 bary = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
-        vec2 uv = bary.x * vec2(0.0, 0.0) + bary.y * vec2(1.0, 0.0) + bary.z * vec2(0.5, 1.0);
+        // Simple UV mapping using barycentrics (good enough for testing)
+        vec2 uv = bary.yz; // map barycentric to UV space
         color *= texture(textures[nonuniformEXT(mat.textureIndex)], uv).rgb;
     }
 
-    vec3 finalColor = diffuse + emissive + color * 0.1; // Small ambient
+    // Ambient + small indirect term
+    vec3 ambient = mat.albedo * 0.1;
 
-    // Debug modulation
+    // Final lit color
+    vec3 finalColor = diffuse + emissive + ambient + color * 0.05;
+
+    // Debug pulsing for visibility confirmation
     if (ubo.debugMode == 1) {
-        finalColor *= (0.8 + 0.2 * sin(ubo.time * 2.0));
+        finalColor *= (0.7 + 0.3 * sin(ubo.time * 3.0 + float(gl_PrimitiveID)));
     }
 
     hitValue = finalColor;
