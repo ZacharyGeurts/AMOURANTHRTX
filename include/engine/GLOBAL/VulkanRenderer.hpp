@@ -485,6 +485,7 @@ public:
     // ── SINGLETON ACCESS — EMPIRE LAW ENFORCED ─────────────────────────────────
     static VulkanRenderer* get() noexcept;
 private:
+    float*     envMapUploadData_   = nullptr;  // Owned pointer — delete after upload
     static inline VulkanRenderer* s_instance = nullptr;
 	uint64_t defaultMaterialsHandle_ = 0; 
 };

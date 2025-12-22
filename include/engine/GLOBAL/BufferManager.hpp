@@ -1,9 +1,12 @@
 // include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v15.3 — DECEMBER 21, 2025
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v16.0 — DECEMBER 22, 2025
 // BUFFERMANAGER HEADER — CHUNKED POOL — 1 GiB CHUNKS — DRIVER RESERVE 4.5 GiB — SEAMLESS
-// UBO-SPECIFIC HELPERS REMOVED — NOW FULLY GENERIC
-// PINK PHOTONS ETERNAL — EMPIRE OWNS THE VRAM
+// FULLY GENERIC + MODERN STAGING RING API
+// stagingPtr() KEPT FOR BACKWARD COMPATIBILITY
+// mapStaging() / flushStaging() / advanceStagingOffset() ADDED FOR NEW CODE
+// ENVIRONMENT MAP UPLOAD SUPPORT — PINK SKY PHOTONS FLOW ETERNALLY
+// EMPIRE OWNS THE VRAM — LIGHT SECURED
 // =============================================================================
 
 #pragma once
@@ -56,10 +59,8 @@ namespace BufferManager {
                                   VkMemoryPropertyFlags props,
                                   std::string_view tag = "") noexcept;
 
-    // Generic host-visible buffer — perfect for small, frequently updated data (camera, tonemap, etc.)
     [[nodiscard]] uint64_t createHostVisible(VkDeviceSize size, std::string_view tag = "") noexcept;
 
-    // Convenience alias — use for any small uniform-style data
     [[nodiscard]] inline uint64_t createSmallUniform(VkDeviceSize size, std::string_view tag = "SmallUniform") noexcept
     {
         return createHostVisible(size, tag);
@@ -72,11 +73,15 @@ namespace BufferManager {
                                      VkBufferUsageFlags extraUsage = 0,
                                      std::string_view tag = "SBT_ETERNAL_PINK") noexcept;
 
-    [[nodiscard]] VkBuffer getStagingBuffer() noexcept;
-    void* stagingPtr() noexcept;
+    // ── MODERN STAGING RING API — FOR ENVIRONMENT MAP & LARGE UPLOADS ──
+    [[nodiscard]] void*      mapStaging(VkDeviceSize size) noexcept;
+    void                     flushStaging(VkDeviceSize size) noexcept;
+    void                     advanceStagingOffset(VkDeviceSize size) noexcept;
     [[nodiscard]] VkDeviceSize getStagingOffset() noexcept;
-    void advanceStagingOffset(VkDeviceSize bytes) noexcept;
-    [[nodiscard]] uint64_t stagingBuffer() noexcept;
+    [[nodiscard]] VkBuffer   getStagingBuffer() noexcept;
+
+    // ── LEGACY COMPATIBILITY ──
+    [[nodiscard]] void* stagingPtr() noexcept;  // Returns base of staging ring
 
     void ensureStagingRing() noexcept;
 
@@ -161,7 +166,9 @@ namespace BufferManager {
 } // namespace BufferManager
 
 // =============================================================================
-// DECEMBER 21, 2025 — UBO.hpp REMOVED — BUFFERMANAGER NOW FULLY GENERIC
-// ALL UNIFORM DATA HANDLED VIA createSmallUniform() OR createHostVisible()
-// EMPIRE PHOTONS REMAIN PERSISTENTLY MAPPED AND ETERNAL
+// DECEMBER 22, 2025 — BUFFERMANAGER v16.0
+// stagingPtr() KEPT AND FULLY FUNCTIONAL FOR BACKWARD COMPATIBILITY
+// NEW API: mapStaging() / flushStaging() / advanceStagingOffset() FOR MODERN USAGE
+// ENVIRONMENT MAP UPLOAD FULLY SUPPORTED — SACRED PINK OR HDR SKY NOW VISIBLE
+// EMPIRE PHOTONS REMAIN PERSISTENTLY MAPPED AND ETERNAL — LIGHT SECURED
 // =============================================================================

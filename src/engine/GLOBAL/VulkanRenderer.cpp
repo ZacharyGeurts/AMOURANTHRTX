@@ -369,17 +369,16 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     envMapImageView_  = RTX::Handle<VkImageView>(equirectView, stone_device(), vkDestroyImageView);
     envMapSampler_    = RTX::Handle<VkSampler>(sampler, stone_device(), vkDestroySampler);
 
+    // Store upload data and mark for upload
+    envMapNeedsUpload_  = true;
+    envMapUploadWidth_  = equiWidth;
+    envMapUploadHeight_ = equiHeight;
+    envMapUploadData_   = data;  // Owned — will delete after upload
+
     if (hdrLoaded) {
-        envMapNeedsUpload_  = true;
-        envMapUploadWidth_  = equiWidth;
-        envMapUploadHeight_ = equiHeight;
         LOG_SUCCESS_CAT("RENDERER", "HDR envmap prepared — {}×{} — upload deferred to first frame", equiWidth, equiHeight);
     } else {
-        envMapNeedsUpload_ = true;  // Still upload the pink fallback
-        envMapUploadWidth_  = equiWidth;
-        envMapUploadHeight_ = equiHeight;
         LOG_SUCCESS_CAT("RENDERER", "SACRED PINK fallback envmap created — the empire demands PINK, not black");
-        // Upload pink data immediately in first frame
     }
 
     // Force pipeline creation — now always safe
@@ -1093,20 +1092,17 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
         return;
     }
 
+    // Always clear to debug pink for initial validation (remove once rendering works)
+    VkClearColorValue debugPink{{1.0f, 0.0f, 0.5f, 1.0f}};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cmd, rtOutputImages_[frameIndex].get(), VK_IMAGE_LAYOUT_GENERAL, &debugPink, 1, &range);
+
+    // Bind pipeline (kept from original)
     vkCmdBindPipeline(cmd,
         VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
         RTX::pipeline().rtPipeline());
 
-    const VkDescriptorSet rtSet = RTX::pipeline().rtDescriptorSets()[frameIndex];
-    vkCmdBindDescriptorSets(cmd,
-        VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-        RTX::pipeline().rtPipelineLayout(),
-        0,
-        1,
-        &rtSet,
-        0,
-        nullptr);
-
+    // Push constants (kept from original)
     struct PushBlock {
         uint32_t frame;
         uint32_t totalSpp;
@@ -1127,15 +1123,10 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
         sizeof(push),
         &push);
 
-    RTX::g_ext.vkCmdTraceRaysKHR(cmd,
-        &RTX::pipeline().raygenRegion(),
-        &RTX::pipeline().missRegion(),
-        &RTX::pipeline().hitRegion(),
-        &RTX::pipeline().callableRegion(),
-        currentExtent().width,
-        currentExtent().height,
-        1u);
+    // Use PipelineManager's traceRays for full 4-set binding (replaces manual bind + trace)
+    RTX::pipeline().traceRays(cmd, frameIndex, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1u);
 
+    // Existing barrier (kept)
     VkMemoryBarrier2 barrier{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
         .srcStageMask  = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
@@ -1727,8 +1718,90 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         nexusScoreNeedsInit_ = false;
     }
 
+    // NEW: Upload environment map on first frame if needed
     if (envMapNeedsUpload_) {
         envMapNeedsUpload_ = false;
+
+        if (envMapUploadData_ && envMapUploadWidth_ > 0 && envMapUploadHeight_ > 0) {
+            const VkDeviceSize uploadSize = static_cast<VkDeviceSize>(envMapUploadWidth_) * envMapUploadHeight_ * 16ULL;  // RGBA32F = 16 bytes/pixel
+
+            // Use BufferManager staging for upload
+            void* stagingPtr = BufferManager::mapStaging(uploadSize);
+            if (stagingPtr) {
+                std::memcpy(stagingPtr, envMapUploadData_, uploadSize);
+                BufferManager::flushStaging(uploadSize);
+                BufferManager::advanceStagingOffset(uploadSize);
+
+                // Allocate one-time command buffer
+                VkCommandBuffer uploadCmd;
+                VkCommandBufferAllocateInfo allocInfo{
+                    .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                    .commandPool        = g_transientCommandPool,
+                    .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                    .commandBufferCount = 1
+                };
+                vkAllocateCommandBuffers(stone_device(), &allocInfo, &uploadCmd);
+
+                VkCommandBufferBeginInfo beginInfo{
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+                };
+                vkBeginCommandBuffer(uploadCmd, &beginInfo);
+
+                // Transition envmap to transfer dst
+                transitionImage(uploadCmd, envMapImage_.get(),
+                                VK_IMAGE_LAYOUT_UNDEFINED,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                0,
+                                VK_ACCESS_TRANSFER_WRITE_BIT,
+                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+                VkBufferImageCopy copyRegion{};
+                copyRegion.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                copyRegion.imageSubresource.layerCount     = 1;
+                copyRegion.imageExtent.width               = envMapUploadWidth_;
+                copyRegion.imageExtent.height              = envMapUploadHeight_;
+                copyRegion.imageExtent.depth               = 1;
+
+                vkCmdCopyBufferToImage(uploadCmd,
+                                       BufferManager::getStagingBuffer(),
+                                       envMapImage_.get(),
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                       1,
+                                       &copyRegion);
+
+                // Transition to shader read-only
+                transitionImage(uploadCmd, envMapImage_.get(),
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                VK_ACCESS_TRANSFER_WRITE_BIT,
+                                VK_ACCESS_SHADER_READ_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+                vkEndCommandBuffer(uploadCmd);
+
+                // Submit and wait (simple synchronous upload)
+                VkSubmitInfo submit{
+                    .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                    .commandBufferCount = 1,
+                    .pCommandBuffers    = &uploadCmd
+                };
+                vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE);
+                vkQueueWaitIdle(stone_graphics_queue());
+
+                vkFreeCommandBuffers(stone_device(), g_transientCommandPool, 1, &uploadCmd);
+
+                LOG_SUCCESS_CAT("RENDERER", "Environment map uploaded — {}×{} — sky photons activated", envMapUploadWidth_, envMapUploadHeight_);
+            } else {
+                LOG_ERROR_CAT("RENDERER", "Failed to map staging buffer for envmap upload");
+            }
+
+            // Clean up CPU-side data
+            delete[] envMapUploadData_;
+            envMapUploadData_ = nullptr;
+        }
     }
 
     if (activeRenderMode_ == 1) {
