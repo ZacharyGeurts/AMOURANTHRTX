@@ -282,14 +282,33 @@ static void phase6_buildDefaultScene() noexcept
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
 {
+    // Use the current sealed window dimensions
+    const uint32_t width  = stone_width();
+    const uint32_t height = stone_height();
+
+    // Get the raw SDL_Window pointer from the global RAII wrapper
+    SDL_Window* sdlWindow = g_sdl_window.get();
+
+    if (!sdlWindow) {
+        LOG_FATAL_CAT("RENDERER", "SDL window is null during renderer creation — empire cannot render");
+        return nullptr;
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Forging VulkanRenderer — {}×{} — overclock: {}", 
+                    width, height, Options::Performance::OVERCLOCK_RENDERER ? "ENABLED" : "DISABLED");
+
     auto renderer = std::make_unique<VulkanRenderer>(
-        stone_width(),
-        stone_height(),
-        SDL3Window::get(),
+        static_cast<int>(width),
+        static_cast<int>(height),
+        sdlWindow,
         Options::Performance::OVERCLOCK_RENDERER
     );
 
+    // Seal the renderer into StoneKey for global access
     stone_seal_renderer(renderer.get());
+
+    LOG_AMOURANTH("VULKAN RENDERER FORGED — EMPIRE SEES ALL — PINK PHOTONS READY");
+
     return renderer;
 }
 

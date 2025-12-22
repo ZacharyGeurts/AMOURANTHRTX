@@ -9,7 +9,8 @@
 // 2. Commercial licensing: gzac5314@gmail.com
 //
 // SDL_EVENT_WINDOW_CLOSE_REQUESTED handled early + forced quit event
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
+// FULLY COMPATIBLE WITH CURRENT ENGINE STATE — PINK PHOTONS ETERNAL
+// EMPIRE UNBROKEN — DECEMBER 22, 2025
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
@@ -53,6 +54,7 @@ std::atomic<bool> g_resizeRequested{false};
 // =============================================================================
 void SDLWindowDeleter::operator()(SDL_Window* w) const noexcept
 {
+    if (w) SDL_DestroyWindow(w);
 }
 
 // =============================================================================
@@ -332,9 +334,10 @@ void SDL3Input::handleGamepadConnection(const SDL_GamepadDeviceEvent& e)
 // =============================================================================
 namespace SDL3Window {
 
-std::vector<std::string> getVulkanExtensions(SDL_Window* window)
+[[nodiscard]] std::vector<std::string> getVulkanExtensions(SDL_Window* window)
 {
-    if (!window) window = get();
+    if (!window) window = g_sdl_window.get();
+
     uint32_t count = 0;
     if (SDL_Vulkan_GetInstanceExtensions(&count) == 0) return {};
 
@@ -352,7 +355,7 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
     {
         eventSeen = true;
 
-        // === FIXED: Immediate quit on X button ===
+        // === CRITICAL: Immediate quit on X button ===
         if (ev.type == SDL_EVENT_QUIT || ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
             quit = true;
             return eventSeen;
@@ -430,7 +433,7 @@ void toggleFullscreen() noexcept
 
 void destroy() noexcept
 {
-
+    g_sdl_window.reset();
 }
 
 } // namespace SDL3Window
@@ -563,7 +566,7 @@ void AudioManager::playSound(std::string_view name) {
 
 // =============================================================================
 // AMOURANTH RTX — UNIVERSAL IMAGE LOADER v∞ — PINK PHOTONS ETERNAL
-// DECEMBER 17, 2025 — FULLY INTEGRATED — EMPIRE COMPLETE
+// DECEMBER 22, 2025 — FULLY INTEGRATED — EMPIRE COMPLETE
 // =============================================================================
 namespace AmouranthRTX::ImageLoader {
 
@@ -624,5 +627,5 @@ namespace AmouranthRTX::ImageLoader {
 // =============================================================================
 // SDL_EVENT_WINDOW_CLOSE_REQUESTED handled first
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
-// DECEMBER 17, 2025 — THE LIGHT IS ETERNAL
+// DECEMBER 22, 2025 — THE LIGHT IS ETERNAL
 // =============================================================================

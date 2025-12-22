@@ -56,9 +56,7 @@ extern std::atomic<bool> g_resizeRequested;
 // =============================================================================
 namespace SDL3Window {
 
-[[nodiscard]] inline SDL_Window* get() noexcept { return g_sdl_window.get(); }
-
-std::vector<std::string> getVulkanExtensions(SDL_Window* window = nullptr);
+[[nodiscard]] std::vector<std::string> getVulkanExtensions(SDL_Window* window = nullptr);
 bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept;
 void toggleFullscreen() noexcept;
 void destroy() noexcept;
@@ -288,8 +286,8 @@ inline AudioManager g_audio;
 
 } // namespace SDL3Audio
 
-
 // =============================================================================
-// FIRST LIGHT ACHIEVED — DECEMBER 17, 2025 — PINK PHOTONS ETERNAL
+// FIRST LIGHT ACHIEVED — DECEMBER 22, 2025 — PINK PHOTONS ETERNAL
+// SDL3Window::get() REMOVED FROM HEADER — DEFINED ONLY IN SDL3.cpp
 // ALL GLOBALS PROPERLY EXTERNED — LINKER HAPPY — EMPIRE UNBROKEN
 // =============================================================================

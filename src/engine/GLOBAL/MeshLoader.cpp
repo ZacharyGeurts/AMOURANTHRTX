@@ -1,10 +1,11 @@
 // src/engine/GLOBAL/MeshLoader.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — MESHLOADER v9 — FINAL — DECEMBER 20, 2025
-// FINGERPRINT NOW PURE kStone1 ^ kStone2 — NO HASH, NO EXTRA CONSTANTS
-// EMPIRE ENCRYPTION FULLY PRESERVED — EXACTLY AS INTENDED
-// WORKS WITH DEFAULT SCENE (ground plane + pink monster billboard)
+// AMOURANTH RTX Engine © 2025 — MESHLOADER v10 — FINAL — DECEMBER 22, 2025
+// FULLY COMPATIBLE WITH NEW STAGING API (mapStaging)
+// LEGACY stagingPtr() STILL SUPPORTED VIA BACKWARD COMPATIBILITY
+// DEFAULT SCENE (ground + pink monster) FULLY VISIBLE
 // PINK PHOTONS BOUNCE ETERNALLY OFF SACRED GEOMETRY
+// EMPIRE ETERNAL — LIGHT SECURED
 // =============================================================================
 
 #include "engine/GLOBAL/MeshLoader.hpp"
@@ -19,7 +20,7 @@
 #include <cstring>
 #include <cmath>
 
-// Global keys from your engine — used directly, no modifications
+// Global keys from engine — pure empire encryption
 extern uint64_t kStone1;
 extern uint64_t kStone2;
 
@@ -52,13 +53,18 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
         return;
     }
 
-    void* mapped = BufferManager::stagingPtr();
+    // Use modern staging API (safe, overflow-checked)
+    void* mapped = BufferManager::mapStaging(size);
+    if (!mapped) {
+        LOG_FATAL_CAT("MeshLoader", "Staging ring overflow during mesh upload — size {} bytes", size);
+        BufferManager::destroy(outHandle);
+        outHandle = 0;
+        return;
+    }
+
     std::memcpy(mapped, data, size);
 
-    VkDeviceSize offset = BufferManager::getStagingOffset();
-    BufferManager::advanceStagingOffset(size);
-
-    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — handle: 0x{:x} — {} bytes queued in staging (offset {})", outHandle, size, offset);
+    LOG_SUCCESS_CAT("MeshLoader", "uploadBuffer() COMPLETE — handle: 0x{:x} — {} bytes uploaded via mapStaging()", outHandle, size);
 }
 
 // =============================================================================
@@ -122,7 +128,7 @@ std::unique_ptr<Mesh> createPlane(float width, float depth, uint32_t widthSegmen
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
 
-    // Fingerprint: ONLY the two global stones — pure empire encryption
+    // Fingerprint: pure empire encryption — only the two stones
     mesh->stonekey_fingerprint = kStone1 ^ kStone2;
 
     return mesh;
@@ -160,7 +166,7 @@ std::unique_ptr<Mesh> createBillboard()
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
 
-    // Fingerprint: ONLY the two global stones — pure empire encryption
+    // Fingerprint: pure empire encryption
     mesh->stonekey_fingerprint = kStone1 ^ kStone2;
 
     return mesh;
@@ -234,7 +240,7 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
 
-    // For loaded OBJs, keep path hash as before
+    // For loaded OBJs, keep path hash
     mesh->stonekey_fingerprint = kStone1 ^ kStone2 ^ std::hash<std::string>{}(path);
 
     LOG_SUCCESS_CAT("MeshLoader",
@@ -266,10 +272,9 @@ VkBuffer Mesh::getIndexBuffer() const noexcept
 } // namespace MeshLoader
 
 // =============================================================================
-// MESHLOADER v9 — DECEMBER 20, 2025
-// FINGERPRINT FOR BUILT-IN MESHES: ONLY kStone1 ^ kStone2
-// NO EXTRA CONSTANTS — YOUR ORIGINAL ENCRYPTION 100% PRESERVED
-// OBJ LOADER STILL USES PATH HASH
-// COMPILATION CLEAN — DEFAULT SCENE READY
-// THE EMPIRE'S FINGERPRINT IS PURE — PINK PHOTONS BOUNCE TRUE
+// MESHLOADER v10 — DECEMBER 22, 2025
+// NOW USES MODERN mapStaging() API — SAFE AND EFFICIENT
+// LEGACY stagingPtr() STILL SUPPORTED VIA BACKWARD COMPATIBILITY
+// DEFAULT SCENE FULLY VISIBLE — PINK MONSTER GLOWS
+// EMPIRE ETERNAL — PHOTONS BOUNCE TRUE
 // =============================================================================
