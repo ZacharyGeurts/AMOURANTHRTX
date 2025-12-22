@@ -1,44 +1,107 @@
+// src/modes/RenderMode7.cpp
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — RENDER MODE 7 — SACRED BLUE VOID
+// =============================================================================
+
 #include "modes/RenderMode7.hpp"
+
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"
-#include <glm/gtc/matrix_transform.hpp>
+#include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
 
-RenderMode7::RenderMode7(uint32_t w, uint32_t h)
-    : width_(w), height_(h), frameCount_(0)
+// Re-use the same transition helper
+static void transitionImage(VkCommandBuffer cmd,
+                            VkImage image,
+                            VkImageLayout oldLayout,
+                            VkImageLayout newLayout,
+                            VkAccessFlags srcAccess,
+                            VkAccessFlags dstAccess,
+                            VkPipelineStageFlags srcStage,
+                            VkPipelineStageFlags dstStage) noexcept
 {
-    LOG_SUCCESS_CAT("RTX", "MODE 7 — ANYHIT VISUALIZER — GREEN = ANYHIT RAN");
+    if (image == VK_NULL_HANDLE || cmd == VK_NULL_HANDLE) return;
+
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = srcAccess,
+        .dstAccessMask       = dstAccess,
+        .oldLayout           = oldLayout,
+        .newLayout           = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = image,
+        .subresourceRange    = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(
+        cmd,
+        srcStage,
+        dstStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
 }
 
-void RenderMode7::updateUniforms(float)
+RenderMode7::RenderMode7(uint32_t width, uint32_t height)
+    : width_(width), height_(height)
 {
-    alignas(16) struct Cmd {
-        alignas(16) glm::vec4 cameraPos;
-        alignas(16) glm::mat4 viewProj;
-        uint64_t uKey1;
-        uint64_t uKey2;
-        uint64_t uObfuscator;
-        uint64_t uMode;
-        uint32_t frame;
-        uint32_t visualize;
-    } cmd{};
-
-    cmd.cameraPos   = glm::vec4(0.0f, 0.0f, -5.0f, 1.0f);
-    cmd.uKey1       = 0x9E37AF18C64D8A17UL;
-    cmd.uKey2       = 0xE4F8B29D71A3C56CUL;
-    cmd.uObfuscator = 0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
-    cmd.uMode       = 7ULL;
-    cmd.frame       = static_cast<uint32_t>(frameCount_);
-    cmd.visualize   = 1;
-
-    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-    cmd.viewProj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 1000.0f);
-
-    g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
+    LOG_AMOURANTH("RENDER MODE 7 AWAKENS — SACRED BLUE VOID — THE EMPIRE RESTS IN ETERNAL LIGHT");
 }
 
-void RenderMode7::traceRays(VkCommandBuffer cmd) { RTX::pipeline().traceRays(cmd, g_rtx().frameNumber() % 2, width_, height_); }
-void RenderMode7::renderFrame(VkCommandBuffer cmd, float dt) { updateUniforms(dt); traceRays(cmd); g_rtx().requestAccumulationReset(); ++frameCount_; }
-void RenderMode7::onResize(uint32_t w, uint32_t h) { width_ = w; height_ = h; frameCount_ = 0; g_rtx().requestAccumulationReset(); }
+void RenderMode7::renderFrame(VkCommandBuffer cmd,
+                              uint32_t frameIndex,
+                              uint32_t imageIndex,
+                              float /*deltaTime*/) noexcept
+{
+    const uint32_t imageCount = StoneKey::stone_image_count();
+    if (imageCount == 0) return;
+
+    VkImage swapImage = StoneKey::stone_images()[imageIndex];
+
+    LOG_TRACE_CAT("MODE7", "Painting sacred blue void — frame {} → swapchain image {}", frameIndex, imageIndex);
+
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    VkClearColorValue sacredBlue{{0.0f, 0.0f, 1.0f, 1.0f}};
+    VkImageSubresourceRange range{
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1
+    };
+
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &sacredBlue, 1, &range);
+
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    0,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+}
+
+void RenderMode7::onResize(uint32_t newWidth, uint32_t newHeight) noexcept
+{
+    width_  = newWidth;
+    height_ = newHeight;
+    LOG_INFO_CAT("MODE7", "Sacred blue void resized → {}×{}", newWidth, newHeight);
+}

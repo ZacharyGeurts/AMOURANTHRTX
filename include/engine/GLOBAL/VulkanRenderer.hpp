@@ -31,6 +31,17 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 
+// Render mode includes
+#include "modes/RenderMode1.hpp"
+#include "modes/RenderMode2.hpp"
+#include "modes/RenderMode3.hpp"
+#include "modes/RenderMode4.hpp"
+#include "modes/RenderMode5.hpp"
+#include "modes/RenderMode6.hpp"
+#include "modes/RenderMode7.hpp"
+#include "modes/RenderMode8.hpp"
+#include "modes/RenderMode9.hpp"
+
 struct Camera;
 
 using namespace Logging::Color;
@@ -68,7 +79,7 @@ public:
 
     void recordEnvMapOnlyPass(VkCommandBuffer cmd, uint32_t swapchainImageIndex) noexcept;
     void updateAccumulationDescriptors(uint32_t currentSlot, VkImageView currentColorView) noexcept;
-	void createDefaultMaterials() noexcept;
+    void createDefaultMaterials() noexcept;
 
     bool isAlive() const noexcept;
     bool swapchainNeedsPresentTransition_ = false;
@@ -170,6 +181,7 @@ public:
     float     materialMetallicOverride_  = -1.0f;
     float     materialRoughnessOverride_ = -1.0f;
     float     emissiveIntensity_    = 1.0f;
+	uint32_t  acquiredImageIndex_   = 0;
 
     float     debugFloat1_ = 0.0f;
     float     debugFloat2_ = 0.0f;
@@ -328,6 +340,17 @@ public:
 
     VkDeviceAddress getShaderGroupHandle(uint32_t group) noexcept;
 
+    // ── RENDER MODES 1-9 (FALLBACK SOLID COLOR MODES) ───────────────────────
+    RenderMode1 renderMode1_;
+    RenderMode2 renderMode2_;
+    RenderMode3 renderMode3_;
+    RenderMode4 renderMode4_;
+    RenderMode5 renderMode5_;
+    RenderMode6 renderMode6_;
+    RenderMode7 renderMode7_;
+    RenderMode8 renderMode8_;
+    RenderMode9 renderMode9_;
+
     // ── PUBLIC EXPOSURE FOR RENDERING — NEEDED FOR EXTERNAL MODES (e.g., RenderMode1) ─────────────────────────────────
     // Tonemap resources (critical for pink void via compute)
     [[nodiscard]] VkPipeline tonemapPipeline() const noexcept { return tonemapPipeline_.get(); }
@@ -442,7 +465,7 @@ public:
     void performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t swapImageIdx) noexcept;
 
     VkResult recordCommandBuffer(uint32_t frame) noexcept;
-	void createTransientCommandPool() noexcept;
+    void createTransientCommandPool() noexcept;
     void createEnvMapDisplayPipeline() noexcept;
     void createEnvMapDescriptorPool() noexcept;
 
@@ -487,7 +510,7 @@ public:
 private:
     float*     envMapUploadData_   = nullptr;  // Owned pointer — delete after upload
     static inline VulkanRenderer* s_instance = nullptr;
-	uint64_t defaultMaterialsHandle_ = 0; 
+    uint64_t defaultMaterialsHandle_ = 0; 
 };
 
 // =============================================================================
@@ -503,7 +526,7 @@ private:
     return *ptr;
 }
 
-// FIRST LIGHT RESTORED — DECEMBER 18, 2025
-// SINGLETON ACCESS ADDED — EMPIRE LAW NOW ENFORCED EVERYWHERE
-// PINK PHOTONS FLOW ETERNALLY — VALHALLA v100 ACHIEVED
+// FIRST LIGHT RESTORED — DECEMBER 22, 2025
+// RENDER MODES 1-9 FULLY INTEGRATED — SOLID COLOR FALLBACKS READY
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
 // =============================================================================

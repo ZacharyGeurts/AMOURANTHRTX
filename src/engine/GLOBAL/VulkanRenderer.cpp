@@ -27,6 +27,16 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "stb/stb_image.h"
 
+#include "modes/RenderMode1.hpp"
+#include "modes/RenderMode2.hpp"
+#include "modes/RenderMode3.hpp"
+#include "modes/RenderMode4.hpp"
+#include "modes/RenderMode5.hpp"
+#include "modes/RenderMode6.hpp"
+#include "modes/RenderMode7.hpp"
+#include "modes/RenderMode8.hpp"
+#include "modes/RenderMode9.hpp"
+
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -1397,6 +1407,17 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
     // 8. Reset accumulation — fresh convergence
     requestAccumulationReset();
 
+    // 9. Notify all render modes of resize
+    renderMode1_.onResize(newWidth, newHeight);
+    renderMode2_.onResize(newWidth, newHeight);
+    renderMode3_.onResize(newWidth, newHeight);
+    renderMode4_.onResize(newWidth, newHeight);
+    renderMode5_.onResize(newWidth, newHeight);
+    renderMode6_.onResize(newWidth, newHeight);
+    renderMode7_.onResize(newWidth, newHeight);
+    renderMode8_.onResize(newWidth, newHeight);
+    renderMode9_.onResize(newWidth, newHeight);
+
     s_resizeInProgress.store(false);
 
     LOG_SUCCESS_CAT("RENDERER", "Full resize rebuild complete — {}×{} — empire unbroken — photons realigned", newWidth, newHeight);
@@ -1451,7 +1472,16 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
       denoisingEnabled_(Options::OptionsRTX::ENABLE_DENOISING),
       adaptiveSamplingEnabled_(Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING),
       overclockMode_(overclock),
-      tonemapEnabled_(Options::Tonemap::ENABLE_TONEMAPPING)
+      tonemapEnabled_(Options::Tonemap::ENABLE_TONEMAPPING),
+      renderMode1_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode2_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode3_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode4_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode5_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode6_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode7_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode8_(static_cast<uint32_t>(width), static_cast<uint32_t>(height)),
+      renderMode9_(static_cast<uint32_t>(width), static_cast<uint32_t>(height))
 {
     s_instance = this;
 
@@ -1648,6 +1678,9 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         &imageIndex
     );
 
+    // Store the acquired image index for use by fallback modes
+    acquiredImageIndex_ = imageIndex;
+
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
         vkDeviceWaitIdle(stone_device());
         RTX::recreateSwapchain(stone_width(), stone_height());
@@ -1668,10 +1701,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     RTX::las().buildOrUpdateTLAS(cmd);
 
-    if (resetAccumNextFrame_) {
-        clearAccumulationImages(cmd);
-        resetAccumNextFrame_ = resetAccumulation_ = false;
-        currentSpp_ = accumulationFrame_ = 0;
+    bool isFallbackMode = (activeRenderMode_ >= 1 && activeRenderMode_ <= 9);
+
+    if (!isFallbackMode) {
+        if (resetAccumNextFrame_) {
+            clearAccumulationImages(cmd);
+            resetAccumNextFrame_ = resetAccumulation_ = false;
+            currentSpp_ = accumulationFrame_ = 0;
+        }
     }
 
     // Deferred first-frame transitions
@@ -1725,14 +1762,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         if (envMapUploadData_ && envMapUploadWidth_ > 0 && envMapUploadHeight_ > 0) {
             const VkDeviceSize uploadSize = static_cast<VkDeviceSize>(envMapUploadWidth_) * envMapUploadHeight_ * 16ULL;  // RGBA32F = 16 bytes/pixel
 
-            // Use BufferManager staging for upload
             void* stagingPtr = BufferManager::mapStaging(uploadSize);
             if (stagingPtr) {
                 std::memcpy(stagingPtr, envMapUploadData_, uploadSize);
                 BufferManager::flushStaging(uploadSize);
                 BufferManager::advanceStagingOffset(uploadSize);
 
-                // Allocate one-time command buffer
                 VkCommandBuffer uploadCmd;
                 VkCommandBufferAllocateInfo allocInfo{
                     .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -1748,7 +1783,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 };
                 vkBeginCommandBuffer(uploadCmd, &beginInfo);
 
-                // Transition envmap to transfer dst
                 transitionImage(uploadCmd, envMapImage_.get(),
                                 VK_IMAGE_LAYOUT_UNDEFINED,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1771,7 +1805,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                                        1,
                                        &copyRegion);
 
-                // Transition to shader read-only
                 transitionImage(uploadCmd, envMapImage_.get(),
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1782,7 +1815,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
                 vkEndCommandBuffer(uploadCmd);
 
-                // Submit and wait (simple synchronous upload)
                 VkSubmitInfo submit{
                     .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                     .commandBufferCount = 1,
@@ -1798,16 +1830,29 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 LOG_ERROR_CAT("RENDERER", "Failed to map staging buffer for envmap upload");
             }
 
-            // Clean up CPU-side data
             delete[] envMapUploadData_;
             envMapUploadData_ = nullptr;
         }
     }
 
-    if (activeRenderMode_ == 1) {
-        VkClearColorValue sacredPink{{1.0f, 0.0f, 0.5f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_GENERAL, &sacredPink, 1, &range);
+    VkImage finalSrc;
+    if (isFallbackMode) {
+        switch (activeRenderMode_) {
+            case 1: renderMode1_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 2: renderMode2_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 3: renderMode3_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 4: renderMode4_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 5: renderMode5_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 6: renderMode6_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 7: renderMode7_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 8: renderMode8_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            case 9: renderMode9_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); break;
+            default: 
+                LOG_WARN_CAT("RENDERER", "Invalid fallback mode {}, defaulting to mode 1", activeRenderMode_);
+                renderMode1_.renderFrame(cmd, frameIndex, imageIndex, deltaTime); 
+                break;
+        }
+        finalSrc = stone_images()[imageIndex];
     } else {
         updateUniformBuffer(slot, camera, deltaTime);
         updateTonemapUniform(slot);
@@ -1832,7 +1877,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 desc.nexusScoreViews = { hypertraceScoreView_ };
             }
 
-            // Bind default materials (ground + pink monster)
             if (defaultMaterialsHandle_ != 0) {
                 const auto* matBuf = BufferManager::get(defaultMaterialsHandle_);
                 if (matBuf) {
@@ -1859,57 +1903,51 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
             updateDenoiserDescriptors();
             performDenoisingPass(cmd);
         }
-    }
 
-    // Final output to swapchain
-    {
-        VkImage finalSrc = rtOutputImages_[slot].get();
+        finalSrc = rtOutputImages_[slot].get();
 
         if (Options::Tonemap::ENABLE_TONEMAPPING && tonemapEnabled_) {
-            VkImageView input = activeRenderMode_ == 1 
-                ? rtOutputViews_[slot].get()
-                : (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
-                    ? denoiserView_.get()
-                    : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[slot].get() : rtOutputViews_[slot].get());
+            VkImageView input = (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
+                                ? denoiserView_.get()
+                                : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[slot].get() : rtOutputViews_[slot].get());
 
             updateTonemapDescriptor(slot, input, stone_views()[imageIndex]);
             performTonemapPass(cmd, slot, imageIndex);
             finalSrc = stone_images()[imageIndex];
         }
+    }
 
-        if (finalSrc != stone_images()[imageIndex]) {
-            transitionImage(cmd, finalSrc, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    // Final output to swapchain (only needed when not in fallback mode)
+    if (!isFallbackMode && finalSrc != stone_images()[imageIndex]) {
+        transitionImage(cmd, finalSrc, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-            VkImageCopy copyRegion{};
-            copyRegion.srcSubresource = copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            copyRegion.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1u };
+        VkImageCopy copyRegion{};
+        copyRegion.srcSubresource = copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copyRegion.extent = { static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1u };
 
-            vkCmdCopyImage(cmd, finalSrc, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1, &copyRegion);
+        vkCmdCopyImage(cmd, finalSrc, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &copyRegion);
 
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-        } else {
-            transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            VK_ACCESS_SHADER_WRITE_BIT, 0,
-                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-        }
+        transitionImage(cmd, stone_images()[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                        VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
     }
 
     vkEndCommandBuffer(cmd);
 
     submitAndPresent(slot, imageIndex);
 
-    currentSpp_++;
-    accumulationFrame_++;
+    if (!isFallbackMode) {
+        currentSpp_++;
+        accumulationFrame_++;
+    }
 }
 
 void VulkanRenderer::updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept
@@ -2144,7 +2182,7 @@ void VulkanRenderer::performTonemapPass(VkCommandBuffer cmd, uint32_t frameIdx, 
     VkImage swapImg = stone_images()[swapImageIdx];
 
     transitionImage(cmd, swapImg,
-                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                     0, VK_ACCESS_SHADER_WRITE_BIT,
                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 

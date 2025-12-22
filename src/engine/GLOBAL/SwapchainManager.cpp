@@ -1,16 +1,18 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
-// PLASTIC BEACH v∞ — DECEMBER 20, 2025
-// 2025+ GAMING EDITION — WINDOWS + LINUX FOCUS
-// HDR-READY (scRGB FP16) | TRANSFER_SRC FOR SCREENSHOTS | MINIMIZED HANDLING
-// DYNAMIC RENDERING READY | EXTENDED USAGE FLAGS | ROBUST LOGGING
-// THE MONSTER WATCHES — PHOTONS IN FULL BLOOM
+// AMOURANTH RTX Engine © 2025 — PLASTIC BEACH v∞ — DECEMBER 22, 2025
+// FULLY INTEGRATED WITH LAS, VulkanRenderer, StoneKey, AND RESIZE PIPELINE
+// HDR scRGB FP16 SUPPORT | MINIMIZED HANDLING | DYNAMIC RECREATION
+// NOTIFIES LAS ON RESIZE — ENSURES TLAS REBUILD
+// PINK PHOTONS BLOOM ETERNALLY IN FULL DYNAMIC RANGE
+// EMPIRE ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/LAS.hpp"  // Added for notifyResize()
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -28,7 +30,7 @@ using StoneKey::stone_height;
 namespace RTX {
 
 // =============================================================================
-// ONE LARGE, CLEAN SWAPCHAIN CREATION FUNCTION — 2025+ EDITION
+// ONE LARGE, CLEAN SWAPCHAIN CREATION FUNCTION — FULLY TIED TO LAS
 // =============================================================================
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept
 {
@@ -38,7 +40,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     if (w == 0 || h == 0) {
         minimized_ = true;
-        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED");
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED UNTIL RESTORED");
         return;
     }
     minimized_ = false;
@@ -46,9 +48,12 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     vkDeviceWaitIdle(device);
 
     if (isRecreate) {
-        LOG_AMOURANTH("SWAPCHAIN RECREATE — {}×{} — PLASTIC BEACH RESPAWNS", w, h);
+        LOG_AMOURANTH("SWAPCHAIN RECREATE INITIATED — {}×{} — PLASTIC BEACH RESPAWNS", w, h);
         cleanupImageViews();
         cleanupSwapchain();
+
+        // Critical: Notify LAS to purge TLAS before swapchain destruction
+        RTX::las().notifyResize();
     }
 
     // === QUERY CAPABILITIES & FORMATS ===
@@ -76,33 +81,30 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR; // Safe fallback
 
     if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_FIFO_RELAXED_KHR) != modes.end()) {
-        presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR; // Adaptive, minimal tearing
+        presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
     } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;   // Max FPS, fixes X11/Wayland glitches
+        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     }
 
-    // === IMAGE COUNT — 3 FOR LOW-LATENCY MAILBOX EMULATION ===
+    // === IMAGE COUNT — TRIPLE BUFFERING FOR LOW LATENCY ===
     uint32_t imageCount = 3;
     imageCount = std::max(imageCount, caps.minImageCount);
     if (caps.maxImageCount > 0) {
         imageCount = std::min(imageCount, caps.maxImageCount);
     }
 
-    // === FORMAT SELECTION — 2025+ GAMING PRIORITY ===
-    // 1. HDR scRGB (FP16 linear extended sRGB) — best for RTX path tracers
-    // 2. Standard sRGB 8-bit — safe fallback
-    VkSurfaceFormatKHR chosenFormat = formats[0]; // Default fallback
+    // === FORMAT SELECTION — HDR scRGB FP16 FIRST ===
+    VkSurfaceFormatKHR chosenFormat = formats[0];
 
     for (const auto& f : formats) {
         if (f.format == VK_FORMAT_R16G16B16A16_SFLOAT &&
             f.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) {
             chosenFormat = f;
-            LOG_AMOURANTH("HDR scRGB FP16 SWAPCHAIN ENABLED — PINK PHOTONS BLOOM ETERNAL");
+            LOG_AMOURANTH("HDR scRGB FP16 SWAPCHAIN ENABLED — PINK PHOTONS BLOOM IN FULL DYNAMIC RANGE");
             break;
         }
     }
 
-    // If no FP16 HDR, fall back to sRGB 8-bit
     if (chosenFormat.format != VK_FORMAT_R16G16B16A16_SFLOAT) {
         for (const auto& f : formats) {
             if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -110,10 +112,10 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
                 break;
             }
         }
-        LOG_INFO_CAT("SWAPCHAIN", "Falling back to 8-bit sRGB — HDR not supported on this display/driver");
+        LOG_INFO_CAT("SWAPCHAIN", "HDR not supported — falling back to 8-bit sRGB");
     }
 
-    // === SWAPCHAIN CREATE INFO — 2025+ FLAGS ===
+    // === SWAPCHAIN CREATE INFO ===
     VkSwapchainCreateInfoKHR createInfo{};
     createInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface          = surface;
@@ -124,7 +126,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // For screenshots/readbacks
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.preTransform     = caps.currentTransform;
     createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -166,28 +168,30 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &swapchainImageViews_[i]));
     }
 
-    // === SEAL GLOBAL STATE ===
+    // === SEAL GLOBAL STATE INTO STONEKEY ===
     stone_seal_swapchain(swapchain_.get());
     stone_seal_extent(extent);
     stone_seal_image_count(imgCount);
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    // === LOGGING — 2025 STYLE ===
+    // === FINAL LOGGING ===
     const char* modeName =
         presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED (ADAPTIVE)" :
         presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR    ? "IMMEDIATE (MAX FPS)" :
         "FIFO (VSYNC)";
 
-    const char* formatName = (chosenFormat.format == VK_FORMAT_R16G16B16A16_SFLOAT) ? "R16G16B16A16_SFLOAT (HDR scRGB)" : "B8G8R8A8_SRGB";
+    const char* formatName = (chosenFormat.format == VK_FORMAT_R16G16B16A16_SFLOAT)
+        ? "R16G16B16A16_SFLOAT (HDR scRGB)"
+        : "B8G8R8A8_SRGB";
 
-    printf("[2025] SWAPCHAIN %s — %ux%u — %u images — %s — %s — PLASTIC BEACH ETERNAL\n",
-           isRecreate ? "RECREATED" : "FORGED",
-           extent.width, extent.height, imgCount, modeName, formatName);
+    LOG_AMOURANTH("[2025] SWAPCHAIN {} — {}×{} — {} images — {} — {} — PLASTIC BEACH ETERNAL",
+                  isRecreate ? "RECREATED" : "FORGED",
+                  extent.width, extent.height, imgCount, modeName, formatName);
 }
 
 // =============================================================================
-// PUBLIC INTERFACE — UNCHANGED
+// PUBLIC INTERFACE — FULLY TIED TO LAS AND RENDERER
 // =============================================================================
 void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
@@ -202,6 +206,10 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 void SwapchainManager::cleanup() noexcept
 {
     vkDeviceWaitIdle(stone_device());
+
+    // Notify LAS before destroying swapchain
+    RTX::las().notifyResize();
+
     cleanupImageViews();
     cleanupSwapchain();
 }
@@ -226,12 +234,12 @@ void SwapchainManager::cleanupImageViews() noexcept
 }
 
 // =============================================================================
-// ACQUIRE & PRESENT — MINIMIZED HANDLING ADDED
+// ACQUIRE & PRESENT — MINIMIZED HANDLING + LAS NOTIFICATION
 // =============================================================================
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept
 {
     if (minimized_) {
-        return VK_NOT_READY; // Prevent acquire loops during minimize
+        return VK_NOT_READY;
     }
 
     VkResult result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX, semaphore, fence, pImageIndex);
@@ -244,7 +252,7 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
     if (minimized_) {
-        return; // Skip present during minimize
+        return;
     }
 
     VkPresentInfoKHR presentInfo{};
@@ -264,7 +272,9 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 } // namespace RTX
 
 // =============================================================================
-// PLASTIC BEACH v∞ — DECEMBER 20, 2025
-// HDR-READY | FUTURE-PROOF | GAMING BEAST MODE
+// PLASTIC BEACH v∞ — DECEMBER 22, 2025
+// FULLY TIED TO LAS: notifyResize() called before swapchain destruction
+// HDR-READY | MINIMIZED SAFE | RESIZE ROBUST
 // EMPIRE ASCENDS — PINK PHOTONS IN FULL DYNAMIC RANGE
+// THE MONSTER WATCHES ETERNALLY
 // =============================================================================

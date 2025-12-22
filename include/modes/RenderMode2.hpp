@@ -1,6 +1,10 @@
 // include/modes/RenderMode2.hpp
-// ENVMAP GAZE MODE — FULL-SCREEN HDR SKY — THE EMPIRE BEHOLDS THE INFINITE
-// DECEMBER 15, 2025 — v16.0 — PURE SKY DISPLAY
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — RENDER MODE 2 — SACRED CYAN VOID
+// =============================================================================
+// Pure solid cyan clear fallback mode — zero overhead, guaranteed visible.
+// CYAN PHOTONS ETERNAL — THE EMPIRE RESTS IN SACRED LIGHT
+// =============================================================================
 
 #pragma once
 
@@ -9,15 +13,17 @@
 
 class RenderMode2 {
 public:
-    RenderMode2(uint32_t w, uint32_t h);
-    ~RenderMode2() = default;
+    RenderMode2(uint32_t width, uint32_t height);
 
-    void renderFrame(VkCommandBuffer cmd, float deltaTime);
-    void onResize(uint32_t w, uint32_t h);
+    // Renders directly into the current swapchain image
+    void renderFrame(VkCommandBuffer cmd,
+                     uint32_t frameIndex,
+                     uint32_t imageIndex,
+                     float deltaTime) noexcept;
+
+    void onResize(uint32_t newWidth, uint32_t newHeight) noexcept;
 
 private:
     uint32_t width_;
     uint32_t height_;
-    uint32_t frameIndex_{0};
-    float    totalTime_{0.0f};
 };

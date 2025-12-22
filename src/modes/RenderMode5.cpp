@@ -1,94 +1,107 @@
 // src/modes/RenderMode5.cpp
 // =============================================================================
-// RENDERMODE 5 — RTX LIGHTING SHOWCASE — DYNAMIC GLOBAL ILLUMINATION
-// Animated emissive orb + temporal accumulation + live Nexus variance heatmap
-// Pink photons bounce eternally — the empire bathes in RTX glory
+// AMOURANTH RTX Engine © 2025 — RENDER MODE 5 — SACRED YELLOW VOID
 // =============================================================================
 
 #include "modes/RenderMode5.hpp"
+
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"
-#include "engine/GLOBAL/PipelineManager.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
 
+// Re-use the same transition helper
+static void transitionImage(VkCommandBuffer cmd,
+                            VkImage image,
+                            VkImageLayout oldLayout,
+                            VkImageLayout newLayout,
+                            VkAccessFlags srcAccess,
+                            VkAccessFlags dstAccess,
+                            VkPipelineStageFlags srcStage,
+                            VkPipelineStageFlags dstStage) noexcept
+{
+    if (image == VK_NULL_HANDLE || cmd == VK_NULL_HANDLE) return;
+
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = srcAccess,
+        .dstAccessMask       = dstAccess,
+        .oldLayout           = oldLayout,
+        .newLayout           = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = image,
+        .subresourceRange    = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(
+        cmd,
+        srcStage,
+        dstStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+}
+
 RenderMode5::RenderMode5(uint32_t width, uint32_t height)
-    : width_(width), height_(height), frameCount_(0)
+    : width_(width), height_(height)
 {
-    LOG_AMOURANTH("MODE 5 — RTX LIGHTING SHOWCASE — DYNAMIC GI + TEMPORAL ACCUMULATION");
-    LOG_AMOURANTH("Animated emissive orb illuminates the scene — pink photons bounce with full RTX glory");
-    LOG_AMOURANTH("Red overlay = high variance (Nexus adaptive sampling active)");
-    LOG_SUCCESS_CAT("RTX", "THE EMPIRE GLOWS — GLOBAL ILLUMINATION IGNITED — PINK PHOTONS ETERNAL");
+    LOG_AMOURANTH("RENDER MODE 5 AWAKENS — SACRED YELLOW VOID — THE EMPIRE RESTS IN ETERNAL LIGHT");
 }
 
-void RenderMode5::updateUniforms(float deltaTime)
+void RenderMode5::renderFrame(VkCommandBuffer cmd,
+                              uint32_t frameIndex,
+                              uint32_t imageIndex,
+                              float /*deltaTime*/) noexcept
 {
-    alignas(16) struct ShowcaseCommand {
-        alignas(16) glm::vec4 lightPos     = glm::vec4(0.0f, 2.0f, 0.0f, 1.0f);
-        alignas(16) glm::vec4 lightColor   = glm::vec4(1.0f, 0.3f, 0.7f, 20.0f);  // Hot pink, high intensity
-        alignas(16) glm::vec4 cameraPos    = glm::vec4(0.0f, 1.0f, -5.0f, 1.0f);
-        alignas(16) glm::mat4 viewProj     = glm::mat4(1.0f);
-        alignas(16) glm::vec4 jitter       = glm::vec4(0.0f);
-        uint64_t      uKey1                = 0x9E3779B97F4A7C15UL;
-        uint64_t      uKey2                = 0xFB21A9D37C4E5B62UL;
-        uint64_t      uObfuscator          = 0x1337C0DE69F00D42UL;
-        uint64_t      uMode                = 5ULL;           // RTX LIGHTING SHOWCASE
-        uint32_t      frame                = 0;
-        uint32_t      visualizeNexus       = 1;              // Show variance heatmap
-        uint32_t      enableGI             = 1;
-        uint32_t      enableShadows        = 1;
-        float         time                 = 0.0f;
-        float         lightRadius          = 0.5f;
-        float         lightPulse           = 1.0f;
-        float         _pad                 = 0.0f;
-    } cmd{};
+    const uint32_t imageCount = StoneKey::stone_image_count();
+    if (imageCount == 0) return;
 
-    // Animated orbiting light
-    float t = frameCount_ * 0.02f;
-    cmd.lightPos.x = sin(t) * 3.0f;
-    cmd.lightPos.z = cos(t) * 3.0f;
-    cmd.lightPos.y = 2.0f + sin(t * 1.7f) * 1.0f;
+    VkImage swapImage = StoneKey::stone_images()[imageIndex];
 
-    // Pulsing intensity
-    cmd.lightColor.w = 15.0f + sin(t * 3.0f) * 5.0f;
+    LOG_TRACE_CAT("MODE5", "Painting sacred yellow void — frame {} → swapchain image {}", frameIndex, imageIndex);
 
-    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-    cmd.viewProj = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 1000.0f);
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    cmd.frame = static_cast<uint32_t>(frameCount_);
-    cmd.time = static_cast<float>(frameCount_) * deltaTime;
+    VkClearColorValue sacredYellow{{1.0f, 1.0f, 0.0f, 1.0f}};
+    VkImageSubresourceRange range{
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1
+    };
 
-    g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &sacredYellow, 1, &range);
+
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    0,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
-void RenderMode5::traceRays(VkCommandBuffer cmd)
+void RenderMode5::onResize(uint32_t newWidth, uint32_t newHeight) noexcept
 {
-    g_rtx().recordRayTrace(cmd, {width_, height_});
-}
-
-void RenderMode5::renderFrame(VkCommandBuffer cmd, float deltaTime)
-{
-    updateUniforms(deltaTime);
-    traceRays(cmd);
-
-    // Keep accumulation for smooth GI, but reset occasionally for fresh look
-    if (frameCount_ % 600 == 0) {
-        g_rtx().requestAccumulationReset();
-    }
-
-    ++frameCount_;
-}
-
-void RenderMode5::onResize(uint32_t width, uint32_t height)
-{
-    if (width == width_ && height == height_) return;
-
-    width_  = width;
-    height_ = height;
-
-    g_rtx().requestAccumulationReset();
-
-    LOG_AMOURANTH("MODE 5 — RESIZED TO {}x{} — RTX LIGHTING CONTINUES UNBROKEN", width, height);
+    width_  = newWidth;
+    height_ = newHeight;
+    LOG_INFO_CAT("MODE5", "Sacred yellow void resized → {}×{}", newWidth, newHeight);
 }

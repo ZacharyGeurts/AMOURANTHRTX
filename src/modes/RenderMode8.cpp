@@ -1,102 +1,107 @@
 // src/modes/RenderMode8.cpp
 // =============================================================================
-// RENDERMODE 8 — RTX SHADOW RAY VISUALIZER — YELLOW = SHADOW RAY FIRED
-// Live debug overlay: YELLOW highlights pixels where shadow rays were traced
-// Animated orbiting light + orbiting camera — perfect for shadow debugging
-// No accumulation — instant response — pink background fallback
-// The empire sees its own shadow — RTX lighting revealed
+// AMOURANTH RTX Engine © 2025 — RENDER MODE 8 — SACRED ORANGE VOID
 // =============================================================================
 
 #include "modes/RenderMode8.hpp"
+
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"
-#include <glm/gtc/matrix_transform.hpp>
+#include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
 
-RenderMode8::RenderMode8(uint32_t w, uint32_t h)
-    : width_(w), height_(h), frameCount_(0)
+// Re-use the same transition helper
+static void transitionImage(VkCommandBuffer cmd,
+                            VkImage image,
+                            VkImageLayout oldLayout,
+                            VkImageLayout newLayout,
+                            VkAccessFlags srcAccess,
+                            VkAccessFlags dstAccess,
+                            VkPipelineStageFlags srcStage,
+                            VkPipelineStageFlags dstStage) noexcept
 {
-    LOG_AMOURANTH("MODE 8 — RTX SHADOW RAY VISUALIZER — YELLOW = SHADOW RAY FIRED");
-    LOG_AMOURANTH("Live overlay shows pixels where shadow rays were traced in YELLOW");
-    LOG_AMOURANTH("Animated light + orbiting camera — perfect for shadow debugging");
-    LOG_SUCCESS_CAT("RTX", "SHADOW VISUALIZER ENGAGED — THE EMPIRE CASTS ITS SHADOW");
+    if (image == VK_NULL_HANDLE || cmd == VK_NULL_HANDLE) return;
+
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = srcAccess,
+        .dstAccessMask       = dstAccess,
+        .oldLayout           = oldLayout,
+        .newLayout           = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = image,
+        .subresourceRange    = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(
+        cmd,
+        srcStage,
+        dstStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
 }
 
-void RenderMode8::updateUniforms(float deltaTime)
+RenderMode8::RenderMode8(uint32_t width, uint32_t height)
+    : width_(width), height_(height)
 {
-    alignas(16) struct ShadowVizCommand {
-        alignas(16) glm::vec4 cameraPos   = glm::vec4(0.0f, 2.0f, -8.0f, 1.0f);
-        alignas(16) glm::vec4 lightPos    = glm::vec4(0.0f, 3.0f, 0.0f, 1.0f);
-        alignas(16) glm::vec4 lightColor  = glm::vec4(1.0f, 0.8f, 0.6f, 25.0f); // Warm white, high intensity
-        alignas(16) glm::mat4 viewProj    = glm::mat4(1.0f);
-        alignas(16) glm::vec4 jitter      = glm::vec4(0.0f);
-        uint64_t      uKey1               = 0x9E3779B97F4A7C15UL;
-        uint64_t      uKey2               = 0xFB21A9D37C4E5B62UL;
-        uint64_t      uObfuscator         = 0x1337C0DE69F00D42UL;
-        uint64_t      uMode               = 8ULL;           // SHADOW RAY VISUALIZER
-        uint32_t      frame               = 0;
-        uint32_t      visualizeShadowRays = 1;              // 1 = yellow overlay where shadow ray fired
-        uint32_t      enableShadows       = 1;
-        uint32_t      _pad                = 0;
-        float         time                = 0.0f;
-        float         lightOrbitRadius    = 4.0f;
-        float         lightOrbitSpeed     = 1.0f;
-        float         _pad2               = 0.0f;
-    } cmd{};
-
-    // Animated orbiting light source
-    float t = frameCount_ * 0.025f;
-    cmd.lightPos.x = sin(t) * cmd.lightOrbitRadius;
-    cmd.lightPos.z = cos(t) * cmd.lightOrbitRadius;
-    cmd.lightPos.y = 3.0f + sin(t * 0.8f) * 1.5f;
-
-    // Smooth orbiting camera
-    cmd.cameraPos.x = sin(t * 0.7f) * 10.0f;
-    cmd.cameraPos.z = cos(t * 0.7f) * 10.0f;
-    cmd.cameraPos.y = 3.0f + sin(t * 1.3f) * 2.0f;
-
-    // View/projection
-    glm::vec3 target(0.0f, 1.0f, 0.0f);
-    glm::mat4 view = glm::lookAt(glm::vec3(cmd.cameraPos), target, glm::vec3(0.0f, 1.0f, 0.0f));
-    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-    glm::mat4 proj = glm::perspective(glm::radians(65.0f), aspect, 0.1f, 1000.0f);
-    proj[1][1] *= -1.0f; // Vulkan Y flip
-
-    cmd.viewProj = proj * view;
-
-    cmd.frame = static_cast<uint32_t>(frameCount_);
-    cmd.time  = t;
-
-    g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
+    LOG_AMOURANTH("RENDER MODE 8 AWAKENS — SACRED ORANGE VOID — THE EMPIRE RESTS IN ETERNAL LIGHT");
 }
 
-void RenderMode8::traceRays(VkCommandBuffer cmd)
+void RenderMode8::renderFrame(VkCommandBuffer cmd,
+                              uint32_t frameIndex,
+                              uint32_t imageIndex,
+                              float /*deltaTime*/) noexcept
 {
-    g_rtx().recordRayTrace(cmd, {width_, height_});
+    const uint32_t imageCount = StoneKey::stone_image_count();
+    if (imageCount == 0) return;
+
+    VkImage swapImage = StoneKey::stone_images()[imageIndex];
+
+    LOG_TRACE_CAT("MODE8", "Painting sacred orange void — frame {} → swapchain image {}", frameIndex, imageIndex);
+
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    VkClearColorValue sacredOrange{{1.0f, 0.5f, 0.0f, 1.0f}};
+    VkImageSubresourceRange range{
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1
+    };
+
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &sacredOrange, 1, &range);
+
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    0,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
-void RenderMode8::renderFrame(VkCommandBuffer cmd, float deltaTime)
+void RenderMode8::onResize(uint32_t newWidth, uint32_t newHeight) noexcept
 {
-    updateUniforms(deltaTime);
-    traceRays(cmd);
-
-    // No accumulation — instant feedback for shadow debugging
-    g_rtx().requestAccumulationReset();
-
-    ++frameCount_;
-}
-
-void RenderMode8::onResize(uint32_t w, uint32_t h)
-{
-    if (width_ == w && height_ == h) return;
-
-    width_ = w;
-    height_ = h;
-    frameCount_ = 0;
-
-    g_rtx().requestAccumulationReset();
-
-    LOG_AMOURANTH("MODE 8 — RESIZED TO {}x{} — SHADOW VISUALIZER REMAINS ACTIVE", w, h);
+    width_  = newWidth;
+    height_ = newHeight;
+    LOG_INFO_CAT("MODE8", "Sacred orange void resized → {}×{}", newWidth, newHeight);
 }

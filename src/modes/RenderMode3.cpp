@@ -1,106 +1,107 @@
 // src/modes/RenderMode3.cpp
 // =============================================================================
-// RENDERMODE 3 — RTX COSMIC DANCE — BINDING 31 — ETERNAL PINK ORBIT
-// Animated camera orbiting a glowing pink emissive sphere
-// Full RTX global illumination + temporal accumulation + subtle Nexus variance overlay
-// The empire revolves in perfect harmony — pink photons illuminate the void
+// AMOURANTH RTX Engine © 2025 — RENDER MODE 3 — SACRED GREEN VOID
 // =============================================================================
 
 #include "modes/RenderMode3.hpp"
+
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
+#include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
 
+// Re-use the same transition helper
+static void transitionImage(VkCommandBuffer cmd,
+                            VkImage image,
+                            VkImageLayout oldLayout,
+                            VkImageLayout newLayout,
+                            VkAccessFlags srcAccess,
+                            VkAccessFlags dstAccess,
+                            VkPipelineStageFlags srcStage,
+                            VkPipelineStageFlags dstStage) noexcept
+{
+    if (image == VK_NULL_HANDLE || cmd == VK_NULL_HANDLE) return;
+
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = srcAccess,
+        .dstAccessMask       = dstAccess,
+        .oldLayout           = oldLayout,
+        .newLayout           = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = image,
+        .subresourceRange    = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(
+        cmd,
+        srcStage,
+        dstStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+}
+
 RenderMode3::RenderMode3(uint32_t width, uint32_t height)
-    : width_(width), height_(height), frameCount_(0)
+    : width_(width), height_(height)
 {
-    LOG_AMOURANTH("MODE 3 — RTX COSMIC DANCE — BINDING 31 IGNITED — {}x{}", width, height);
-    LOG_AMOURANTH("Camera orbits a pulsing pink emissive sphere — RTX GI + temporal accumulation");
-    LOG_AMOURANTH("Subtle red overlay shows Nexus adaptive sampling focus — the empire breathes");
-    LOG_SUCCESS_CAT("RTX", "COSMIC DANCE ENGAGED — PINK PHOTONS REVOLVE ETERNALLY");
+    LOG_AMOURANTH("RENDER MODE 3 AWAKENS — SACRED GREEN VOID — THE EMPIRE RESTS IN ETERNAL LIGHT");
 }
 
-void RenderMode3::updateUniforms(float deltaTime)
+void RenderMode3::renderFrame(VkCommandBuffer cmd,
+                              uint32_t frameIndex,
+                              uint32_t imageIndex,
+                              float /*deltaTime*/) noexcept
 {
-    alignas(16) struct CosmicCommand {
-        alignas(16) glm::vec4 cameraPos    = glm::vec4(0.0f, 2.0f, -8.0f, 1.0f);
-        alignas(16) glm::vec4 lightPos     = glm::vec4(0.0f, 1.5f, 0.0f, 1.0f);
-        alignas(16) glm::vec4 lightColor   = glm::vec4(1.0f, 0.3f, 0.8f, 30.0f);  // Hot pink, high intensity
-        alignas(16) glm::mat4 view         = glm::mat4(1.0f);
-        alignas(16) glm::mat4 proj         = glm::mat4(1.0f);
-        alignas(16) glm::mat4 invView      = glm::mat4(1.0f);
-        alignas(16) glm::mat4 invProj      = glm::mat4(1.0f);
-        alignas(16) glm::vec4 jitter       = glm::vec4(0.0f);
-        uint64_t      uKey1                = 0x9E3779B97F4A7C15UL;
-        uint64_t      uKey2                = 0xFB21A9D37C4E5B62UL;
-        uint64_t      uObfuscator          = 0x1337C0DE69F00D42UL;
-        uint64_t      uMode                = 3ULL;           // RTX COSMIC DANCE
-        uint32_t      frame                = 0;
-        uint32_t      visualizeNexus       = 1;              // Subtle variance overlay
-        uint32_t      enableGI             = 1;
-        uint32_t      enableEmissive       = 1;
-        float         time                 = 0.0f;
-        float         lightPulse           = 1.0f;
-        float         orbitSpeed           = 1.0f;
-        float         _pad                 = 0.0f;
-    } cmd{};
+    const uint32_t imageCount = StoneKey::stone_image_count();
+    if (imageCount == 0) return;
 
-    // Smooth orbiting camera
-    float t = frameCount_ * 0.015f;
-    float radius = 8.0f;
-    cmd.cameraPos.x = sin(t) * radius;
-    cmd.cameraPos.z = cos(t) * radius;
-    cmd.cameraPos.y = 2.0f + sin(t * 0.5f) * 1.0f;
+    VkImage swapImage = StoneKey::stone_images()[imageIndex];
 
-    // Pulsing central emissive sphere
-    cmd.lightColor.w = 25.0f + sin(t * 4.0f) * 10.0f;
-    cmd.lightPulse = 1.0f + sin(t * 3.0f) * 0.3f;
+    LOG_TRACE_CAT("MODE3", "Painting sacred green void — frame {} → swapchain image {}", frameIndex, imageIndex);
 
-    // View/projection
-    glm::vec3 target(0.0f, 1.0f, 0.0f);
-    cmd.view = glm::lookAt(glm::vec3(cmd.cameraPos), target, glm::vec3(0.0f, 1.0f, 0.0f));
-    float aspect = static_cast<float>(width_) / static_cast<float>(height_);
-    cmd.proj = glm::perspective(glm::radians(65.0f), aspect, 0.1f, 1000.0f);
-    cmd.proj[1][1] *= -1.0f; // Vulkan Y flip
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    cmd.invView = glm::inverse(cmd.view);
-    cmd.invProj = glm::inverse(cmd.proj);
+    VkClearColorValue sacredGreen{{0.0f, 1.0f, 0.0f, 1.0f}};
+    VkImageSubresourceRange range{
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1
+    };
 
-    cmd.frame = static_cast<uint32_t>(frameCount_);
-    cmd.time = t;
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &sacredGreen, 1, &range);
 
-    g_rtx().updateUniformBinding31(&cmd, sizeof(cmd));
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    0,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
-void RenderMode3::traceRays(VkCommandBuffer cmd)
+void RenderMode3::onResize(uint32_t newWidth, uint32_t newHeight) noexcept
 {
-    g_rtx().recordRayTrace(cmd, {width_, height_});
-}
-
-void RenderMode3::renderFrame(VkCommandBuffer cmd, float deltaTime)
-{
-    updateUniforms(deltaTime);
-    traceRays(cmd);
-
-    // Reset on first frame or every 20 seconds for fresh convergence showcase
-    if (frameCount_ == 0 || (frameCount_ % 1200 == 0)) {
-        g_rtx().requestAccumulationReset();
-    }
-
-    ++frameCount_;
-}
-
-void RenderMode3::onResize(uint32_t width, uint32_t height)
-{
-    if (width == width_ && height == height_) return;
-
-    width_ = width;
-    height_ = height;
-
-    g_rtx().requestAccumulationReset();
-
-    LOG_AMOURANTH("MODE 3 — RESIZED TO {}x{} — COSMIC DANCE CONTINUES UNBROKEN", width, height);
+    width_  = newWidth;
+    height_ = newHeight;
+    LOG_INFO_CAT("MODE3", "Sacred green void resized → {}×{}", newWidth, newHeight);
 }

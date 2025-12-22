@@ -1,32 +1,107 @@
 // src/modes/RenderMode4.cpp
-// MINIMAL STABLE MODE — NO RESOURCES — NO CRASH — JUST BLACK
+// =============================================================================
+// AMOURANTH RTX Engine © 2025 — RENDER MODE 4 — SACRED RED VOID
+// =============================================================================
+
 #include "modes/RenderMode4.hpp"
+
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 
 using namespace Logging::Color;
 
-RenderMode4::RenderMode4(uint32_t, uint32_t)
+// Re-use the same transition helper
+static void transitionImage(VkCommandBuffer cmd,
+                            VkImage image,
+                            VkImageLayout oldLayout,
+                            VkImageLayout newLayout,
+                            VkAccessFlags srcAccess,
+                            VkAccessFlags dstAccess,
+                            VkPipelineStageFlags srcStage,
+                            VkPipelineStageFlags dstStage) noexcept
 {
-    LOG_SUCCESS_CAT("RenderMode4", "MINIMAL STABLE MODE — NO RENDERING — BLACK VOID — NO CRASH");
+    if (image == VK_NULL_HANDLE || cmd == VK_NULL_HANDLE) return;
+
+    VkImageMemoryBarrier barrier{
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = srcAccess,
+        .dstAccessMask       = dstAccess,
+        .oldLayout           = oldLayout,
+        .newLayout           = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = image,
+        .subresourceRange    = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1
+        }
+    };
+
+    vkCmdPipelineBarrier(
+        cmd,
+        srcStage,
+        dstStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
 }
 
-RenderMode4::~RenderMode4() = default;
-
-void RenderMode4::renderFrame(VkCommandBuffer cmd, float)
+RenderMode4::RenderMode4(uint32_t width, uint32_t height)
+    : width_(width), height_(height)
 {
-    // Clear to pure black — sacred silence
-    const VkClearColorValue black = { { 0.0f, 0.0f, 0.0f, 1.0f } };
-    const VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-    // Use the swapchain image directly (already bound by VulkanRenderer)
-    vkCmdClearColorImage(cmd,
-        StoneKey::stone_images()[0],  // any valid swapchain image
-        VK_IMAGE_LAYOUT_GENERAL,
-        &black, 1, &range);
+    LOG_AMOURANTH("RENDER MODE 4 AWAKENS — SACRED RED VOID — THE EMPIRE RESTS IN ETERNAL LIGHT");
 }
 
-void RenderMode4::onResize(uint32_t, uint32_t)
+void RenderMode4::renderFrame(VkCommandBuffer cmd,
+                              uint32_t frameIndex,
+                              uint32_t imageIndex,
+                              float /*deltaTime*/) noexcept
 {
-    // Do nothing — no resources to recreate
+    const uint32_t imageCount = StoneKey::stone_image_count();
+    if (imageCount == 0) return;
+
+    VkImage swapImage = StoneKey::stone_images()[imageIndex];
+
+    LOG_TRACE_CAT("MODE4", "Painting sacred red void — frame {} → swapchain image {}", frameIndex, imageIndex);
+
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    VkClearColorValue sacredRed{{1.0f, 0.0f, 0.0f, 1.0f}};
+    VkImageSubresourceRange range{
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1
+    };
+
+    vkCmdClearColorImage(cmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &sacredRed, 1, &range);
+
+    transitionImage(cmd,
+                    swapImage,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    0,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+}
+
+void RenderMode4::onResize(uint32_t newWidth, uint32_t newHeight) noexcept
+{
+    width_  = newWidth;
+    height_ = newHeight;
+    LOG_INFO_CAT("MODE4", "Sacred red void resized → {}×{}", newWidth, newHeight);
 }
