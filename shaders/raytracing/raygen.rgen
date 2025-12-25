@@ -1,125 +1,117 @@
-// assets/shaders/raytracing/raygen.rgen
+// raygen.rgen
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : enable
-#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : require
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
+struct Payload {
+    vec3 color;
+    vec3 attenuation;
+    uint depth;
+    bool miss;
+};
 
-layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
-layout(set = 0, binding = 1, rgba16f) uniform image2D rtOutput;
-layout(set = 0, binding = 2, std140) uniform DreamUBO {
-    float     time;
-    uint      frame;
-    uint      currentSpp;
-    uint      totalSpp;
-    float     exposure;
-    uint      enableEnvMap;
-    uint      hypertraceEnabled;
-    uint      denoisingEnabled;
-    uint      adaptiveEnabled;
-    uint      debugMode;
-    float     envIntensity;
-    float     envRotation;
+layout(location = 0) rayPayloadEXT Payload payload;
 
-    vec2      resolution;
-    vec2      jitter;
-    vec2      jitterPrev;
-    float     nexusScoreThreshold;
-    float     hypertraceJitterScale;
-    float     _pad0;
-    float     _pad1;
+layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
+layout(binding = 1, set = 0, rgba32f) uniform image2D rtOutput;
+layout(binding = 2, set = 0) uniform sampler2D envMap;
+layout(binding = 3, set = 0) uniform sampler2D monsterTex;
 
-    mat4      view;
-    mat4      proj;
-    mat4      invView;
-    mat4      invProj;
+layout(push_constant) uniform PushConstants {
+    mat4 invView;
+    mat4 invProj;
+    float totalTime;
+    uint spp;
+    uint frameSeed;
+    uint forceEnvOnly;
+    float jitterStrength;
+    uint maxRecursion;
+    uint useEnvSky;
+    uint flipEnvV;
+    uint showHotPink;
+    float environmentExposure;
+    float skyIntensity;
+    float environmentRotationY;
+    vec3 billboardBaseColor;
+    float billboardAlphaCutoff;
+    uint billboardUseAlphaBlend;
+    uint showNormals;
+    uint showUVs;
+    uint showWireframe;
+    uint enableReflections;
+    uint enableShadows;
+    uint enableVolumetrics;
+    float fogPulseSpeed;
+    float fogPulseAmount;
+    float lightBobSpeed;
+    float lightBobAmplitude;
+    float lightOrbitSpeed;
+    float lightOrbitAmplitude;
+    float lightColorPulseSpeed;
+    float lightColorPulseAmount;
+} pc;
 
-    vec4      camPos;
-    vec4      camDir;
-    float     fov;
-    float     aperture;
-    float     focusDistance;
-    uint      _pad2;
+uint pcg(uint v)
+{
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
 
-    uint      materialCount;
-    uint      activeMaterialIndex;
-    float     metallicOverride;
-    float     roughnessOverride;
-    float     emissiveIntensity;
-    uint      enableBlueNoise;
-    uint      enableTAA;
-    float     taaAlpha;
+float rand(inout uint seed)
+{
+    seed = pcg(seed);
+    return float(seed) / float(0xffffffffu);
+}
 
-    vec3      sunDirection;
-    float     sunIntensity;
-    vec3      sunColor;
-    float     fogDensity;
-    vec3      fogColor;
-    float     _pad3;
+vec2 hash2(uint seed)
+{
+    uint s = seed;
+    return vec2(rand(s), rand(s));
+}
 
-    uint      showNexusScore;
-    uint      showSppHeatmap;
-    uint      showAccumulationCount;
-    uint      showGpuTimestamps;
-    float     debugFloat1;
-    float     debugFloat2;
-    float     debugFloat3;
-    float     debugFloat4;
-} ubo;
-
-layout(set = 0, binding = 3, rgba16f) uniform image2D accumulation;
-layout(set = 0, binding = 7) uniform sampler2D envMap;
+vec3 sampleEnvironment(vec3 dir)
+{
+    vec2 uv;
+    uv.x = atan(dir.z, dir.x) * (0.5 / 3.14159265359) + 0.5 + (pc.environmentRotationY / (2.0 * 3.14159265359));
+    uv.y = acos(clamp(dir.y, -1.0, 1.0)) / 3.14159265359;
+    if (pc.flipEnvV == 1) uv.y = 1.0 - uv.y;
+    uv.x = fract(uv.x);
+    return texture(envMap, uv).rgb * pc.environmentExposure * pc.skyIntensity;
+}
 
 void main()
 {
-    const vec2 launchID = gl_LaunchIDEXT.xy;
-    const vec2 launchSize = gl_LaunchSizeEXT.xy;
+    const uvec2 pixel = gl_LaunchIDEXT.xy;
+    const vec2 uv = vec2(pixel + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
 
-    vec2 uv = (launchID + vec2(0.5)) / launchSize;
-    vec2 ndc = uv * 2.0 - 1.0;
-    vec2 jitteredNDC = ndc + ubo.jitter / launchSize;
+    uint rngSeed = pc.frameSeed + pc.spp + pixel.x * 1973 + pixel.y * 9277;
 
-    vec4 near = ubo.invProj * vec4(jitteredNDC, -1.0, 1.0);
-    vec4 far  = ubo.invProj * vec4(jitteredNDC,  1.0, 1.0);
+    vec2 jitter = (pc.jitterStrength > 0.0) ? (hash2(rngSeed) - vec2(0.5)) * pc.jitterStrength : vec2(0.0);
+    vec2 ndc = uv * 2.0 - 1.0 + jitter / vec2(gl_LaunchSizeEXT.xy);
+
+    vec4 near = pc.invProj * vec4(ndc, -1.0, 1.0);
     near /= near.w;
-    far  /= far.w;
+    vec4 far = pc.invProj * vec4(ndc, 1.0, 1.0);
+    far /= far.w;
 
-    vec3 rayOrigin = ubo.camPos.xyz;
-    vec3 rayDir    = normalize(far.xyz - near.xyz);
+    vec3 origin = (pc.invView * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    vec3 direction = normalize((pc.invView * vec4(normalize(far.xyz - near.xyz), 0.0)).xyz);
 
-    hitValue = vec3(0.0);
+    payload.color = vec3(0.0);
+    payload.attenuation = vec3(1.0);
+    payload.depth = 0;
+    payload.miss = false;
 
-    traceRayEXT(topLevelAS,
-                gl_RayFlagsOpaqueEXT,
-                0xFF,
-                0,
-                0,
-                0,
-                rayOrigin,
-                0.001,
-                rayDir,
-                10000.0,
-                0);
+    uint flags = gl_RayFlagsOpaqueEXT;
 
-    vec3 color = hitValue * ubo.exposure;
+    traceRayEXT(tlas, flags, 0xFF, 0, 0, 0, origin, 0.001, direction, 10000.0, 0);
 
-    // Environment map fallback on miss
-    if (ubo.enableEnvMap == 1 && length(hitValue) < 0.01) {
-        vec3 dir = normalize(rayDir);
-        float theta = acos(dir.y);
-        float phi = atan(dir.z, dir.x);
-        vec2 envUV = vec2(phi * 0.1591 + 0.5, theta * 0.3183);
-        color = texture(envMap, envUV).rgb * ubo.envIntensity;
-    }
+    vec3 finalColor = payload.color;
 
-    // Temporal accumulation
-    if (ubo.currentSpp > 0) {
-        vec3 prev = imageLoad(accumulation, ivec2(launchID)).rgb;
-        float alpha = 1.0 / float(ubo.currentSpp + 1);
-        color = mix(prev, color, alpha);
-    }
+    finalColor *= pc.environmentExposure;
+    finalColor = finalColor / (finalColor + vec3(1.0));
+    finalColor = pow(finalColor, vec3(1.0 / 2.2));
 
-    imageStore(accumulation, ivec2(launchID), vec4(color, 1.0));
-    imageStore(rtOutput, ivec2(launchID), vec4(color, 1.0));
+    imageStore(rtOutput, ivec2(pixel), vec4(finalColor, 1.0));
 }
