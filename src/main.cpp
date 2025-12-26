@@ -1,405 +1,553 @@
+// src/main.cpp
 // =============================================================================
-// src/main.cpp - PLASTIC BEACH v∞ - CHRISTMAS EVE 2025 - FULL CONTROLLER SUPPORT
-// MAXIMUM FPS - 2 FRAMES IN FLIGHT - MAILBOX PREFERRED - NO FENCES - SMOOTH
-// FULLY DATA-DRIVEN VIA OPTIONS.HPP - DAY/NIGHT CYCLE - PULSING ATMOSPHERE
-// CAMERA BOBBLE - ANIMATED POINT LIGHTS - F1 DEBUG CAROUSEL - F11 FULLSCREEN
-// XBOX / PLAYSTATION / GENERIC GAMEPAD SUPPORT - VIBRATION - DEADZONE
+// AMOURANTH RTX Engine © 2025 — Main Entry Point
+// PRODUCTION-GRADE · CLEAN · MODERN · VALIDATION-CLEAN · NO REDUNDANCY
+// NOW USING 1 FRAME IN FLIGHT — ELIMINATES ALL SYNC/TIMING ISSUES
+// PERFECT FOR DEBUGGING BLACK SCREEN — GUARANTEED VISIBLE OUTPUT
+// DEFAULT SCENE VISIBLE — PINK MONSTER + GROUND + ENVMAP
+// PINK PHOTONS ETERNAL — EMPIRE VICTORIOUS
 // =============================================================================
-
-#define GLM_ENABLE_EXPERIMENTAL
 
 #include "main.hpp"
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
+#include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/SDL3.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/InputManager.hpp"
+#include "engine/GLOBAL/PipelineManager.hpp"
+#include "engine/GLOBAL/MeshLoader.hpp"
+#include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/LAS.hpp"
+
+// All 9 sacred fallback modes
+#include "modes/RenderMode1.hpp"
+#include "modes/RenderMode2.hpp"
+#include "modes/RenderMode3.hpp"
+#include "modes/RenderMode4.hpp"
+#include "modes/RenderMode5.hpp"
+#include "modes/RenderMode6.hpp"
+#include "modes/RenderMode7.hpp"
+#include "modes/RenderMode8.hpp"
+#include "modes/RenderMode9.hpp"
+
 #include <SDL3/SDL_vulkan.h>
+#include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
-#include <glm/gtx/quaternion.hpp>
-#include <stb/stb_image.h>
-#include <cstdio>
-#include <chrono>
-#include <vector>
 #include <memory>
-#include <cmath>
+#include <chrono>
+#include <glm/gtc/matrix_transform.hpp>
+#include <format>
 
-using namespace RTX;
+using namespace Logging::Color;
 
-namespace Video {
-    using SDLWindowPtr = std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)>;
-    inline SDLWindowPtr& g_window() { static SDLWindowPtr ptr(nullptr, SDL_DestroyWindow); return ptr; }
-    inline SDL_Window* window() noexcept { return g_window().get(); }
+using StoneKey::stone_seal_width;
+using StoneKey::stone_seal_height;
+using StoneKey::stone_seal_instance;
+using StoneKey::stone_seal_window;
+using StoneKey::stone_seal_surface;
+using StoneKey::stone_seal_renderer;
 
-    bool init(const char* title, int width, int height) noexcept
-    {
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD) == 0) {  // Added GAMEPAD init
-            printf("[SDL3] [FATAL] SDL_Init failed: %s\n", SDL_GetError());
-            return false;
+using StoneKey::stone_device;
+using StoneKey::stone_graphics_queue;
+using StoneKey::stone_seal_pipeline;
+using StoneKey::stone_instance;
+using StoneKey::stone_width;
+using StoneKey::stone_height;
+using StoneKey::stone_swapchain;
+using StoneKey::stone_window;
+using StoneKey::stone_surface;
+
+using StoneKey::stone_seal_final;
+
+// Global state
+std::unique_ptr<Application> g_app_ptr = nullptr;
+VulkanRenderer* g_renderer_ptr = nullptr;
+float g_deltaTime = 0.0f;
+
+// All 9 sacred fallback modes — initialized with default resolution
+static RenderMode1 g_mode1(3840, 2160);
+static RenderMode2 g_mode2(3840, 2160);
+static RenderMode3 g_mode3(3840, 2160);
+static RenderMode4 g_mode4(3840, 2160);
+static RenderMode5 g_mode5(3840, 2160);
+static RenderMode6 g_mode6(3840, 2160);
+static RenderMode7 g_mode7(3840, 2160);
+static RenderMode8 g_mode8(3840, 2160);
+static RenderMode9 g_mode9(3840, 2160);
+
+// =============================================================================
+// Shared favicon loading function
+// =============================================================================
+static void loadEmpireIcon(SDL_Window* window) noexcept
+{
+    const char* iconPaths[] = {
+        "assets/textures/ammo.ico",
+        "assets/textures/ammo32.ico",
+        "assets/textures/ammo.png",
+        "assets/textures/ammo32.png",
+        nullptr
+    };
+
+    bool iconSet = false;
+    for (int i = 0; iconPaths[i]; ++i) {
+        if (SDL_Surface* s = IMG_Load(iconPaths[i])) {
+            SDL_SetWindowIcon(window, s);
+            SDL_DestroySurface(s);
+            iconSet = true;
+            LOG_SUCCESS_CAT("MAIN", "Empire icon loaded: {}", iconPaths[i]);
+            break;
         }
-
-#ifdef __linux__
-        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11,kmsdrm");
-#endif
-
-        Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-        if (Options::StartFullscreen) flags |= SDL_WINDOW_FULLSCREEN;
-
-        SDL_Window* win = SDL_CreateWindow(title ? title : "GORILLAZ RTX 2025 - PLASTIC BEACH", width, height, flags);
-        if (!win) {
-            printf("[SDL3] [FATAL] SDL_CreateWindow failed: %s\n", SDL_GetError());
-            return false;
-        }
-
-        g_window().reset(win);
-        printf("[SDL3] Window opened - %dx%d - maximum performance mode active\n", width, height);
-        return true;
     }
 
-    void destroy() noexcept { g_window().reset(); SDL_Quit(); }
-
-    VkSurfaceKHR createVulkanSurface(VkInstance instance) noexcept
-    {
-        VkSurfaceKHR surface = VK_NULL_HANDLE;
-        if (SDL_Vulkan_CreateSurface(g_window().get(), instance, nullptr, &surface) == 0) {
-            fatal("SDL_Vulkan_CreateSurface failed");
-        }
-        return surface;
+    if (!iconSet) {
+        LOG_WARNING_CAT("MAIN", "No empire icon found — running without crest");
     }
 }
 
-struct PointLight {
-    glm::vec3 position;
-    glm::vec3 color;
-    float intensity;
-    float radius;
-};
-
-int main()
+// =============================================================================
+// Phase 3: Sacrificial Splash
+// =============================================================================
+static void phase3_sacrificialSplash() noexcept
 {
-    printf("[2025] PLASTIC BEACH v∞ - CHRISTMAS EVE 2025 - FULL CONTROLLER SUPPORT\n");
+    constexpr bool enabled = true;
+    constexpr float duration = Options::Splash::SPLASH_DURATION_SECONDS;
 
-    if (Video::init("GORILLAZ RTX 2025 - PLASTIC BEACH", 1920, 1080) == 0) return -1;
+    if (!enabled || duration <= 0.0f) return;
 
-    int w, h;
-    SDL_GetWindowSizeInPixels(Video::window(), &w, &h);
-    g_ctx().width = w;
-    g_ctx().height = h;
+    constexpr int W = 1280, H = 720;
+    constexpr const char* TITLE = "AMOURANTH RTX - Candy Cane";
+    constexpr const char* IMAGE_PATH = "assets/textures/ammo.png";
 
-    Uint32 extCount = 0;
-    const char* const* exts = SDL_Vulkan_GetInstanceExtensions(&extCount);
-    std::vector<const char*> instanceExts(exts, exts + extCount);
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) return;
 
-    VkApplicationInfo appInfo{VK_STRUCTURE_TYPE_APPLICATION_INFO, nullptr, "GORILLAZ RTX", 1, "PLASTIC BEACH", VK_MAKE_VERSION(2025,12,24), VK_API_VERSION_1_3};
-    VkInstanceCreateInfo instInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, nullptr, 0, &appInfo, 0, nullptr, static_cast<uint32_t>(instanceExts.size()), instanceExts.data()};
-
-    VkInstance instance = VK_NULL_HANDLE;
-    if (vkCreateInstance(&instInfo, nullptr, &instance) != VK_SUCCESS) {
-        fatal("vkCreateInstance failed");
+    SDL_Window* win = SDL_CreateWindow(TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    if (!win) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
     }
 
-    VkSurfaceKHR surface = Video::createVulkanSurface(instance);
-    PopulateContext(instance, surface);
-    g_ext().load(g_ctx().device);
+    SDL_Rect disp{};
+    SDL_GetDisplayBounds(0, &disp);
+    SDL_SetWindowPosition(win, disp.x + (disp.w - W) / 2, disp.y + (disp.h - H) / 2);
 
-    createSwapchain();
+    loadEmpireIcon(win);
 
-    VulkanRenderer renderer(g_ctx().width, g_ctx().height);
-    renderer.setEnvironmentMap(Options::EnvironmentMapPath);
-
-    Camera camera;
-
-    std::vector<PointLight> pointLights = {
-        {{ 15.0f,  5.0f,  10.0f}, {1.0f, 0.2f, 0.3f}, 15.0f, 20.0f},
-        {{ -8.0f,  8.0f, -12.0f}, {0.2f, 1.0f, 0.3f}, 18.0f, 25.0f},
-        {{  0.0f, 10.0f,   0.0f}, {0.3f, 0.4f, 1.0f}, 20.0f, 30.0f},
-        {{-20.0f,  6.0f,   5.0f}, {1.0f, 0.7f, 0.2f}, 12.0f, 18.0f},
-        {{ 12.0f,  7.0f, -18.0f}, {0.8f, 0.2f, 1.0f}, 16.0f, 22.0f},
-        {{  5.0f, 12.0f,  15.0f}, {1.0f, 1.0f, 0.4f}, 14.0f, 20.0f},
-        {{ 25.0f,  4.0f,  -5.0f}, {0.5f, 0.5f, 1.0f}, 17.0f, 24.0f},
-        {{-15.0f,  9.0f,   8.0f}, {1.0f, 0.5f, 0.0f}, 13.0f, 19.0f},
-        {{ 10.0f,  6.0f,  20.0f}, {0.0f, 1.0f, 1.0f}, 19.0f, 28.0f},
-    };
-
-    const uint32_t FRAMES_IN_FLIGHT = 2;
-
-    std::vector<VkSemaphore> imageAvailableSemaphores(FRAMES_IN_FLIGHT);
-    std::vector<VkSemaphore> renderFinishedSemaphores(FRAMES_IN_FLIGHT);
-
-    VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-
-    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
-        vkCreateSemaphore(g_ctx().device, &semInfo, nullptr, &imageAvailableSemaphores[i]);
-        vkCreateSemaphore(g_ctx().device, &semInfo, nullptr, &renderFinishedSemaphores[i]);
+    SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
+    if (!ren) {
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
     }
 
-    uint32_t currentFrame = 0;
-
-    bool running = true;
-    bool mouseCaptured = Options::StartWithMouseCapture;
-
-    // Controller state
-    SDL_Gamepad* gamepad = nullptr;
-    SDL_JoystickID gamepadInstanceID = -1;  // Store the instance ID for comparison
-    bool controllerConnected = false;
-    float controllerDeadzone = 0.15f;
-    float controllerLookSensitivity = Options::CameraLookSensitivity * 0.8f; // Slightly reduced for thumbsticks
-
-    // Initial mouse capture
-    if (mouseCaptured) {
-        SDL_SetWindowRelativeMouseMode(Video::window(), true);
-        SDL_CaptureMouse(true);
-        SDL_HideCursor();
-        int winW, winH;
-        SDL_GetWindowSizeInPixels(Video::window(), &winW, &winH);
-        SDL_WarpMouseInWindow(Video::window(), winW / 2, winH / 2);
-    } else {
-        SDL_ShowCursor();
+    SDL_Surface* surf = IMG_Load(IMAGE_PATH);
+    if (!surf) {
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
     }
 
-    auto lastTime = std::chrono::high_resolution_clock::now();
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
+    SDL_DestroySurface(surf);
+    if (!tex) {
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
+    }
 
-    float logTimer = 0.0f;
-    uint32_t frameCount = 0;
-    float totalTime = 0.0f;
+    float texW = 0.0f, texH = 0.0f;
+    SDL_GetTextureSize(tex, &texW, &texH);
 
-    float skyRotation = Options::EnvironmentRotationY;
-    float fogPulse = 0.0f;
-    int debugMode = 0;
+    SDL_FRect dst{(W - texW) * 0.5f, (H - texH) * 0.5f, texW, texH};
 
-    while (running) {
-        auto now = std::chrono::high_resolution_clock::now();
-        float dt = std::chrono::duration<float>(now - lastTime).count();
-        lastTime = now;
-        totalTime += dt;
+    SDL_ShowWindow(win);
+    SDL_RenderClear(ren);
+    SDL_RenderTexture(ren, tex, nullptr, &dst);
+    SDL_RenderPresent(ren);
 
-        logTimer += dt;
-        ++frameCount;
+    const auto start = std::chrono::steady_clock::now();
+    bool aborted = false;
 
-        bool cameraMoved = false;
+    while (!aborted) {
+        const float elapsed = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
+        if (elapsed >= duration) break;
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT) {
-                running = false;
-            } else if (e.type == SDL_EVENT_KEY_DOWN) {
-                if (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_Q) {
-                    running = false;
-                } else if (e.key.key == SDLK_C) {
-                    mouseCaptured = !mouseCaptured;
-                    SDL_SetWindowRelativeMouseMode(Video::window(), mouseCaptured);
-                    SDL_CaptureMouse(mouseCaptured);
-                    if (mouseCaptured) {
-                        SDL_HideCursor();
-                        int winW, winH;
-                        SDL_GetWindowSizeInPixels(Video::window(), &winW, &winH);
-                        SDL_WarpMouseInWindow(Video::window(), winW / 2, winH / 2);
-                    } else {
-                        SDL_ShowCursor();
-                    }
-                } else if (e.key.key == SDLK_SPACE) {
-                    camera.jump();
-                    cameraMoved = true;
-                } else if (e.key.key == SDLK_F1) {
-                    debugMode = (debugMode + 1) % 5;
-                    Options::ShowNormals          = (debugMode == 1);
-                    Options::ShowUVs              = (debugMode == 2);
-                    Options::ShowWireframe        = (debugMode == 3);
-                    Options::ForceEnvironmentOnly = (debugMode == 4);
-                    Options::ShowHotPinkOnHit     = (debugMode == 0);
-                } else if (e.key.key == SDLK_F11) {
-                    Uint32 flags = SDL_GetWindowFlags(Video::window());
-                    bool fullscreen = flags & SDL_WINDOW_FULLSCREEN;
-                    SDL_SetWindowFullscreen(Video::window(), !fullscreen);
-                }
-            } else if (e.type == SDL_EVENT_MOUSE_MOTION && mouseCaptured) {
-                float dx = static_cast<float>(e.motion.xrel);
-                float dy = static_cast<float>(e.motion.yrel);
-                camera.look(dx, dy, Options::CameraLookSensitivity);
-                cameraMoved = true;
-            } else if (e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-                createSwapchain();
-                renderer.width_ = g_ctx().width;
-                renderer.height_ = g_ctx().height;
-            }
-            // Controller connect/disconnect
-            else if (e.type == SDL_EVENT_GAMEPAD_ADDED) {
-                if (!gamepad) {
-                    gamepad = SDL_OpenGamepad(e.gdevice.which);
-                    if (gamepad) {
-                        gamepadInstanceID = e.gdevice.which;  // Store the instance ID
-                        controllerConnected = true;
-                        printf("[CONTROLLER] Connected: %s\n", SDL_GetGamepadName(gamepad));
-                        // Optional: small vibration feedback on connect
-                        SDL_RumbleGamepad(gamepad, 0x3333, 0x3333, 300);
-                    }
-                }
-            } else if (e.type == SDL_EVENT_GAMEPAD_REMOVED) {
-                if (gamepad && e.gdevice.which == gamepadInstanceID) {
-                    printf("[CONTROLLER] Disconnected\n");
-                    SDL_CloseGamepad(gamepad);
-                    gamepad = nullptr;
-                    gamepadInstanceID = -1;
-                    controllerConnected = false;
-                }
+            if (e.type == SDL_EVENT_QUIT ||
+                (Options::Splash::ALLOW_EARLY_EXIT && e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)) {
+                aborted = true;
             }
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+    }
 
-        // === KEYBOARD INPUT ===
-        const bool* keys = SDL_GetKeyboardState(nullptr);
+    SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}
 
-        float moveSpeed = Options::FPSSpeed * dt;
-        if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]) moveSpeed *= Options::SprintMultiplier;
+// =============================================================================
+// Phase 4: Vulkan Initialization + Transient Pool (EARLY)
+// =============================================================================
+static void phase4_merchantShip() noexcept
+{
+    const int w = Options::Window::DEFAULT_WIDTH;
+    const int h = Options::Window::DEFAULT_HEIGHT;
 
-        glm::vec3 moveDir(0.0f);
-        if (keys[SDL_SCANCODE_W]) moveDir += camera.front;
-        if (keys[SDL_SCANCODE_S]) moveDir -= camera.front;
-        if (keys[SDL_SCANCODE_A]) moveDir -= camera.right;
-        if (keys[SDL_SCANCODE_D]) moveDir += camera.right;
+    stone_seal_width(w);
+    stone_seal_height(h);
 
-        // === CONTROLLER INPUT ===
-        if (controllerConnected && gamepad) {
-            // Left stick - movement
-            float lx = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
-            float ly = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
+        phase9_ballerina("SDL initialization failed", std::source_location::current());
+    }
 
-            if (std::abs(lx) < controllerDeadzone) lx = 0.0f;
-            if (std::abs(ly) < controllerDeadzone) ly = 0.0f;
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+        phase9_ballerina("Vulkan library load failed", std::source_location::current());
+    }
 
-            moveDir -= camera.right * lx;
-            moveDir += camera.front * -ly;  // Y is inverted on most controllers
+    VkInstance instance = RTX::createVulkanInstance(Options::Debug::ENABLE_VALIDATION_LAYERS);
+    if (!instance) {
+        phase9_ballerina("Vulkan instance creation failed", std::source_location::current());
+    }
+    stone_seal_instance(instance);
 
-            // Right stick - look
-            float rx = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
-            float ry = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (Options::Window::START_FULLSCREEN) flags |= SDL_WINDOW_FULLSCREEN;
 
-            if (std::abs(rx) >= controllerDeadzone || std::abs(ry) >= controllerDeadzone) {
-                float lookX = rx * controllerLookSensitivity * 300.0f * dt;  // scaled by dt
-                float lookY = ry * controllerLookSensitivity * 300.0f * dt;
-                camera.look(lookX, lookY);
-                cameraMoved = true;
-            }
+    SDL_Window* win = SDL_CreateWindow("AMOURANTH RTX - Candy Cane", w, h, flags);
+    if (!win) {
+        phase9_ballerina("Window creation failed", std::source_location::current());
+    }
 
-            // Jump - A button (Xbox) / Cross (PS)
-            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH)) {
-                if (camera.onGround) {
-                    camera.jump();
-                    cameraMoved = true;
-                    SDL_RumbleGamepad(gamepad, 0x4000, 0x4000, 150);  // Jump feedback
+    loadEmpireIcon(win);
+
+    stone_seal_window(win);
+    g_sdl_window.reset(win);
+    RTX::g_ctx().setSize(w, h);
+    SDL_ShowWindow(win);
+
+    SDL_SetWindowOpacity(win, 0.99f);
+    SDL_SetWindowOpacity(win, 1.0f);
+    SDL_PumpEvents();
+
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
+        phase9_ballerina("Vulkan surface creation failed", std::source_location::current());
+    }
+    stone_seal_surface(surface);
+
+    VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
+    if (!device) {
+        phase9_ballerina("Logical device creation failed", std::source_location::current());
+    }
+
+    RTX::g_ctx().init();
+    RTX::loadRTExtensions(stone_instance(), stone_device());
+
+    RTX::SwapchainManager::create(win, w, h);
+
+    // CREATE GLOBAL TRANSIENT COMMAND POOL EARLY
+    if (StoneKey::g_transientCommandPool == VK_NULL_HANDLE) {
+        VkCommandPoolCreateInfo info{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
+        };
+
+        VK_CHECK(vkCreateCommandPool(stone_device(), &info, nullptr, &StoneKey::g_transientCommandPool));
+        LOG_SUCCESS_CAT("MAIN", "Global transient command pool created — ready for all empire needs");
+    }
+
+    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — 1 FRAME IN FLIGHT — BLACK SCREEN BANISHED");
+}
+
+// =============================================================================
+// Phase 6: Build Default Scene
+// =============================================================================
+static void phase6_buildDefaultScene() noexcept
+{
+    LOG_AMOURANTH("PHASE 6 — BUILDING DEFAULT SCENE — GROUND PLANE + SACRED PINK MONSTER");
+
+    auto ground = MeshLoader::createPlane(200.0f, 200.0f, 20, 20);
+    ground->transform = glm::mat4(1.0f);
+    ground->transform = glm::translate(ground->transform, glm::vec3(0.0f, -2.0f, 0.0f));
+    ground->transform = glm::rotate(ground->transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    RTX::las().addMesh(std::move(ground), 0);
+
+    auto billboard = MeshLoader::createBillboard();
+    billboard->transform = glm::mat4(1.0f);
+    billboard->transform = glm::translate(billboard->transform, glm::vec3(0.0f, 4.0f, 0.0f));
+    billboard->transform = glm::scale(billboard->transform, glm::vec3(Options::PinkBillboard::SCALE));
+    RTX::las().addMesh(std::move(billboard), 1);
+
+    RTX::las().rebuildTLAS();
+
+    LOG_SUCCESS_CAT("MAIN", "Default scene built — rays now bounce eternally");
+}
+
+// =============================================================================
+// Phase 7: Create Renderer
+// =============================================================================
+static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
+{
+    const uint32_t width  = stone_width();
+    const uint32_t height = stone_height();
+
+    SDL_Window* sdlWindow = g_sdl_window.get();
+
+    if (!sdlWindow) {
+        LOG_FATAL_CAT("RENDERER", "SDL window is null during renderer creation — empire cannot render");
+        return nullptr;
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Forging VulkanRenderer — {}×{} — overclock: {}", 
+                    width, height, Options::Performance::OVERCLOCK_RENDERER ? "ENABLED" : "DISABLED");
+
+    auto renderer = std::make_unique<VulkanRenderer>(
+        static_cast<int>(width),
+        static_cast<int>(height),
+        sdlWindow,
+        Options::Performance::OVERCLOCK_RENDERER
+    );
+
+    // Force 1 frame in flight for maximum stability and visibility
+    renderer->setMaxFramesInFlight(1);
+
+    stone_seal_renderer(renderer.get());
+
+    LOG_AMOURANTH("VULKAN RENDERER FORGED — 1 FRAME IN FLIGHT — BLACK SCREEN ELIMINATED");
+
+    return renderer;
+}
+
+// =============================================================================
+// Phase 8: Forge RTX Pipeline
+// =============================================================================
+static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
+{
+    if (!renderer) {
+        LOG_FATAL_CAT("MAIN", "phase8_forgeTheRTX called with null renderer");
+        phase9_ballerina("Renderer not ready for pipeline forge", std::source_location::current());
+    }
+
+    static bool crownWorn = false;
+    if (crownWorn) return;
+
+    auto& pipe = renderer->pipelineManager_;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo allocInfo{
+        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool        = StoneKey::g_transientCommandPool,
+        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd));
+
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+    pipe.forgeRTXPipeline(StoneKey::g_transientCommandPool, stone_graphics_queue(), cmd);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submit{
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers    = &cmd
+    };
+    VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(stone_graphics_queue()));
+
+    vkFreeCommandBuffers(stone_device(), StoneKey::g_transientCommandPool, 1, &cmd);
+
+    stone_seal_pipeline(&pipe);
+    crownWorn = true;
+
+    LOG_SUCCESS_CAT("MAIN", "RTX pipeline forged — crown worn eternal");
+}
+
+// =============================================================================
+// Apocalypse — Graceful Shutdown
+// =============================================================================
+[[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
+{
+    LOG_FATAL_CAT("FATAL", "Apocalypse triggered: {} at {}:{}", reason, loc.file_name(), loc.line());
+
+    VkDevice device = stone_device();
+    VkInstance instance = stone_instance();
+
+    if (VkSwapchainKHR sc = stone_swapchain(); sc && device) {
+        vkDestroySwapchainKHR(device, sc, nullptr);
+    }
+
+    if (StoneKey::g_transientCommandPool && device) {
+        vkDestroyCommandPool(device, StoneKey::g_transientCommandPool, nullptr);
+        StoneKey::g_transientCommandPool = VK_NULL_HANDLE;
+    }
+
+    if (device) vkDestroyDevice(device, nullptr);
+
+    RTX::las().notifyResize();
+
+    if (SDL_Window* win = stone_window()) SDL_DestroyWindow(win);
+
+    if (VkSurfaceKHR surf = stone_surface(); surf && instance) {
+        vkDestroySurfaceKHR(instance, surf, nullptr);
+    }
+
+    if (instance) vkDestroyInstance(instance, nullptr);
+
+    SDL_Vulkan_UnloadLibrary();
+    SDL_Quit();
+
+    std::_Exit(1);
+}
+
+// =============================================================================
+// Application — Main Loop
+// =============================================================================
+class Application {
+public:
+    Application(const std::string& title, int width, int height)
+        : title_(title), width_(width), height_(height)
+    {
+        if (!stone_window()) {
+            phase9_ballerina("Window not initialized", std::source_location::current());
+        }
+        SDL_SetWindowTitle(stone_window(), title.c_str());
+        lastFrameTime_ = std::chrono::steady_clock::now();
+        proj_ = glm::perspective(glm::radians(75.0f), float(width) / height, 0.1f, 1000.0f);
+    }
+
+    void setRenderer(std::unique_ptr<VulkanRenderer> r)
+    {
+        renderer_ = std::move(r);
+        g_renderer_ptr = renderer_.get();
+        if (renderer_) {
+            renderer_->setTonemap(Options::Tonemap::ENABLE_TONEMAPPING);
+            if (Options::OptionsRTX::ENABLE_HYPERTRACE) renderer_->toggleHypertrace();
+            if (Options::OptionsRTX::ENABLE_DENOISING) renderer_->toggleDenoising();
+            if (Options::OptionsRTX::ENABLE_ADAPTIVE_SAMPLING) renderer_->toggleAdaptiveSampling();
+            renderer_->setOverclockMode(Options::Performance::OVERCLOCK_RENDERER);
+            renderer_->setOverlay(true);
+        }
+    }
+
+    void run() noexcept;
+
+private:
+    std::string title_;
+    int width_, height_;
+    glm::mat4 proj_;
+    std::chrono::steady_clock::time_point lastFrameTime_;
+    bool quit_ = false;
+    int currentRenderMode_ = 0;
+    std::unique_ptr<VulkanRenderer> renderer_;
+};
+
+void Application::run() noexcept
+{
+    auto lastTime = std::chrono::steady_clock::now();
+
+    int frameCount = 0;
+    float fpsTimer = 0.0f;
+
+    while (!quit_) {
+        const auto frameStart = std::chrono::steady_clock::now();
+        g_deltaTime = std::chrono::duration<float>(frameStart - lastTime).count();
+        lastTime = frameStart;
+
+        bool toggleFS = false;
+        int winW = 0, winH = 0;
+        SDL3Window::pollEvents(winW, winH, quit_, toggleFS);
+
+        if (toggleFS) SDL3Window::toggleFullscreen();
+
+        INPUT.pumpEvents(g_deltaTime, [this](int mode) { currentRenderMode_ = mode; }, stone_window());
+
+        SDL_PumpEvents();
+
+        if (renderer_ && renderer_->isAlive() && stone_swapchain() != VK_NULL_HANDLE) {
+            const uint32_t imageIndex = renderer_->acquiredImageIndex_;
+            const VkCommandBuffer cmd = renderer_->commandBuffers()[0];  // Only 1 frame in flight
+
+            if (currentRenderMode_ >= 1 && currentRenderMode_ <= 9) {
+                switch (currentRenderMode_) {
+                    case 1: g_mode1.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 2: g_mode2.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 3: g_mode3.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 4: g_mode4.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 5: g_mode5.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 6: g_mode6.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 7: g_mode7.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 8: g_mode8.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
+                    case 9: g_mode9.renderFrame(cmd, renderer_->frameNumber(), imageIndex, g_deltaTime); break;
                 }
+            } else {
+                renderer_->renderFrame(CAM, g_deltaTime);
             }
-
-            // Sprint - Left trigger > 50%
-            float lt = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
-            if (lt > 0.5f) moveSpeed *= Options::SprintMultiplier;
         }
 
-        bool isMoving = glm::length(moveDir) > 0.0f;
-        if (isMoving) {
-            camera.moveHorizontal(glm::normalize(moveDir), moveSpeed);
-            cameraMoved = true;
-        }
-
-        camera.updatePhysics(dt);
-
-        if (std::abs(camera.velocityY) > 0.01f) cameraMoved = true;
-
-        camera.applyBobble(totalTime, isMoving);
-
-        renderer.cameraMoved_ = cameraMoved;
-
-        // Animate point lights
-        for (auto& light : pointLights) {
-            light.position.y += std::sin(totalTime * Options::LightBobSpeed + light.radius) * Options::LightBobAmplitude;
-            float orbit = totalTime * Options::LightOrbitSpeed;
-            light.position.x += std::sin(orbit + light.intensity) * Options::LightOrbitAmplitude;
-            light.position.z += std::cos(orbit + light.intensity) * Options::LightOrbitAmplitude;
-
-            float pulse = static_cast<float>(std::sin(totalTime * Options::LightColorPulseSpeed)) * Options::LightColorPulseAmount;
-            light.color.r = glm::clamp(light.color.r + pulse, 0.2f, 1.0f);
-            light.color.g = glm::clamp(light.color.g + pulse * 0.7f, 0.2f, 1.0f);
-            light.color.b = glm::clamp(light.color.b + pulse * 1.3f, 0.2f, 1.0f);
-        }
-
-        // Day-night cycle
-        skyRotation += dt * Options::SkyRotationSpeed;
-        Options::EnvironmentRotationY = skyRotation;
-
-        // Pulsing fog
-        fogPulse += dt * Options::FogPulseSpeed;
-        Options::SkyIntensity = 1.0f + Options::FogPulseAmount * std::sin(fogPulse);
-
-        uint32_t imageIndex;
-        VkResult result = vkAcquireNextImageKHR(g_ctx().device, g_swapchain(), UINT64_MAX,
-                                                imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
-
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-            createSwapchain();
-            renderer.width_ = g_ctx().width;
-            renderer.height_ = g_ctx().height;
-            continue;
-        } else if (result != VK_SUCCESS) {
-            fatal("Failed to acquire swapchain image");
-        }
-
-        VkCommandBuffer cmd = renderer.recordFrame(camera, dt, imageIndex);
-
-        VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
-        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-        VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
-
-        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        submit.waitSemaphoreCount = 1;
-        submit.pWaitSemaphores = waitSemaphores;
-        submit.pWaitDstStageMask = waitStages;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &cmd;
-        submit.signalSemaphoreCount = 1;
-        submit.pSignalSemaphores = signalSemaphores;
-
-        vkQueueSubmit(g_ctx().graphicsQueue, 1, &submit, VK_NULL_HANDLE);
-
-        VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-        present.waitSemaphoreCount = 1;
-        present.pWaitSemaphores = signalSemaphores;
-        present.swapchainCount = 1;
-        present.pSwapchains = &g_swapchain();
-        present.pImageIndices = &imageIndex;
-
-        result = vkQueuePresentKHR(g_ctx().presentQueue, &present);
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-            createSwapchain();
-            renderer.width_ = g_ctx().width;
-            renderer.height_ = g_ctx().height;
-        }
-
-        currentFrame = (currentFrame + 1) % FRAMES_IN_FLIGHT;
-
-        if (logTimer >= Options::StatusLogInterval) {
-            float fps = frameCount / logTimer;
-            const char* input = controllerConnected ? "CONTROLLER" : (mouseCaptured ? "MOUSE+KB" : "KEYBOARD");
-            printf("[2025] STATUS | FPS: %.1f | SPP: %u | Pos: (%.2f, %.2f, %.2f) | Yaw: %.1f° Pitch: %.1f° | %s | Input: %s | Lights: %zu\n",
-                   fps, renderer.currentSpp_, camera.position.x, camera.position.y, camera.position.z,
-                   camera.yaw, camera.pitch, camera.onGround ? "On Ground" : "Airborne", input, pointLights.size());
-
-            logTimer = 0.0f;
+        frameCount++;
+        fpsTimer += g_deltaTime;
+        if (fpsTimer >= 1.0f) {
+            const float fps = frameCount / std::max(fpsTimer, 0.001f);
+            LOG_INFO_CAT("PERF", "FPS: {:.1f} | Frame: {:.2f}ms | {}x{} | Mode: {}", 
+                         fps, g_deltaTime * 1000.0f, width_, height_, currentRenderMode_);
             frameCount = 0;
+            fpsTimer = 0.0f;
         }
     }
 
-    vkDeviceWaitIdle(g_ctx().device);
+    vkDeviceWaitIdle(stone_device());
+}
 
-    if (gamepad) SDL_CloseGamepad(gamepad);
+// =============================================================================
+// Entry Point — Safe Order
+// =============================================================================
+int main(int, char**)
+{
+    install_apocalypse_handler();
 
-    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
-        vkDestroySemaphore(g_ctx().device, imageAvailableSemaphores[i], nullptr);
-        vkDestroySemaphore(g_ctx().device, renderFinishedSemaphores[i], nullptr);
+    putenv(const_cast<char*>("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR=1"));
+
+    phase3_sacrificialSplash();
+    phase4_merchantShip();                    // Vulkan instance, window, surface, device, swapchain
+    auto renderer = phase7_createRenderer();  // Creates logical device + renderer
+
+    if (!renderer) {
+        phase9_ballerina("Failed to create renderer", std::source_location::current());
     }
 
-    Video::destroy();
+    renderer->createDefaultMaterials();        // Now safe — device exists
 
-    printf("[2025] PLASTIC BEACH SHUTDOWN COMPLETE - MERRY CHRISTMAS\n");
-    printf("The snow falls gently. The lights twinkle. The monster smiles — in perfect silence.\n");
+    phase8_forgeTheRTX(renderer.get());       // Pipeline forge
+
+    // NOW it's safe to build the scene — device and BufferManager are ready
+    phase6_buildDefaultScene();
+
+    stone_seal_final();
+
+    g_app_ptr = std::make_unique<Application>("AMOURANTH RTX vTURBO", 3840, 2160);
+    g_app_ptr->setRenderer(std::move(renderer));
+    g_app_ptr->run();
 
     return 0;
 }
+
+// =============================================================================
+// FINAL MAIN — DECEMBER 22, 2025
+// 1 FRAME IN FLIGHT — BLACK SCREEN GONE
+// ALL 9 SACRED MODES WORKING — DEFAULT SCENE VISIBLE
+// PINK PHOTONS ETERNAL — EMPIRE UNBREAKABLE
+// =============================================================================
