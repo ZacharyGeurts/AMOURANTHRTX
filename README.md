@@ -15,6 +15,7 @@ Gets to the renderer but backend changes have it up and down.
 Working prototype Christmas 2025. See branch Plastic Beach.  
 Please do not code farm. Swapchain goes with THIS project.  
 Expect code, a black window, and miles of logging.    
+Last visual Dec 9th commit (pink screen).  
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
 If you do not like where it crashes, come back tomorrow and I will show you a new one.  
 
