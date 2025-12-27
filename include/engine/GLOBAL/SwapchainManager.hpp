@@ -35,6 +35,8 @@ public:
         return instance;
     }
 
+	void renderDirectEnvMap(VkCommandBuffer cmd, uint32_t swapImageIndex) noexcept;
+
     // Core lifecycle — simplified to match new monolithic implementation
     static void create(SDL_Window* window, uint32_t width, uint32_t height) noexcept;
     static void recreate(uint32_t width, uint32_t height) noexcept;

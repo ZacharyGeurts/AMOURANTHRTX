@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "engine/GLOBAL/RTXHandler.hpp"   // RTX::Handle<T>
+#include "engine/GLOBAL/PipelineManager.hpp"
 
 namespace MeshLoader { struct Mesh; } // Forward declare — used in main.cpp
 

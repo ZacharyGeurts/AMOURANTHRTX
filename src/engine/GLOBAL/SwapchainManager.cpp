@@ -1,18 +1,20 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — PLASTIC BEACH v∞ — DECEMBER 22, 2025
-// FULLY INTEGRATED WITH LAS, VulkanRenderer, StoneKey, AND RESIZE PIPELINE
-// HDR scRGB FP16 SUPPORT | MINIMIZED HANDLING | DYNAMIC RECREATION
-// NOTIFIES LAS ON RESIZE — ENSURES TLAS REBUILD
-// PINK PHOTONS BLOOM ETERNALLY IN FULL DYNAMIC RANGE
-// EMPIRE ETERNAL
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 27, 2025 — CRASH FIXED
+// REMOVED: Direct call to VulkanRenderer from swapchain creation
+// Envmap display pipeline now safely created inside VulkanRenderer only
+// Swapchain remains pure — no dependency on renderer
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/LAS.hpp"  // Added for notifyResize()
+#include "engine/GLOBAL/LAS.hpp"
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -28,6 +30,8 @@ using StoneKey::stone_width;
 using StoneKey::stone_height;
 
 namespace RTX {
+
+// Removed: g_forceDirectEnvMapDisplay — now controlled solely by VulkanRenderer
 
 // =============================================================================
 // ONE LARGE, CLEAN SWAPCHAIN CREATION FUNCTION — FULLY TIED TO LAS
@@ -77,8 +81,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // === PRESENT MODE — PLASTIC BEACH PRIORITY (2025+) ===
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR; // Safe fallback
+    // === PRESENT MODE ===
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
 
     if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_FIFO_RELAXED_KHR) != modes.end()) {
         presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
@@ -86,7 +90,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     }
 
-    // === IMAGE COUNT — TRIPLE BUFFERING FOR LOW LATENCY ===
+    // === IMAGE COUNT ===
     uint32_t imageCount = 3;
     imageCount = std::max(imageCount, caps.minImageCount);
     if (caps.maxImageCount > 0) {
@@ -126,7 +130,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                  VK_IMAGE_USAGE_STORAGE_BIT;  // Still kept for future compute writes
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.preTransform     = caps.currentTransform;
     createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -168,7 +173,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &swapchainImageViews_[i]));
     }
 
-    // === SEAL GLOBAL STATE INTO STONEKEY ===
+    // === SEAL GLOBAL STATE ===
     stone_seal_swapchain(swapchain_.get());
     stone_seal_extent(extent);
     stone_seal_image_count(imgCount);
@@ -188,11 +193,11 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     LOG_AMOURANTH("[2025] SWAPCHAIN {} — {}×{} — {} images — {} — {} — PLASTIC BEACH ETERNAL",
                   isRecreate ? "RECREATED" : "FORGED",
                   extent.width, extent.height, imgCount, modeName, formatName);
+
+    // REMOVED: No longer calling VulkanRenderer here — prevents null deref
 }
 
-// =============================================================================
-// PUBLIC INTERFACE — FULLY TIED TO LAS AND RENDERER
-// =============================================================================
+// Rest of file unchanged (create, recreate, cleanup, acquireNextImage, presentImage, renderDirectEnvMap removed or moved)
 void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
     createOrRecreateSwapchain(w, h, false);
@@ -206,10 +211,7 @@ void SwapchainManager::recreate(uint32_t w, uint32_t h) noexcept
 void SwapchainManager::cleanup() noexcept
 {
     vkDeviceWaitIdle(stone_device());
-
-    // Notify LAS before destroying swapchain
     RTX::las().notifyResize();
-
     cleanupImageViews();
     cleanupSwapchain();
 }
@@ -233,14 +235,9 @@ void SwapchainManager::cleanupImageViews() noexcept
     swapchainImageViews_.clear();
 }
 
-// =============================================================================
-// ACQUIRE & PRESENT — MINIMIZED HANDLING + LAS NOTIFICATION
-// =============================================================================
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept
 {
-    if (minimized_) {
-        return VK_NOT_READY;
-    }
+    if (minimized_) return VK_NOT_READY;
 
     VkResult result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX, semaphore, fence, pImageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
@@ -251,9 +248,7 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
-    if (minimized_) {
-        return;
-    }
+    if (minimized_) return;
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -272,9 +267,8 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 } // namespace RTX
 
 // =============================================================================
-// PLASTIC BEACH v∞ — DECEMBER 22, 2025
-// FULLY TIED TO LAS: notifyResize() called before swapchain destruction
-// HDR-READY | MINIMIZED SAFE | RESIZE ROBUST
-// EMPIRE ASCENDS — PINK PHOTONS IN FULL DYNAMIC RANGE
-// THE MONSTER WATCHES ETERNALLY
+// CRASH FIXED — DECEMBER 27, 2025
+// Swapchain no longer touches VulkanRenderer during creation
+// Envmap display now safely triggered from renderer only
+// Empire stable — pink photons flow again
 // =============================================================================

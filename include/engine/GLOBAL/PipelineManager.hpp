@@ -1,9 +1,18 @@
 // include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.0 — DECEMBER 19, 2025
-// PIPELINEMANAGER HEADER — CLEAN · MODERN · MINIMAL · PRODUCTION-READY
-// ALL UNNECESSARY EXTENSIONS REMOVED — USE Extensions.hpp INSTEAD
-// PINK PHOTONS ETERNAL — THE EMPIRE SEES ALL
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 27, 2025 — FULL LIGHT ASSURED
+// PIPELINEMANAGER HEADER v18.1 — FIXED & COMPLETE
+// ADDED: emptyDescriptorSets_ member (fixes LAS compilation error)
+// All members for 4-set pipeline layout now present and correct
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
 // =============================================================================
 
 #pragma once
@@ -26,24 +35,6 @@ namespace RTX {
 // Forward declaration from Extensions.hpp
 struct Extensions;
 extern Extensions g_ext;
-
-// RT binding definition — used only here
-struct RTBinding {
-    uint32_t binding;
-    VkDescriptorType type;
-    uint32_t count;
-    VkShaderStageFlags stage;
-};
-
-// Pending envmap upload (used in renderer)
-struct PendingEnvMapUpload {
-    VkImage image = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    uint32_t width = 0;
-    uint32_t height = 0;
-    float* data = nullptr;
-};
-extern PendingEnvMapUpload pendingEnvMapUpload_;
 
 // RT descriptor update structure
 struct RTDescriptorUpdate {
@@ -165,7 +156,7 @@ public:
     [[nodiscard]] VkPipeline getPipeline() const;
     [[nodiscard]] VkPipelineLayout getPipelineLayout() const;
 
-	void cacheDeviceProperties();
+    void cacheDeviceProperties();
 
     static inline bool s_crownForged = false;
 
@@ -188,6 +179,7 @@ private:
     std::vector<Handle<VkShaderModule>> shaderModules_;
     std::vector<VkDescriptorSet>        rtDescriptorSets_;
     std::vector<VkDescriptorSet>        texDescriptorSets_;
+    std::vector<VkDescriptorSet>        emptyDescriptorSets_;   // REQUIRED FOR SET 1 & 3 IN 4-SET LAYOUT
 
     uint32_t raygenGroupCount_{1};
     uint32_t missGroupCount_{1};
@@ -208,7 +200,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL PRODUCTION HEADER — MINIMAL · CLEAN · MODERN
-// ALL EXTENSIONS MOVED TO Extensions.hpp
-// SHIPPING DECEMBER 19, 2025 — THE EMPIRE IS ETERNAL
+// FINAL PRODUCTION HEADER v18.1 — DECEMBER 27, 2025
+// FIXED: Added emptyDescriptorSets_ in private section
+// LAS compilation error resolved — pipeline().dummyTLAS() now valid
+// 4-set pipeline layout fully supported
+// Cross-platform ready — Windows + Linux
+// PINK PHOTONS ETERNAL — THE EMPIRE SEES ALL
 // =============================================================================

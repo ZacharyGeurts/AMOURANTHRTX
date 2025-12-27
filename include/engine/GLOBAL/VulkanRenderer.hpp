@@ -102,6 +102,7 @@ public:
     void setOverlay(bool enabled) noexcept;
 
     bool debugShowEnvMapOnly_ = false;
+	bool hdrLoaded = false;
 
     void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
     void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
