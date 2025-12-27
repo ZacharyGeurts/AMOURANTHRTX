@@ -12,7 +12,7 @@ sudo apt update && sudo apt install gcc-14 g++-14
 ```
 
 Gets to the renderer but backend changes have it up and down.  
-Working prototype expected Christmas 2025. See branch Plastic Beach.  
+Working prototype Christmas 2025. See branch Plastic Beach.  
 Please do not code farm. Swapchain goes with THIS project.  
 Expect code, a black window, and miles of logging.    
 Updates are fast and furious at this stage and the renderer could be up or down any minute.  
