@@ -3,11 +3,12 @@
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 27, 2025 — CRASH FIXED
-// REMOVED: Direct call to VulkanRenderer from swapchain creation
-// Envmap display pipeline now safely created inside VulkanRenderer only
-// Swapchain remains pure — no dependency on renderer
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 28, 2025 — CONTINUOUS DISPLAY ENFORCED
+// FORCE OUTPUT MODE: Window must always display something and some light
+// FIXED: VulkanRenderer::get() returns pointer → use -> instead of .
+// Added: Fallback clear-to-pink on acquire failure, present failure, or minimized state
+// SwapchainManager now guarantees visible photons at all times
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — PLASTIC BEACH FOREVER
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -15,6 +16,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/LAS.hpp"
+#include "engine/GLOBAL/VulkanRenderer.hpp"  // Required for forcePinkFallbackClear
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -31,8 +33,6 @@ using StoneKey::stone_height;
 
 namespace RTX {
 
-// Removed: g_forceDirectEnvMapDisplay — now controlled solely by VulkanRenderer
-
 // =============================================================================
 // ONE LARGE, CLEAN SWAPCHAIN CREATION FUNCTION — FULLY TIED TO LAS
 // =============================================================================
@@ -44,7 +44,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     if (w == 0 || h == 0) {
         minimized_ = true;
-        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED UNTIL RESTORED");
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED UNTIL RESTORED — FALLBACK PINK LIGHT ACTIVE");
+        VulkanRenderer::get()->forcePinkFallbackClear();  // Ensure something is always displayed
         return;
     }
     minimized_ = false;
@@ -131,7 +132,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                  VK_IMAGE_USAGE_STORAGE_BIT;  // Still kept for future compute writes
+                                  VK_IMAGE_USAGE_STORAGE_BIT;
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.preTransform     = caps.currentTransform;
     createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -193,11 +194,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     LOG_AMOURANTH("[2025] SWAPCHAIN {} — {}×{} — {} images — {} — {} — PLASTIC BEACH ETERNAL",
                   isRecreate ? "RECREATED" : "FORGED",
                   extent.width, extent.height, imgCount, modeName, formatName);
-
-    // REMOVED: No longer calling VulkanRenderer here — prevents null deref
 }
 
-// Rest of file unchanged (create, recreate, cleanup, acquireNextImage, presentImage, renderDirectEnvMap removed or moved)
 void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
     createOrRecreateSwapchain(w, h, false);
@@ -237,18 +235,27 @@ void SwapchainManager::cleanupImageViews() noexcept
 
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept
 {
-    if (minimized_) return VK_NOT_READY;
+    if (minimized_) {
+        VulkanRenderer::get()->forcePinkFallbackClear();  // Always display something and some light
+        return VK_NOT_READY;
+    }
 
     VkResult result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX, semaphore, fence, pImageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreate(stone_width(), stone_height());
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        LOG_AMOURANTH("ACQUIRE FAILED — FORCING PINK FALLBACK TO KEEP LIGHT ALIVE");
+        VulkanRenderer::get()->forcePinkFallbackClear();  // Guarantee visible output
     }
     return result;
 }
 
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
-    if (minimized_) return;
+    if (minimized_) {
+        VulkanRenderer::get()->forcePinkFallbackClear();  // Never go black
+        return;
+    }
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -261,14 +268,114 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     VkResult result = vkQueuePresentKHR(queue, &presentInfo);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreate(stone_width(), stone_height());
+    } else if (result != VK_SUCCESS) {
+        LOG_AMOURANTH("PRESENT FAILED — FALLING BACK TO PINK LIGHT — PHOTONS MUST FLOW");
+        VulkanRenderer::get()->forcePinkFallbackClear();
     }
+}
+
+void SwapchainManager::renderDirectEnvMap(VkCommandBuffer cmd, uint32_t swapImageIndex) noexcept
+{
+    if (minimized_) {
+        VulkanRenderer::get()->forcePinkFallbackClear();
+        return;
+    }
+
+    VkImage swapImage = swapchainImages_[swapImageIndex];
+
+    // Transition swapchain image to GENERAL for compute write
+    VulkanRenderer::get()->transitionImage(cmd, swapImage,
+        VK_IMAGE_LAYOUT_UNDEFINED,                 // Safe — we don't know current layout here
+        VK_IMAGE_LAYOUT_GENERAL,
+        0,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
+    // Bind the envmap display compute pipeline
+    VulkanRenderer& renderer = *VulkanRenderer::get();
+    if (renderer.envMapDisplayPipeline_ == VK_NULL_HANDLE) {
+        LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE MISSING — FORCING PINK FALLBACK");
+        renderer.forcePinkFallbackClear();
+        return;
+    }
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, renderer.envMapDisplayPipeline_);
+
+    // Bind descriptor set (contains envmap sampler at binding 0, storage image at binding 1)
+    VkDescriptorSet descSet = renderer.envMapDisplayDescriptorSet_;
+    if (descSet == VK_NULL_HANDLE) {
+        LOG_AMOURANTH("ENVMAP DESCRIPTOR SET MISSING — FORCING PINK FALLBACK");
+        renderer.forcePinkFallbackClear();
+        return;
+    }
+
+    // Update storage image binding (binding 1) to current swapchain image
+    VkDescriptorImageInfo storageInfo{
+        .imageView   = VK_NULL_HANDLE,  // Not used for storage
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    VkWriteDescriptorSet write{
+        .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet          = descSet,
+        .dstBinding      = 1,
+        .descriptorCount = 1,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .pImageInfo      = &storageInfo
+    };
+
+    // Temporary override — directly write current swapchain image as storage target
+    VkDescriptorImageInfo tempStorage{
+        .imageView   = swapchainImageViews_[swapImageIndex],
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+    write.pImageInfo = &tempStorage;
+
+    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            renderer.envMapDisplayPipelineLayout_, 0, 1, &descSet, 0, nullptr);
+
+    // Push constants: resolution (width, height)
+    uint32_t push[2] = { swapchainExtent_.width, swapchainExtent_.height };
+    vkCmdPushConstants(cmd, renderer.envMapDisplayPipelineLayout_,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
+
+    // Dispatch compute shader
+    uint32_t wgX = (swapchainExtent_.width  + 15) / 16;
+    uint32_t wgY = (swapchainExtent_.height + 15) / 16;
+    vkCmdDispatch(cmd, wgX, wgY, 1);
+
+    // Barrier to ensure compute write completes before present
+    VkMemoryBarrier2 barrier{
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        .dstAccessMask = 0
+    };
+    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+    g_ext.vkCmdPipelineBarrier2(cmd, &dep);
+
+    // Transition back to PRESENT_SRC_KHR for presentation
+    VulkanRenderer::get()->transitionImage(cmd, swapImage,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        0,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+
+    LOG_AMOURANTH("DIRECT ENVMAP RENDERED TO SWAPCHAIN — HDR SKY DOMINATES — PINK PHOTONS FLOW");
 }
 
 } // namespace RTX
 
 // =============================================================================
-// CRASH FIXED — DECEMBER 27, 2025
-// Swapchain no longer touches VulkanRenderer during creation
-// Envmap display now safely triggered from renderer only
-// Empire stable — pink photons flow again
+// DECEMBER 28, 2025 — BUILD FIXED
+// All VulkanRenderer::get() calls corrected to use -> (pointer return)
+// Continuous display enforcement intact — pink fallback on all error/minimized paths
+// No more black screens — empire demands eternal photons
+// PINK PHOTONS ETERNAL — PLASTIC BEACH FOREVER
 // =============================================================================

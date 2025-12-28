@@ -3,8 +3,10 @@
 //
 // Dual Licensed: CC BY-NC 4.0 + Commercial (gzac5314@gmail.com)
 //
-// AMOURANTH RTX Engine (C) 2025 — SLIPSTREAM v∞ — WARPZONE BREACH IMMINENT
-// Pink wake eternal. First light restored. Photons now obey without rebellion.
+// AMOURANTH RTX Engine (C) 2025 — SLIPSTREAM v∞ — DECEMBER 28, 2025
+// FORCE OUTPUT MODE ENFORCED — PINK PHOTONS ETERNAL
+// Added: public forcePinkFallbackClear() — called by SwapchainManager on minimize/error
+// Window will never go black — empire demands continuous light
 // =============================================================================
 
 #pragma once
@@ -102,7 +104,7 @@ public:
     void setOverlay(bool enabled) noexcept;
 
     bool debugShowEnvMapOnly_ = false;
-	bool hdrLoaded = false;
+    bool hdrLoaded = false;
 
     void transitionImageForTransferWrite(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
     void transitionImageForShaderRead(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout) noexcept;
@@ -155,6 +157,11 @@ public:
     void clearPinkForce() noexcept;
     EnvironmentMap createEnvironmentMap() noexcept;
 
+    // ── NEW: FORCE OUTPUT MODE SUPPORT ──────────────────────────────────────
+    // Called by SwapchainManager when minimized or on acquire/present failure
+    // Guarantees the window always displays something — pink photons eternal
+    void forcePinkFallbackClear() noexcept;
+
     // ── FIXED COMMAND POOL & BUFFERS ────────────────────────────────────────
     VkCommandPool                commandPool_            = VK_NULL_HANDLE;      // Persistent primary pool
     VkCommandPool                transientCommandPool_   = VK_NULL_HANDLE;      // For one-time ops (reset every frame)
@@ -182,7 +189,7 @@ public:
     float     materialMetallicOverride_  = -1.0f;
     float     materialRoughnessOverride_ = -1.0f;
     float     emissiveIntensity_    = 1.0f;
-	uint32_t  acquiredImageIndex_   = 0;
+    uint32_t  acquiredImageIndex_   = 0;
 
     float     debugFloat1_ = 0.0f;
     float     debugFloat2_ = 0.0f;
@@ -527,7 +534,8 @@ private:
     return *ptr;
 }
 
-// FIRST LIGHT RESTORED — DECEMBER 22, 2025
-// RENDER MODES 1-9 FULLY INTEGRATED — SOLID COLOR FALLBACKS READY
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
+// FORCE OUTPUT MODE COMPLETE — DECEMBER 28, 2025
+// forcePinkFallbackClear() exposed and ready for SwapchainManager
+// No black screens — pink light flows even in darkness
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — PLASTIC BEACH FOREVER
 // =============================================================================

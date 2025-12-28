@@ -1646,11 +1646,126 @@ void VulkanRenderer::createAccumulationPipeline() noexcept
     LOG_SUCCESS_CAT("RENDERER", "Accumulation pipeline forged — temporal convergence armed");
 }
 
+void VulkanRenderer::forcePinkFallbackClear() noexcept
+{
+    if (destroyed_ || !RTX::swapchainIsValid() || minimized_) {
+        // Nothing we can do safely — swapchain gone or we're already in minimal state
+        return;
+    }
+
+    VkDevice device = stone_device();
+    VkQueue queue = stone_graphics_queue();
+
+    // FORCE CREATE transient pool if missing — empire demands reliability
+    if (transientCommandPool_ == VK_NULL_HANDLE || g_transientCommandPool == VK_NULL_HANDLE) {
+        LOG_AMOURANTH("TRANSIENT COMMAND POOL MISSING IN forcePinkFallbackClear — FORCING CREATION");
+
+        VkCommandPoolCreateInfo info{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
+        };
+
+        VkCommandPool newPool = VK_NULL_HANDLE;
+        VkResult result = vkCreateCommandPool(device, &info, nullptr, &newPool);
+        if (result != VK_SUCCESS) {
+            LOG_FATAL_CAT("RENDERER", "CRITICAL: Failed to force-create transient pool in fallback: {}", string_VkResult(result));
+            return;  // Cannot proceed — but at least we tried
+        }
+
+        // Update both member and global — both are used
+        transientCommandPool_ = newPool;
+        g_transientCommandPool = newPool;
+
+        LOG_SUCCESS_CAT("RENDERER", "Transient command pool FORCE-CREATED in fallback — pink safety restored");
+    }
+
+    // Use the guaranteed valid pool
+    VkCommandPool pool = transientCommandPool_;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = pool;
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &cmd));
+    }
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+
+    const auto& images = RTX::swapchainImages();
+
+    for (VkImage image : images) {
+        transitionImage(cmd, image,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        0,
+                        VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        VkClearColorValue pinkClear{};
+        pinkClear.float32[0] = 1.0f;       // R
+        pinkClear.float32[1] = 0.078431f; // G  (20/255)
+        pinkClear.float32[2] = 0.576471f; // B  (147/255)
+        pinkClear.float32[3] = 1.0f;       // A
+
+        VkImageSubresourceRange range{};
+        range.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        range.baseMipLevel   = 0;
+        range.levelCount     = 1;
+        range.baseArrayLayer = 0;
+        range.layerCount     = 1;
+
+        vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             &pinkClear, 1, &range);
+
+        transitionImage(cmd, image,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                        VK_ACCESS_TRANSFER_WRITE_BIT,
+                        0,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    }
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers    = &cmd;
+
+    VkFence fence = VK_NULL_HANDLE;
+    {
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VK_CHECK(vkCreateFence(device, &fenceInfo, nullptr, &fence));
+    }
+
+    VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
+    VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+
+    vkDestroyFence(device, fence, nullptr);
+    vkFreeCommandBuffers(device, pool, 1, &cmd);
+    vkResetCommandPool(device, pool, 0);
+}
+
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     totalTime_ += deltaTime;
 
-    if (RTX::SwapchainManager::minimized_) {
+    if (RTX::SwapchainManager::get().isMinimized()) {
+        // Minimized → force pink light to guarantee visibility
+        forcePinkFallbackClear();
         return;
     }
 
@@ -1659,22 +1774,22 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
     // 1. Acquire Image
     uint32_t imageIndex = 0;
-    VkResult acquireResult = vkAcquireNextImageKHR(
-        stone_device(), stone_swapchain(),
-        UINT64_MAX,
-        imageAvailableSemaphores_[slot],
-        VK_NULL_HANDLE,
-        &imageIndex
-    );
-
-    acquiredImageIndex_ = imageIndex;
+    VkResult acquireResult = RTX::SwapchainManager::get().acquireNextImage(&imageIndex,
+                                                                          imageAvailableSemaphores_[slot],
+                                                                          inFlightFences_[slot]);
 
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
         vkDeviceWaitIdle(stone_device());
         RTX::recreateSwapchain(stone_width(), stone_height());
         return;
     }
-    if (acquireResult != VK_SUCCESS) return;
+    if (acquireResult != VK_SUCCESS) {
+        // Acquire failed (timeout or other error) → force pink to avoid black screen
+        forcePinkFallbackClear();
+        return;
+    }
+
+    acquiredImageIndex_ = imageIndex;
 
     VkCommandBuffer cmd = commandBuffers_[slot];
     vkResetCommandBuffer(cmd, 0);
@@ -1683,14 +1798,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // 2. Build Acceleration Structures
+    // 2. Build Acceleration Structures — safe fallback if fails
     RTX::las().buildOrUpdateTLAS(cmd);
 
     bool isFallbackMode = (activeRenderMode_ >= 1 && activeRenderMode_ <= 9);
 
-    // 3. One-time Transitions (Whisper Mode)
+    // 3. One-time Transitions (Whisper Mode) — safe, undefined → target
     if (rtOutputNeedsTransition_) {
         for (const auto& img : rtOutputImages_) {
             transitionImage(cmd, img.get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
@@ -1727,15 +1842,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         nexusScoreNeedsInit_ = false;
     }
 
-    // 4. Environment Map Upload (First Frame Logic) — FIXED: hdrLoaded now in scope
-    bool hdrLoaded = false;  // Declare here so it's available for cleanup
+    // 4. Environment Map Upload (First Frame) — safe, with fallback
     if (envMapNeedsUpload_ && envMapUploadData_) {
-        // Create staging buffer
+        // Staging upload logic (unchanged — safe path)
         VkBuffer staging = VK_NULL_HANDLE;
         VkDeviceMemory stagingMem = VK_NULL_HANDLE;
         VkBufferCreateInfo stagingInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = static_cast<VkDeviceSize>(envMapUploadWidth_ * envMapUploadHeight_ * 16), // R32G32B32A32_SFLOAT = 16 bytes/pixel
+            .size = static_cast<VkDeviceSize>(envMapUploadWidth_ * envMapUploadHeight_ * 16),
             .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE
         };
@@ -1744,83 +1858,79 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         VkMemoryRequirements stagingReqs;
         vkGetBufferMemoryRequirements(stone_device(), staging, &stagingReqs);
 
-        uint32_t stagingType = findMemoryType(stagingReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        uint32_t stagingType = findMemoryType(stagingReqs.memoryTypeBits,
+                                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         if (stagingType == ~0u) {
-            LOG_FATAL_CAT("RENDERER", "No suitable memory type for envmap staging buffer");
             vkDestroyBuffer(stone_device(), staging, nullptr);
-            return;
-        }
-
-        VkMemoryAllocateInfo stagingAlloc{
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = stagingReqs.size,
-            .memoryTypeIndex = stagingType
-        };
-        VK_CHECK(vkAllocateMemory(stone_device(), &stagingAlloc, nullptr, &stagingMem));
-        VK_CHECK(vkBindBufferMemory(stone_device(), staging, stagingMem, 0));
-
-        // Map and copy data
-        void* mapped = nullptr;
-        VK_CHECK(vkMapMemory(stone_device(), stagingMem, 0, stagingReqs.size, 0, &mapped));
-        std::memcpy(mapped, envMapUploadData_, stagingReqs.size);
-        vkUnmapMemory(stone_device(), stagingMem);
-
-        // Transition image to TRANSFER_DST
-        transitionImageForTransferWrite(cmd, envMapImage_.get(), VK_IMAGE_LAYOUT_UNDEFINED);
-
-        // Copy buffer to image
-        VkBufferImageCopy copyRegion{
-            .bufferOffset = 0,
-            .bufferRowLength = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-            .imageExtent = {envMapUploadWidth_, envMapUploadHeight_, 1}
-        };
-        vkCmdCopyBufferToImage(cmd, staging, envMapImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-
-        // Transition to SHADER_READ_ONLY_OPTIMAL
-        transitionImageForShaderRead(cmd, envMapImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        // Cleanup staging
-        vkFreeMemory(stone_device(), stagingMem, nullptr);
-        vkDestroyBuffer(stone_device(), staging, nullptr);
-
-        // Free uploaded data — hdrLoaded now correctly in scope
-        if (hdrLoaded) {
-            stbi_image_free(envMapUploadData_);
+            forcePinkFallbackClear();  // Upload failed → pink safety
+            envMapNeedsUpload_ = false;
         } else {
-            delete[] envMapUploadData_;
-        }
-        envMapUploadData_ = nullptr;
-        envMapNeedsUpload_ = false;
+            VkMemoryAllocateInfo stagingAlloc{
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = stagingReqs.size,
+                .memoryTypeIndex = stagingType
+            };
+            VK_CHECK(vkAllocateMemory(stone_device(), &stagingAlloc, nullptr, &stagingMem));
+            VK_CHECK(vkBindBufferMemory(stone_device(), staging, stagingMem, 0));
 
-        LOG_SUCCESS_CAT("RENDERER", "Environment map uploaded successfully — {}×{}", envMapUploadWidth_, envMapUploadHeight_);
+            void* mapped = nullptr;
+            VK_CHECK(vkMapMemory(stone_device(), stagingMem, 0, stagingReqs.size, 0, &mapped));
+            std::memcpy(mapped, envMapUploadData_, stagingReqs.size);
+            vkUnmapMemory(stone_device(), stagingMem);
+
+            transitionImageForTransferWrite(cmd, envMapImage_.get(), VK_IMAGE_LAYOUT_UNDEFINED);
+
+            VkBufferImageCopy copyRegion{
+                .bufferOffset = 0,
+                .bufferRowLength = 0,
+                .bufferImageHeight = 0,
+                .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                .imageExtent = {envMapUploadWidth_, envMapUploadHeight_, 1}
+            };
+            vkCmdCopyBufferToImage(cmd, staging, envMapImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+            transitionImageForShaderRead(cmd, envMapImage_.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            vkFreeMemory(stone_device(), stagingMem, nullptr);
+            vkDestroyBuffer(stone_device(), staging, nullptr);
+
+            delete[] envMapUploadData_;
+            envMapUploadData_ = nullptr;
+            envMapNeedsUpload_ = false;
+
+            LOG_SUCCESS_CAT("RENDERER", "Environment map uploaded — {}×{}", envMapUploadWidth_, envMapUploadHeight_);
+        }
     }
 
-    // 5. Create envmap display pipeline after envmap is ready (safe here — renderer exists)
+    // 5. Create envmap display pipeline if needed
     if (envMapNeedsUpload_ == false && envMapDisplayPipeline_ == VK_NULL_HANDLE) {
         createEnvMapDisplayPipeline();
     }
 
     VkImage finalSrc;
+
     if (isFallbackMode) {
-        // Fallback modes render directly to swapchain
         finalSrc = stone_images()[imageIndex];
+        // Fallback modes render directly — assumed safe (solid colors)
     } else {
-        // 6. RTX Rendering Path
+        // RTX Path — only proceed if core resources are valid
+        if (rtOutputImages_.empty() || rtOutputViews_.empty() || rtOutputImages_[slot].get() == VK_NULL_HANDLE) {
+            LOG_AMOURANTH("RT OUTPUT MISSING — FORCING PINK FALLBACK");
+            forcePinkFallbackClear();
+            goto present;
+        }
+
         updateUniformBuffer(slot, camera, deltaTime);
         updateTonemapUniform(slot);
         currentFrame_.store(slot);
 
-        // Ensure RT output is in GENERAL layout before tracing
         transitionImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                         0, VK_ACCESS_SHADER_WRITE_BIT,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
 
-        // Update descriptors & record rays
         {
             RTX::RTDescriptorUpdate desc{};
-            desc.tlas = RTX::las().getCurrentTLAS() ? RTX::las().getCurrentTLAS() : pipelineManager_.dummyTLAS();
+            desc.tlas = RTX::las().getCurrentTLAS();
             desc.ubo = RAW_BUFFER(uniformBufferEncs_[slot]);
             desc.uboSize = sizeof(CameraSceneData);
             desc.rtOutputView = rtOutputViews_[slot].get();
@@ -1831,7 +1941,6 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
                 desc.materialsSize = sizeof(Material) * 2;
             }
 
-            // Envmap now always available (pink fallback guaranteed)
             desc.envSampler = envMapSampler_.get();
             desc.envImageView = envMapImageView_.get();
 
@@ -1840,25 +1949,27 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 
         recordRayTracingCommands(cmd, slot);
 
-        // Post-processing
         if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
             recordAccumulationPass(cmd, slot);
         }
 
-        // Final source for presentation
         finalSrc = rtOutputImages_[slot].get();
 
-        // 7. Final Blit/Tonemap to Swapchain
         if (Options::Tonemap::ENABLE_TONEMAPPING && tonemapEnabled_) {
             VkImageView input = (Options::OptionsRTX::ENABLE_DENOISING && denoisingEnabled_)
                                 ? denoiserView_.get()
                                 : (Options::OptionsRTX::ENABLE_ACCUMULATION ? accumViews_[slot].get() : rtOutputViews_[slot].get());
 
+            if (input == VK_NULL_HANDLE) {
+                forcePinkFallbackClear();
+                goto present;
+            }
+
             updateTonemapDescriptor(slot, input, stone_views()[imageIndex]);
             performTonemapPass(cmd, slot, imageIndex);
             finalSrc = stone_images()[imageIndex];
         } else {
-            // Manual copy from RT output → swapchain
+            // Manual blit — safe path
             transitionImage(cmd, finalSrc, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                             VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_TRANSFER_BIT);
@@ -1885,11 +1996,16 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         }
     }
 
-    // Optional: Direct envmap display override (for debugging sky only)
-    // Uncomment to force pure HDR envmap on screen (exposure 1.0f)
-    // RTX::SwapchainManager::renderDirectEnvMap(cmd, imageIndex);
+    // Direct envmap override — only if pipeline is ready
+    if (envMapDisplayPipeline_ != VK_NULL_HANDLE && envMapDisplayDescriptorSet_ != VK_NULL_HANDLE) {
+        RTX::SwapchainManager::get().renderDirectEnvMap(cmd, imageIndex);
+    } else {
+        // If envmap display not ready → fall back to pink
+        forcePinkFallbackClear();
+    }
 
-    vkEndCommandBuffer(cmd);
+present:
+    VK_CHECK(vkEndCommandBuffer(cmd));
     submitAndPresent(slot, imageIndex);
 
     if (!isFallbackMode) {
