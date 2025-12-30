@@ -659,7 +659,7 @@ void VulkanRenderer::createRTOutputImages() noexcept
 
     const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    destroyRTOutputImages();
+    //destroyRTOutputImages();
 
     rtOutputImages_.resize(frames);
     rtOutputMemories_.resize(frames);

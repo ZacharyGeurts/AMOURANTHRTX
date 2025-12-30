@@ -1,0 +1,103 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform readonly  image2D imgNoisy;      // Current RT output
+layout(set = 0, binding = 1, rgba32f) uniform readonly  image2D imgHistory;    // Previous accumulation
+layout(set = 0, binding = 2, rgba32f) uniform writeonly image2D imgOutput;     // Final denoised
+layout(set = 0, binding = 3, r32f)    uniform readonly  image2D imgDepth;      // Linear depth (optional but recommended)
+layout(set = 0, binding = 4, rgba16f) uniform readonly  image2D imgNormal;     // World normal (oct-encoded or regular)
+
+layout(push_constant) uniform Push {
+    uint   frame;           // current frame counter
+    float  alpha;           // temporal blend (0.1-0.2 typical)
+    float  phiColor;        // color sigma for spatial
+    float  phiNormal;       // normal sigma for spatial
+    float  phiDepth;        // depth sigma for spatial
+} pc;
+
+// Helper: decode octahedral normal (if you encode normals this way)
+vec3 decodeNormal(vec2 enc) {
+    vec3 n = vec3(enc.xy, 1.0 - abs(enc.x) - abs(enc.y));
+    float t = max(-n.z, 0.0);
+    n.x += n.x >= 0.0 ? -t : t;
+    n.y += n.y >= 0.0 ? -t : t;
+    return normalize(n);
+}
+
+// Simple temporal accumulation with depth-based rejection
+vec4 temporalAccumulation(ivec2 pix) {
+    vec4 currColor = imageLoad(imgNoisy, pix);
+
+    // Previous frame pixel (simple - no motion vectors yet)
+    ivec2 prevPix = pix; // extend later with motion vectors
+
+    vec4 prevColor = imageLoad(imgHistory, prevPix);
+
+    // Basic rejection using depth continuity (add normal check if needed)
+    float currDepth = imageLoad(imgDepth, pix).r;
+    float prevDepth = imageLoad(imgDepth, prevPix).r;
+    float depthDiff = abs(currDepth - prevDepth);
+
+    float blend = depthDiff < 0.05 ? pc.alpha : 1.0; // reject if disoccluded
+
+    return mix(prevColor, currColor, blend);
+}
+
+// Edge-avoiding à-trous wavelet (5 iterations)
+vec3 atrousFilter(ivec2 pix, vec3 centerColor, vec3 centerNormal, float centerDepth) {
+    const int kernel[5][5] = { // 5 iterations, step increases: 1,2,4,8,16
+        {1, 4, 6, 4, 1},
+        {4, 16, 24, 16, 4},
+        {6, 24, 36, 24, 6},
+        {4, 16, 24, 16, 4},
+        {1, 4, 6, 4, 1}
+    };
+    const float kernelWeight = 256.0;
+
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+
+    for (int iter = 0; iter < 5; ++iter) {
+        int step = 1 << iter;
+        for (int y = -2; y <= 2; ++y) {
+            for (int x = -2; x <= 2; ++x) {
+                ivec2 p = pix + ivec2(x, y) * step;
+                vec3 sampleColor = imageLoad(imgNoisy, p).rgb;
+
+                vec3 sampleNormal = decodeNormal(imageLoad(imgNormal, p).xy);
+                float sampleDepth = imageLoad(imgDepth, p).r;
+
+                float wColor  = exp(-dot(centerColor - sampleColor, centerColor - sampleColor) / (2.0 * pc.phiColor * pc.phiColor));
+                float wNormal = pow(max(0.0, dot(centerNormal, sampleNormal)), pc.phiNormal);
+                float wDepth  = exp(-abs(centerDepth - sampleDepth) / (pc.phiDepth * max(centerDepth, 1e-3)));
+
+                float w = wColor * wNormal * wDepth * kernel[2+y][2+x];
+
+                sum += sampleColor * w;
+                wsum += w;
+            }
+        }
+    }
+
+    return wsum > 1e-4 ? sum / wsum : centerColor;
+}
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    if (pix.x >= imageSize(imgNoisy).x || pix.y >= imageSize(imgNoisy).y) return;
+
+    // Step 1: Temporal accumulation (write to output as intermediate)
+    vec4 tempColor = temporalAccumulation(pix);
+
+    // Step 2: Spatial à-trous on temporally accumulated color
+    vec3 centerNormal = decodeNormal(imageLoad(imgNormal, pix).xy);
+    float centerDepth = imageLoad(imgDepth, pix).r;
+
+    vec3 denoised = atrousFilter(pix, tempColor.rgb, centerNormal, centerDepth);
+
+    imageStore(imgOutput, pix, vec4(denoised, tempColor.a)); // preserve alpha if needed
+}
