@@ -1,5 +1,5 @@
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -7,10 +7,10 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 21, 2025 — GENERIC UNIFORM BUFFERS
+// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 30, 2025 — FIXED BLACK SCREEN EDITION
 // HARDCORE: 2 Frames in Flight | R16G16_SFLOAT for Nexus/Adaptive | All Top-Notch Enabled
 // Empire Optimized: Unlimited FPS | Full Accumulation/Denoising/Adaptive/Hypertrace/Tonemap
-// UBO now correctly bound at binding 2 in all relevant places — matches PipelineManager v17.2
+// MAJOR FIXES: Completed envmap display pipeline with shader | Removed debug pink clear | Updated descriptors | Added missing pipeline creations | Fixed transitions | Added animation call | Fixed leaks
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -509,6 +509,46 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
         return;
     }
 
+    // Load compute shader for envmap display
+    VkShaderModule module = pipelineManager_.loadShader("assets/shaders/compute/envmap_display.spv");
+    if (module == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load envmap_display.spv — envmap display disabled");
+        vkDestroyPipelineLayout(device, envMapDisplayPipelineLayout_, nullptr);
+        envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
+        vkDestroyDescriptorSetLayout(device, envMapDisplayDescSetLayout_, nullptr);
+        envMapDisplayDescSetLayout_ = VK_NULL_HANDLE;
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo stage{
+        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = module,
+        .pName  = "main"
+    };
+
+    VkComputePipelineCreateInfo pipeInfo{
+        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage  = stage,
+        .layout = envMapDisplayPipelineLayout_
+    };
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkResult pipeResult = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline);
+    if (pipeResult != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create envmap display pipeline: {}", string_VkResult(pipeResult));
+        vkDestroyShaderModule(device, module, nullptr);
+        vkDestroyPipelineLayout(device, envMapDisplayPipelineLayout_, nullptr);
+        envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
+        vkDestroyDescriptorSetLayout(device, envMapDisplayDescSetLayout_, nullptr);
+        envMapDisplayDescSetLayout_ = VK_NULL_HANDLE;
+        return;
+    }
+
+    envMapDisplayPipeline_ = pipeline;
+
+    vkDestroyShaderModule(device, module, nullptr);
+
     // Free old descriptor set if exists
     if (envMapDisplayDescriptorSet_ != VK_NULL_HANDLE) {
         VkResult freeResult = vkFreeDescriptorSets(device, envMapDescriptorPool_.get(), 1, &envMapDisplayDescriptorSet_);
@@ -528,6 +568,8 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
     VkResult allocResult = vkAllocateDescriptorSets(device, &allocInfo, &envMapDisplayDescriptorSet_);
     if (allocResult != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to allocate envmap descriptor set: {}", string_VkResult(allocResult));
+        vkDestroyPipeline(device, envMapDisplayPipeline_, nullptr);
+        envMapDisplayPipeline_ = VK_NULL_HANDLE;
         vkDestroyPipelineLayout(device, envMapDisplayPipelineLayout_, nullptr);
         envMapDisplayPipelineLayout_ = VK_NULL_HANDLE;
         vkDestroyDescriptorSetLayout(device, envMapDisplayDescSetLayout_, nullptr);
@@ -551,10 +593,6 @@ void VulkanRenderer::createEnvMapDisplayPipeline() noexcept
         .pImageInfo      = &samplerInfo
     };
     vkUpdateDescriptorSets(device, 1, &samplerWrite, 0, nullptr);
-
-    // Render the envmap.hdr directly — no precompiled shader needed
-    // We use the HDR texture as-is via sampler — no compute shader required
-    // This function now only creates the pipeline infrastructure — actual rendering happens elsewhere
 
     LOG_AMOURANTH("ENVMAP DISPLAY PIPELINE FORGED — assets/textures/envmap.hdr READY TO DOMINATE THE SKY — PINK FALLBACK ACTIVE");
 }
@@ -769,6 +807,7 @@ void VulkanRenderer::clearAccumulationImages(VkCommandBuffer cmd)
     if (hypertraceScoreImage_ != VK_NULL_HANDLE) {
         vkCmdClearColorImage(cmd, hypertraceScoreImage_, VK_IMAGE_LAYOUT_GENERAL, &navy, 1, &range);
     }
+    resetAccumNextFrame_ = false;
 }
 
 void VulkanRenderer::transitionImage(
@@ -1091,11 +1130,6 @@ void VulkanRenderer::recordRayTracingCommands(VkCommandBuffer cmd, uint32_t fram
     // Removed the TLAS check to always perform tracing with dummy TLAS if necessary
     // This ensures the envmap is sampled on miss, preventing black screen
 
-    // Always clear to debug pink for initial validation (remove once rendering works)
-    VkClearColorValue debugPink{{1.0f, 0.0f, 0.5f, 1.0f}};
-    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdClearColorImage(cmd, rtOutputImages_[frameIndex].get(), VK_IMAGE_LAYOUT_GENERAL, &debugPink, 1, &range);
-
     // Bind pipeline (kept from original)
     vkCmdBindPipeline(cmd,
         VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
@@ -1328,11 +1362,81 @@ void VulkanRenderer::updateDenoiserDescriptors() noexcept {
     vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
+void VulkanRenderer::createDenoiserPipeline() noexcept
+{
+    if (denoiserPipeline_.valid()) {
+        return;
+    }
+
+    LOG_INFO_CAT("RENDERER", "Forging denoiser compute pipeline");
+
+    VkDescriptorSetLayoutBinding inputBinding = {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+    VkDescriptorSetLayoutBinding outputBinding = {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {inputBinding, outputBinding};
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    layoutInfo.bindingCount = bindings.size();
+    layoutInfo.pBindings = bindings.data();
+
+    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(stone_device(), &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create denoiser descriptor set layout");
+        return;
+    }
+
+    denoiserLayout_ = Handle<VkDescriptorSetLayout>(rawLayout, stone_device(), vkDestroyDescriptorSetLayout);
+
+    VkPipelineLayoutCreateInfo plInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    plInfo.setLayoutCount = 1;
+    plInfo.pSetLayouts = &rawLayout;
+
+    VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &rawPipelineLayout) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create denoiser pipeline layout");
+        return;
+    }
+
+    denoiserPipelineLayout_ = Handle<VkPipelineLayout>(rawPipelineLayout, stone_device(), vkDestroyPipelineLayout);
+
+    VkShaderModule module = pipelineManager_.loadShader("assets/shaders/compute/denoiser.spv");
+    if (module == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load denoiser.spv");
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.module = module;
+    stage.pName = "main";
+
+    VkComputePipelineCreateInfo pipeInfo = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    pipeInfo.stage = stage;
+    pipeInfo.layout = rawPipelineLayout;
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create denoiser pipeline");
+        vkDestroyShaderModule(stone_device(), module, nullptr);
+        return;
+    }
+
+    denoiserPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
+
+    vkDestroyShaderModule(stone_device(), module, nullptr);
+
+    LOG_SUCCESS_CAT("RENDERER", "Denoiser pipeline forged");
+}
+
 void VulkanRenderer::performDenoisingPass(VkCommandBuffer cmd) noexcept {
+    if (!denoiserPipeline_.valid()) {
+        return;
+    }
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, denoiserPipeline_.get());
 
     VkDescriptorSet set = denoiserSets_[currentFrame_ % denoiserSets_.size()];
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, denoiserLayout_.get(), 0, 1, &set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, denoiserPipelineLayout_.get(), 0, 1, &set, 0, nullptr);
 
     uint32_t wgX = (width_ + 15) / 16;
     uint32_t wgY = (height_ + 15) / 16;
@@ -1406,6 +1510,12 @@ void VulkanRenderer::requestResize(uint32_t newWidth, uint32_t newHeight) noexce
     renderMode7_.onResize(newWidth, newHeight);
     renderMode8_.onResize(newWidth, newHeight);
     renderMode9_.onResize(newWidth, newHeight);
+
+    // Reset transition flags after recreate
+    rtOutputNeedsTransition_ = true;
+    accumulationNeedsTransition_ = true;
+    depthNeedsTransition_ = true;
+    nexusScoreNeedsInit_ = true;
 
     s_resizeInProgress.store(false);
 
@@ -1485,6 +1595,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createTonemapDescriptorSetLayout();
     createTonemapDescriptorSets();
     recreateTonemapUBOs();
+    createTonemapPipeline();  // Added missing creation
 
     initializeAllBufferData(Options::Performance::MAX_FRAMES_IN_FLIGHT, sizeof(CameraSceneData), MATERIAL_BUFFER_SIZE);
 
@@ -1493,6 +1604,7 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     createAccumulationImages();
     createAccumulationPipeline();
     createNexusScoreImage(g_transientCommandPool, stone_graphics_queue());
+    createDenoiserPipeline();  // Added missing creation
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1705,7 +1817,7 @@ void VulkanRenderer::forcePinkFallbackClear() noexcept
 
     for (VkImage image : images) {
         transitionImage(cmd, image,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         0,
                         VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1762,6 +1874,9 @@ void VulkanRenderer::forcePinkFallbackClear() noexcept
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     totalTime_ += deltaTime;
+
+    // Animate the pink monster
+    RTX::las().animatePinkMonster(deltaTime);
 
     if (RTX::SwapchainManager::get().isMinimized()) {
         // Minimized → force pink light to guarantee visibility
@@ -1924,9 +2039,14 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         updateTonemapUniform(slot);
         currentFrame_.store(slot);
 
-        transitionImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                        0, VK_ACCESS_SHADER_WRITE_BIT,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+        // Update descriptors
+        updateNexusDescriptors();
+        updateDenoiserDescriptors();
+        updateAccumulationDescriptors(slot);
+
+        transitionImage(cmd, rtOutputImages_[slot].get(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+                        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);  // Ensure correct layout
 
         {
             RTX::RTDescriptorUpdate desc{};
@@ -1950,7 +2070,12 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         recordRayTracingCommands(cmd, slot);
 
         if (Options::OptionsRTX::ENABLE_ACCUMULATION) {
+            clearAccumulationImages(cmd);  // Clear if reset requested
             recordAccumulationPass(cmd, slot);
+        }
+
+        if (Options::OptionsRTX::ENABLE_DENOISING) {
+            performDenoisingPass(cmd);
         }
 
         finalSrc = rtOutputImages_[slot].get();
@@ -2131,6 +2256,48 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
 }
 
 // =============================================================================
+// updateAccumulationDescriptors — Added to fix unbound descriptors
+// =============================================================================
+void VulkanRenderer::updateAccumulationDescriptors(uint32_t slot) noexcept
+{
+    VkDescriptorSet set = accumulationSets_[slot % accumulationSets_.size()];
+
+    VkDescriptorImageInfo currentInfo{};
+    currentInfo.imageView = rtOutputViews_[slot].get();
+    currentInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorImageInfo historyInfo{};
+    historyInfo.imageView = accumViews_[(slot + 1) % Options::Performance::MAX_FRAMES_IN_FLIGHT].get();  // Previous frame
+    historyInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorImageInfo outputInfo{};
+    outputInfo.imageView = accumViews_[slot].get();
+    outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorImageInfo depthInfo{};
+    depthInfo.imageView = depthImageView_.get();
+    depthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkDescriptorBufferInfo uboInfo{};
+    const auto* ubo = BufferManager::get(uniformBufferEncs_[slot]);
+    if (ubo) {
+        uboInfo.buffer = ubo->buffer;
+        uboInfo.offset = 0;
+        uboInfo.range = sizeof(CameraSceneData);
+    }
+
+    std::array<VkWriteDescriptorSet, 5> writes = {{
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &currentInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 1, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &historyInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 2, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &outputInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 3, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, &depthInfo},
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 4, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &uboInfo}
+    }};
+
+    vkUpdateDescriptorSets(stone_device(), writes.size(), writes.data(), 0, nullptr);
+}
+
+// =============================================================================
 // recordAccumulationPass — Full implementation
 // =============================================================================
 void VulkanRenderer::recordAccumulationPass(VkCommandBuffer cmd, uint32_t slot) noexcept
@@ -2227,6 +2394,62 @@ void VulkanRenderer::updateTonemapDescriptor(uint32_t frameIdx, VkImageView inpu
     }};
 
     vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+}
+
+// =============================================================================
+// createTonemapPipeline — Added missing creation
+// =============================================================================
+void VulkanRenderer::createTonemapPipeline() noexcept
+{
+    if (tonemapPipeline_.valid()) {
+        return;
+    }
+
+    LOG_INFO_CAT("RENDERER", "Forging tonemap compute pipeline");
+
+    VkPipelineLayoutCreateInfo plInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    plInfo.setLayoutCount = 1;
+    VkDescriptorSetLayout rawLayout = tonemapDescriptorSetLayout_.get();
+    plInfo.setLayoutCount = 1;
+    plInfo.pSetLayouts = &rawLayout;
+    plInfo.pushConstantRangeCount = 1;
+    VkPushConstantRange pc = {VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(float) * 4};  // exposure, type, enabled, pad
+    plInfo.pPushConstantRanges = &pc;
+
+    VkPipelineLayout pl = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create tonemap pipeline layout");
+        return;
+    }
+
+    tonemapLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
+
+    VkShaderModule module = pipelineManager_.loadShader("assets/shaders/compute/tonemap.spv");
+    if (module == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RENDERER", "Failed to load tonemap.spv");
+        vkDestroyPipelineLayout(stone_device(), pl, nullptr);
+        return;
+    }
+
+    VkPipelineShaderStageCreateInfo stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.module = module;
+    stage.pName = "main";
+
+    VkComputePipelineCreateInfo pipeInfo = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    pipeInfo.stage = stage;
+    pipeInfo.layout = pl;
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create tonemap pipeline");
+    }
+
+    tonemapPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
+
+    vkDestroyShaderModule(stone_device(), module, nullptr);
+
+    LOG_SUCCESS_CAT("RENDERER", "Tonemap pipeline forged");
 }
 
 // =============================================================================
@@ -2554,12 +2777,58 @@ void VulkanRenderer::createTonemapDescriptorSets() noexcept
 
 VulkanRenderer::~VulkanRenderer()
 {
+    destroyed_ = true;
+    waitForGPU();
+    destroyRTOutputImages();
+    destroyAccumulationImages();
+    destroyDenoiserImage();
+    destroyNexusScoreImage();
+    // Destroy command buffers
+    if (g_transientCommandPool != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(stone_device(), g_transientCommandPool, commandBuffers_.size(), commandBuffers_.data());
+    }
+    // Destroy sync objects
+    for (auto s : imageAvailableSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto s : renderFinishedSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto f : inFlightFences_) vkDestroyFence(stone_device(), f, nullptr);
+    // Destroy envmap
+    envMapImageView_.reset();
+    envMapSampler_.reset();
+    envMapImage_.reset();
+    envMapMemory_.reset();
+    // Destroy depth
+    depthImageView_.reset();
+    depthImage_.reset();
+    depthImageMemory_.reset();
+    // Destroy buffers
+    for (auto h : uniformBufferEncs_) BufferManager::destroy(h);
+    for (auto h : materialBufferEncs_) BufferManager::destroy(h);
+    for (auto h : dimensionBufferEncs_) BufferManager::destroy(h);
+    for (auto h : tonemapUniformEncs_) BufferManager::destroy(h);
+    if (defaultMaterialsHandle_ != 0) BufferManager::destroy(defaultMaterialsHandle_);
+    // Destroy pipelines and layouts
+    if (envMapDisplayPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(stone_device(), envMapDisplayPipeline_, nullptr);
+    if (envMapDisplayPipelineLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(stone_device(), envMapDisplayPipelineLayout_, nullptr);
+    if (envMapDisplayDescSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(stone_device(), envMapDisplayDescSetLayout_, nullptr);
+    if (envMapDescriptorPool_.valid()) envMapDescriptorPool_.reset();
+    if (accumulationPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(stone_device(), accumulationPipeline_, nullptr);
+    if (accumulationPipelineLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
+    if (accumulationDescSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
+    if (accumulationDescriptorPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(stone_device(), accumulationDescriptorPool_, nullptr);
+    if (denoiserPipeline_.valid()) denoiserPipeline_.reset();
+    if (denoiserPipelineLayout_.valid()) denoiserPipelineLayout_.reset();
+    if (denoiserLayout_.valid()) denoiserLayout_.reset();
+    if (tonemapPipeline_.valid()) tonemapPipeline_.reset();
+    if (tonemapLayout_.valid()) tonemapLayout_.reset();
+    if (tonemapDescriptorSetLayout_.valid()) tonemapDescriptorSetLayout_.reset();
+    if (tonemapDescriptorPool_.valid()) tonemapDescriptorPool_.reset();
+    tonemapSampler_.reset();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Final Status
 // ──────────────────────────────────────────────────────────────────────────────
 /*
- * December 21, 2025 — 2026 HARDCODE MASTERMIND — 2 FRAMES | R16G16_SFLOAT NEXUS | ALL TOP-NOTCH ENABLED
+ * December 30, 2025 — BLACK SCREEN FIXED EDITION — FULL RENDER PIPELINE COMPLETE
  * Empire Optimized: Unlimited FPS | Full Features | Half-Float RT/Accum/Denoise | Photons Eternal.
  */

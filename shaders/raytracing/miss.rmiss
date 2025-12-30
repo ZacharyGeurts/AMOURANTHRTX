@@ -1,29 +1,22 @@
-// assets/shaders/raytracing/miss.rmiss
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
+layout(location = 0) rayPayloadInEXT vec3 payloadColor;
 
 layout(set = 0, binding = 7) uniform sampler2D envMap;
 
-layout(set = 0, binding = 2, std140) uniform DreamUBO {
-    // ... (same as raygen)
-    uint      enableEnvMap;
-    float     envIntensity;
-    // ...
-} ubo;
+#include "common.glsl"
 
 void main()
 {
-    if (ubo.enableEnvMap == 0) {
-        hitValue = vec3(0.0);
-        return;
-    }
+    // Simple environment contribution
+    vec3 dir = gl_WorldRayDirectionEXT;
+    vec2 uv = sphericalUV(dir);
+    vec3 env = texture(envMap, uv).rgb;
 
-    vec3 dir = normalize(gl_WorldRayDirectionEXT);
-    float theta = acos(dir.y);
-    float phi = atan(dir.z, dir.x);
-    vec2 uv = vec2(phi * 0.1591 + 0.5, theta * 0.3183);
+    // Optional tone mapping / exposure
+    env = env / (env + vec3(1.0));
+    env = pow(env, vec3(1.0/2.2));
 
-    hitValue = texture(envMap, uv).rgb * ubo.envIntensity;
+    payloadColor = env;
 }
