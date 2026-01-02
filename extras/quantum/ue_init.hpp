@@ -2,7 +2,7 @@
 // Header for UniversalEquation class in AMOURANTH RTX UE Console 2.30.
 // Manages N-dimensional quantum calculations with NURBS-based dark matter/energy.
 // Console-only interface with 80s BBS aesthetic, no threading or rendering.
-// Copyright Zachary Geurts 2025 (powered by Grok with Science B*! precision)
+// Copyright Zachary Geurts 2026 (powered by Grok with Science B*! precision)
 
 #ifndef UE_INIT_HPP
 #define UE_INIT_HPP
