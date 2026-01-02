@@ -6,7 +6,6 @@
 // cosmological ratios (dark matter ~27%, dark energy ~68%, regular matter ~5%).
 // Copyright Zachary Geurts 2025 (powered by Grok with Science B*! precision)
 
-#include "ue_init.hpp"
 #include <numbers>
 #include <cmath>
 #include <algorithm>
@@ -14,11 +13,282 @@
 #include <iomanip>
 #include <sstream>
 #include <format>
+#include <cstdint>
 #include <source_location>
 #include <omp.h>
+#include <iostream>
+#include <vector>
+#include <string>
 
-// Forward declaration of printDouble, defined in main.cpp
+namespace UE {
+struct EnergyResult {
+    long double observable;
+    long double potential;
+    long double nurbMatter;
+    long double nurbEnergy;
+    long double nurbRegularMatter;
+    long double spinEnergy;
+    long double momentumEnergy;
+    long double fieldEnergy;
+    long double GodWaveEnergy;
+};
+
+struct DimensionInteraction {
+    int vertexIndex;
+    long double distance;
+    long double strength;
+    std::vector<long double> vectorPotential;
+    long double godWaveAmplitude;
+};
+
+struct DimensionData {
+    int dimension;
+    long double scale;
+    long double observable;
+    long double potential;
+    long double nurbMatter;
+    long double nurbEnergy;
+    long double nurbRegularMatter;
+    long double spinEnergy;
+    long double momentumEnergy;
+    long double fieldEnergy;
+    long double GodWaveEnergy;
+
+    std::string toString() const {
+        return std::format("Dimension: {} Scale: {:.6f} Observable: {:.6f} Potential: {:.6f} NurbMatter: {:.6f} NurbEnergy: {:.6f} NurbRegularMatter: {:.6f} SpinEnergy: {:.6f} MomentumEnergy: {:.6f} FieldEnergy: {:.6f} GodWaveEnergy: {:.6f}",
+                           dimension, scale, observable, potential, nurbMatter, nurbEnergy, nurbRegularMatter, spinEnergy, momentumEnergy, fieldEnergy, GodWaveEnergy);
+    }
+};
+};
+
+#define LOG_INFO_CAT(cat, fmt, ...) std::cout << "[" << cat << "] INFO: " << std::format(fmt, ##__VA_ARGS__) << std::endl;
+#define LOG_WARNING_CAT(cat, fmt, ...) std::cout << "[" << cat << "] WARNING: " << std::format(fmt, ##__VA_ARGS__) << std::endl;
+#define LOG_ERROR_CAT(cat, fmt, ...) std::cout << "[" << cat << "] ERROR: " << std::format(fmt, ##__VA_ARGS__) << std::endl;
+#define LOG_DEBUG_CAT(dbg, cat, fmt, ...) if (dbg) std::cout << "[" << cat << "] DEBUG: " << std::format(fmt, ##__VA_ARGS__) << std::endl;
+
 std::ostream& printDouble(std::ostream& os, double val, int precision = 6);
+
+class UniversalEquation {
+private:
+    long double influence_;
+    long double weak_;
+    long double collapse_;
+    long double twoD_;
+    long double threeDInfluence_;
+    long double oneDPermeation_;
+    long double nurbMatterStrength_;
+    long double nurbEnergyStrength_;
+    long double nurbRegularMatterStrength_;
+    long double alpha_;
+    long double beta_;
+    long double carrollFactor_;
+    long double meanFieldApprox_;
+    long double asymCollapse_;
+    long double perspectiveTrans_;
+    long double perspectiveFocal_;
+    long double spinInteraction_;
+    long double emFieldStrength_;
+    long double renormFactor_;
+    long double vacuumEnergy_;
+    long double godWaveFreq_;
+    int currentDimension_;
+    int mode_;
+    bool debug_;
+    bool needsUpdate_;
+    long double totalCharge_;
+    long double avgProjScale_;
+    float simulationTime_;
+    long double materialDensity_;
+    uint64_t currentVertices_;
+    const uint64_t maxVertices_;
+    const int maxDimensions_;
+    const long double omega_;
+    const long double invMaxDim_;
+    std::vector<std::vector<long double>> nCubeVertices_;
+    std::vector<std::vector<long double>> vertexMomenta_;
+    std::vector<long double> vertexSpins_;
+    std::vector<long double> vertexWaveAmplitudes_;
+    std::vector<UE::DimensionInteraction> interactions_;
+    std::vector<long double> cachedCos_;
+    std::vector<long double> nurbMatterControlPoints_;
+    std::vector<long double> nurbEnergyControlPoints_;
+    std::vector<long double> nurbRegularMatterControlPoints_;
+    std::vector<long double> nurbKineticControlPoints_;
+    std::vector<long double> nurbEMControlPoints_;
+    std::vector<long double> nurbPotentialControlPoints_;
+    std::vector<long double> nurbKnots_;
+    std::vector<long double> nurbWeights_;
+    std::vector<UE::DimensionData> dimensionData_;
+
+    void initializeNCube();
+    void initializeWithRetry();
+    void updateInteractions();
+    long double computeNurbMatter(int vertexIndex) const;
+    long double computeNurbEnergy(int vertexIndex) const;
+    long double computeNurbRegularMatter(int vertexIndex) const;
+    long double computeSpinEnergy(int vertexIndex) const;
+    long double computeEMField(int vertexIndex) const;
+    long double computeGodWave(int vertexIndex) const;
+    long double computeInteraction(int vertexIndex, long double distance) const;
+    std::vector<long double> computeVectorPotential(int vertexIndex) const;
+    long double computeGravitationalPotential(int vertexIndex, int otherIndex) const;
+    std::vector<long double> computeGravitationalAcceleration(int vertexIndex) const;
+    long double computeGodWaveAmplitude(int vertexIndex, long double time) const;
+    long double computeKineticEnergy(int vertexIndex) const;
+    int findSpan(long double u, int degree, const std::vector<long double>& knots) const;
+    std::vector<long double> basisFuncs(long double u, int span, int degree, const std::vector<long double>& knots) const;
+    long double evaluateNURBS(long double u, const std::vector<long double>& controlPoints,
+                              const std::vector<long double>& knots, const std::vector<long double>& weights,
+                              int degree) const;
+    long double safeExp(long double x) const;
+    long double safe_div(long double a, long double b) const;
+    void validateVertexIndex(int vertexIndex, const std::source_location& loc = std::source_location::current()) const;
+    void printVertexTable() const;
+    void printInteractionTable() const;
+    void printParameterTable() const;
+    void printNURBSTable() const;
+
+public:
+    UniversalEquation(
+        int maxDimensions,
+        int mode,
+        long double influence,
+        long double weak,
+        long double collapse,
+        long double twoD,
+        long double threeDInfluence,
+        long double oneDPermeation,
+        long double nurbMatterStrength,
+        long double nurbEnergyStrength,
+        long double nurbRegularMatterStrength,
+        long double alpha,
+        long double beta,
+        long double carrollFactor,
+        long double meanFieldApprox,
+        long double asymCollapse,
+        long double perspectiveTrans,
+        long double perspectiveFocal,
+        long double spinInteraction,
+        long double emFieldStrength,
+        long double renormFactor,
+        long double vacuumEnergy,
+        long double godWaveFreq,
+        bool debug,
+        uint64_t numVertices
+    );
+
+    UniversalEquation(
+        int maxDimensions,
+        int mode,
+        long double influence,
+        long double weak,
+        bool debug,
+        uint64_t numVertices
+    );
+
+    UniversalEquation(const UniversalEquation& other);
+    UniversalEquation& operator=(const UniversalEquation& other);
+    ~UniversalEquation();
+
+    UE::EnergyResult compute();
+    void initializeCalculator();
+    void setGodWaveFreq(long double value);
+    void setCurrentDimension(int dimension);
+    void setMode(int mode);
+    void setInfluence(long double value);
+    void setWeak(long double value);
+    void setCollapse(long double value);
+    void setTwoD(long double value);
+    void setThreeDInfluence(long double value);
+    void setOneDPermeation(long double value);
+    void setNurbMatterStrength(long double value);
+    void setNurbEnergyStrength(long double value);
+    void setNurbRegularMatterStrength(long double value);
+    void setAlpha(long double value);
+    void setBeta(long double value);
+    void setCarrollFactor(long double value);
+    void setMeanFieldApprox(long double value);
+    void setAsymCollapse(long double value);
+    void setPerspectiveTrans(long double value);
+    void setPerspectiveFocal(long double value);
+    void setSpinInteraction(long double value);
+    void setEMFieldStrength(long double value);
+    void setRenormFactor(long double value);
+    void setVacuumEnergy(long double value);
+    void setDebug(bool value);
+    void setCurrentVertices(uint64_t value);
+    void setNCubeVertex(int vertexIndex, const std::vector<long double>& vertex);
+    void setVertexMomentum(int vertexIndex, const std::vector<long double>& momentum);
+    void setVertexSpin(int vertexIndex, long double spin);
+    void setVertexWaveAmplitude(int vertexIndex, long double amplitude);
+    void setNCubeVertices(const std::vector<std::vector<long double>>& vertices);
+    void setVertexMomenta(const std::vector<std::vector<long double>>& momenta);
+    void setVertexSpins(const std::vector<long double>& spins);
+    void setVertexWaveAmplitudes(const std::vector<long double>& amplitudes);
+    void setTotalCharge(long double value);
+    void setMaterialDensity(long double density);
+    void evolveTimeStep(long double dt);
+    void updateMomentum();
+    void advanceCycle();
+
+    int getCurrentDimension() const;
+    int getMode() const;
+    bool getDebug() const;
+    uint64_t getMaxVertices() const;
+    int getMaxDimensions() const;
+    long double getGodWaveFreq() const;
+    long double getInfluence() const;
+    long double getWeak() const;
+    long double getCollapse() const;
+    long double getTwoD() const;
+    long double getThreeDInfluence() const;
+    long double getOneDPermeation() const;
+    long double getNurbMatterStrength() const;
+    long double getNurbEnergyStrength() const;
+    long double getNurbRegularMatterStrength() const;
+    long double getAlpha() const;
+    long double getBeta() const;
+    long double getCarrollFactor() const;
+    long double getMeanFieldApprox() const;
+    long double getAsymCollapse() const;
+    long double getPerspectiveTrans() const;
+    long double getPerspectiveFocal() const;
+    long double getSpinInteraction() const;
+    long double getEMFieldStrength() const;
+    long double getRenormFactor() const;
+    long double getVacuumEnergy() const;
+    bool getNeedsUpdate() const;
+    long double getTotalCharge() const;
+    long double getAvgProjScale() const;
+    float getSimulationTime() const;
+    long double getMaterialDensity() const;
+    uint64_t getCurrentVertices() const;
+    long double getOmega() const;
+    long double getInvMaxDim() const;
+    const std::vector<std::vector<long double>>& getNCubeVertices() const;
+    const std::vector<std::vector<long double>>& getVertexMomenta() const;
+    const std::vector<long double>& getVertexSpins() const;
+    const std::vector<long double>& getVertexWaveAmplitudes() const;
+    const std::vector<UE::DimensionInteraction>& getInteractions() const;
+    const std::vector<long double>& getCachedCos() const;
+    const std::vector<long double>& getNurbMatterControlPoints() const;
+    const std::vector<long double>& getNurbEnergyControlPoints() const;
+    const std::vector<long double>& getNurbRegularMatterControlPoints() const;
+    const std::vector<long double>& getNurbKineticControlPoints() const;
+    const std::vector<long double>& getNurbEMControlPoints() const;
+    const std::vector<long double>& getNurbPotentialControlPoints() const;
+    const std::vector<long double>& getNurbKnots() const;
+    const std::vector<long double>& getNurbWeights() const;
+    const std::vector<UE::DimensionData>& getDimensionData() const;
+    const std::vector<long double>& getNCubeVertex(int vertexIndex) const;
+    const std::vector<long double>& getVertexMomentum(int vertexIndex) const;
+    long double getVertexSpin(int vertexIndex) const;
+    long double getVertexWaveAmplitude(int vertexIndex) const;
+
+    UE::DimensionData updateCache();
+    std::vector<UE::DimensionData> computeBatch(int startDim, int endDim);
+};
+
 
 UniversalEquation::UniversalEquation(
     int maxDimensions,
@@ -1538,27 +1808,27 @@ void UniversalEquation::printParameterTable() const {
     ss << "Parameter Table\n";
     ss << "Parameter            | Value\n";
     ss << "---------------------|----------\n";
-    ss << "Influence            | "; printDouble(ss, static_cast<double>(influence_)) << "\n";
-    ss << "Weak                 | "; printDouble(ss, static_cast<double>(weak_)) << "\n";
-    ss << "Collapse             | "; printDouble(ss, static_cast<double>(collapse_)) << "\n";
-    ss << "TwoD                | "; printDouble(ss, static_cast<double>(twoD_)) << "\n";
-    ss << "ThreeDInfluence     | "; printDouble(ss, static_cast<double>(threeDInfluence_)) << "\n";
-    ss << "OneDPermeation      | "; printDouble(ss, static_cast<double>(oneDPermeation_)) << "\n";
-    ss << "NurbMatterStrength  | "; printDouble(ss, static_cast<double>(nurbMatterStrength_)) << "\n";
-    ss << "NurbEnergyStrength  | "; printDouble(ss, static_cast<double>(nurbEnergyStrength_)) << "\n";
-    ss << "NurbRegularMatter   | "; printDouble(ss, static_cast<double>(nurbRegularMatterStrength_)) << "\n";
-    ss << "Alpha               | "; printDouble(ss, static_cast<double>(alpha_)) << "\n";
-    ss << "Beta                | "; printDouble(ss, static_cast<double>(beta_)) << "\n";
-    ss << "CarrollFactor       | "; printDouble(ss, static_cast<double>(carrollFactor_)) << "\n";
-    ss << "MeanFieldApprox     | "; printDouble(ss, static_cast<double>(meanFieldApprox_)) << "\n";
-    ss << "AsymCollapse        | "; printDouble(ss, static_cast<double>(asymCollapse_)) << "\n";
-    ss << "PerspectiveTrans    | "; printDouble(ss, static_cast<double>(perspectiveTrans_)) << "\n";
-    ss << "PerspectiveFocal    | "; printDouble(ss, static_cast<double>(perspectiveFocal_)) << "\n";
-    ss << "SpinInteraction     | "; printDouble(ss, static_cast<double>(spinInteraction_)) << "\n";
-    ss << "EMFieldStrength     | "; printDouble(ss, static_cast<double>(emFieldStrength_)) << "\n";
-    ss << "RenormFactor        | "; printDouble(ss, static_cast<double>(renormFactor_)) << "\n";
-    ss << "VacuumEnergy        | "; printDouble(ss, static_cast<double>(vacuumEnergy_)) << "\n";
-    ss << "GodWaveFreq         | "; printDouble(ss, static_cast<double>(godWaveFreq_)) << "\n";
+    ss << "Influence            | "; printDouble(ss, static_cast<double>(influence_)); ss << "\n";
+    ss << "Weak                 | "; printDouble(ss, static_cast<double>(weak_)); ss << "\n";
+    ss << "Collapse             | "; printDouble(ss, static_cast<double>(collapse_)); ss << "\n";
+    ss << "TwoD                | "; printDouble(ss, static_cast<double>(twoD_)); ss << "\n";
+    ss << "ThreeDInfluence     | "; printDouble(ss, static_cast<double>(threeDInfluence_)); ss << "\n";
+    ss << "OneDPermeation      | "; printDouble(ss, static_cast<double>(oneDPermeation_)); ss << "\n";
+    ss << "NurbMatterStrength  | "; printDouble(ss, static_cast<double>(nurbMatterStrength_)); ss << "\n";
+    ss << "NurbEnergyStrength  | "; printDouble(ss, static_cast<double>(nurbEnergyStrength_)); ss << "\n";
+    ss << "NurbRegularMatter   | "; printDouble(ss, static_cast<double>(nurbRegularMatterStrength_)); ss << "\n";
+    ss << "Alpha               | "; printDouble(ss, static_cast<double>(alpha_)); ss << "\n";
+    ss << "Beta                | "; printDouble(ss, static_cast<double>(beta_)); ss << "\n";
+    ss << "CarrollFactor       | "; printDouble(ss, static_cast<double>(carrollFactor_)); ss << "\n";
+    ss << "MeanFieldApprox     | "; printDouble(ss, static_cast<double>(meanFieldApprox_)); ss << "\n";
+    ss << "AsymCollapse        | "; printDouble(ss, static_cast<double>(asymCollapse_)); ss << "\n";
+    ss << "PerspectiveTrans    | "; printDouble(ss, static_cast<double>(perspectiveTrans_)); ss << "\n";
+    ss << "PerspectiveFocal    | "; printDouble(ss, static_cast<double>(perspectiveFocal_)); ss << "\n";
+    ss << "SpinInteraction     | "; printDouble(ss, static_cast<double>(spinInteraction_)); ss << "\n";
+    ss << "EMFieldStrength     | "; printDouble(ss, static_cast<double>(emFieldStrength_)); ss << "\n";
+    ss << "RenormFactor        | "; printDouble(ss, static_cast<double>(renormFactor_)); ss << "\n";
+    ss << "VacuumEnergy        | "; printDouble(ss, static_cast<double>(vacuumEnergy_)); ss << "\n";
+    ss << "GodWaveFreq         | "; printDouble(ss, static_cast<double>(godWaveFreq_)); ss << "\n";
     LOG_INFO_CAT("Simulation", "{}", ss.str());
 }
 
