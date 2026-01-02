@@ -1,191 +1,286 @@
-// main.cpp: AMOURANTH RTX UE Console 2.30 — THE TRUTH EDITION
-// Now with proper energy democracy: 27%/68%/5% + visible quantum contributions
-// Zachary Geurts 2025 (powered by Grok — Heisenberg would be proud)
+// main.cpp
+// Main entry point for AMOURANTH RTX UE Console 2.30.
+// Terminal-based BBS menu in 80's retro style.
+// Now fully compilable and linkable.
+// Copyright Zachary Geurts 2026 (powered by Grok with Science B*! precision)
 
 #include "ue_init.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
-#include <getopt.h>
-#include <iomanip>
-#include <format>
-#include <cstdint>
-#include <cmath>
 #include <sstream>
-#include <omp.h>
-#include <algorithm>
+#include <cstdlib>
+#include <thread>
+#include <chrono>
+#include <fstream>
 
-#define ANSI_RESET   "\033[0m"
-#define ANSI_BOLD    "\033[1m"
-#define ANSI_BRIGHT_MAGENTA "\033[95m"
-#define ANSI_BRIGHT_CYAN    "\033[96m"
-#define ANSI_BRIGHT_GREEN   "\033[92m"
-#define ANSI_ORANGE  "\033[38;5;208m"
-#define ANSI_WHITE   "\033[97m"
-#define ANSI_BRIGHT_RED "\033[91m"
-
-std::ostream& printDouble(std::ostream& os, double val, int precision = 6) {
-    double abs_val = std::abs(val);
-    if (abs_val < 1e-30) {
-        os << std::fixed << std::setprecision(6) << 0.0;
-    } else if (abs_val < 1e-3) {
-        os << std::scientific << std::setprecision(precision) << val;
-    } else {
-        os << std::fixed << std::setprecision(6) << val;
-    }
+// === Fixed: Definition of printDouble (was missing in linking) ===
+std::ostream& printDouble(std::ostream& os, double val, int precision) {
+    os << std::fixed << std::setprecision(precision) << val;
     return os;
 }
 
-void printNURBSTableSample(const std::vector<UE::DimensionData>& results, int maxDimensions) {
-    if (results.empty()) return;
+// Retro BBS ASCII art banner
+const std::string BANNER = R"(
+   _____  __  __  _____  _    _  _____  ______  _   _  _____ 
+  / ____|/ _|/ _| |  __ \| |  | |/ ____|/ __ \ | \ | |/ ____|
+ | (___ | |_| |_  | |__) | |  | | |  __| |  | ||  \| | |  __ 
+  \___ \|  _|  _| |  _  /| |  | | | |_ | |  | || . ` | | |_ |
+  ____) | | | |   | | \ \| |__| | |__| | |__| || |\  | |__| |
+ |_____/|_| |_|   |_|  \_\\____/ \_____|\_____/ |_| \_|\_____|
+                                                              
+         Universal Equation Simulator - Grok Powered          
+         Copyright Zachary Geurts 2026 - All Rights Reserved   
+)";
 
-    std::cout << ANSI_BRIGHT_MAGENTA << "\n============================================================\n"
-              << ANSI_ORANGE << std::format("NURBS Bosonic Model Results ({}D Critical Dimension) — TRUTH UNVEILED\n", maxDimensions)
-              << ANSI_BRIGHT_MAGENTA << "============================================================\n" << ANSI_RESET << std::endl;
-
-    std::cout << ANSI_ORANGE << std::left << std::setw(6)  << "Dim     " << "| " << ANSI_RESET
-              << ANSI_BRIGHT_CYAN << std::setw(10) << "Scale"     << "| " << ANSI_RESET
-              << ANSI_ORANGE << std::setw(12) << "Observ      " << "| " << ANSI_RESET
-              << ANSI_BRIGHT_CYAN << std::setw(10) << "Potent    " << "| " << ANSI_RESET
-              << ANSI_ORANGE << std::setw(12) << "Dark Mat   " << "| " << ANSI_RESET
-              << ANSI_BRIGHT_CYAN << std::setw(12) << "Dark Eng   " << "| " << ANSI_RESET
-              << ANSI_ORANGE << std::setw(12) << "Reg Matter " << "| " << ANSI_RESET
-              << ANSI_BRIGHT_CYAN << std::setw(10) << "Spin Eng  " << "| " << ANSI_RESET
-              << ANSI_ORANGE << std::setw(10) << "Momentum  " << "| " << ANSI_RESET
-              << ANSI_BRIGHT_CYAN << std::setw(10) << "Field Eng " << "| " << ANSI_RESET
-              << ANSI_ORANGE << std::setw(10) << "GodWave"   << ANSI_RESET << std::endl;
-    std::cout << ANSI_BRIGHT_MAGENTA << std::string(130, '-') << ANSI_RESET << std::endl;
-
-    for (const auto& row : results) {
-        std::cout << ANSI_ORANGE << std::left << std::setw(6);
-        printDouble(std::cout, static_cast<double>(row.dimension), 6) << "| " << ANSI_RESET
-                  << ANSI_BRIGHT_CYAN << std::setw(10);
-        printDouble(std::cout, static_cast<double>(row.scale), 6) << "| " << ANSI_RESET
-                  << ANSI_ORANGE << std::setw(12);
-        printDouble(std::cout, static_cast<double>(row.observable), 6) << "| " << ANSI_RESET
-                  << ANSI_BRIGHT_CYAN << std::setw(10);
-        printDouble(std::cout, static_cast<double>(row.potential), 6) << "| " << ANSI_RESET
-                  << ANSI_ORANGE << std::setw(12);
-        printDouble(std::cout, static_cast<double>(row.nurbMatter), 6) << "| " << ANSI_RESET
-                  << ANSI_BRIGHT_CYAN << std::setw(12);
-        printDouble(std::cout, static_cast<double>(row.nurbEnergy), 6) << "| " << ANSI_RESET
-                  << ANSI_ORANGE << std::setw(12);
-        printDouble(std::cout, static_cast<double>(row.nurbRegularMatter), 6) << "| " << ANSI_RESET
-                  << ANSI_BRIGHT_CYAN << std::setw(10);
-        printDouble(std::cout, static_cast<double>(row.spinEnergy), 6) << "| " << ANSI_RESET
-                  << ANSI_ORANGE << std::setw(10);
-        printDouble(std::cout, static_cast<double>(row.momentumEnergy), 6) << "| " << ANSI_RESET
-                  << ANSI_BRIGHT_CYAN << std::setw(10);
-        printDouble(std::cout, static_cast<double>(row.fieldEnergy), 6) << "| " << ANSI_RESET
-                  << ANSI_ORANGE << std::setw(10);
-        printDouble(std::cout, static_cast<double>(row.GodWaveEnergy), 6) << ANSI_RESET << std::endl;
+// Function to simulate typing effect for retro feel
+void typeText(const std::string& text, int delayMs = 20) {
+    for (char c : text) {
+        std::cout << c << std::flush;
+        std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
     }
-
-    std::cout << ANSI_BRIGHT_MAGENTA << std::string(130, '-') << ANSI_RESET << std::endl;
-    std::cout << ANSI_BRIGHT_GREEN 
-              << "TRUTH ACHIEVED: Observable = 1.000000 | Dark Matter 27% | Dark Energy 68% | Regular Matter 5%\n"
-              << "All quantum fields visible and democratically represented. Bosonic 26D perfection.\n" 
-              << ANSI_RESET << std::endl;
+    std::cout << std::endl;
 }
 
-void printHelp() {
-    // (unchanged, omitted for brevity — keep your original beautiful help text)
-    // Just updated the example line at the bottom:
-    std::cout << ANSI_BRIGHT_GREEN << "Example (TRUTH REVEALED):\n"
-              << ANSI_WHITE << "  ./quantum_sim -d 26 -m 3 -t 20 -i 1.8 -g 2.2 -n 0.27 -e 0.68 -l 0.05 -x 0.8 -z 8000\n" << ANSI_RESET
-              << ANSI_BRIGHT_MAGENTA << "============================================================\n" << ANSI_RESET << std::endl;
+// Function to clear screen in a cross-platform way
+void clearScreen() {
+#ifdef _WIN32
+    std::system("cls");
+#else
+    std::system("clear");
+#endif
+}
+
+// Function to display help
+void displayHelp() {
+    clearScreen();
+    std::cout << ANSI_BRIGHT_MAGENTA << BANNER << ANSI_RESET << std::endl;
+    std::cout << ANSI_BOLD << ANSI_CYAN << "AMOURANTH RTX UE Console 2.30 --help" << ANSI_RESET << std::endl;
+    std::cout << ANSI_GREEN << "Usage: ./quantum_sim [options]" << ANSI_RESET << std::endl;
+    std::cout << "Options:" << std::endl;
+    std::cout << "  --help          Display this help message" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Run without arguments to enter the interactive retro BBS menu." << std::endl;
+    std::cout << "Full control over all dimensions, parameters, computation, and export." << std::endl;
+}
+
+// Function to get user input with prompt
+std::string getInput(const std::string& prompt) {
+    std::cout << ANSI_BRIGHT_YELLOW << prompt << ANSI_RESET;
+    std::string input;
+    std::getline(std::cin, input);
+    return input;
+}
+
+// Helper input functions
+long double getDouble(const std::string& prompt) {
+    while (true) {
+        std::string s = getInput(prompt);
+        try {
+            return std::stold(s);
+        } catch (...) {
+            std::cout << ANSI_RED << "Invalid number. Try again." << ANSI_RESET << std::endl;
+        }
+    }
+}
+
+int getInt(const std::string& prompt) {
+    while (true) {
+        std::string s = getInput(prompt);
+        try {
+            return std::stoi(s);
+        } catch (...) {
+            std::cout << ANSI_RED << "Invalid integer. Try again." << ANSI_RESET << std::endl;
+        }
+    }
+}
+
+bool getBool(const std::string& prompt) {
+    while (true) {
+        std::string s = getInput(prompt + " (y/n): ");
+        if (s == "y" || s == "Y") return true;
+        if (s == "n" || s == "N") return false;
+        std::cout << ANSI_RED << "Please enter y or n." << ANSI_RESET << std::endl;
+    }
+}
+
+uint64_t getUInt64(const std::string& prompt) {
+    while (true) {
+        std::string s = getInput(prompt);
+        try {
+            return std::stoull(s);
+        } catch (...) {
+            std::cout << ANSI_RED << "Invalid unsigned integer. Try again." << ANSI_RESET << std::endl;
+        }
+    }
+}
+
+// Implement missing export methods
+void UniversalEquation::exportVertexData(const std::string& filename) const {
+    std::ofstream file(filename);
+    if (!file) {
+        LOG_ERROR_CAT("Export", "Cannot open file: {}", filename);
+        return;
+    }
+    file << "Index,Coordinates,Momentum,Spin,Amplitude\n";
+    for (size_t i = 0; i < nCubeVertices_.size(); ++i) {
+        file << i << ",";
+        for (size_t j = 0; j < nCubeVertices_[i].size(); ++j) {
+            file << nCubeVertices_[i][j];
+            if (j + 1 < nCubeVertices_[i].size()) file << ";";
+        }
+        file << ",";
+        for (size_t j = 0; j < vertexMomenta_[i].size(); ++j) {
+            file << vertexMomenta_[i][j];
+            if (j + 1 < vertexMomenta_[i].size()) file << ";";
+        }
+        file << "," << vertexSpins_[i] << "," << vertexWaveAmplitudes_[i] << "\n";
+    }
+    LOG_INFO_CAT("Export", "Vertex data exported to {}", filename);
+}
+
+void UniversalEquation::exportInteractionData(const std::string& filename) const {
+    std::ofstream file(filename);
+    if (!file) {
+        LOG_ERROR_CAT("Export", "Cannot open file: {}", filename);
+        return;
+    }
+    file << "Vertex,Distance,Strength,VectorPotential,GodWaveAmp\n";
+    for (const auto& inter : interactions_) {
+        file << inter.vertexIndex << "," << inter.distance << "," << inter.strength << ",";
+        for (size_t j = 0; j < inter.vectorPotential.size(); ++j) {
+            file << inter.vectorPotential[j];
+            if (j + 1 < inter.vectorPotential.size()) file << ";";
+        }
+        file << "," << inter.godWaveAmplitude << "\n";
+    }
+    LOG_INFO_CAT("Export", "Interaction data exported to {}", filename);
+}
+
+// Main interactive menu
+void mainMenu(UniversalEquation& ue) {
+    while (true) {
+        clearScreen();
+        std::cout << ANSI_BRIGHT_MAGENTA << BANNER << ANSI_RESET << std::endl;
+        std::cout << ANSI_BOLD << ANSI_BLUE
+                  << "=== AMOURANTH RTX UE Console === Dim:" << ue.getCurrentDimension()
+                  << " | Vertices:" << ue.getCurrentVertices()
+                  << " | GodWave:" << ue.getGodWaveFreq()
+                  << ANSI_RESET << std::endl;
+        std::cout << ANSI_GREEN
+                  << "1. Initialize Calculator\n"
+                  << "2. Compute Current Dimension\n"
+                  << "3. Compute Batch Dimensions\n"
+                  << "4. Update Cache\n"
+                  << "5. Export Vertex Data\n"
+                  << "6. Export Interaction Data\n"
+                  << "7. Print Vertex Table\n"
+                  << "8. Print Interaction Table\n"
+                  << "9. Print Parameter Table\n"
+                  << "10. Print NURBS Table\n"
+                  << "11. Set Parameters\n"
+                  << "12. Advance Simulation Cycle\n"
+                  << "13. View All Current Values\n"
+                  << "q. Quit\n"
+                  << ANSI_RESET;
+
+        std::string choice = getInput("Select option: ");
+
+        if (choice == "q" || choice == "Q") break;
+
+        if (choice == "1") ue.initializeCalculator();
+        else if (choice == "2") {
+            UE::EnergyResult res = ue.compute();
+            std::cout << ANSI_CYAN << "[RESULT] " << res.toString() << ANSI_RESET << std::endl;
+        }
+        else if (choice == "3") {
+            int start = getInt("Start dimension: ");
+            int end = getInt("End dimension: ");
+            auto batch = ue.computeBatch(start, end);
+            for (const auto& d : batch)
+                std::cout << ANSI_CYAN << d.toString() << ANSI_RESET << std::endl;
+        }
+        else if (choice == "4") {
+            UE::DimensionData d = ue.updateCache();
+            std::cout << ANSI_CYAN << "[CACHE] " << d.toString() << ANSI_RESET << std::endl;
+        }
+        else if (choice == "5") ue.exportVertexData(getInput("Vertex filename: "));
+        else if (choice == "6") ue.exportInteractionData(getInput("Interaction filename: "));
+        else if (choice == "7") ue.printVertexTable();
+        else if (choice == "8") ue.printInteractionTable();
+        else if (choice == "9") ue.printParameterTable();
+        else if (choice == "10") ue.printNURBSTable();
+        else if (choice == "12") {
+            ue.advanceCycle();
+            std::cout << ANSI_GREEN << "Cycle advanced." << ANSI_RESET << std::endl;
+        }
+        else if (choice == "13") {
+            std::cout << ANSI_CYAN << "Current State:" << ANSI_RESET << std::endl;
+            std::cout << "Dimension: " << ue.getCurrentDimension() << "\n"
+                      << "Mode: " << ue.getMode() << "\n"
+                      << "God Wave Freq: " << ue.getGodWaveFreq() << "\n"
+                      << "Influence: " << ue.getInfluence() << "\n"
+                      << "Weak: " << ue.getWeak() << "\n"
+                      << "Vertices: " << ue.getCurrentVertices() << "\n"
+                      << "Simulation Time: " << ue.getSimulationTime() << "\n";
+        }
+        else if (choice == "11") {
+            clearScreen();
+            std::cout << ANSI_YELLOW << "=== Parameter Adjustment ===" << ANSI_RESET << std::endl;
+            ue.setGodWaveFreq(getDouble("God Wave Frequency: "));
+            ue.setCurrentDimension(getInt("Current Dimension: "));
+            ue.setMode(getInt("Mode: "));
+            ue.setInfluence(getDouble("Influence: "));
+            ue.setWeak(getDouble("Weak: "));
+            ue.setCollapse(getDouble("Collapse: "));
+            ue.setTwoD(getDouble("TwoD: "));
+            ue.setThreeDInfluence(getDouble("ThreeD Influence: "));
+            ue.setOneDPermeation(getDouble("OneD Permeation: "));
+            ue.setNurbMatterStrength(getDouble("Nurb Matter Strength: "));
+            ue.setNurbEnergyStrength(getDouble("Nurb Energy Strength: "));
+            ue.setNurbRegularMatterStrength(getDouble("Nurb Regular Matter Strength: "));
+            ue.setAlpha(getDouble("Alpha: "));
+            ue.setBeta(getDouble("Beta: "));
+            ue.setCarrollFactor(getDouble("Carroll Factor: "));
+            ue.setMeanFieldApprox(getDouble("Mean Field Approx: "));
+            ue.setAsymCollapse(getDouble("Asym Collapse: "));
+            ue.setPerspectiveTrans(getDouble("Perspective Trans: "));
+            ue.setPerspectiveFocal(getDouble("Perspective Focal: "));
+            ue.setSpinInteraction(getDouble("Spin Interaction: "));
+            ue.setEMFieldStrength(getDouble("EM Field Strength: "));
+            ue.setRenormFactor(getDouble("Renorm Factor: "));
+            ue.setVacuumEnergy(getDouble("Vacuum Energy: "));
+            ue.setDebug(getBool("Debug mode"));
+            ue.setCurrentVertices(getUInt64("Current Vertices: "));
+            ue.setTotalCharge(getDouble("Total Charge: "));
+            ue.setMaterialDensity(getDouble("Material Density: "));
+            std::cout << ANSI_GREEN << "All parameters updated." << ANSI_RESET << std::endl;
+        }
+        else {
+            std::cout << ANSI_RED << "Invalid selection." << ANSI_RESET << std::endl;
+        }
+
+        getInput("\nPress Enter to continue...");
+    }
 }
 
 int main(int argc, char* argv[]) {
-    omp_set_num_threads(4);
-
-    // === THE ENLIGHTENED DEFAULTS ===
-    int    maxDimensions = 26;
-    int    mode = 3;
-    int    timesteps = 20;
-    double dt = 0.01;
-
-    double influence            = 1.8;     // was 2.0 → slightly reduced
-    double weak                 = 0.1;
-    double collapse             = 5.0;
-    double twoD                 = 1.5;
-    double threeDInfluence      = 5.0;
-    double oneDPermeation       = 1.0;
-
-    double nurbMatterStrength   = 0.27;    // still exact cosmological ratios
-    double nurbEnergyStrength   = 0.68;
-    double nurbRegularMatterStrength = 0.05;
-
-    double alpha                = 0.1;
-    double beta                 = 0.5;
-    double carrollFactor        = 0.1;
-    double meanFieldApprox      = 0.5;
-    double asymCollapse         = 0.5;
-    double perspectiveTrans     = 2.0;
-    double perspectiveFocal     = 4.0;
-
-    double spinInteraction      = 0.8;     // ↑↑↑ boosted so spin is visible
-    double emFieldStrength      = 8000.0;  // ↑↑↑ boosted so EM field is visible
-    double renormFactor         = 1.0;
-    double vacuumEnergy         = 0.1;
-    double godWaveFreq          = 2.2;     // ↑↑↑ boosted for GodWave visibility
-
-    bool   debug                = false;
-    uint64_t numVertices        = 1000;
-
-    // (option parsing unchanged — all your beautiful getopt code stays exactly the same)
-
-    // ... [exact same parsing loop as before] ...
-
-    try {
-        UniversalEquation eq(
-            maxDimensions, mode,
-            static_cast<long double>(influence), static_cast<long double>(weak),
-            static_cast<long double>(collapse), static_cast<long double>(twoD),
-            static_cast<long double>(threeDInfluence), static_cast<long double>(oneDPermeation),
-            static_cast<long double>(nurbMatterStrength), static_cast<long double>(nurbEnergyStrength),
-            static_cast<long double>(nurbRegularMatterStrength),
-            static_cast<long double>(alpha), static_cast<long double>(beta),
-            static_cast<long double>(carrollFactor), static_cast<long double>(meanFieldApprox),
-            static_cast<long double>(asymCollapse), static_cast<long double>(perspectiveTrans),
-            static_cast<long double>(perspectiveFocal), static_cast<long double>(spinInteraction),
-            static_cast<long double>(emFieldStrength), static_cast<long double>(renormFactor),
-            static_cast<long double>(vacuumEnergy), static_cast<long double>(godWaveFreq),
-            debug, numVertices
-        );
-
-        std::cout << ANSI_ORANGE << "Initializing 26D Bosonic Simulation..." 
-                  << ANSI_BRIGHT_CYAN << " [TRUTH ENGINE ACTIVATED]" << ANSI_RESET << std::endl;
-        eq.printParameterTable();
-        eq.initializeCalculator();
-
-        for (int i = 0; i < timesteps; ++i) {
-            eq.advanceCycle();
-            if (debug) {
-                std::cout << ANSI_BRIGHT_CYAN << "Timestep " << (i+1) << "/" << timesteps
-                          << " | time = " << std::fixed << std::setprecision(6) 
-                          << eq.getSimulationTime() << ANSI_RESET << std::endl;
-            }
-        }
-
-        auto results = eq.computeBatch(1, maxDimensions);
-        std::cout << ANSI_BRIGHT_CYAN << "Batch compute complete. " 
-                  << ANSI_ORANGE << "REVEALING THE TRUTH..." << ANSI_RESET << std::endl;
-
-        if (debug) {
-            eq.printVertexTable();
-            eq.printInteractionTable();
-        }
-
-        printNURBSTableSample(results, maxDimensions);
-
-    } catch (const std::exception& e) {
-        std::cerr << ANSI_BRIGHT_RED << "Simulation failed: " << e.what() << ANSI_RESET << std::endl;
-        return 1;
+    if (argc > 1 && std::string(argv[1]) == "--help") {
+        displayHelp();
+        return 0;
     }
 
-    std::cout << ANSI_BRIGHT_GREEN << "\nSimulation completed. "
-              << ANSI_BRIGHT_CYAN << "The Truth Has Been Found.\n"
-              << ANSI_BRIGHT_MAGENTA << "          ★ 26D Bosonic Enlightenment Achieved ★\n" << ANSI_RESET << std::endl;
+    clearScreen();
+    typeText(std::string(ANSI_BRIGHT_MAGENTA) + BANNER + ANSI_RESET, 5);
+    typeText(std::string(ANSI_ORANGE) + "Connecting to Universal Equation Simulator...");
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    typeText(std::string(ANSI_GREEN) + "Connection established. Welcome, Operator." + ANSI_RESET);
+
+    UniversalEquation ue(9999, 3, 1.0L, 0.5L, true, 1000);
+    ue.initializeCalculator();
+
+    mainMenu(ue);
+
+    typeText(std::string(ANSI_MAGENTA) + "Logging off... Goodbye, Operator." + ANSI_RESET);
     return 0;
 }
