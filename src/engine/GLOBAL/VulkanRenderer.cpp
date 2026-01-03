@@ -371,9 +371,6 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
         LOG_SUCCESS_CAT("RENDERER", "SACRED PINK fallback envmap created — the empire demands PINK, not black");
     }
 
-    // Force pipeline creation — now always safe
-    createEnvMapDisplayPipeline();
-
     return envmap;
 }
 
