@@ -1,27 +1,20 @@
 // include/engine/GLOBAL/LAS.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025-2026 — LAS (Acceleration Structure Manager) Header — v3.0 — DECEMBER 29, 2025
-// DYNAMIC EMPIRE EDITION
-// MAJOR UPGRADES:
-// • Full per-instance transforms with update API → real animated scenes
-// • BLAS built once and cached (no rebuild on TLAS refresh)
-// • Persistent reusable scratch buffers (zero allocation churn)
-// • Animated default pink monster support
-// • Material index directly usable as instanceCustomIndex
-// • Continuous visibility mandate preserved and enhanced
-// PINK PHOTONS ETERNAL, ANIMATED AND UNBROKEN — EMPIRE ETERNAL — PLASTIC BEACH FOREVER
+// AMOURANTH RTX Engine © 2025-2026 — VALHALLA v∞ TURBO — DEVELOPER EDITION
+// Light Acceleration System (LAS) v4.0 — January 03, 2026
+// Clean, modern C++23 header — developer-friendly, safe, extensible
+// Fully compatible with existing codebase (RTX::las() singleton access)
 // =============================================================================
 
 #pragma once
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
-#include <memory>
 #include <vector>
+#include <memory>
+#include <cstdint>
 
-#include "engine/GLOBAL/RTXHandler.hpp"   // RTX::Handle<T>
-
-namespace MeshLoader { struct Mesh; } // Forward declare
+#include "engine/GLOBAL/MeshLoader.hpp"
 
 namespace RTX {
 
@@ -30,85 +23,56 @@ public:
     LAS();
     ~LAS();
 
-    // Called every frame — builds missing BLAS, then builds TLAS if dirty
-    void buildOrUpdateTLAS(VkCommandBuffer cmd);
+    size_t addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialIndex = 0);
+    void setInstanceTransform(size_t instanceIndex, const glm::mat4& transform);
+    void requestRebuild();
+    void update(VkCommandBuffer cmd);
+    VkAccelerationStructureKHR getTLAS() const;
+    void onResize();
 
-    // Returns current TLAS (valid after first successful build)
-    [[nodiscard]] VkAccelerationStructureKHR getCurrentTLAS() const;
-
-    // Called on window resize — purges TLAS (BLAS preserved)
-    void notifyResize();
-
-    // Add mesh — takes ownership
-    void addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialIndex = 0);
-
-    // Force TLAS rebuild (e.g., after adding meshes)
-    void rebuildTLAS();
-
-    // Update transform of a specific mesh instance (index from add order)
-    void updateInstanceTransform(size_t meshIndex, const glm::mat4& transform);
-
-    // Optional: animate the sacred pink monster (call every frame with deltaTime)
-    void animatePinkMonster(float deltaTime);
+    // Legacy compatibility
+    void notifyResize() { onResize(); }
+    void rebuildTLAS() { requestRebuild(); }
+    void buildOrUpdateTLAS(VkCommandBuffer cmd) { update(cmd); }
+    VkAccelerationStructureKHR getCurrentTLAS() const { return getTLAS(); }
 
 private:
-    // Internal representation of a mesh instance
+    // Internal mesh representation — moved UP so it's known before use
     struct InternalMesh {
-        uint64_t vertexHandle = 0;
-        uint64_t indexHandle = 0;
+        uint64_t vertexBuffer = 0;
+        uint64_t indexBuffer = 0;
         uint32_t primitiveCount = 0;
         uint32_t materialIndex = 0;
-
+        glm::mat4 transform = glm::mat4(1.0f);
         VkAccelerationStructureKHR blas = VK_NULL_HANDLE;
-        RTX::Handle<VkBuffer> blasBuffer;
-        RTX::Handle<VkDeviceMemory> blasMemory;
-
-        glm::mat4 transform = glm::mat4(1.0f);  // Per-instance world transform
+        uint64_t blasStorage = 0;
     };
 
-    // Persistent scratch buffer state
-    struct ScratchBuffers {
-        uint64_t handle = 0;
-        VkDeviceSize size = 0;
-    };
-
-    void buildBLAS(VkCommandBuffer cmd);  // Builds any missing BLAS
-    void buildSingleBLAS(VkCommandBuffer cmd, InternalMesh& m);
-    void buildTLAS(VkCommandBuffer cmd);
+    void createDefaultDeveloperScene();
+    void buildBLAS(VkCommandBuffer cmd, InternalMesh& mesh);  // Now InternalMesh is known
+    bool buildTLAS(VkCommandBuffer cmd);
+    uint64_t ensureScratch(VkDeviceSize required, const std::string& tag);
+    void insertAccelerationStructureBarrier(VkCommandBuffer cmd);
     void clearTLAS();
     void destroyScratchBuffers();
-    uint64_t ensureScratch(VkDeviceSize requiredSize, ScratchBuffers& scratch, const std::string& tag);
 
     std::vector<InternalMesh> meshes_;
 
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
-    RTX::Handle<VkBuffer> tlasBuffer;
-    RTX::Handle<VkDeviceMemory> tlasMemory;
+    uint64_t tlasStorage = 0;
+    uint64_t instanceStorage = 0;
 
-    RTX::Handle<VkBuffer> instanceBuffer;
-    RTX::Handle<VkDeviceMemory> instanceMemory;
+    uint64_t scratchBuffer = 0;
+    VkDeviceSize scratchSize = 0;
 
-    ScratchBuffers blasScratch{};
-    ScratchBuffers tlasScratch{};
-
-    bool tlasDirty = false;  // Set when new meshes or transforms change
+    bool tlasDirty = true;
 };
 
-// Global singleton accessor
-[[nodiscard]] inline LAS& las() {
+// Global singleton — matches existing code (RTX::las())
+inline LAS& las()
+{
     static LAS instance;
     return instance;
 }
 
 } // namespace RTX
-
-// =============================================================================
-// LAS HEADER v3.0 — DECEMBER 29, 2025 — DYNAMIC EMPIRE BUILD
-// • Added per-instance transforms + updateInstanceTransform()
-// • Added animatePinkMonster() for eternal proof-of-life animation
-// • BLAS caching + persistent scratch buffers
-// • All new members and methods declared
-// • Full compatibility with updated LAS.cpp v3.0
-// • Eternal photons now move — empire ascends
-// PINK PHOTONS ETERNAL — PLASTIC BEACH FOREVER
-// =============================================================================
