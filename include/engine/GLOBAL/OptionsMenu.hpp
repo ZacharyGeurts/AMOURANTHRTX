@@ -130,7 +130,7 @@ namespace Debug {
     constexpr bool     SHOW_SPP_HEATMAP            = true;
     constexpr bool     SHOW_ACCUMULATION_COUNT     = true;
     constexpr bool     SHOW_GPU_TIMESTAMPS         = false;
-    constexpr bool     ENABLE_VALIDATION_LAYERS    = false;
+    constexpr bool     ENABLE_VALIDATION_LAYERS    = true;
 }
 
 // ── CAMERA DEFAULTS (RESTORED ALL USED OPTIONS) ──────────────────────────────

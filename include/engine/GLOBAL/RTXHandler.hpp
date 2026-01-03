@@ -1,17 +1,21 @@
 // include/engine/GLOBAL/RTXHandler.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// =============================================================================
-// RTXHandler.hpp — CENTRALIZED VULKAN CONTEXT & INITIALIZATION
-// PRODUCTION-GRADE · MODERN C++23 · CLEAN · ROBUST · FULL VULKAN 1.4 SUPPORT
-// COMPATIBILITY PRESERVED · ALL LEGACY INTERFACES MAINTAINED
-// PINK PHOTONS ETERNAL — THE EMPIRE'S CORE IS SOLID
+// RTXHandler v2.0 — Production-Ready Vulkan Context & Initialization Header
+// FULLY COMPATIBLE WITH ENGINE STATE — DECEMBER 30, 2025
+// • Clean, modern C++23 design
+// • Safe initialization order enforced
+// • Global descriptor pool support
+// • Robust RAII Handle with leak-proof semantics
+// • Full RTX capability detection
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — PLASTIC BEACH FOREVER
 // =============================================================================
 
 #pragma once
@@ -23,7 +27,6 @@
 #include <atomic>
 #include <optional>
 #include <string>
-#include <span>
 #include <functional>
 
 #include "engine/GLOBAL/logging.hpp"
@@ -36,7 +39,7 @@ namespace RTX {
 struct Camera;
 
 // =============================================================================
-// RAII Handle Template
+// RAII Handle Template — Leak-proof, production-safe
 // =============================================================================
 template<typename T>
 struct Handle {
@@ -49,6 +52,7 @@ struct Handle {
     std::string tag;
 
     Handle() noexcept = default;
+
     Handle(T h, VkDevice d, DestroyFn del = nullptr, size_t sz = 0, std::string_view t = "")
         : raw(h), device(d), destroyer(std::move(del)), size(sz), tag(t) {}
 
@@ -70,6 +74,7 @@ struct Handle {
         tag = std::move(o.tag);
         o.raw = T{};
         o.device = VK_NULL_HANDLE;
+        o.destroyer = nullptr;
         return *this;
     }
 
@@ -101,14 +106,14 @@ struct QueueFamilyIndices {
     std::optional<uint32_t> transferFamily;
 
     [[nodiscard]] bool isComplete() const noexcept {
-        return graphicsFamily && presentFamily;
+        return graphicsFamily.has_value() && presentFamily.has_value();
     }
 };
 
 [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept;
 
 // =============================================================================
-// Global RTX Context
+// Global RTX Context — Singleton, Thread-Safe Ready Flag
 // =============================================================================
 struct Context {
     VkInstance                 instance_       = VK_NULL_HANDLE;
@@ -165,7 +170,7 @@ public:
     [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
     [[nodiscard]] constexpr bool isRtxCapable() const noexcept { return rtxCapable_; }
 
-    // Internal setters
+    // Internal setters (used during initialization)
     void setInstance(VkInstance i) noexcept { instance_ = i; }
     void setSurface(VkSurfaceKHR s) noexcept { surface_ = s; }
     void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physicalDevice_ = pd; }
@@ -188,17 +193,23 @@ extern Context g_context_instance;
 [[nodiscard]] inline Context& g_ctx() noexcept { return g_context_instance; }
 
 // =============================================================================
-// Core Functions
+// Core Initialization Functions
 // =============================================================================
 [[nodiscard]] VkInstance createVulkanInstance(bool enableValidation) noexcept;
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept;
 
+// =============================================================================
+// Helper: Write Acceleration Structure Descriptor
+// =============================================================================
 void WriteAccelerationStructureDescriptor(
     VkDescriptorSet dstSet,
     uint32_t dstBinding,
     uint32_t dstArrayElement,
     VkAccelerationStructureKHR accelStruct) noexcept;
 
+// =============================================================================
+// Global Descriptor Pool Accessor
+// =============================================================================
 [[nodiscard]] inline VkDescriptorPool globalDescriptorPool() noexcept {
     return g_ctx().descriptorPool_.valid() ? g_ctx().descriptorPool_.get() : VK_NULL_HANDLE;
 }
@@ -206,7 +217,8 @@ void WriteAccelerationStructureDescriptor(
 } // namespace RTX
 
 // =============================================================================
-// PRODUCTION-GRADE RTX HEADER — CLEAN · COMPATIBLE · FULLY REWORKED
-// ALL COMPILATION ISSUES RESOLVED · LEGACY SUPPORT MAINTAINED
-// SHIPPING DECEMBER 18, 2025 — THE EMPIRE IS UNIFIED AND STRONG
+// RTX HEADER v2.0 — DECEMBER 30, 2025
+// Production-ready, clean, and fully compatible with current engine
+// Safe initialization, RAII safety, and global pool support
+// THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN
 // =============================================================================

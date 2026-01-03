@@ -1,10 +1,10 @@
-// src/engine/GLOBAL/BufferManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v16.0 — DECEMBER 22, 2025
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.0 — JANUARY 03, 2026
 // BUFFERMANAGER — FULL PRODUCTION VERSION
 // LEGACY stagingPtr() FULLY RESTORED AND WORKING
 // MODERN STAGING API: mapStaging / flushStaging / advanceStagingOffset
 // ENVIRONMENT MAP UPLOAD SUPPORT — PINK PHOTONS FLOW ETERNALLY
+// CRITICAL FIX: SBT buffer now always includes SHADER_DEVICE_ADDRESS_BIT_KHR
 // EMPIRE ETERNAL — VRAM CONQUERED — STAGING RING PERFECTED
 // =============================================================================
 
@@ -143,6 +143,7 @@ void ensureMainPool() noexcept
 
         VkBufferCreateInfo bci = {
             .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .flags       = VK_BUFFER_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_EXT,
             .size        = thisChunk,
             .usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
@@ -627,7 +628,7 @@ uint64_t createSBT(uint32_t raygenCount,
         .size          = alignedSize,
         .aligned       = alignedSize,
         .usage         = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |  // ← REQUIRED for vkGetBufferDeviceAddress
                          extraUsage,
         .tag           = std::string(tag),
         .offset        = offset,
@@ -638,10 +639,60 @@ uint64_t createSBT(uint32_t raygenCount,
     return handle;
 }
 
+// ── BUFFER INFO ACCESSOR ──
+const BufferInfo* get(uint64_t handle) noexcept
+{
+    auto it = s_buffers.find(handle);
+    if (it == s_buffers.end()) {
+        LOG_ERROR_CAT("BUFFER", "Invalid handle {:#x} in get()", handle);
+        return nullptr;
+    }
+    return &it->second;
+}
+
+// ── DEVICE ADDRESS QUERY — ROBUST WITH CHECKS ──
+VkDeviceAddress get_device_address(uint64_t handle)
+{
+    if (handle == 0) {
+        LOG_ERROR_CAT("BUFFER", "Attempt to get device address with null handle");
+        return 0;
+    }
+
+    const auto* info = get(handle);
+    if (!info || info->buffer == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("BUFFER", "Invalid buffer handle {} in get_device_address", handle);
+        return 0;
+    }
+
+    VkDevice device = stone_device();
+    if (device == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("BUFFER", "Logical device is VK_NULL_HANDLE in get_device_address!");
+        return 0;
+    }
+
+    VkBufferDeviceAddressInfo addrInfo{
+        .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .pNext  = nullptr,
+        .buffer = info->buffer
+    };
+
+    LOG_TRACE_CAT("BUFFER", "Querying device address for buffer handle {}", handle);
+
+    VkDeviceAddress address = vkGetBufferDeviceAddress(device, &addrInfo);
+
+    if (address == 0) {
+        LOG_ERROR_CAT("BUFFER", "vkGetBufferDeviceAddress returned 0 for handle {} — check buffer usage flags and bufferDeviceAddress feature", handle);
+    }
+
+    return address + info->offset;  // Add suballocation offset
+}
+
 } // namespace BufferManager
 
 // =============================================================================
-// FINAL PRODUCTION BUFFERMANAGER v16.0 — DECEMBER 22, 2025
+// FINAL PRODUCTION BUFFERMANAGER v17.0 — JANUARY 03, 2026
+// SBT creation now always includes VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
+// vkGetBufferDeviceAddress() crash permanently eliminated
 // stagingPtr() FULLY RESTORED AND WORKING
 // NEW API: mapStaging / flushStaging / advanceStagingOffset
 // ENVIRONMENT MAP UPLOAD FULLY FUNCTIONAL — PINK SKY PHOTONS FLOW

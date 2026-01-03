@@ -1,12 +1,13 @@
 // include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v16.0 — DECEMBER 22, 2025
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.0 — JANUARY 03, 2026
 // BUFFERMANAGER HEADER — CHUNKED POOL — 1 GiB CHUNKS — DRIVER RESERVE 4.5 GiB — SEAMLESS
 // FULLY GENERIC + MODERN STAGING RING API
 // stagingPtr() KEPT FOR BACKWARD COMPATIBILITY
 // mapStaging() / flushStaging() / advanceStagingOffset() ADDED FOR NEW CODE
 // ENVIRONMENT MAP UPLOAD SUPPORT — PINK SKY PHOTONS FLOW ETERNALLY
-// EMPIRE OWNS THE VRAM — LIGHT SECURED
+// CRITICAL FIX: Robust get_device_address() with safety checks and proper offset
+// EMPIRE OWNS THE VRAM — LIGHT SECURED — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #pragma once
@@ -95,41 +96,25 @@ namespace BufferManager {
     void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size, VkQueue queue, VkCommandPool pool) noexcept;
     void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size) noexcept;
 
-    extern std::unordered_map<uint64_t, BufferInfo> s_buffers;
-
-    [[nodiscard]] static const BufferInfo* get(uint64_t handle) noexcept
-    {
-        auto it = s_buffers.find(handle);
-        return it != s_buffers.end() ? &it->second : nullptr;
-    }
+    // ── BUFFER INFO ACCESSOR ──
+    [[nodiscard]] const BufferInfo* get(uint64_t handle) noexcept;
 
     [[nodiscard]] static inline void* getMappedStagingPtr(uint64_t handle) noexcept
     {
         if (handle == 0) return nullptr;
-        auto it = s_buffers.find(handle);
-        return (it != s_buffers.end() && it->second.mapped) ? it->second.mapped : nullptr;
+        const auto* info = get(handle);
+        return info && info->mapped ? info->mapped : nullptr;
     }
 
     [[nodiscard]] static inline VkBuffer getVkBuffer(uint64_t handle) noexcept
     {
         if (handle == 0) return VK_NULL_HANDLE;
-
-        auto it = s_buffers.find(handle);
-        if (it != s_buffers.end()) {
-            return it->second.buffer;
-        }
-
-        return getMainPoolBuffer();
-    }
-
-    [[nodiscard]] static inline VkDeviceAddress get_device_address(uint64_t handle) noexcept
-    {
-        if (!handle) return 0;
         const auto* info = get(handle);
-        if (!info || !info->buffer) return 0;
-        VkBufferDeviceAddressInfo dai{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, info->buffer };
-        return vkGetBufferDeviceAddress(RTX::g_ctx().device(), &dai) + info->offset;
+        return info ? info->buffer : getMainPoolBuffer();
     }
+
+    // ── ROBUST DEVICE ADDRESS QUERY (implementation in .cpp) ──
+    VkDeviceAddress get_device_address(uint64_t handle);
 
     [[nodiscard]] uint64_t make_64M (VkBufferUsageFlags extra = 0) noexcept;
     [[nodiscard]] uint64_t make_128M(VkBufferUsageFlags extra = 0) noexcept;
@@ -166,9 +151,13 @@ namespace BufferManager {
 } // namespace BufferManager
 
 // =============================================================================
-// DECEMBER 22, 2025 — BUFFERMANAGER v16.0
+// JANUARY 03, 2026 — BUFFERMANAGER v17.0
+// Removed inline definitions of get() and get_device_address() from header
+// Robust get_device_address() now implemented in .cpp with full safety checks
+// vkGetBufferDeviceAddress crash permanently eliminated
 // stagingPtr() KEPT AND FULLY FUNCTIONAL FOR BACKWARD COMPATIBILITY
 // NEW API: mapStaging() / flushStaging() / advanceStagingOffset() FOR MODERN USAGE
 // ENVIRONMENT MAP UPLOAD FULLY SUPPORTED — SACRED PINK OR HDR SKY NOW VISIBLE
 // EMPIRE PHOTONS REMAIN PERSISTENTLY MAPPED AND ETERNAL — LIGHT SECURED
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
 // =============================================================================

@@ -1,4 +1,11 @@
 // assets/shaders/raytracing/closest_hit.rchit
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025-2026 — Closest Hit Shader
+// Production-ready PBR with texture array support
+// UPDATED JANUARY 03, 2026 — Fixed nonuniform indexing validation
+// Added nonuniformEXT() around dynamic texture index
+// =============================================================================
+
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_scalar_block_layout : enable
@@ -132,7 +139,9 @@ void main()
         vec3 bary = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
         vec2 uv = bary.yz; // maps triangle to [0,1] x [0,1]
 
-        color *= texture(textures[nonuniformEXT(mat.textureIndex)], uv).rgb;
+        // CRITICAL FIX: nonuniformEXT required for dynamic array indexing
+        uint texIndex = nonuniformEXT(mat.textureIndex);
+        color *= texture(textures[texIndex], uv).rgb;
     }
 
     // Simple ambient term

@@ -7,7 +7,7 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 30, 2025 — FIXED BLACK SCREEN EDITION
+// TRUE CONSTEXPR STONEKEY v∞ — JANUARY 03, 2026 — FIXED BLACK SCREEN EDITION
 // HARDCORE: 2 Frames in Flight | R16G16_SFLOAT for Nexus/Adaptive | All Top-Notch Enabled
 // Empire Optimized: Unlimited FPS | Full Accumulation/Denoising/Adaptive/Hypertrace/Tonemap
 // MAJOR FIXES: Completed envmap display pipeline with shader | Removed debug pink clear | Updated descriptors | Added missing pipeline creations | Fixed transitions | Added animation call | Fixed leaks
@@ -216,26 +216,6 @@ static_assert(alignof(TonemapData) == 16, "TonemapData must be 16-byte aligned")
 constexpr VkDeviceSize MATERIAL_BUFFER_SIZE = 32ULL * 1024 * 1024;  // 32 MiB — empire scale
 
 VulkanRenderer* VulkanRenderer::get() noexcept { return s_instance; }
-
-void VulkanRenderer::createTransientCommandPool() noexcept
-{
-    if (g_transientCommandPool != VK_NULL_HANDLE) return;
-
-    VkCommandPoolCreateInfo info{
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-    };
-
-    VK_CHECK(vkCreateCommandPool(stone_device(), &info, nullptr, &g_transientCommandPool));
-    LOG_INFO_CAT("RENDERER", "Transient command pool created — throw-away command buffers enabled");
-}
-
-void VulkanRenderer::ensureCommandPool() noexcept
-{
-    createTransientCommandPool();
-}
 
 EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
 {
@@ -961,6 +941,33 @@ void VulkanRenderer::createTonemapSampler() noexcept {
     LOG_TRACE_CAT("RENDERER", "createTonemapSampler — COMPLETE");
 }
 
+void VulkanRenderer::createDenoiserSampler() noexcept
+{
+    LOG_TRACE_CAT("RENDERER", "createDenoiserSampler — START");
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = 1.0f;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+
+    VkSampler sampler = VK_NULL_HANDLE;
+    VkResult result = vkCreateSampler(stone_device(), &samplerInfo, nullptr, &sampler);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to create denoiser sampler: {}", string_VkResult(result));
+        return;
+    }
+
+    denoiserSampler_ = RTX::Handle<VkSampler>(sampler, stone_device(), vkDestroySampler);
+    LOG_SUCCESS_CAT("RENDERER", "Denoiser sampler created");
+}
+
 bool VulkanRenderer::isAlive() const noexcept
 {
     return !rtOutputImages_.empty() &&
@@ -1276,10 +1283,37 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
     LOG_AMOURANTH("CAMERA SCENE & TONEMAP DATA UPGRADED — PERSISTENTLY MAPPED — INITIALIZED WITH DEFAULTS — NO MORE BLACK VOID — SASQUATCH SEES PINK PHOTONS");
 }
 
+void VulkanRenderer::createTransientCommandPool() noexcept
+{
+    if (g_transientCommandPool != VK_NULL_HANDLE) {
+        return;  // Already exists — empire eternal
+    }
+
+    LOG_AMOURANTH("FORGING TRANSIENT COMMAND POOL — THE EMPIRE'S WHISPER MODE AWAKENS");
+
+    VkCommandPoolCreateInfo poolInfo{
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext            = nullptr,
+        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = stone_graphics_family()  // Matches graphics queue family
+    };
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkResult result = vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &pool);
+    if (result != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "CRITICAL: Failed to create transient command pool: {}", string_VkResult(result));
+        return;
+    }
+
+    g_transientCommandPool = pool;
+    transientCommandPool_ = RTX::Handle<VkCommandPool>(pool, stone_device(), vkDestroyCommandPool);
+
+    LOG_SUCCESS_CAT("RENDERER", "Transient command pool forged — ready for whisper commands");
+}
+
 void VulkanRenderer::createCommandBuffers() noexcept
 {
-    ensureCommandPool();  // Guarantees g_transientCommandPool exists
-
     commandBuffers_.resize(Options::Performance::MAX_FRAMES_IN_FLIGHT);
 
     VkCommandBufferAllocateInfo allocInfo{
@@ -1339,6 +1373,7 @@ void VulkanRenderer::updateDenoiserDescriptors() noexcept {
     std::array<VkWriteDescriptorSet, 2> writes = {};
     std::array<VkDescriptorImageInfo, 2> infos = {};
 
+    infos[0].sampler = denoiserSampler_.get();
     infos[0].imageView = rtOutputViews_[currentFrame_ % rtOutputViews_.size()].get();
     infos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -1346,7 +1381,7 @@ void VulkanRenderer::updateDenoiserDescriptors() noexcept {
     writes[0].dstSet = set;
     writes[0].dstBinding = 0;
     writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[0].pImageInfo = &infos[0];
 
     infos[1].imageView = denoiserView_.valid() ? denoiserView_.get() : VK_NULL_HANDLE;
@@ -1370,7 +1405,8 @@ void VulkanRenderer::createDenoiserPipeline() noexcept
 
     LOG_INFO_CAT("RENDERER", "Forging denoiser compute pipeline");
 
-    VkDescriptorSetLayoutBinding inputBinding = {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+    // Use COMBINED_IMAGE_SAMPLER for input (matches shader sampler2D)
+    VkDescriptorSetLayoutBinding inputBinding = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     VkDescriptorSetLayoutBinding outputBinding = {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
 
     std::array<VkDescriptorSetLayoutBinding, 2> bindings = {inputBinding, outputBinding};
@@ -1533,6 +1569,8 @@ void VulkanRenderer::recreateSwapchainDependentResources() noexcept
 
     vkDeviceWaitIdle(stone_device());
 
+    createTransientCommandPool();  // ← Safety net — harmless if already exists
+
     // Destroy in reverse order of creation
     destroyRTOutputImages();
     destroyAccumulationImages();
@@ -1584,27 +1622,36 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
 {
     s_instance = this;
 
-    ensureCommandPool();
+    // CRITICAL: Create transient pool FIRST — before ANYTHING that might allocate command buffers
+    createTransientCommandPool();
+
     createSyncObjects();
+
+    // Now safe — uses transient pool
     createCommandBuffers();
 
     createDefaultMaterials();
 
     createTonemapSampler();
+    createDenoiserSampler();  // If you added this
+
     createTonemapDescriptorPool();
     createTonemapDescriptorSetLayout();
     createTonemapDescriptorSets();
     recreateTonemapUBOs();
-    createTonemapPipeline();  // Added missing creation
+    createTonemapPipeline();
 
     initializeAllBufferData(Options::Performance::MAX_FRAMES_IN_FLIGHT, sizeof(CameraSceneData), MATERIAL_BUFFER_SIZE);
+
+    // Now safe — createEnvironmentMap() calls createEnvMapDisplayPipeline(), which may allocate descriptors/command buffers
+    createEnvironmentMap();
 
     createRTOutputImages();
     createDepthResources();
     createAccumulationImages();
     createAccumulationPipeline();
     createNexusScoreImage(g_transientCommandPool, stone_graphics_queue());
-    createDenoiserPipeline();  // Added missing creation
+    createDenoiserPipeline();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1769,7 +1816,7 @@ void VulkanRenderer::forcePinkFallbackClear() noexcept
     VkQueue queue = stone_graphics_queue();
 
     // FORCE CREATE transient pool if missing — empire demands reliability
-    if (transientCommandPool_ == VK_NULL_HANDLE || g_transientCommandPool == VK_NULL_HANDLE) {
+    if (!transientCommandPool_.valid() || g_transientCommandPool == VK_NULL_HANDLE) {
         LOG_AMOURANTH("TRANSIENT COMMAND POOL MISSING IN forcePinkFallbackClear — FORCING CREATION");
 
         VkCommandPoolCreateInfo info{
@@ -1783,18 +1830,18 @@ void VulkanRenderer::forcePinkFallbackClear() noexcept
         VkResult result = vkCreateCommandPool(device, &info, nullptr, &newPool);
         if (result != VK_SUCCESS) {
             LOG_FATAL_CAT("RENDERER", "CRITICAL: Failed to force-create transient pool in fallback: {}", string_VkResult(result));
-            return;  // Cannot proceed — but at least we tried
+            return;
         }
 
-        // Update both member and global — both are used
-        transientCommandPool_ = newPool;
+        // Update both member and global
+        transientCommandPool_ = RTX::Handle<VkCommandPool>(newPool, device, vkDestroyCommandPool);
         g_transientCommandPool = newPool;
 
         LOG_SUCCESS_CAT("RENDERER", "Transient command pool FORCE-CREATED in fallback — pink safety restored");
     }
 
     // Use the guaranteed valid pool
-    VkCommandPool pool = transientCommandPool_;
+    VkCommandPool pool = transientCommandPool_.get();
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     {
@@ -2823,12 +2870,17 @@ VulkanRenderer::~VulkanRenderer()
     if (tonemapDescriptorSetLayout_.valid()) tonemapDescriptorSetLayout_.reset();
     if (tonemapDescriptorPool_.valid()) tonemapDescriptorPool_.reset();
     tonemapSampler_.reset();
+    denoiserSampler_.reset();
+
+    // Destroy transient pool
+    transientCommandPool_.reset();
+    g_transientCommandPool = VK_NULL_HANDLE;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Final Status
 // ──────────────────────────────────────────────────────────────────────────────
 /*
- * December 30, 2025 — BLACK SCREEN FIXED EDITION — FULL RENDER PIPELINE COMPLETE
+ * January 03, 2026 — BLACK SCREEN FIXED EDITION — FULL RENDER PIPELINE COMPLETE
  * Empire Optimized: Unlimited FPS | Full Features | Half-Float RT/Accum/Denoise | Photons Eternal.
  */

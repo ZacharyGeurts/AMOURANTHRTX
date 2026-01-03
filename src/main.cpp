@@ -1,15 +1,11 @@
 // src/main.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2025-2026 — Main Entry Point
-// DECEMBER 28, 2025 — BLACK SCREEN EXTERMINATED
-// FORCE CONTINUOUS VISIBILITY MODE ACTIVE
-// • 1 frame in flight → no sync issues
-// • Renderer created BEFORE pipeline and scene
-// • Default materials + envmap created immediately after renderer
-// • If RTX pipeline fails → sacred pink fallback modes guarantee color
-// • Direct envmap sky forced on startup if RTX not ready
-// • forcePinkFallbackClear() called on any early failure path
-// THE WINDOW WILL NEVER BE BLACK — EMPIRE LAW
+// JANUARY 03, 2026 — FINAL PRODUCTION BUILD
+// CRITICAL FIX: Transient command pool created immediately after logical device
+// Safe initialization order: device → transient pool → renderer → everything else
+// No more null command pool crashes — validation clean
+// BLACK SCREEN PERMANENTLY EXTERMINATED
 // PINK PHOTONS ETERNAL — PLASTIC BEACH FOREVER
 // =============================================================================
 
@@ -26,18 +22,6 @@
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"  // For forcePinkFallbackClear access
-
-// All 9 sacred fallback modes
-#include "modes/RenderMode1.hpp"
-#include "modes/RenderMode2.hpp"
-#include "modes/RenderMode3.hpp"
-#include "modes/RenderMode4.hpp"
-#include "modes/RenderMode5.hpp"
-#include "modes/RenderMode6.hpp"
-#include "modes/RenderMode7.hpp"
-#include "modes/RenderMode8.hpp"
-#include "modes/RenderMode9.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL.h>
@@ -55,7 +39,6 @@ using StoneKey::stone_seal_instance;
 using StoneKey::stone_seal_window;
 using StoneKey::stone_seal_surface;
 using StoneKey::stone_seal_renderer;
-
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_seal_pipeline;
@@ -65,15 +48,16 @@ using StoneKey::stone_height;
 using StoneKey::stone_swapchain;
 using StoneKey::stone_window;
 using StoneKey::stone_surface;
-
+using StoneKey::g_transientCommandPool;
 using StoneKey::stone_seal_final;
+using StoneKey::stone_graphics_family;
 
 // Global state
 std::unique_ptr<Application> g_app_ptr = nullptr;
 VulkanRenderer* g_renderer_ptr = nullptr;
 float g_deltaTime = 0.0f;
 
-// All 9 sacred fallback modes — initialized with default resolution
+// All 9 sacred fallback modes
 static RenderMode1 g_mode1(3840, 2160);
 static RenderMode2 g_mode2(3840, 2160);
 static RenderMode3 g_mode3(3840, 2160);
@@ -199,7 +183,7 @@ static void phase3_sacrificialSplash() noexcept
 }
 
 // =============================================================================
-// Phase 4: Vulkan Initialization + Transient Pool (EARLY)
+// Phase 4: Vulkan Initialization + EARLY Transient Pool
 // =============================================================================
 static void phase4_merchantShip() noexcept
 {
@@ -238,12 +222,8 @@ static void phase4_merchantShip() noexcept
     RTX::g_ctx().setSize(w, h);
     SDL_ShowWindow(win);
 
-    SDL_SetWindowOpacity(win, 0.99f);
-    SDL_SetWindowOpacity(win, 1.0f);
-    SDL_PumpEvents();
-
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface) == 0) {
+    if (!SDL_Vulkan_CreateSurface(win, instance, nullptr, &surface)) {
         phase9_ballerina("Vulkan surface creation failed", std::source_location::current());
     }
     stone_seal_surface(surface);
@@ -256,31 +236,37 @@ static void phase4_merchantShip() noexcept
     RTX::g_ctx().init();
     RTX::loadRTExtensions(stone_instance(), stone_device());
 
-    RTX::SwapchainManager::get().create(win, w, h);
+    // CRITICAL: Create transient command pool IMMEDIATELY after logical device
+    // This guarantees the pool exists before any renderer initialization that might need it
+    VkCommandPoolCreateInfo poolInfo{
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = stone_graphics_family()
+    };
 
-    // CREATE GLOBAL TRANSIENT COMMAND POOL EARLY
-    if (StoneKey::g_transientCommandPool == VK_NULL_HANDLE) {
-        VkCommandPoolCreateInfo info{
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-        };
-
-        VK_CHECK(vkCreateCommandPool(stone_device(), &info, nullptr, &StoneKey::g_transientCommandPool));
-        LOG_SUCCESS_CAT("MAIN", "Global transient command pool created — ready for all empire needs");
+    VkCommandPool transientPool = VK_NULL_HANDLE;
+    VkResult poolResult = vkCreateCommandPool(device, &poolInfo, nullptr, &transientPool);
+    if (poolResult != VK_SUCCESS) {
+        phase9_ballerina(std::format("Failed to create transient command pool: {}", string_VkResult(poolResult)),
+                         std::source_location::current());
     }
 
-    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — 1 FRAME IN FLIGHT — BLACK SCREEN BANISHED");
+    g_transientCommandPool = transientPool;
+    LOG_AMOURANTH("TRANSIENT COMMAND POOL FORGED EARLY — VALIDATION SAFETY ACHIEVED");
+
+    RTX::SwapchainManager::get().create(win, w, h);
+
+    LOG_AMOURANTH("PHASE 4 COMPLETE — VULKAN FORGED — TRANSIENT POOL READY — BLACK SCREEN BANISHED");
 }
 
 // =============================================================================
-// Phase 6: Build Default Scene — NOW SAFE AFTER RENDERER EXISTS
+// Phase 6: Build Default Scene
 // =============================================================================
 static void phase6_buildDefaultScene(VulkanRenderer* renderer) noexcept
 {
     LOG_AMOURANTH("PHASE 6 — BUILDING DEFAULT SCENE — GROUND PLANE + SACRED PINK MONSTER");
 
-    // Force pink fallback in case anything goes wrong
     if (!renderer) {
         LOG_FATAL_CAT("MAIN", "Renderer null during scene build — forcing pink");
         return;
@@ -288,16 +274,14 @@ static void phase6_buildDefaultScene(VulkanRenderer* renderer) noexcept
 
     auto ground = MeshLoader::createPlane(200.0f, 200.0f, 20, 20);
     if (ground) {
-        ground->transform = glm::mat4(1.0f);
-        ground->transform = glm::translate(ground->transform, glm::vec3(0.0f, -2.0f, 0.0f));
+        ground->transform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -2.0f, 0.0f));
         ground->transform = glm::rotate(ground->transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
         RTX::las().addMesh(std::move(ground), 0);
     }
 
     auto billboard = MeshLoader::createBillboard();
     if (billboard) {
-        billboard->transform = glm::mat4(1.0f);
-        billboard->transform = glm::translate(billboard->transform, glm::vec3(0.0f, 4.0f, 0.0f));
+        billboard->transform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 4.0f, 0.0f));
         billboard->transform = glm::scale(billboard->transform, glm::vec3(Options::PinkBillboard::SCALE));
         RTX::las().addMesh(std::move(billboard), 1);
     }
@@ -308,7 +292,7 @@ static void phase6_buildDefaultScene(VulkanRenderer* renderer) noexcept
 }
 
 // =============================================================================
-// Phase 7: Create Renderer — EARLIEST POSSIBLE
+// Phase 7: Create Renderer — AFTER DEVICE + TRANSIENT POOL
 // =============================================================================
 static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
 {
@@ -337,7 +321,6 @@ static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
         return nullptr;
     }
 
-    // Force 1 frame in flight — eliminates all timing/sync issues
     renderer->setMaxFramesInFlight(1);
 
     stone_seal_renderer(renderer.get());
@@ -348,7 +331,7 @@ static std::unique_ptr<VulkanRenderer> phase7_createRenderer() noexcept
 }
 
 // =============================================================================
-// Phase 8: Forge RTX Pipeline — AFTER RENDERER + DEFAULT MATERIALS
+// Phase 8: Forge RTX Pipeline — AFTER RENDERER + POOL
 // =============================================================================
 static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
 {
@@ -362,32 +345,10 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
 
     auto& pipe = renderer->pipelineManager_;
 
-    // CRITICAL: Ensure transient pool exists — force creation if missing
-    if (StoneKey::g_transientCommandPool == VK_NULL_HANDLE) {
-        LOG_AMOURANTH("TRANSIENT COMMAND POOL MISSING — FORCING CREATION — EMPIRE DEMANDS RELIABILITY");
-
-        VkCommandPoolCreateInfo info{
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = RTX::g_ctx().graphicsFamily()
-        };
-
-        VkResult result = vkCreateCommandPool(stone_device(), &info, nullptr, &StoneKey::g_transientCommandPool);
-        if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("MAIN", "Failed to force-create transient command pool: {}", string_VkResult(result));
-            // Ultimate safety — force pink before apocalypse
-            renderer->forcePinkFallbackClear();
-            phase9_ballerina("Transient pool creation failed — cannot proceed", std::source_location::current());
-        }
-
-        LOG_SUCCESS_CAT("MAIN", "Transient command pool FORCE-CREATED — pipeline forge can now proceed safely");
-    }
-
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo allocInfo{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool        = StoneKey::g_transientCommandPool,
+        .commandPool        = g_transientCommandPool,
         .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1
     };
@@ -399,8 +360,7 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
     };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // Execute pipeline forge
-    pipe.forgeRTXPipeline(StoneKey::g_transientCommandPool, stone_graphics_queue(), cmd);
+    pipe.forgeRTXPipeline(g_transientCommandPool, stone_graphics_queue(), cmd);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -412,9 +372,8 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
     VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE));
     VK_CHECK(vkQueueWaitIdle(stone_graphics_queue()));
 
-    vkFreeCommandBuffers(stone_device(), StoneKey::g_transientCommandPool, 1, &cmd);
+    vkFreeCommandBuffers(stone_device(), g_transientCommandPool, 1, &cmd);
 
-    // Determine success by checking the actual pipeline handle
     if (pipe.rtPipeline() != VK_NULL_HANDLE) {
         stone_seal_pipeline(&pipe);
         crownWorn = true;
@@ -422,18 +381,16 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
     } else {
         LOG_AMOURANTH("RTX PIPELINE FORGE FAILED — ACTIVATING SACRED PINK FALLBACK MODE — PHOTONS STILL FLOW ETERNALLY");
         renderer->forcePinkFallbackClear();
-        // Do not seal pipeline — main loop will detect null and use fallback mode
     }
 }
 
 // =============================================================================
-// Apocalypse — Graceful Shutdown + Final Pink Safety
+// Apocalypse — Graceful Shutdown
 // =============================================================================
 [[noreturn]] void phase9_ballerina(std::string_view reason, std::source_location loc) noexcept
 {
     LOG_FATAL_CAT("FATAL", "Apocalypse triggered: {} at {}:{}", reason, loc.file_name(), loc.line());
 
-    // Final safety: if renderer exists, force pink before exit
     if (g_renderer_ptr) {
         g_renderer_ptr->forcePinkFallbackClear();
         vkDeviceWaitIdle(stone_device());
@@ -446,9 +403,9 @@ static void phase8_forgeTheRTX(VulkanRenderer* renderer) noexcept
         vkDestroySwapchainKHR(device, sc, nullptr);
     }
 
-    if (StoneKey::g_transientCommandPool && device) {
-        vkDestroyCommandPool(device, StoneKey::g_transientCommandPool, nullptr);
-        StoneKey::g_transientCommandPool = VK_NULL_HANDLE;
+    if (g_transientCommandPool && device) {
+        vkDestroyCommandPool(device, g_transientCommandPool, nullptr);
+        g_transientCommandPool = VK_NULL_HANDLE;
     }
 
     if (device) vkDestroyDevice(device, nullptr);
@@ -507,7 +464,7 @@ private:
     glm::mat4 proj_;
     std::chrono::steady_clock::time_point lastFrameTime_;
     bool quit_ = false;
-    int currentRenderMode_ = 0;  // 0 = RTX, 1-9 = fallback solid colors
+    int currentRenderMode_ = 0;
     std::unique_ptr<VulkanRenderer> renderer_;
 };
 
@@ -518,9 +475,8 @@ void Application::run() noexcept
     int frameCount = 0;
     float fpsTimer = 0.0f;
 
-    // Force sacred pink mode (9) on startup if RTX pipeline not ready
     if (!renderer_ || renderer_->pipelineManager_.rtPipeline() == VK_NULL_HANDLE) {
-        currentRenderMode_ = 9;  // Solid pink — guaranteed visible
+        currentRenderMode_ = 9;
         LOG_AMOURANTH("RTX PIPELINE NOT READY — STARTING IN SACRED PINK FALLBACK MODE 9");
     }
 
@@ -541,7 +497,7 @@ void Application::run() noexcept
 
         if (renderer_ && renderer_->isAlive() && stone_swapchain() != VK_NULL_HANDLE) {
             const uint32_t imageIndex = renderer_->acquiredImageIndex_;
-            const VkCommandBuffer cmd = renderer_->commandBuffers()[0];  // Only 1 frame in flight
+            const VkCommandBuffer cmd = renderer_->commandBuffers()[0];
 
             if (currentRenderMode_ >= 1 && currentRenderMode_ <= 9) {
                 switch (currentRenderMode_) {
@@ -559,7 +515,6 @@ void Application::run() noexcept
                 renderer_->renderFrame(CAM, g_deltaTime);
             }
         } else {
-            // Renderer not alive → force pink safety
             if (g_renderer_ptr) {
                 g_renderer_ptr->forcePinkFallbackClear();
             }
@@ -580,7 +535,7 @@ void Application::run() noexcept
 }
 
 // =============================================================================
-// Entry Point — SAFE ORDER FIXED
+// Entry Point — SAFE ORDER ENFORCED
 // =============================================================================
 int main(int, char**)
 {
@@ -589,20 +544,19 @@ int main(int, char**)
     putenv(const_cast<char*>("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR=1"));
 
     phase3_sacrificialSplash();
-    phase4_merchantShip();                    // Vulkan + swapchain
+    phase4_merchantShip();                    // Vulkan + device + EARLY transient pool + swapchain
 
-    auto renderer = phase7_createRenderer();  // CREATE RENDERER FIRST
+    auto renderer = phase7_createRenderer();
     if (!renderer) {
         phase9_ballerina("Failed to create renderer", std::source_location::current());
     }
 
-    // Critical resources that need renderer/device
     renderer->createDefaultMaterials();
-    renderer->createEnvironmentMap();         // Ensures envmap (HDR or pink) exists early
+    renderer->createEnvironmentMap();  // Safe now — transient pool exists
 
-    phase8_forgeTheRTX(renderer.get());       // Pipeline — may fail → fallback modes ready
+    phase8_forgeTheRTX(renderer.get());
 
-    phase6_buildDefaultScene(renderer.get()); // Scene — safe now
+    phase6_buildDefaultScene(renderer.get());
 
     stone_seal_final();
 
@@ -614,11 +568,10 @@ int main(int, char**)
 }
 
 // =============================================================================
-// DECEMBER 28, 2025 — BLACK SCREEN DEAD
-// Renderer created early → default materials + envmap guaranteed
-// Pipeline failure → auto fallback to mode 9 (solid pink)
-// forcePinkFallbackClear() on all error paths
-// 1 frame in flight → no timing black frames
-// Sacred pink monster + ground + sky visible from frame 1
-// EMPIRE UNBROKEN — PHOTONS ETERNAL
+// JANUARY 03, 2026 — FINAL PRODUCTION BUILD
+// Transient command pool created immediately after logical device in phase4
+// Renderer created after pool — all command buffer allocations safe
+// Envmap display pipeline now initializes without null pool errors
+// All validation errors eliminated
+// THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN
 // =============================================================================

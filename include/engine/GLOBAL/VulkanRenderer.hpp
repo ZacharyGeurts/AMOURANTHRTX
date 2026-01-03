@@ -3,10 +3,10 @@
 //
 // Dual Licensed: CC BY-NC 4.0 + Commercial (gzac5314@gmail.com)
 //
-// AMOURANTH RTX Engine (C) 2025-2026 — SLIPSTREAM v∞ — DECEMBER 30, 2025
+// AMOURANTH RTX Engine (C) 2025-2026 — SLIPSTREAM v∞ — JANUARY 03, 2026
 // BLACK SCREEN FIXED EDITION — FULL RENDER PIPELINE COMPLETE
 // Empire Optimized: Unlimited FPS | Full Features | Half-Float RT/Accum/Denoise | Photons Eternal.
-// MAJOR FIXES: Fixed denoiser layout type mismatch (now DescriptorSetLayout), added missing declarations
+// MAJOR FIXES: Added missing denoiserSampler_ declaration and createDenoiserSampler()
 // =============================================================================
 
 #pragma once
@@ -169,7 +169,7 @@ public:
 
     // ── FIXED COMMAND POOL & BUFFERS ────────────────────────────────────────
     VkCommandPool                commandPool_            = VK_NULL_HANDLE;
-    VkCommandPool                transientCommandPool_   = VK_NULL_HANDLE;
+    RTX::Handle<VkCommandPool> transientCommandPool_;
     std::vector<VkCommandBuffer> commandBuffers_;
     std::vector<VkCommandBuffer> computeCommandBuffers_;
 
@@ -329,6 +329,9 @@ public:
     RTX::Handle<VkDescriptorSetLayout> denoiserLayout_;   // ← Correct type
     std::vector<VkDescriptorSet>  denoiserSets_;
 
+    // NEW: Denoiser sampler for COMBINED_IMAGE_SAMPLER input
+    RTX::Handle<VkSampler> denoiserSampler_;
+
     std::vector<VkFramebuffer> framebuffers_;
     std::vector<VkDescriptorSet> rtDescriptorSets_;
 
@@ -376,7 +379,7 @@ public:
 
     // Command buffers and pools
     [[nodiscard]] VkCommandPool commandPool() const noexcept { return commandPool_; }
-    [[nodiscard]] VkCommandPool transientCommandPool() const noexcept { return transientCommandPool_; }
+    [[nodiscard]] VkCommandPool transientCommandPool() const noexcept { return transientCommandPool_.get(); }
     [[nodiscard]] const std::vector<VkCommandBuffer>& commandBuffers() const noexcept { return commandBuffers_; }
     [[nodiscard]] VkCommandBuffer commandBuffer(uint32_t frame) const noexcept {
         return (frame < commandBuffers_.size()) ? commandBuffers_[frame] : VK_NULL_HANDLE;
@@ -423,6 +426,7 @@ public:
         return (frame < denoiserSets_.size()) ? denoiserSets_[frame] : VK_NULL_HANDLE;
     }
     [[nodiscard]] VkImageView denoiserView() const noexcept { return denoiserView_.get(); }
+    [[nodiscard]] VkSampler denoiserSampler() const noexcept { return denoiserSampler_.get(); }
 
     // Nexus/Hypertrace resources
     [[nodiscard]] VkImageView hypertraceScoreView() const noexcept { return hypertraceScoreView_; }
@@ -466,6 +470,7 @@ public:
     void createDenoiserImage() noexcept;
     void createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept;
     void createTonemapSampler() noexcept;
+    void createDenoiserSampler() noexcept;  // NEW: Declaration for denoiser sampler creation
 
     void destroyRTOutputImages() noexcept;
     void destroyAccumulationImages() noexcept;
@@ -539,8 +544,8 @@ private:
     return *ptr;
 }
 
-// BLACK SCREEN FIXED — DECEMBER 30, 2025
-// Fixed denoiserLayout_ type to VkDescriptorSetLayout
+// JANUARY 03, 2026 — COMPILATION FIXED EDITION
+// Added denoiserSampler_ member and createDenoiserSampler() declaration
 // All pipelines now compile correctly
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — PLASTIC BEACH FOREVER
 // =============================================================================
