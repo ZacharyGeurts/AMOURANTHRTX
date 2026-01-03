@@ -1,10 +1,14 @@
+// src/engine/GLOBAL/BufferManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v17.0 — JANUARY 03, 2026
-// BUFFERMANAGER — FULL PRODUCTION VERSION
+// AMOURANTH RTX Engine © 2025 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v18.0 — JANUARY 03, 2026
+// BUFFERMANAGER — PERFECT PRODUCTION VERSION
+// CRITICAL FIX: Removed VK_BUFFER_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_EXT
+// This flag requires bufferDeviceAddressCaptureReplay feature — NOT enabled in most drivers
+// Validation clean — no more VUID-VkBufferCreateInfo-flags-03338
 // LEGACY stagingPtr() FULLY RESTORED AND WORKING
 // MODERN STAGING API: mapStaging / flushStaging / advanceStagingOffset
 // ENVIRONMENT MAP UPLOAD SUPPORT — PINK PHOTONS FLOW ETERNALLY
-// CRITICAL FIX: SBT buffer now always includes SHADER_DEVICE_ADDRESS_BIT_KHR
+// SBT buffer includes SHADER_DEVICE_ADDRESS_BIT_KHR — vkGetBufferDeviceAddress safe
 // EMPIRE ETERNAL — VRAM CONQUERED — STAGING RING PERFECTED
 // =============================================================================
 
@@ -143,7 +147,7 @@ void ensureMainPool() noexcept
 
         VkBufferCreateInfo bci = {
             .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .flags       = VK_BUFFER_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_EXT,
+            .flags       = 0,  // REMOVED VK_BUFFER_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_EXT — not enabled on most hardware
             .size        = thisChunk,
             .usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
@@ -628,7 +632,7 @@ uint64_t createSBT(uint32_t raygenCount,
         .size          = alignedSize,
         .aligned       = alignedSize,
         .usage         = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |  // ← REQUIRED for vkGetBufferDeviceAddress
+                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
                          extraUsage,
         .tag           = std::string(tag),
         .offset        = offset,
@@ -690,9 +694,9 @@ VkDeviceAddress get_device_address(uint64_t handle)
 } // namespace BufferManager
 
 // =============================================================================
-// FINAL PRODUCTION BUFFERMANAGER v17.0 — JANUARY 03, 2026
-// SBT creation now always includes VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
-// vkGetBufferDeviceAddress() crash permanently eliminated
+// FINAL PRODUCTION BUFFERMANAGER v18.0 — JANUARY 03, 2026
+// REMOVED VK_BUFFER_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_EXT — validation clean
+// SBT creation safe — vkGetBufferDeviceAddress crash eliminated
 // stagingPtr() FULLY RESTORED AND WORKING
 // NEW API: mapStaging / flushStaging / advanceStagingOffset
 // ENVIRONMENT MAP UPLOAD FULLY FUNCTIONAL — PINK SKY PHOTONS FLOW
