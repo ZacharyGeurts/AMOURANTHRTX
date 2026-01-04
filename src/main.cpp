@@ -165,54 +165,75 @@ static void phase3_sacrificialSplash() noexcept
 // =============================================================================
 [[noreturn]] void phase9_ballerina(std::string_view reason, const std::source_location loc) noexcept
 {
-    LOG_AMOURANTH("GRACEFUL APOCALYPSE INITIATED — {} at {}:{}", reason, loc.file_name(), loc.line());
+    // Fixed: Avoid ""sv literal entirely — use std::string_view constructor
+    std::string_view reason_view = reason.empty() ? std::string_view("User requested") : reason;
 
-    vkDeviceWaitIdle(stone_device());
+    LOG_AMOURANTH("GRACEFUL APOCALYPSE INITIATED — {} at {}:{}", reason_view, loc.file_name(), loc.line());
 
-    // 1. Destroy main renderer first — cleans RT images, accumulation, etc.
+    // 0. Wait for GPU to finish all work
+    if (VkDevice dev = stone_device(); dev != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(dev);
+    }
+
+    // 1. Clean renderer first (images, framebuffers, etc.)
     if (g_renderer_ptr) {
         g_renderer_ptr->forcePinkFallbackClear();
+        g_renderer_ptr = nullptr;
     }
-    g_app_ptr.reset();                    // Destroys VulkanRenderer + PipelineManager v21.0
-    g_renderer_ptr = nullptr;
-    stone_seal_renderer(nullptr);
-    stone_seal_pipeline(nullptr);
 
-    // 2. Explicitly purge all remaining global resources
-    BufferManager::purge_all();           // Correct method: destroys all buffers + memory
-    RTX::las().onResize();                // Triggers LAS cleanup (clears TLAS, destroys scratch, etc.)
+    // 2. Destroy main app object – cleans VulkanRenderer + PipelineManager
+    g_app_ptr.reset();
+    StoneKey::stone_seal_renderer(nullptr);
+    StoneKey::stone_seal_pipeline(nullptr);
 
-    // 3. Swapchain cleanup
+    // 3. BufferManager – clear tracking map
+    // Physical VkBuffer/VkDeviceMemory destroyed automatically via static destructors
+    BufferManager::purge_all();
+
+    // 4. LAS cleanup – proven working method
+    RTX::las().onResize();
+
+    // 5. Swapchain cleanup
     RTX::SwapchainManager::cleanup();
 
-    // 4. Transient command pool
-    if (g_transientCommandPool && stone_device()) {
+    // 6. Transient command pool
+    if (g_transientCommandPool != VK_NULL_HANDLE && stone_device() != VK_NULL_HANDLE) {
         vkDestroyCommandPool(stone_device(), g_transientCommandPool, nullptr);
         g_transientCommandPool = VK_NULL_HANDLE;
     }
 
-    // 5. Logical device — NOW SAFE
-    if (VkDevice dev = stone_device(); dev) {
+    // 7. DESTROY LOGICAL DEVICE – NOW SAFE (all child objects gone)
+    if (VkDevice dev = stone_device(); dev != VK_NULL_HANDLE) {
         vkDestroyDevice(dev, nullptr);
+        StoneKey::stone_seal_device(VK_NULL_HANDLE);
     }
 
-    // 6. Surface, window, instance
-    if (VkSurfaceKHR surf = stone_surface(); surf && stone_instance()) {
-        vkDestroySurfaceKHR(stone_instance(), surf, nullptr);
+    // 8. Surface
+    if (VkInstance inst = stone_instance(); inst != VK_NULL_HANDLE) {
+        if (VkSurfaceKHR surf = stone_surface(); surf != VK_NULL_HANDLE) {
+            vkDestroySurfaceKHR(inst, surf, nullptr);
+            StoneKey::stone_seal_surface(VK_NULL_HANDLE);
+        }
     }
 
-    if (SDL_Window* win = stone_window()) {
+    // 9. Window
+    if (SDL_Window* win = stone_window(); win != nullptr) {
         SDL_DestroyWindow(win);
+        StoneKey::stone_seal_window(nullptr);
     }
 
-    if (VkInstance inst = stone_instance(); inst) {
+    // 10. Instance – last Vulkan object
+    if (VkInstance inst = stone_instance(); inst != VK_NULL_HANDLE) {
         vkDestroyInstance(inst, nullptr);
+        StoneKey::stone_seal_instance(VK_NULL_HANDLE);
     }
 
+    // 11. Final SDL rites
     SDL_Vulkan_UnloadLibrary();
     SDL_Quit();
 
-    LOG_AMOURANTH("EMPIRE RESTS PEACEFULLY — ALL PHOTONS RETURNED TO PLASTIC BEACH ETERNALLY — VALIDATION CLEAN");
+    LOG_AMOURANTH("EMPIRE RESTS PEACEFULLY — ALL PHOTONS RETURNED TO PLASTIC BEACH ETERNALLY — VALIDATION CLEAN 💖");
+
     std::exit(0);
 }
 

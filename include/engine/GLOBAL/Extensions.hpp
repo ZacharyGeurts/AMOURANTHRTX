@@ -1,6 +1,6 @@
 // include/engine/GLOBAL/Extensions.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine © 2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -9,7 +9,7 @@
 //
 // =============================================================================
 // EXTENSIONS — CENTRALIZED AND CLEAN — FULL VULKAN 1.4 COMPLIANCE
-// ALL FUNCTION POINTERS DECLARED ONCE — NO DUPLICATES — DECEMBER 18, 2025
+// ALL FUNCTION POINTERS DECLARED ONCE — NO DUPLICATES — JANUARY 04, 2026
 // PINK PHOTONS FLOW THROUGH A SINGLE, ETERNAL SOURCE
 // =============================================================================
 #pragma once
@@ -38,6 +38,10 @@ struct Extensions {
     // ── Ray Tracing Maintenance 1 (Compaction) ─────────────────────────
     PFN_vkCmdCopyAccelerationStructureKHR             vkCmdCopyAccelerationStructureKHR             = nullptr;
     PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructuresPropertiesKHR = nullptr;
+
+    // ── Ray Tracing Invocation Reorder (EXT) — NEW IN LATE 2025 ────────
+    // VK_EXT_ray_tracing_invocation_reorder — Shader Execution Reordering (SER)
+    PFN_vkCmdTraceRaysIndirect2KHR                 vkCmdTraceRaysIndirect2KHR              = nullptr;
 
     // ── Vulkan 1.3 Core — Dynamic Rendering & Synchronization 2 ────────
     PFN_vkCmdBeginRendering                    vkCmdBeginRendering                    = nullptr;
@@ -81,6 +85,9 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 #define VK_GET_RT_GROUP_HANDLES(...)             RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(__VA_ARGS__)
 #define VK_CMD_TRACE_RAYS(cmd, ...)              RTX::g_ext.vkCmdTraceRaysKHR(cmd, __VA_ARGS__)
 
+// NEW: Indirect trace with invocation reordering support (SER)
+#define VK_CMD_TRACE_RAYS_INDIRECT2(cmd, ...)    RTX::g_ext.vkCmdTraceRaysIndirect2KHR(cmd, __VA_ARGS__)
+
 #define VK_GET_AS_BUILD_SIZES(...)               RTX::g_ext.vkGetAccelerationStructureBuildSizesKHR(__VA_ARGS__)
 #define VK_CMD_BUILD_ACCELERATION_STRUCTURES(...) RTX::g_ext.vkCmdBuildAccelerationStructuresKHR(__VA_ARGS__)
 #define VK_CREATE_ACCELERATION_STRUCTURE(...)    RTX::g_ext.vkCreateAccelerationStructureKHR(__VA_ARGS__)
@@ -101,5 +108,5 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 // =============================================================================
 // ALL EXTENSIONS NOW LIVE IN THIS FILE — NO MORE SCATTERED DECLARATIONS
 // THE EMPIRE IS CLEAN, CENTRALIZED, AND ETERNAL
-// DECEMBER 18, 2025 — FINAL CONVERGENCE ACHIEVED
+// JANUARY 04, 2026 — SER CONVERGENCE ACHIEVED
 // =============================================================================
