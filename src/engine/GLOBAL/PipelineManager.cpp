@@ -8,9 +8,10 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// PipelineManager v20.0 — JANUARY 03, 2026 — PERFECT PRODUCTION EDITION
+// PipelineManager v21.0 — JANUARY 04, 2026 — PERFECT PRODUCTION EDITION
 // THE PERFECT PIPELINE — VALIDATION CLEAN, LEAK-FREE, ROBUST, OPTIMIZED
 // MAJOR PERFECTIONS:
+// • Fixed VkRayTracingShaderGroupCreateInfoKHR validation errors by explicitly setting unused shaders to VK_SHADER_UNUSED_KHR
 // • Removed unnecessary VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT (no bindless bindings)
 // • Increased descriptor pool safety margins
 // • Enhanced RAII cleanup and rebuild safety
@@ -451,18 +452,24 @@ void PipelineManager::createRayTracingPipeline()
                       .stage  = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
                       .module = raygen,
                       .pName  = "main"});
-    groups.push_back({.sType           = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                      .type            = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-                      .generalShader   = shaderIndex++});
+    groups.push_back({.sType              = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                      .type               = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+                      .generalShader      = shaderIndex++,
+                      .closestHitShader   = VK_SHADER_UNUSED_KHR,
+                      .anyHitShader       = VK_SHADER_UNUSED_KHR,
+                      .intersectionShader = VK_SHADER_UNUSED_KHR});
 
     // Miss
     stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                       .stage  = VK_SHADER_STAGE_MISS_BIT_KHR,
                       .module = miss,
                       .pName  = "main"});
-    groups.push_back({.sType           = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                      .type            = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-                      .generalShader   = shaderIndex++});
+    groups.push_back({.sType              = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                      .type               = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+                      .generalShader      = shaderIndex++,
+                      .closestHitShader   = VK_SHADER_UNUSED_KHR,
+                      .anyHitShader       = VK_SHADER_UNUSED_KHR,
+                      .intersectionShader = VK_SHADER_UNUSED_KHR});
 
     // Closest hit
     stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -479,10 +486,12 @@ void PipelineManager::createRayTracingPipeline()
     uint32_t ahitIndex = shaderIndex++;
 
     // Hit group
-    groups.push_back({.sType           = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                      .type            = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
-                      .closestHitShader = chitIndex,
-                      .anyHitShader     = ahitIndex});
+    groups.push_back({.sType              = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                      .type               = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+                      .generalShader      = VK_SHADER_UNUSED_KHR,
+                      .closestHitShader   = chitIndex,
+                      .anyHitShader       = ahitIndex,
+                      .intersectionShader = VK_SHADER_UNUSED_KHR});
 
     raygenGroupCount_ = 1;
     missGroupCount_   = 1;
@@ -892,7 +901,7 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
         return;
     }
 
-    LOG_AMOURANTH("FORGING THE PERFECT RTX PIPELINE — JANUARY 03, 2026 — PHOTONS UNLEASHED");
+    LOG_AMOURANTH("FORGING THE PERFECT RTX PIPELINE — JANUARY 04, 2026 — PHOTONS UNLEASHED");
 
     createDescriptorPool();
     createPipelineLayout();
@@ -935,7 +944,7 @@ PipelineManager::~PipelineManager()
 } // namespace RTX
 
 // =============================================================================
-// JANUARY 03, 2026 — THE PERFECT PIPELINE
+// JANUARY 04, 2026 — THE PERFECT PIPELINE
 // Validation clean • Leak-free • Thread-safe • Optimized • Robust
 // No unnecessary flags • Perfect alignment • Eternal dummy TLAS
 // Pink photons flow forever — Plastic Beach victorious
