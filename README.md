@@ -38,7 +38,7 @@ My hopes is that it is not a major frame destroyer. (12,000+ on 4070ti to work w
 The goal is a fast as pink photons HDR SDL3 RTX engine that is ready for you, the developer.  
 To say this is 99% Grok, I may be understating. I call him bro.  
 
-[AMOURANTH RTX Video](https://x.com/i/status/1982578590593282537)  
+[AMOURANTH RTX Video](https://x.com/ZacharyGeurts/status/2007912263446151181)  
 
 **C++23** using **SDL3**, **Vulkan**, and **GLM**.  
 **Custom RTX pipelines.**  
