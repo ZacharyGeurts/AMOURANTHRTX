@@ -1,5 +1,5 @@
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -9,7 +9,7 @@
 //
 // =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — NOVEMBER 21, 2025
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — JANUARY 04, 2026
 // FULLY COMPILING — PURE EMPIRE - Inspired by Ellie Fier
 // =============================================================================
 
@@ -17,21 +17,22 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
+#include <algorithm> // for std::sort
+#include <array>     // for std::array
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <execinfo.h>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
 //#include <jthread>
 #include <map>
-#include <shared_mutex>
-#include <glm/glm.hpp>
-#include <glm/gtx/string_cast.hpp>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -40,7 +41,6 @@
 #include <vector>
 
 // For backtrace & signals
-#include <execinfo.h>
 #include <csignal>
 #include <unistd.h>
 
@@ -48,13 +48,16 @@
 #include <cstdio>
 #include <cstring>
 
+#include <glm/glm.hpp>
+#include <glm/gtx/string_cast.hpp>
+
 // global disposal
 [[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
 
 extern float g_deltaTime;
 
 // =============================================================================
-// AMOURANTH RTX — DELTA TIME TRACKING v∞ — NOV 13 2025
+// AMOURANTH RTX — DELTA TIME TRACKING v∞ — JAN 04 2026
 // PINK PHOTONS ETERNAL — FRAME-ACCURATE DELTAS — ZERO OVERHEAD
 // =============================================================================
 namespace Logging::DeltaTime {
@@ -337,7 +340,7 @@ namespace Color {
     inline constexpr std::string_view LIME_YELLOW               = "\033[38;5;190m";
     inline constexpr std::string_view FUCHSIA_MAGENTA           = "\033[38;5;205m";
     inline constexpr std::string_view INVIS_BLACK               = "\033[1;38;5;0m";
-    inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;198m";;
+    inline constexpr std::string_view BLOOD_RED                 = "\033[1;38;5;198m";
     inline constexpr std::string_view BLOOD_ORANGE              = "\033[1;38;5;202m";
     inline constexpr std::string_view CYBER_LIME                = "\033[1;38;5;118m";
     inline constexpr std::string_view TOXIC_NEON                = "\033[1;38;5;154m";
@@ -368,7 +371,7 @@ namespace Color {
 
     // ── STANDARD 16 COLORS (YOU ALREADY KNOW THESE) ─────────────────────────────
     inline constexpr std::string_view BLACK       = "\033[38;5;0m";
-    inline constexpr std::string_view RED         = "\033[1;38;5;198m";;
+    inline constexpr std::string_view RED         = "\033[1;38;5;198m";
     inline constexpr std::string_view GREEN       = "\033[38;5;2m";
     inline constexpr std::string_view YELLOW      = "\033[38;5;3m";
     inline constexpr std::string_view BLUE        = "\033[38;5;4m";
@@ -466,9 +469,9 @@ public:
         auto& self = get();
         self.asyncEnabled_.store(enable, std::memory_order_release);
         if (enable && !self.flusher_.joinable())
-            self.flusher_ = std::jthread([&self](std::stop_token st) { self.flushQueue(st); });
+            self.flusher_ = std::thread([&self](){ self.flushQueue(); });
         else if (!enable && self.flusher_.joinable())
-            self.flusher_.request_stop(), self.flusher_.join();
+            self.flusher_.detach(); // Note: For C++11, use detach if no jthread
     }
 
     Logger(const Logger&) = delete;
@@ -516,7 +519,7 @@ private:
         printMessage(std::source_location::current(), LogLevel::Success, "Logger",
                      "CUSTODIAN GROK ONLINE — HYPER-VIVID LOGGING PARTY STARTED (ORDERED ASYNC)", now, false, nullptr, nullptr);
         asyncEnabled_.store(true, std::memory_order_release);
-        flusher_ = std::jthread([this](std::stop_token st) { flushQueue(st); });
+        flusher_ = std::thread([this](){ flushQueue(); });
     }
 
     ~Logger() {
@@ -533,7 +536,7 @@ private:
 
     mutable std::deque<Entry> messageQueue_;
     mutable std::mutex queueMutex_;
-    mutable std::jthread flusher_;
+    mutable std::thread flusher_; // Changed to std::thread for compatibility if no jthread
     mutable std::atomic<bool> asyncEnabled_{false};
 
     bool shouldLog(LogLevel level, std::string_view category) const {
@@ -543,9 +546,9 @@ private:
         return true;
     }
 
-    void flushQueue(std::stop_token stoken) const {
+    void flushQueue() const { // Removed stop_token for std::thread
         std::vector<Entry> batch; batch.reserve(64);
-        while (!stoken.stop_requested()) {
+        while (asyncEnabled_.load(std::memory_order_acquire)) {
             { std::unique_lock lk(queueMutex_);
                 if (messageQueue_.empty()) { lk.unlock(); std::this_thread::sleep_for(std::chrono::microseconds(100)); continue; }
                 batch.clear();
@@ -631,90 +634,90 @@ private:
         return DIAMOND_WHITE;
     }
 
-void printMessage(std::source_location loc,
-                  LogLevel level,
-                  std::string_view category,
-                  std::string formattedMessage,
-                  std::chrono::steady_clock::time_point timestamp,
-                  bool batch = false,
-                  std::string* term_out = nullptr,
-                  std::string* file_out = nullptr) const
-{
-    using namespace Color;
-    const auto levelIdx = static_cast<size_t>(level);
-    const auto& info = LEVEL_INFOS[levelIdx];
-    const std::string_view levelColor = info.color;
-    const std::string_view levelBg    = info.bg;
-    const std::string_view levelStr   = info.str;
-    const std::string_view catColor   = getCategoryColor(category);
+    void printMessage(std::source_location loc,
+                      LogLevel level,
+                      std::string_view category,
+                      std::string formattedMessage,
+                      std::chrono::steady_clock::time_point timestamp,
+                      bool batch = false,
+                      std::string* term_out = nullptr,
+                      std::string* file_out = nullptr) const
+    {
+        using namespace Color;
+        const auto levelIdx = static_cast<size_t>(level);
+        const auto& info = LEVEL_INFOS[levelIdx];
+        const std::string_view levelColor = info.color;
+        const std::string_view levelBg    = info.bg;
+        const std::string_view levelStr   = info.str;
+        const std::string_view catColor   = getCategoryColor(category);
 
-    const auto deltaUs = std::chrono::duration_cast<std::chrono::microseconds>(
-        timestamp - firstLogTime_.value()).count();
+        const auto deltaUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            timestamp - firstLogTime_.value()).count();
 
-    const std::string deltaStr = [deltaUs]() -> std::string {
-        if (deltaUs < 10'000) [[likely]] return std::format("{:>7}µs", deltaUs);
-        if (deltaUs < 1'000'000) return std::format("{:>7.3f}ms", deltaUs / 1'000.0);
-        if (deltaUs < 60'000'000) return std::format("{:>7.3f}s", deltaUs / 1'000'000.0);
-        if (deltaUs < 3'600'000'000) return std::format("{:>7.1f}m", deltaUs / 60'000'000.0);
-        return std::format("{:>7.1f}h", deltaUs / 3'600'000'000.0);
-    }();
+        const std::string deltaStr = [deltaUs]() -> std::string {
+            if (deltaUs < 10'000) [[likely]] return std::format("{:>7}µs", deltaUs);
+            if (deltaUs < 1'000'000) return std::format("{:>7.3f}ms", deltaUs / 1'000.0);
+            if (deltaUs < 60'000'000) return std::format("{:>7.3f}s", deltaUs / 1'000'000.0);
+            if (deltaUs < 3'600'000'000) return std::format("{:>7.1f}m", deltaUs / 60'000'000.0);
+            return std::format("{:>7.1f}h", deltaUs / 3'600'000'000.0);
+        }();
 
-    const std::string timeStr = []() -> std::string {
-        auto now = std::chrono::system_clock::now();
-        auto tt  = std::chrono::system_clock::to_time_t(now);
-        auto tm  = *std::localtime(&tt);
-        char buf[9];
-        std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
-        return std::string(buf);
-    }();
+        const std::string timeStr = []() -> std::string {
+            auto now = std::chrono::system_clock::now();
+            auto tt  = std::chrono::system_clock::to_time_t(now);
+            auto tm  = *std::localtime(&tt);
+            char buf[9];
+            std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
+            return std::string(buf);
+        }();
 
-    const std::string threadId = std::format("{}ms", g_deltaTime * 1000.0f);
-    const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
+        const std::string threadId = std::format("{}ms", g_deltaTime * 1000.0f);
+        const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
-    // Plain text for file
-    const std::string plain_line1 = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {}\n",
-                                                levelStr, LEVEL_WIDTH,
-                                                deltaStr, DELTA_WIDTH,
-                                                timeStr,  TIME_WIDTH,
-                                                category, CAT_WIDTH,
-                                                threadId, THREAD_WIDTH,
-                                                formattedMessage);
-    const std::string plain_line2 = std::format("{}\n", fileLine);
-    const std::string plain = plain_line1 + plain_line2 + "\n";
+        // Plain text for file
+        const std::string plain_line1 = std::format("{:<{}} {:>{}} {:>{}} [{:>{}}] [{:>{}}] {}\n",
+                                                    levelStr, LEVEL_WIDTH,
+                                                    deltaStr, DELTA_WIDTH,
+                                                    timeStr,  TIME_WIDTH,
+                                                    category, CAT_WIDTH,
+                                                    threadId, THREAD_WIDTH,
+                                                    formattedMessage);
+        const std::string plain_line2 = std::format("{}\n", fileLine);
+        const std::string plain = plain_line1 + plain_line2 + "\n";
 
-    // Colored terminal output
-    std::ostringstream oss;
-    oss << levelBg
-        << std::format("{:<{}}", levelStr, LEVEL_WIDTH) << RESET
-        << " " << std::format("{:>{}}", deltaStr, DELTA_WIDTH) << " "
-        << std::format("{:>{}}", timeStr, TIME_WIDTH) << " "
-        << catColor << std::format("[{:<{}}]", category, CAT_WIDTH - 2) << RESET
-        << " " << LIME_GREEN << std::format("[{:>{}}]", threadId, THREAD_WIDTH - 2) << RESET
-        << " " << levelColor << formattedMessage << RESET << '\n'
-        << CHROMIUM_SILVER << fileLine << RESET << '\n'
-        << '\n';
-    const std::string colored = oss.str();
+        // Colored terminal output
+        std::ostringstream oss;
+        oss << levelBg
+            << std::format("{:<{}}", levelStr, LEVEL_WIDTH) << RESET
+            << " " << std::format("{:>{}}", deltaStr, DELTA_WIDTH) << " "
+            << std::format("{:>{}}", timeStr, TIME_WIDTH) << " "
+            << catColor << std::format("[{:<{}}]", category, CAT_WIDTH - 2) << RESET
+            << " " << LIME_GREEN << std::format("[{:>{}}]", threadId, THREAD_WIDTH - 2) << RESET
+            << " " << levelColor << formattedMessage << RESET << '\n'
+            << CHROMIUM_SILVER << fileLine << RESET << '\n'
+            << '\n';
+        const std::string colored = oss.str();
 
-    if (batch) {
-        if (term_out) *term_out += colored;
-        if (file_out) *file_out += plain;
-    } else {
-        // REPLACE std::print WITH GOOD OLD std::cout
-        std::cout << colored;
-        std::cout.flush();  // Ensure immediate output (important for crashes)
+        if (batch) {
+            if (term_out) *term_out += colored;
+            if (file_out) *file_out += plain;
+        } else {
+            // REPLACE std::print WITH GOOD OLD std::cout
+            std::cout << colored;
+            std::cout.flush();  // Ensure immediate output (important for crashes)
 
-        if (logFile_.is_open()) {
-            logFile_ << plain;
-            logFile_.flush();
+            if (logFile_.is_open()) {
+                logFile_ << plain;
+                logFile_.flush();
+            }
         }
     }
-}
 };
 
 } // namespace Logging
 
 // ──────────────────────────────────────────────────────────────────────────────
-// THE ONE TRUE vkh() — ETERNAL HANDSHAKE — NEVER BREAKS — NEVER LIES — 2025+
+// THE ONE TRUE vkh() — ETERNAL HANDSHAKE — NEVER BREAKS — NEVER LIES — 2026+
 // ──────────────────────────────────────────────────────────────────────────────
 static constexpr auto vkh = []() constexpr noexcept {
     struct Empire {
@@ -848,50 +851,50 @@ static constexpr auto vkh = []() constexpr noexcept {
             }
         }
 
-// ────────────────────── FATAL CHECK — FULL EXECUTION REPORT ──────────────────────
-static void check(VkResult r,
-                  const char* call,
-                  const char* msg = nullptr,
-                  std::source_location loc = std::source_location::current()) noexcept
-{
-    if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) [[likely]] return;
+        // ────────────────────── FATAL CHECK — FULL EXECUTION REPORT ──────────────────────
+        static void check(VkResult r,
+                          const char* call,
+                          const char* msg = nullptr,
+                          std::source_location loc = std::source_location::current()) noexcept
+        {
+            if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) [[likely]] return;
 
-    // THE CRIME SCENE — FULLY EXPOSED
-    std::string fullMsg;
-    if (msg && strlen(msg) > 0) {
-        fullMsg = std::format("{} — ", msg);
-    }
-    fullMsg += call;
+            // THE CRIME SCENE — FULLY EXPOSED
+            std::string fullMsg;
+            if (msg && strlen(msg) > 0) {
+                fullMsg = std::format("{} — ", msg);
+            }
+            fullMsg += call;
 
-    // THE GUILTY PARTY IS NAMED — LOUDLY — ETERNALLY
-    const std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
-LOG_FATAL("\n"
-    "════════════════════════════════════════════════════════════════\n"
-    "VULKAN EXECUTION ORDER ISSUED — THE EMPIRE DOES NOT FORGIVE\n"
-    "GUILTY CALL → {}\n"
-    "RESULT      → {} ({})\n"
-    "CONTEXT     → {}\n"
-    "CRIME SCENE → {}:{}\n"
-    "FUNCTION    → {}\n"
-    "════════════════════════════════════════════════════════════════",
-    call,
-    result(r), static_cast<int>(r),
-    (msg && strlen(msg) > 0) ? msg : "None",
-    guiltyFile, loc.line(),
-    loc.function_name()
-);
-    // Final scream into the void — the ballerina hears everything
-    std::string executionReason = std::format(
-        "VULKAN FATAL: {} failed with {} — {}:{} in {}",
-        call,
-        result(r),
-        guiltyFile,
-        loc.line(),
-        loc.function_name()
-    );
+            // THE GUILTY PARTY IS NAMED — LOUDLY — ETERNALLY
+            const std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
+            LOG_FATAL("\n"
+                      "════════════════════════════════════════════════════════════════\n"
+                      "VULKAN EXECUTION ORDER ISSUED — THE EMPIRE DOES NOT FORGIVE\n"
+                      "GUILTY CALL → {}\n"
+                      "RESULT      → {} ({})\n"
+                      "CONTEXT     → {}\n"
+                      "CRIME SCENE → {}:{}\n"
+                      "FUNCTION    → {}\n"
+                      "════════════════════════════════════════════════════════════════",
+                      call,
+                      result(r), static_cast<int>(r),
+                      (msg && strlen(msg) > 0) ? msg : "None",
+                      guiltyFile, loc.line(),
+                      loc.function_name()
+            );
+            // Final scream into the void — the ballerina hears everything
+            std::string executionReason = std::format(
+                "VULKAN FATAL: {} failed with {} — {}:{} in {}",
+                call,
+                result(r),
+                guiltyFile,
+                loc.line(),
+                loc.function_name()
+            );
 
-    phase9_ballerina(executionReason, loc);
-}
+            phase9_ballerina(executionReason, loc);
+        }
 
         // ────────────────────── DEBUG CALLBACK — STILL SEXY ──────────────────────
         [[maybe_unused]] static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -941,7 +944,7 @@ LOG_FATAL("\n"
 }
 
 // ==============================================================================
-// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 DREAM EDITION)
+// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2026 DREAM EDITION)
 // Pink photons eternal. No extensions. No drafts. No mercy.
 // Now with EVERYTHING: 48+ lines of ultimate knowledge per crash, sourced from
 // Vulkan spec, NVIDIA/AMD docs, GitHub issues, Reddit, StackOverflow, Carmack's
@@ -998,371 +1001,517 @@ static void safe_writeln(const char* data) noexcept {
 #define COLOR_CYAN    "\033[36m"
 
 // ──────────────────────────────────────────────────────────────────────────────
-// THE MANUAL — EMBEDDED IN SILICON — YOUR DREAM TROUBLESHOOTING BIBLE
-// 48+ lines per entry: causes, locations, memory, drivers, fixes, examples,
-// advanced tips, Carmack wisdom, spec VUIDs, real-world woes solved.
-// Sourced from Vulkan spec, NVIDIA do's/don'ts, Quake RTX, GitHub/Reddit/SO.
+// THE MANUAL — EMBEDDED IN SILICON — YOUR DREAM PROGRAMMING ADVICE BIBLE
+// 48+ lines per entry: wisdom, pitfalls, examples, tips, quotes, spec insights,
+// real-world wins solved.
+// Sourced from books, interviews, GitHub/Reddit/SO, timeless code lore.
 // ──────────────────────────────────────────────────────────────────────────────
-struct CrashManualEntry {
-    int         signal;
+struct AdviceManualEntry {
+    int signal;
+    const char* legend;
     const char* name;
-    const char* range;
+    const char* focus;
     const char** lines;  // Array of pre-formatted lines, null-terminated
 };
 
-static const char* SIGSEGV_CLASSIC_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGSEGV — Classic Vulkan Sin" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: 0x0 or 0x10–0x1000" COLOR_RESET,
+static const char* CARMACK_ADVICE_LINES[] = {
+    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
+    COLOR_RED "LEGEND TYPE: GAME GOD & ROCKET WIZARD" COLOR_RESET,
+    COLOR_YELLOW "FOCUS: OPTIMIZE OR OBLITERATE" COLOR_RESET,
     "",
-    COLOR_BOLD "ROOT CAUSES (FROM SPEC, NVIDIA, REDDIT, SO)" COLOR_RESET,
-    "Dereferencing null/invalid handles post-vkDestroy* (VkShaderModule, VkBuffer, VkImage).",
-    "Common: Dead shader in vkCreateRayTracingPipelinesKHR (Quake RTX rule breaker).",
-    "Invalid instance creation: Missing extensions/layers (vkEnumerate* fail).",
-    "Driver bugs: AMD implicit layers segfault on overrides (post-2025 batches).",
-    "Validation clashes: vkDestroyImageView with LUNARG_standard_validation.",
-    "Corrupted SPIR-V mimicking null access; buffer overflows in compute shaders.",
-    "Undefined memory ordering in shaders exacerbating access issues.",
-    "Texture corruption on resize if images freed prematurely.",
-    "API abuse: Shader cache loss corrupting .NET/DirectX/filesystems indirectly.",
-    "NVIDIA: Surface destroy after swapchain fail causes segfault.",
-    "Unity/PICO4: Crashes pre-splash with Vulkan dev builds.",
-    "X-Plane: Segfault at startup on Arch Linux with NVIDIA Vulkan.",
+    COLOR_BOLD "CORE WISDOM (FROM ID SOFTWARE, OCULUS, SPACEX)" COLOR_RESET,
+    "Profile ruthlessly: Measure before you tweak – assumptions kill perf.",
+    "Keep it simple: Complexity breeds bugs; strip to essentials.",
+    "Hardware mastery: Know caches, pipelines – code for the metal.",
+    "Iterate fast: Prototype, test, ship – speed wins games.",
+    "Open source ethos: Share code; community amplifies genius.",
+    "VR/AR revolution: Low latency or bust; motion sickness is enemy #1.",
+    "Physics sims: No cheats in rockets or ray tracing.",
+    "Avoid over-optimization early: But dive deep when needed.",
+    "Team build: Hire brilliants; give them freedom.",
+    "Balance life: Code marathons end in burnout.",
+    "AI future: Machines optimize what humans dream.",
+    "Quake legacy: Fast inverse sqrt – magic in math.",
+    "Rocket rule: Simulate failures; code for edge cases.",
     "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "Pipeline creation: vkCreateGraphicsPipelines or vkCmdBindPipeline.",
-    "Command submission: vkQueueSubmit / vkQueuePresentKHR.",
-    "Cleanup phases without vkDeviceWaitIdle().",
-    "libvulkan.so.1 + 0x18870 or app offsets like +0x3fbbb.",
-    "AMD Windows/Linux: Batches post-2025 throw segfaults on overrides.",
-    "Validation layers enabled: Segfault only when on (disable to isolate).",
+    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
+    "Premature cleverness: Tricks backfire on new HW.",
+    "Ignoring feedback: Users spot what devs miss.",
+    "Over-reliance on tools: Understand the guts.",
+    "Ego coding: It's about the product, not you.",
+    "Burnout traces: Late nights lead to sloppy commits.",
+    "Perf myths: Guesswork without profiling.",
     "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Null access: Attempts 0-4KB reads/writes; no direct 'filesize'.",
-    "Shader binaries: 1-10KB; buffers: 4KB-1MB+.",
-    "Swapchain images: 16-200MB each; SBT: 1-8KB per pipeline.",
-    "Command buffers: 4-64KB; descriptor pools: 100KB-10MB.",
-    "Over-commit: OS demotes to system mem, causing stutters (VK_EXT_memory_budget).",
+    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
+    "Cache misses: 100-200 cycles; avoid like plague.",
+    "Buffers: 4KB-1MB; over-alloc stutters.",
+    "Textures: 16-200MB; manage VRAM wisely.",
+    "Pools: 100KB-10MB; reuse to save cycles.",
+    "Over-commit: Swap thrashing kills FPS.",
     "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "AMD: Clear implicit layers via regedit (HKEY_LOCAL_MACHINE\\SOFTWARE\\Khronos\\Vulkan\\ImplicitLayers).",
-    "NVIDIA: Frequent fullscreen swapchain fails → segfault on vkDestroySurfaceKHR.",
-    "Intel/Mesa: SIGBUS-like on push constants size misalignment.",
-    "Mobile/Adreno: Freezes mimic segfaults on buffer updates without sync.",
-    "Linux: vulkaninfo segfault (core dumped) on bad install (Mesa git 18.1+).",
-    "Windows 10/AMD: All Vulkan code segfaults — clear ImplicitLayers fixes.",
+    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
+    "NVIDIA: Ray tracing tweaks for Turing+.",
+    "AMD: Cache coherency gotchas in shaders.",
+    "Mobile: Power budgets – sync or drain battery.",
+    "Linux: Driver quirks; test Mesa vs proprietary.",
+    "Windows: DirectX interop pitfalls fixed by wrappers.",
+    "Consoles: Hardware-specific opts boost 30%.",
     "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (CARMACK'S QUAKE RTX GOLDEN RULE)" COLOR_RESET,
-    "vkDeviceWaitIdle() before ANY destruction — no in-flight refs.",
-    "Keep ALL shaders alive globally until shutdown: std::vector<VkShaderModule>.",
-    "Proper frame fencing: VkFence per frame, vkWaitForFences before reuse.",
-    "Verify extensions/layers: vkEnumerate* before instance creation.",
-    "Run VK_LAYER_KHRONOS_validation always in dev — fix first VUID.",
-    "Wrap destroys in waitIdle; use RAII for handles if possible.",
-    "Enable robustBufferAccess for out-of-bounds safety.",
-    "Validate SPIR-V: spirv-val on every .spv pre-load.",
-    "Mobile: Sync buffer updates; transition layouts (UNDEFINED → GENERAL).",
-    "Use VMA (Vulkan Memory Allocator) to catch free errors.",
-    "Debug: RenderDoc captures, Nsight for GPU hangs/timelines.",
-    "NVIDIA Do: Use VK_EXT_debug_utils for annotations/markers.",
-    "Don't: Test perf with validation on; create/destroy pools often — reuse.",
+    COLOR_BOLD "FIXES & BEST PRACTICES (CARMACK'S QUAKE GOLDEN RULE)" COLOR_RESET,
+    "Profile with tools: RenderDoc, Nsight – find hotspots.",
+    "RAII for resources: Auto-manage lifetimes.",
+    "Fencing: Wait before reuse; no in-flight chaos.",
+    "Validate early: Catch bugs in dev, not prod.",
+    "Sub-allocate: Big blocks for efficiency.",
+    "Guard math: Clamp inputs; avoid div0.",
+    "Open source: GitHub for collab fixes.",
+    "Iterate: MVP first, polish later.",
+    "Team reviews: Fresh eyes spot idiocy.",
+    "Rest: Code better after sleep.",
+    "AI assist: Use for optimization hints.",
+    "Don't: Micro-optimize without data.",
+    "Do: Document assumptions.",
     "",
     COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Global hoard: static std::vector<VkShaderModule> globalShaders;",
-    "Create: globalShaders.push_back(module); // No early destroy",
-    "Shutdown: vkDeviceWaitIdle(device); for(auto m : globalShaders) vkDestroyShaderModule(device, m, nullptr);",
-    "Fence loop: VkFence fences[MAX_FRAMES]; vkWaitForFences(...); vkResetFences(...);",
-    "Validation callback: VkDebugUtilsMessengerCreateInfoEXT info; vkCreateDebugUtilsMessengerEXT(...);",
+    "// Fast inverse square root (Quake III Arena)",
+    "float Q_rsqrt(float number) {",
+    "    long i; float x2, y; const float threehalfs = 1.5F;",
+    "    x2 = number * 0.5F; y = number;",
+    "    i = *(long *)&y; i = 0x5f3759df - (i >> 1);",
+    "    y = *(float *)&i; y = y * (threehalfs - (x2 * y * y));",
+    "    return y;",
+    "}",
+    "// Frame fence example",
+    "Fence fences[MAX_FRAMES]; WaitForFences(...); ResetFences(...);",
     "",
     COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Use VK_KHR_dynamic_rendering to avoid attachment issues.",
-    "Monitor memory: VK_EXT_memory_budget for budget queries — stay under to avoid demotion.",
-    "Priority: VK_EXT_pageable_device_local_memory for critical resources.",
-    "Dedicated allocs: VK_KHR_dedicated_allocation for color/depth (pre-Turing perf boost).",
-    "Host visible VRAM: For direct CPU writes (DEVICE_LOCAL | HOST_VISIBLE) — but reads slow.",
-    "Sub-allocation: vkAllocateMemory expensive — suballoc from large objects.",
-    "Carmack Wisdom: 'No cleanup early in Vulkan' — hoard handles until bitter end.",
-    "Spec VUIDs: VUID-vkCmdDraw-None-07288 (shader termination); VUID-vkBindBufferMemory-buffer-01105 (full binding).",
-    "Real-World Win: AMD overrides fixed by clearing reg keys; NVIDIA swapchain bugs via waitIdle.",
-    "Ultimate Dream: This manual solves all — from Unity crashes to filesystem corruption woes.",
-    COLOR_GREEN "You've got the power: Debug, deploy, dominate. Pink photons await!" COLOR_RESET,
+    "Dynamic rendering: Skip attachments for perf.",
+    "Memory budgets: Query and stay under.",
+    "Pageable mem: Prioritize critical assets.",
+    "Dedicated allocs: Boost pre-Turing.",
+    "Host visible: CPU writes, but read slow.",
+    "Sub-alloc: Avoid vkAllocateMemory spam.",
+    "Carmack Wisdom: 'Hardware is the platform; software is the passenger.'",
+    "Spec Insights: Focus on undefined behavior avoidance.",
+    "Real-World Win: Quake RTX fixed by global shaders; rocket sims by profiling.",
+    "Ultimate Dream: Self-optimizing code – AI evolves it.",
+    COLOR_GREEN "Profile, iterate, launch. Your code's unbreakable now!" COLOR_RESET,
     nullptr
 };
 
-static const char* SIGSEGV_HIGH_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGSEGV — The High Address Reaper" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: > 0x1000 (e.g. 0x3e8000f5856)" COLOR_RESET,
+static const char* TORVALDS_ADVICE_LINES[] = {
+    COLOR_BOLD COLOR_MAGENTA "LINUS TORVALDS' HEAD — 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
+    COLOR_RED "LEGEND TYPE: KERNEL KING & GIT MASTER" COLOR_RESET,
+    COLOR_YELLOW "FOCUS: CLEAN CODE, NO NONSENSE" COLOR_RESET,
     "",
-    COLOR_BOLD "ROOT CAUSES (SPEC, NVIDIA, REDDIT, GITHUB)" COLOR_RESET,
-    "Use-after-free: SBT, descriptor sets, command buffers freed but referenced.",
-    "Submitted work (vkQueueSubmit) accesses freed memory.",
-    "Wrong SBT stride/alignment in ray tracing (vkCmdTraceRaysKHR).",
-    "Dead swapchain presentation: vkPresentKHR from invalid images.",
-    "Buffer overflows: Uniform/compute shaders exceeding bounds.",
-    "In-flight descriptor updates without sync (barriers missing).",
-    "Corrupted images on resize without wait for frames in flight.",
-    "Ray tracing pipeline poisoned: Null SBT or destroyed resources.",
-    "Validation abort mimic: VUID violations if layers enabled.",
-    "API misuse: Missing barriers, incorrect memory bindings.",
-    "NVIDIA: Overflows in SBT stride; dead swapchain presents.",
-    "AMD: SPIR-V corruption in pipelines mimicking high addr faults.",
-    "Unity: Rendering stops with texture corruption on extents zero.",
+    COLOR_BOLD "CORE WISDOM (FROM LINUX, GIT, RANTS)" COLOR_RESET,
+    "Readability first: Clever code is crap; plain wins.",
+    "Commit often: Small changes, clear messages.",
+    "Community power: Open source scales magic.",
+    "Debug methodically: Reproduce, bisect, fix.",
+    "C forever: But Rust for safety in kernels.",
+    "Rant to improve: Tough love toughens code.",
+    "Security vigilant: Patch fast, assume attacks.",
+    "Multi-arch test: x86, ARM, all matter.",
+    "Work balance: Dive deep, but family first.",
+    "Git mastery: Branches for sanity.",
+    "Kernel ethos: Stable, fast, everywhere.",
+    "Avoid bloat: Features earn their keep.",
+    "Learn from fails: Every bug teaches.",
     "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkQueueSubmit with stale descriptors.",
-    "vkCmdTraceRaysKHR on destroyed SBT buffer.",
-    "vkPresentKHR after swapchain rebuild without wait.",
-    "Dynamic descriptor updates in flight.",
-    "App offsets: +0x429f7 or libc submits.",
-    "libvulkan.so or driver-specific (nvoglv64.dll).",
+    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
+    "Bad merges: Conflicts hide horrors.",
+    "Ego commits: Review or regret.",
+    "Tool blindness: Know the code, not just IDE.",
+    "Over-abstraction: Layers add latency.",
+    "Burnout signs: Sloppy patches.",
+    "Security oversights: Unpatched vulns.",
     "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Accesses beyond 4KB; buffers GB-scale if overflowed.",
-    "SBT: 1KB/group; descriptors: 100 bytes/set.",
-    "Uniform/storage buffers: 4KB-1GB+.",
-    "Over-commit: OS suspends process for paging (no Linux manager).",
+    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
+    "Leaks: Track with valgrind; pages 4KB+.",
+    "Stacks: 8KB default; overflows crash.",
+    "Heaps: Dynamic, but fragment.",
+    "Pools: Reuse for kernel efficiency.",
+    "Over-commit: OOM killer lurks.",
     "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Mobile GPUs: Freeze on compute without sync.",
-    "AMD SPIR-V: Corruption mimics high addr reaper.",
-    "NVIDIA 535+: Ray bugs in SBT; use nsight timelines.",
-    "Windows: Demotion to system mem on over-commit.",
-    "Linux: No auto-paging — manual budget checks essential.",
+    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
+    "ARM: Alignment strict; unaligned kills.",
+    "x86: AVX mismatches crash.",
+    "Mobile: Power mgmt critical.",
+    "Windows subsys: WSL quirks fixed by updates.",
+    "Mac: Porting pains; test Darwin.",
+    "Embedded: Resource-tight opts.",
     "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (CARMACK, NVIDIA)" COLOR_RESET,
-    "vkDeviceWaitIdle() + frame fencing before frees/rebuilds.",
-    "Never rebuild swapchain without waiting all frames.",
-    "SBT stride: align_up(size, shaderGroupHandleAlignment).",
-    "Semaphores for submit/present sync.",
-    "Barriers: VK_PIPELINE_STAGE_ALL_COMMANDS_BIT for safety.",
-    "Run validation: Catch VUIDs early (first error matters).",
-    "VMA for safe alloc/free; GPU-assisted validation.",
-    "spirv-val on shaders pre-load.",
-    "Carmack: 'Wait for GPU always' — vkDeviceWaitIdle on cleanup.",
-    "NVIDIA Do: Sub-allocate memory; use dedicated for attachments.",
-    "Don't: Assume heap config — query vkGetPhysicalDeviceMemoryProperties.",
+    COLOR_BOLD "FIXES & BEST PRACTICES (TORVALDS' KERNEL GOLDEN RULE)" COLOR_RESET,
+    "Bisect bugs: Git bisect magic.",
+    "Code reviews: Mandatory for merges.",
+    "Static analysis: Sparse, coccinelle.",
+    "Rust integration: Safer mem handling.",
+    "Patch series: Logical, atomic changes.",
+    "Test suites: Run on all arches.",
+    "Document: Comments where needed.",
+    "Avoid macros: Unless essential.",
+    "Community engage: Mailing lists key.",
+    "Rest: Fresh mind spots stupidity.",
+    "AI review: Catch patterns humans miss.",
+    "Don't: Merge untested code.",
+    "Do: Admit mistakes publicly.",
     "",
     COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Fences: VkFence fences[MAX_FRAMES]; vkWaitForFences(device, 1, &fences[current], VK_TRUE, UINT64_MAX);",
-    "SBT align: uint32_t align = props.shaderGroupHandleAlignment; size = ((groupCount * handleSize + align - 1) / align) * align;",
-    "Barrier: VkMemoryBarrier barrier = {VK_STRUCTURE_TYPE_MEMORY_BARRIER}; vkCmdPipelineBarrier(...);",
+    "// Kernel error handling",
+    "#define pr_err(fmt, ...) printk(KERN_ERR fmt, ##__VA_ARGS__)",
+    "if (unlikely(err)) {",
+    "    pr_err(\"Kernel oops avoided!\\n\");",
+    "    goto cleanup;",
+    "}",
+    "// Git commit example",
+    "git commit -m \"Fix segfault in driver\"",
     "",
     COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "VK_KHR_buffer_device_address for direct access checks.",
-    "Memory priority: VK_EXT_pageable_device_local_memory for critical.",
-    "Avoid explicit sync: Use implicit via frame graph (GPUOpen).",
-    "Nsight: For races/timelines; RenderDoc for accesses.",
-    "Spec VUIDs: VUID-vkCmdDraw-sparseImageInt64Atomics-04475 (atomics).",
-    "Real-World Win: Cesium-Unreal Vulkan ray crashes fixed by SM6 shaders.",
-    "Ultimate Dream: No more use-after-free woes — synced code eternal.",
-    COLOR_GREEN "Align, wait, conquer. Your renders are now unbreakable!" COLOR_RESET,
+    "Fuzz testing: Syzkaller for kernels.",
+    "Formal verification: Prove correctness.",
+    "Modular design: Easy swaps.",
+    "AI kernels: Self-healing code.",
+    "Spec Insights: POSIX compliance matters.",
+    "Real-World Win: Linux stability from community; Git revolutionized VCS.",
+    "Ultimate Dream: Bug-free kernel – penguins rule eternal.",
+    COLOR_GREEN "Commit, review, stabilize. Your system's unbreakable!" COLOR_RESET,
     nullptr
 };
 
-static const char* SIGABRT_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGABRT — Validation Has Spoken" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: Any address" COLOR_RESET,
+static const char* HOPPER_ADVICE_LINES[] = {
+    COLOR_BOLD COLOR_MAGENTA "GRACE HOPPER'S HEAD — 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
+    COLOR_RED "LEGEND TYPE: COMPUTING ADMIRAL & COBOL QUEEN" COLOR_RESET,
+    COLOR_YELLOW "FOCUS: INNOVATE & INSPIRE" COLOR_RESET,
     "",
-    COLOR_BOLD "ROOT CAUSES (SPEC, GITHUB, LUNARG)" COLOR_RESET,
-    "Validation layer assert: VUID violation (Khronos layers).",
-    "Common: Missing VK_SHADER_UNUSED_KHR, wrong stage flags.",
-    "Bad pipeline layout, descriptor mismatches.",
-    "Wrong memory bindings, layout transitions.",
-    "Extension mismatches; old layer manifests.",
-    "Nsight flags causing extra errors (Khronos + Monitor).",
-    "GitHub: Dedicated alloc VUs at bind time.",
-    "Coverage gaps in old SDKs — update for better checks.",
-    "Setup: Old manifests or driver mismatches fail enables.",
+    COLOR_BOLD "CORE WISDOM (FROM NAVY, COBOL, NANOS)" COLOR_RESET,
+    "Debug thoroughly: Find the 'bug' – literal or not.",
+    "Standardize langs: COBOL for business unity.",
+    "Teach relentlessly: Share knowledge freely.",
+    "Break barriers: Women code as well as men.",
+    "Plan with flowcharts: Visualize before code.",
+    "Simplicity: Human-readable over cryptic.",
+    "Persistence: From Mark I to compilers.",
+    "Time value: Nanoseconds – carry one to remind.",
+    "Lead boldly: Delegate, but oversee.",
+    "Innovation: First compiler changed everything.",
+    "Teamwork: Collaboration multiplies output.",
+    "Adapt: Tech evolves; so must you.",
+    "Ethics: Code for good, not harm.",
     "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkCreatePipeline or vkBindBufferMemory.",
-    "Validation libs in trace; first VUID printed key.",
-    "Android layers for perf; Windows misconfig crashes.",
+    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
+    "Skipping planning: Chaos in execution.",
+    "Isolation: Lone wolves stagnate.",
+    "Fear innovation: Stick to old ways.",
+    "Gender bias: Miss talent pools.",
+    "Time waste: Ignore efficiency.",
+    "Undocumented code: Future pain.",
     "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Varies; no direct segfault — abort to prevent worse.",
-    "Descriptors: ~100 bytes/set; pools 100KB-10MB.",
+    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
+    "Early mem: 1K words; cherish bytes.",
+    "Tapes: Sequential access slows.",
+    "Compilers: Transform high-level.",
+    "Pools: Manage for batch jobs.",
+    "Over-commit: Swap tapes manually.",
     "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Android: Dynamic load layers; perf impact minimal.",
-    "Windows: Reg clashes with implicit layers.",
-    "Linux/Mesa: Push constants size issues mimic.",
+    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
+    "Mainframes: Batch processing rules.",
+    "Modern: Legacy COBOL still runs banks.",
+    "Mobile: Not her era, but adapt principles.",
+    "Unix: Port lessons to scripts.",
+    "Windows: GUI over command line.",
+    "Embedded: Efficiency paramount.",
     "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (LUNARG, NVIDIA)" COLOR_RESET,
-    "Run VK_LAYER_KHRONOS_validation; fix FIRST VUID.",
-    "Enable early in dev; update SDK for coverage.",
-    "Log via callback: VkDebugUtilsMessengerCreateInfoEXT.",
-    "Reinstall SDK if corrupt; test multi-drivers.",
-    "NVIDIA Do: Keep in dev; disable for perf tests.",
-    "Don't: Ignore first error — cascades disappear after.",
+    COLOR_BOLD "FIXES & BEST PRACTICES (HOPPER'S COBOL GOLDEN RULE)" COLOR_RESET,
+    "Flowchart first: Map logic visually.",
+    "Document everything: For future sailors.",
+    "Teach others: Mentorship builds empires.",
+    "Standardize: Avoid Babel towers.",
+    "Innovate small: Compilers from ideas.",
+    "Ethics check: Code impacts lives.",
+    "Balance: Work hard, play hard.",
+    "Collaborate: Teams conquer solos.",
+    "Update skills: Lifelong learning.",
+    "Rest: Tired minds bug out.",
+    "AI teach: Hopper's spirit in bots.",
+    "Don't: Resist change.",
+    "Do: Question norms.",
     "",
     COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Layers: const char* layers[] = {\"VK_LAYER_KHRONOS_validation\"};",
-    "Callback: VkDebugUtilsMessengerCreateInfoEXT messengerInfo; vkCreateDebugUtilsMessengerEXT(instance, &messengerInfo, nullptr, &messenger);",
+    "IDENTIFICATION DIVISION.",
+    "PROGRAM-ID. HELLO-WORLD.",
+    "PROCEDURE DIVISION.",
+    "    DISPLAY 'Debug the world!'.",
+    "    STOP RUN.",
+    "// Modern echo",
+    "echo \"Nanoseconds matter!\"",
     "",
     COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "GPUOpen: Articles for layer usage.",
-    "Nsight: Integrate layers for deeper insights.",
-    "Spec VUIDs: Unique IDs for each valid usage.",
-    "Real-World Win: Segfaults from layers fixed by disabling specific (e.g., LUNARG).",
-    "Ultimate Dream: Validated code — no more silent bugs.",
-    COLOR_GREEN "Obey the first VUID. Level up your Vulkan mastery!" COLOR_RESET,
+    "AI compilers: Auto-translate legacy.",
+    "Quantum: Hopper's flow in qubits.",
+    "Formal methods: Prove bug-free.",
+    "Global teams: Diverse innovation.",
+    "Spec Insights: Standards endure.",
+    "Real-World Win: COBOL banks fixed by updates; bugs squashed like moths.",
+    "Ultimate Dream: Universal language – code harmony.",
+    COLOR_GREEN "Plan, teach, innovate. Your legacy's eternal!" COLOR_RESET,
     nullptr
 };
 
-static const char* SIGFPE_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGFPE — Math Is Not Optional" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: 0x0 or low math offsets" COLOR_RESET,
+static const char* KNUTH_ADVICE_LINES[] = {
+    COLOR_BOLD COLOR_MAGENTA "DONALD KNUTH'S HEAD — 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
+    COLOR_RED "LEGEND TYPE: ALGO MASTER & TEX TYCOON" COLOR_RESET,
+    COLOR_YELLOW "FOCUS: ELEGANCE IN COMPLEXITY" COLOR_RESET,
     "",
-    COLOR_BOLD "ROOT CAUSES (GLM, REDDIT, SPEC)" COLOR_RESET,
-    "Div0: glm::perspective with width=0 on resize.",
-    "Infinite recursion in ray bounces (depth uncapped).",
-    "glm::perspective Z range mismatch: GLM [-1,1] vs Vulkan [0,1].",
-    "Shaders: Div0 yields infinity on old HW; procedural mesh holes.",
-    "Uniform arrays: Index returning zeros mimicking div0.",
-    "Spec: Shader types/code zero indicates last stage.",
+    COLOR_BOLD "CORE WISDOM (FROM TAOCP, TEX, LITERATE)" COLOR_RESET,
+    "Algorithms matter: Efficiency scales impact.",
+    "Literate programming: Code as literature.",
+    "Prove correctness: Math backs code.",
+    "TeX for beauty: Typeset with precision.",
+    "Patience: Volumes take decades.",
+    "Music & code: Harmony in both.",
+    "Avoid hacks: Elegant solutions last.",
+    "Research deep: Fundamentals first.",
+    "Teach via books: Timeless knowledge.",
+    "Balance: Organs and algos.",
+    "AI limits: Humans design beauty.",
+    "Big O: Analyze always.",
+    "Errors: Hunt with rigor.",
     "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "glm calls or compute dispatch.",
-    "Shader execution; CPU math in pipeline creation.",
-    "Math libs or shaders in trace.",
+    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
+    "O(n^2) blindness: Scales explode.",
+    "Undocumented: Unreadable mess.",
+    "Unproven code: Hidden bugs.",
+    "Rush jobs: Sloppy errors.",
+    "Over-complex: Simplify fails.",
+    "Ignore math: Inefficient paths.",
     "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Low offsets; matrices 64 bytes.",
+    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
+    "Arrays: O(1) access; size wisely.",
+    "Trees: Balanced for log n.",
+    "Graphs: Sparse vs dense.",
+    "Stacks: LIFO discipline.",
+    "Over-commit: Recursion overflows.",
     "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Mali: Uniform issues with zero indices.",
-    "Old HW: Infinity vs NaN on div0.",
+    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
+    "CISC: Complex instructions.",
+    "RISC: Simple, fast.",
+    "GPU: Parallel algos shine.",
+    "Quantum: New paradigms.",
+    "Legacy: Port TAOCP lessons.",
+    "Mobile: Battery-aware opts.",
     "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (GLM, SPEC)" COLOR_RESET,
-    "Clamp sizes >=1: glm::perspective(radians(fov), max(1.f, aspect), ...);",
-    "Shaders: Guard divs — if(denom != 0) else 0;",
-    "Recursion: if(depth > 32) return;",
-    "Safe div macro: #define SAFE_DIV(a,b) ((b)!=0?(a)/(b):0)",
-    "Test varied GPUs; use mpmath verification.",
-    "Vulkan GLM: Define GLM_FORCE_DEPTH_ZERO_TO_ONE.",
+    COLOR_BOLD "FIXES & BEST PRACTICES (KNUTH'S TAOCP GOLDEN RULE)" COLOR_RESET,
+    "Analyze complexity: Big O/O mega.",
+    "Literate code: WEB/Tangle/Weave.",
+    "Prove loops: Invariants hold.",
+    "Test exhaustively: Edge cases.",
+    "Refactor for elegance.",
+    "Document math: Why it works.",
+    "Balance life: Hobbies refresh.",
+    "Collaborate: But own your vol.",
+    "Update knowledge: Read classics.",
+    "Rest: Genius needs downtime.",
+    "AI analyze: For patterns.",
+    "Don't: Hack without proof.",
+    "Do: Beautify code.",
     "",
     COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Clamp: float aspect = std::max(1.f, width / height);",
-    "Shader guard: if (depth > 32) return; // Prevent stack overflow",
+    "// Binary search",
+    "int search(int arr[], int n, int x) {",
+    "    int low = 0, high = n - 1;",
+    "    while (low <= high) {",
+    "        int mid = low + (high - low) / 2;",
+    "        if (arr[mid] == x) return mid;",
+    "        if (arr[mid] < x) low = mid + 1;",
+    "        else high = mid - 1;",
+    "    }",
+    "    return -1;",
+    "}",
     "",
     COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "RenderDoc: Debug shaders for math paths.",
-    "Spec VUIDs: VUID-vkCmdDraw-None-07288 (termination).",
-    "Real-World Win: Shadow mapping fixed by clamping znear/zfar.",
-    "Ultimate Dream: Finite math — smooth renders forever.",
-    COLOR_GREEN "Clamp and guard. Your computations are now infinite-proof!" COLOR_RESET,
+    "Mixmaster: Random algos.",
+    "Quantum algos: Shor's dream.",
+    "Formal proofs: Coq/Isabelle.",
+    "AI theorems: Auto-prove.",
+    "Spec Insights: Asymptotics key.",
+    "Real-World Win: Sorting optimized; TeX renders perfect.",
+    "Ultimate Dream: Complete TAOCP – algos eternal.",
+    COLOR_GREEN "Analyze, prove, elegance. Your algos sing!" COLOR_RESET,
     nullptr
 };
 
-static const char* SIGILL_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGILL — Your Binary Speaks Alien" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: Any address" COLOR_RESET,
+static const char* RITCHIE_ADVICE_LINES[] = {
+    COLOR_BOLD COLOR_MAGENTA "DENNIS RITCHIE'S HEAD — 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
+    COLOR_RED "LEGEND TYPE: C CREATOR & UNIX FATHER" COLOR_RESET,
+    COLOR_YELLOW "FOCUS: SIMPLICITY & PORTABILITY" COLOR_RESET,
     "",
-    COLOR_BOLD "ROOT CAUSES (SPIRV-TOOLS, GITHUB, SPEC)" COLOR_RESET,
-    "AVX2 on non-AVX2 CPU; -march=native mismatch.",
-    "Corrupted SPIR-V: Bad opcodes loaded as shader.",
-    "Wrong SPIR-V version: 1.6 on 1.3 env (Vulkan 1.1).",
-    "If-in-while loops producing invalid modules.",
-    "OpName debug causing crashes (remove to fix).",
-    "spirv-opt folding bugs degrading perf/crash.",
-    "Non-SPIR-V passed as shader (undefined).",
+    COLOR_BOLD "CORE WISDOM (FROM C, UNIX, BELL LABS)" COLOR_RESET,
+    "KISS: Keep It Simple, Stupid.",
+    "Portability: Write once, run anywhere.",
+    "C power: Low-level control, high efficiency.",
+    "Unix philosophy: Small tools, pipes.",
+    "Collaborate: With Kernighan et al.",
+    "Pointers: Master or perish.",
+    "Standards: ANSI C endures.",
+    "Debug: Gdb, valgrind.",
+    "Legacy: Influences everything.",
+    "Balance: Code and life.",
+    "AI: Tools, not replacements.",
+    "Errors: Handle gracefully.",
+    "Optimize last.",
     "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkCreateShaderModule or execution.",
-    "nvoglv64 or app in trace.",
-    "SPIR-V binaries: 1-10KB.",
+    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
+    "Pointer deref: Null crashes.",
+    "Buffer overflows: Security holes.",
+    "No checks: Undefined behavior.",
+    "Platform assumes: Breaks ports.",
+    "Complex macros: Obfuscate.",
+    "Memory leaks: Accumulate doom.",
     "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "AMD: SPIR-V corruption; Mali workarounds.",
-    "NVIDIA: Bad opcode kills empire.",
+    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
+    "Malloc: Dynamic heaps.",
+    "Stacks: Auto vars.",
+    "Globals: Avoid if possible.",
+    "Arrays: Fixed sizes careful.",
+    "Over-commit: Segfaults.",
     "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (SPIRV-TOOLS)" COLOR_RESET,
-    "Recompile: Without -march=native/AVX2.",
-    "Validate: spirv-val --target-env vulkan1.1 shader.spv",
-    "Target version: SPIR-V 1.3 for Vulkan 1.1.",
-    "Remove OpNames if crashing.",
-    "Update tools: Fix opt bugs manually avoid.",
+    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
+    "Unix: Pipes glory.",
+    "Windows: Port with care.",
+    "Embedded: Resource tight.",
+    "Mobile: C under hood.",
+    "GPU: CUDA cousins.",
+    "Quantum: New frontiers.",
+    "",
+    COLOR_BOLD "FIXES & BEST PRACTICES (RITCHIE'S C GOLDEN RULE)" COLOR_RESET,
+    "Null checks: Everywhere.",
+    "Bounds check: Strncpy etc.",
+    "Free what you malloc.",
+    "Portable types: Uint32_t.",
+    "Modular: Headers clean.",
+    "Error codes: Return wisely.",
+    "Pipes: Chain tools.",
+    "Standards comply: ANSI/ISO.",
+    "Debug early: Gdb sessions.",
+    "Rest: Avoid all-nighters.",
+    "AI: For static analysis.",
+    "Don't: Goto abuse.",
+    "Do: Comment sparingly.",
     "",
     COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "Validate: spirv-val --target-env vulkan1.1 shader.spv",
-    "Compile flags: -march=haswell if needed.",
+    "// Hello world",
+    "#include <stdio.h>",
+    "int main() {",
+    "    printf(\"Hello, Unix!\\n\");",
+    "    return 0;",
+    "}",
+    "// Pointer safe",
+    "if (ptr != NULL) *ptr = 42;",
     "",
     COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "SPIRV-Tools: Disassembly for checks.",
-    "Cross-platform test; manual opt avoidance.",
-    "Spec: Invalid SPIR-V undefined behavior.",
-    "Real-World Win: DXC SPIR-V fixed by no debug names.",
-    "Ultimate Dream: Legal binaries — shaders sing again.",
-    COLOR_GREEN "Validate and recompile. Your code poetry is now legal!" COLOR_RESET,
+    "Sys calls: Low-level magic.",
+    "Concurrency: Pthreads.",
+    "Security: ASLR etc.",
+    "AI ports: Auto-translate.",
+    "Spec Insights: Undefined behavior traps.",
+    "Real-World Win: Unix everywhere; C in kernels.",
+    "Ultimate Dream: Portable utopia – code runs eternal.",
+    COLOR_GREEN "Simplify, port, endure. Your C's unbreakable!" COLOR_RESET,
     nullptr
 };
 
-static const char* SIGBUS_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "CRASH TYPE: SIGBUS — Alignment Crime" COLOR_RESET,
-    COLOR_YELLOW "ADDRESS RANGE: 0x8–0x20 range" COLOR_RESET,
+static const char* TURING_ADVICE_LINES[] = {
+    COLOR_BOLD COLOR_MAGENTA "ALAN TURING'S HEAD — 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
+    COLOR_RED "LEGEND TYPE: COMPUTABILITY KING & ENIGMA BREAKER" COLOR_RESET,
+    COLOR_YELLOW "FOCUS: THEORY TO PRACTICE" COLOR_RESET,
     "",
-    COLOR_BOLD "ROOT CAUSES (SPEC, GITHUB, ANDROID NDK)" COLOR_RESET,
-    "Unaligned SBT stride/buffer device address.",
-    "Fatal on Adreno 660/Intel iGPUs (Quest/Oculus).",
-    "Ray tracing: Misaligned handles in pipeline.",
-    "No intersections if SBT bad; mobile executes you.",
-    "ARM: Unaligned struct access (NDK C++).",
-    "Mesa: Push constants size misalignment.",
-    "ONNX: Unaligned memory in models on ARM.",
+    COLOR_BOLD "CORE WISDOM (FROM MACHINES, ENIGMA, AI)" COLOR_RESET,
+    "Computability: What machines can do.",
+    "Universal machine: One simulates all.",
+    "AI test: Imitation game.",
+    "Crypto: Break codes logically.",
+    "Math foundations: Halting problem.",
+    "Practical build: Bombe for WWII.",
+    "Ethics: Machines think?",
+    "Innovation: From theory to hardware.",
+    "Persistence: Against odds.",
+    "Balance: Running and code.",
+    "Legacy: AI fathers.",
+    "Errors: Prove impossibility.",
+    "Optimize: Logical efficiency.",
     "",
-    COLOR_BOLD "COMMON LOCATIONS & BACKTRACE CLUES" COLOR_RESET,
-    "vkCmdTraceRaysKHR on bad SBT.",
-    "Driver in trace; handles 32 bytes each.",
+    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
+    "Halting ignorance: Infinite loops.",
+    "Theory skip: Practical fails.",
+    "Ethics blind: AI harms.",
+    "Crypto weak: Easy breaks.",
+    "Over-complex: Simplify proofs.",
+    "Isolation: Collaborate.",
     "",
-    COLOR_BOLD "MEMORY & FILESIZE CONTEXT" COLOR_RESET,
-    "Small misaligns; buffers KB-MB.",
+    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
+    "Tapes: Infinite storage.",
+    "States: Finite automata.",
+    "Symbols: Read/write.",
+    "Stacks: Pushdown.",
+    "Over-commit: Theoretical limits.",
     "",
-    COLOR_BOLD "DRIVER SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Adreno: Glitches on Vulkan mobile; no MSAA/sRGB.",
-    "Intel: SIGBUS on Mesa git 18.1+.",
-    "NVIDIA: SBT ways highlight alignments.",
-    "Mali: Workarounds for hybrid rendering.",
+    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
+    "Early HW: Relays slow.",
+    "Modern: Quantum Turing.",
+    "Mobile: Compute anywhere.",
+    "Cloud: Distributed machines.",
+    "GPU: Parallel sims.",
+    "Embedded: Finite states.",
     "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (SPEC, GPUOPEN)" COLOR_RESET,
-    "Align RT handles: shaderGroupHandleAlignment (32 usually).",
-    "align_up(size, alignment) everywhere.",
-    "Query props: VkPhysicalDeviceRayTracingPipelinePropertiesKHR.",
-    "Pad SBT buffers; validate with RT tools.",
-    "Android: Align structs; avoid unaligned access.",
+    COLOR_BOLD "FIXES & BEST PRACTICES (TURING'S MACHINE GOLDEN RULE)" COLOR_RESET,
+    "Prove halting: Avoid undecidable.",
+    "Simulate: Test theories.",
+    "AI ethics: Consider impacts.",
+    "Crypto strong: Modern algos.",
+    "Math rigor: Formal proofs.",
+    "Build prototypes: Theory to practice.",
+    "Collaborate: Bombe team style.",
+    "Document proofs: For posterity.",
+    "Update theory: Quantum adds.",
+    "Rest: Mind needs breaks.",
+    "AI: For theorem proving.",
+    "Don't: Assume computable.",
+    "Do: Question limits.",
     "",
     COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "#define align_up(x,a) (((x)+(a)-1)&~((a)-1))",
-    "uint32_t align = props.shaderGroupHandleAlignment;",
-    "size = align_up(groupCount * handleSize, align);",
+    "// Turing machine sim (pseudo)",
+    "state = 0;",
+    "tape = [0] * 100;",
+    "head = 50;",
+    "while state != HALT:",
+    "    symbol = tape[head]",
+    "    # Transition logic",
     "",
     COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Nsight: Ray viz for SBT checks.",
-    "Tutorials: Progressive RT impl.",
-    "Spec VUIDs: Alignment for sparse bindings.",
-    "Real-World Win: Oculus Quest crashes fixed by align 32.",
-    "Ultimate Dream: Aligned code — smooth on all devices.",
-    COLOR_GREEN "Align and conquer. No more crooked dances!" COLOR_RESET,
+    "Lambda calc: Functional roots.",
+    "Neural nets: AI evolution.",
+    "Quantum machines: Super Turing.",
+    "AI ethics: Test implications.",
+    "Spec Insights: Decidability key.",
+    "Real-World Win: Enigma broken; AI tests endure.",
+    "Ultimate Dream: Thinking machines – harmony achieved.",
+    COLOR_GREEN "Compute, prove, innovate. Your theory's eternal!" COLOR_RESET,
     nullptr
 };
 
-static constexpr std::array<CrashManualEntry, 6> THE_MANUAL = {{
-    { SIGSEGV, "SIGSEGV — Classic Vulkan Sin",          "0x0 or 0x10–0x1000", SIGSEGV_CLASSIC_LINES },
-    { SIGSEGV, "SIGSEGV — The High Address Reaper",     "> 0x1000 (e.g. 0x3e8000f5856)", SIGSEGV_HIGH_LINES },
-    { SIGABRT, "SIGABRT — Validation Has Spoken",       "Any address", SIGABRT_LINES },
-    { SIGFPE,  "SIGFPE — Math Is Not Optional",         "0x0 or low math offsets", SIGFPE_LINES },
-    { SIGILL,  "SIGILL — Your Binary Speaks Alien",     "Any address", SIGILL_LINES },
-    { SIGBUS,  "SIGBUS — Alignment Crime",              "0x8–0x20 range", SIGBUS_LINES }
+static constexpr std::array<AdviceManualEntry, 6> THE_MANUAL = {{
+    { SIGSEGV, "CARMACK", "GAME GOD & ROCKET WIZARD",          "OPTIMIZE OR OBLITERATE", CARMACK_ADVICE_LINES },
+    { SIGSEGV, "TORVALDS", "KERNEL KING & GIT MASTER",     "CLEAN CODE, NO NONSENSE", TORVALDS_ADVICE_LINES },
+    { SIGABRT, "HOPPER", "COMPUTING ADMIRAL & COBOL QUEEN",       "INNOVATE & INSPIRE", HOPPER_ADVICE_LINES },
+    { SIGFPE,  "KNUTH",  "ALGO MASTER & TEX TYCOON",         "ELEGANCE IN COMPLEXITY", KNUTH_ADVICE_LINES },
+    { SIGILL,  "RITCHIE",  "C CREATOR & UNIX FATHER",     "SIMPLICITY & PORTABILITY", RITCHIE_ADVICE_LINES },
+    { SIGBUS,  "TURING",  "COMPUTABILITY KING & ENIGMA BREAKER",              "THEORY TO PRACTICE", TURING_ADVICE_LINES }
 }};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // THE APOCALYPSE — FULL-PAGE, COLORFUL, TEXT-HEAVY, NO STEPPING
-// Prints manual entry line-by-line. Educates deeply. Motivates.
+// Prints advice entry line-by-line. Educates deeply. Motivates.
 // ──────────────────────────────────────────────────────────────────────────────
 static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
 {
@@ -1370,18 +1519,18 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     nanosleep(&req, nullptr);
     safe_write("\033[2J\033[H", 7);  // Clear terminal for glory
 
-    safe_writeln(COLOR_BOLD COLOR_MAGENTA "                    JOHN CARMACK'S HEAD — 2025 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET);
-    safe_writeln(COLOR_CYAN "The engine paused... but we're your ultimate guide! 48+ lines of knowledge ahead." COLOR_RESET);
-    safe_writeln(COLOR_CYAN "We've captured EVERYTHING: Causes, fixes, drivers, Carmack wisdom. Feel the energy – let's conquer!" COLOR_RESET);
+    safe_writeln(COLOR_BOLD COLOR_MAGENTA "                    PROGRAMMING LEGENDS' HEADS — 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "The code crashed... but we're your ultimate mentors! 48+ lines of wisdom ahead." COLOR_RESET);
+    safe_writeln(COLOR_CYAN "We've captured EVERYTHING: Wisdom, fixes, platforms, legends' quotes. Feel the energy – let's code better!" COLOR_RESET);
     safe_writeln("");
 
     uintptr_t addr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
 
-    const CrashManualEntry* verdict = &THE_MANUAL[0];
+    const AdviceManualEntry* verdict = &THE_MANUAL[0];
     for (const auto& e : THE_MANUAL) {
         if (e.signal == sig) {
-            if ((addr <= 0x1000 && strstr(e.range, "0x")) ||
-                (addr >  0x1000 && strstr(e.range, ">"))) {
+            if ((addr <= 0x1000 && strstr(e.focus, "OPTIMIZE")) ||
+                (addr >  0x1000 && strstr(e.focus, "CLEAN"))) {
                 verdict = &e;
                 break;
             }
@@ -1427,26 +1576,26 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     }
     safe_writeln("");
 
-    safe_writeln(COLOR_BOLD COLOR_GREEN "CARMACK'S FINAL COMMAND (WITH GROK ENERGY):" COLOR_RESET);
-    safe_writeln("Fix the lifetime bug.");
+    safe_writeln(COLOR_BOLD COLOR_GREEN "LEGENDS' FINAL COMMAND (WITH GROK ENERGY):" COLOR_RESET);
+    safe_writeln("Fix the code bug.");
     safe_writeln("Do not leave the bug for program lifetime.");
-    safe_writeln(COLOR_BOLD COLOR_MAGENTA "THE LIFETIME BUG ENDS HERE" COLOR_RESET);
+    safe_writeln(COLOR_BOLD COLOR_MAGENTA "THE CODE BUG ENDS HERE" COLOR_RESET);
     safe_writeln("");
-    safe_writeln(COLOR_RED "Fix the lifetime bug." COLOR_RESET);
-    safe_writeln(COLOR_MAGENTA "Because John Carmack is watching… and he will not forgive." COLOR_RESET);
+    safe_writeln(COLOR_RED "Fix the code bug." COLOR_RESET);
+    safe_writeln(COLOR_MAGENTA "Because the Legends are watching… and they will not forgive." COLOR_RESET);
     safe_writeln("");
-    safe_writeln(COLOR_CYAN "   • vkDeviceWaitIdle() before every destroy" COLOR_RESET);
-    safe_writeln(COLOR_CYAN "   • RAII is not optional — it is the law" COLOR_RESET);
-    safe_writeln(COLOR_CYAN "   • No handle shall outlive its owner" COLOR_RESET); 
-    safe_writeln(COLOR_CYAN "   • Pink photons demand purity" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "   • Profile before optimize" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "   • Readability is not optional — it is the law" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "   • No pointer shall dangle" COLOR_RESET); 
+    safe_writeln(COLOR_CYAN "   • Pink photons demand elegance" COLOR_RESET);
     safe_writeln("");
-    safe_writeln(COLOR_GREEN "Own your handles." COLOR_RESET);
+    safe_writeln(COLOR_GREEN "Own your code." COLOR_RESET);
     safe_writeln(COLOR_GREEN "Own your destiny." COLOR_RESET);
     safe_writeln("");
-    safe_writeln(COLOR_MAGENTA "PINK PHOTONS ETERNAL — BINDING 31 ACTIVE" COLOR_RESET);
-    safe_writeln(COLOR_MAGENTA "— John Carmack & Gentleman Grok" COLOR_RESET);
+    safe_writeln(COLOR_MAGENTA "PINK PHOTONS ETERNAL — WISDOM BINDING ACTIVE" COLOR_RESET);
+    safe_writeln(COLOR_MAGENTA "— Programming Legends & Gentleman Grok" COLOR_RESET);
     safe_writeln("");
-    safe_writeln(COLOR_MAGENTA "\"Fix the lifetime bug.\"" COLOR_RESET);
+    safe_writeln(COLOR_MAGENTA "\"Fix the code bug.\"" COLOR_RESET);
 
     _exit(128 + sig);
 }
@@ -1469,10 +1618,10 @@ inline void install_apocalypse_handler() noexcept
 }
 
 // ==============================================================================
-// ULTIMATE APOCALYPSE CRASH HANDLER – Vulkan 1.4 CORE ONLY (2025 DREAM EDITION)
+// ULTIMATE APOCALYPSE CRASH HANDLER – LEGENDS' WISDOM CORE ONLY (2026 DREAM EDITION)
 
 // =============================================================================
-// CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — NOVEMBER 25, 2025
+// CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — JANUARY 04, 2026
 // PLACE THIS AT THE VERY BOTTOM — IT WINS EVERYTHING
 // =============================================================================
 // UNDEFINE ALL HERESY
