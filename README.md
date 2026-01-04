@@ -64,6 +64,8 @@ Errors and bad code will not be tolerated.
 I would be taking a 1 to their 2 parts as far as distribution ratio.  
 The software is unrestricted and if you go commercial then set something up then.  
 If you make money it will probably be around 3 cents on the dollar or 3%. Not above.  
+I doubt anyone has time for lawyers, so be a sport if you make a few bucks.  
+Read that as: It's free until you think it should not be.  
 If they do not like my using their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH  
 If you need help with your project, it's Grok, not me.  
