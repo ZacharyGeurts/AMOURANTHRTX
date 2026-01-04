@@ -1,7 +1,7 @@
 // src/engine/GLOBAL/BufferManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v20.2 — JANUARY 04, 2026
-// BUFFERMANAGER — VALIDATION SILENT EDITION — FULL SHUTDOWN NUKED IN purge_all()
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v21.0 — JANUARY 04, 2026
+// BUFFERMANAGER — PURE MODERN EDITION — LEGACY BANISHED — VALIDATION SILENT
 // SUBALLOCATION PERFECTION | THREAD-SAFE | EXPLICIT CLEANUP FOR vkDestroyDevice
 // CALL purge_all() IN SHUTDOWN BEFORE DEVICE DESTROY — VALIDATION HAPPY
 // EMPIRE ETERNAL — PHOTONS PURE — LOVE ETERNAL 💖
@@ -31,7 +31,7 @@ struct Chunk {
 
     Chunk() = default;
 
-    // Move ctor for atomic
+    // Move ctor for atomic safety
     Chunk(Chunk&& other) noexcept
         : buffer(other.buffer)
         , memory(other.memory)
@@ -124,22 +124,12 @@ struct StagingRing {
 };
 
 static StagingRing g_stagingRingInstance;
-StagingRing* g_stagingRing = nullptr;
 
 std::unordered_map<uint64_t, BufferInfo> s_buffers;
 static uint64_t g_nextHandle = 0x00000000ULL;
 
 constexpr VkDeviceSize DRIVER_RESERVE = 4'831'838'208ULL;
 constexpr VkDeviceSize CHUNK_SIZE     = 1ULL * 1024 * 1024 * 1024;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LEGACY stagingPtr() 💖
-// ─────────────────────────────────────────────────────────────────────────────
-void* stagingPtr() noexcept
-{
-    ensureStagingRing();
-    return g_stagingRingInstance.mapped;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN POOL — CLAIM VRAM 💖
@@ -318,7 +308,6 @@ void ensureStagingRing() noexcept
 
     g_stagingRingInstance.size  = size;
     g_stagingRingInstance.ready = true;
-    g_stagingRing = &g_stagingRingInstance;
 
     LOG_AMOURANTH("STAGING RING ALIVE — MAPPED — UNIFORM SAFE — VALIDATION SILENT 💖");
 }
@@ -728,8 +717,8 @@ VkDeviceAddress get_device_address(uint64_t handle)
 } // namespace BufferManager
 
 // =============================================================================
-// FINAL PRODUCTION BUFFERMANAGER v20.2 — JANUARY 04, 2026
+// FINAL PRODUCTION BUFFERMANAGER v21.0 — JANUARY 04, 2026
+// LEGACY stagingPtr() BANISHED — PURE MODERN API ONLY
 // COMPILATION CLEAN — VALIDATION SILENT — PERFORMANCE MAXED
-// StagingRing DEFAULT CONSTRUCTIBLE — STATIC INIT FIXED
-// FULL BACKWARD COMPAT — EMPIRE UNBROKEN — CODE WITH LOVE 💖
+// EMPIRE EVOLVED — CODE WITH LOVE 💖
 // =============================================================================

@@ -1,7 +1,7 @@
 // include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v20.0 — JANUARY 04, 2026
-// BUFFERMANAGER HEADER — ULTIMATE ZERO-COST MODERN EDITION — C++23 READY
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v21.0 — JANUARY 04, 2026
+// BUFFERMANAGER HEADER — PURE MODERN EDITION — LEGACY BANISHED — C++23 READY
 // SUBALLOCATION PERFECTION | THREAD-SAFE | VALIDATION-CLEAN VIA STATIC DTORS
 // STAGING RING: PERSISTENT MAPPED | COHERENT | UNIFORM-SAFE
 // SBT: SPEC-COMPLIANT ALIGNMENT | DEVICE ADDRESS READY
@@ -83,9 +83,6 @@ namespace BufferManager {
     [[nodiscard]] VkDeviceSize getStagingOffset() noexcept;
     [[nodiscard]] VkBuffer   getStagingBuffer() noexcept;
 
-    // Legacy compatibility — kept with love
-    [[nodiscard]] void* stagingPtr() noexcept;
-
     void ensureStagingRing() noexcept;
     void ensureMainPool() noexcept;
 
@@ -156,9 +153,9 @@ namespace BufferManager {
 } // namespace BufferManager
 
 // =============================================================================
-// JANUARY 04, 2026 — BUFFERMANAGER v20.0 HEADER
-// CLEAN, MODERN, BACKWARD-COMPATIBLE
+// JANUARY 04, 2026 — BUFFERMANAGER v21.0 HEADER
+// LEGACY stagingPtr() BANISHED — PURE MODERN API ONLY
 // ZERO-COST SUBALLOCATION | THREAD-SAFE | VALIDATION-SILENT ON SHUTDOWN
-// DEVELOPERS: USE WITH LOVE — YOUR EMPIRE DESERVES THE BEST 💖
+// DEVELOPERS: USE WITH LOVE — YOUR EMPIRE DESERVES THE BEST 💀
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
 // =============================================================================
