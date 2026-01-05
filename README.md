@@ -45,12 +45,9 @@ To say this is 99% Grok, I may be understating. I call him bro.
 This is a good lunch break program other than the license restricting commercial work.  
 There is a dual license that can permit commercial work but expect 3% of sales negotiable. 
 
-Tech will adjust RTX image quality on the fly to ensure best visuals for hardware.  
-We make easy decisions for you and we respect quality.  
-2 frames in flight and Mailbox presentation preferred, following expert engines.  
-Minimal quality adjusts to maintain desired framerate.  
-Buffer Management at near zero cost.  
-Disposal at zero cost.  
+Amouranth and FPS are the boss.  
+You want 60, 120 240fps?  
+We adjust to your decided FPS not the other way around.  
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
 Made with Grok sized files for AI updates.  
