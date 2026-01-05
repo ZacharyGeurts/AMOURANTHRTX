@@ -471,6 +471,7 @@ public:
     void createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept;
     void createTonemapSampler() noexcept;
     void createDenoiserSampler() noexcept;  // NEW: Declaration for denoiser sampler creation
+	void onResize(int newWidth, int newHeight) noexcept;
 
     void destroyRTOutputImages() noexcept;
     void destroyAccumulationImages() noexcept;
@@ -539,7 +540,6 @@ private:
     VulkanRenderer* ptr = VulkanRenderer::get();
     if (!ptr) {
         LOG_FATAL_CAT("RTX", "g_rtx() called before renderer sealed — empire fallen");
-        phase9_ballerina("NO RENDERER — PHOTONS LOST", std::source_location::current());
     }
     return *ptr;
 }

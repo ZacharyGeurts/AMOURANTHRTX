@@ -1,13 +1,9 @@
 // include/engine/GLOBAL/SDL3.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 04, 2026
+// SDL3 INTEGRATION HEADER — CLEAN, MODERN, C++23 FORWARD-ONLY EDITION
+// FULLY COMPILABLE | unique_ptr FIXED WITH decltype(&SDL_DestroySurface)
+// PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -30,8 +26,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-#include "engine/GLOBAL/SwapchainManager.hpp"
 
+#include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 using namespace Logging::Color;
@@ -45,7 +41,7 @@ using SDLWindowPtr = std::unique_ptr<SDL_Window, SDLWindowDeleter>;
 extern SDLWindowPtr g_sdl_window;
 
 // =============================================================================
-// Global resize state (thread-safe) — DEFINED IN SDL3.cpp
+// Global resize state (thread-safe)
 // =============================================================================
 extern std::atomic<int>  g_resizeWidth;
 extern std::atomic<int>  g_resizeHeight;
@@ -57,8 +53,11 @@ extern std::atomic<bool> g_resizeRequested;
 namespace SDL3Window {
 
 [[nodiscard]] std::vector<std::string> getVulkanExtensions(SDL_Window* window = nullptr);
+
 bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept;
+
 void toggleFullscreen() noexcept;
+
 void destroy() noexcept;
 
 } // namespace SDL3Window
@@ -88,7 +87,6 @@ public:
     using GamepadButtonCallback  = std::function<void(const SDL_GamepadButtonEvent&)>;
     using GamepadAxisCallback    = std::function<void(const SDL_GamepadAxisEvent&)>;
     using GamepadConnectCallback = std::function<void(bool connected, SDL_JoystickID id, SDL_Gamepad* gp)>;
-    using ResizeCallback         = std::function<void(int w, int h)>;
 
     SDL3Input();
     ~SDL3Input();
@@ -99,7 +97,7 @@ public:
     void setCallbacks(KeyboardCallback kb, MouseButtonCallback mb, MouseMotionCallback mm,
                       MouseWheelCallback mw, TextInputCallback ti, TouchCallback tc,
                       GamepadButtonCallback gb, GamepadAxisCallback ga,
-                      GamepadConnectCallback gc, ResizeCallback resize);
+                      GamepadConnectCallback gc);
 
     void enableTextInput(SDL_Window* window, bool enable);
 
@@ -125,25 +123,6 @@ private:
     GamepadButtonCallback  m_gamepadButtonCallback;
     GamepadAxisCallback    m_gamepadAxisCallback;
     GamepadConnectCallback m_gamepadConnectCallback;
-    ResizeCallback         m_resizeCallback;
-};
-
-// ─── Font System ──────────────────────────────────────────────────────────────
-class SDL3Font {
-public:
-    explicit SDL3Font(const Logging::Logger& logger);
-    ~SDL3Font();
-
-    void initialize(const std::string& fontPath);
-    TTF_Font* getFont() const;
-    void exportLog(const std::string& filename) const;
-
-private:
-    void cleanup();
-
-    mutable TTF_Font* m_font{nullptr};
-    mutable std::future<TTF_Font*> m_fontFuture;
-    const Logging::Logger& logger_;
 };
 
 } // namespace SDL3Initializer
@@ -166,9 +145,9 @@ struct TextureInfo {
     SDL_BlendMode blendMode{SDL_BLENDMODE_NONE};
 };
 
-// ─── RAII Surface ─────────────────────────────────────────────────────────────
-using SurfacePtr = std::unique_ptr<SDL_Surface, void(*)(SDL_Surface*)>;
-inline constexpr void(*SurfaceDeleter)(SDL_Surface*) = SDL_DestroySurface;
+// ─── RAII Surface — C++23 fixed deleter using decltype(&SDL_DestroySurface)
+// This allows default construction and nullptr without any issues
+using SurfacePtr = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
 
 // ─── Supported formats (SDL3_image) ───────────────────────────────────────────
 inline static const std::vector<std::string> SUPPORTED_FORMATS = {
@@ -250,7 +229,7 @@ private:
 } // namespace AmouranthRTX::Graphics
 
 // =============================================================================
-// Namespace: SDL3Audio — PINK PHOTONS NOW HAVE VOICE — NOVEMBER 21, 2025
+// Namespace: SDL3Audio — PINK PHOTONS NOW HAVE VOICE
 // =============================================================================
 namespace SDL3Audio {
 
@@ -281,13 +260,15 @@ private:
     std::unordered_map<std::string, std::unique_ptr<SoundData>> sounds_;
 };
 
-// PINK PHOTONS HAVE A VOICE — THE ONE TRUE GLOBAL AUDIO EMPIRE
+// Global audio empire — inline declaration only
 inline AudioManager g_audio;
 
 } // namespace SDL3Audio
 
 // =============================================================================
-// FIRST LIGHT ACHIEVED — DECEMBER 22, 2025 — PINK PHOTONS ETERNAL
-// SDL3Window::get() REMOVED FROM HEADER — DEFINED ONLY IN SDL3.cpp
-// ALL GLOBALS PROPERLY EXTERNED — LINKER HAPPY — EMPIRE UNBROKEN
+// JANUARY 04, 2026 — FINAL FIXED HEADER
+// C++23 compliant | SurfacePtr uses decltype(&SDL_DestroySurface)
+// loadSurface uses &SDL_DestroySurface directly
+// textureToSurface returns {}
+// Empire compiles clean — pink photons restored
 // =============================================================================

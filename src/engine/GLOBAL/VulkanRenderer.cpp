@@ -1935,6 +1935,43 @@ void VulkanRenderer::forcePinkFallbackClear() noexcept
     vkResetCommandPool(device, pool, 0);
 }
 
+void VulkanRenderer::onResize(int newWidth, int newHeight) noexcept
+{
+    if (newWidth <= 0 || newHeight <= 0) {
+        LOG_AMOURANTH("WINDOW MINIMIZED OR INVALID SIZE — PHOTONS PAUSED");
+        minimized_ = true;
+        return;
+    }
+
+    minimized_ = false;
+
+    LOG_AMOURANTH("RESIZE → {}×{} — EMPIRE REBIRTH", newWidth, newHeight);
+
+    // Wait for GPU to finish current work
+    vkDeviceWaitIdle(StoneKey::stone_device());
+
+    // Recreate swapchain
+    RTX::SwapchainManager::recreate(newWidth, newHeight);
+
+    // Update internal size
+    width_ = newWidth;
+    height_ = newHeight;
+
+    // Notify LAS — modern way
+    RTX::las().requestRebuild();
+
+    // Recreate all swapchain-dependent resources
+    recreateSwapchainDependentResources();
+
+    // Reset frame counters
+    frameNumber_ = 0;
+    currentSpp_ = 0;
+    accumulationFrame_ = 0;
+    resetAccumNextFrame_ = true;
+
+    LOG_SUCCESS_CAT("RENDERER", "Resize complete — {}×{} — empire realigned", newWidth, newHeight);
+}
+
 void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
 {
     totalTime_ += deltaTime;

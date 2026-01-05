@@ -24,9 +24,6 @@
 class VulkanRenderer;
 extern std::unique_ptr<class Application> g_app_ptr;
 
-// NEW: Global direct pointer to renderer — set once in main.cpp
-extern VulkanRenderer* g_renderer_ptr;
-
 using namespace Logging::Color;
 
 // ===================================================================
@@ -139,17 +136,6 @@ private:
 
             if (pressed && !key1Down) {
                 key1Down = true;
-                if (g_renderer_ptr) {
-                    g_renderer_ptr->debugShowEnvMapOnly_ = !g_renderer_ptr->debugShowEnvMapOnly_;
-                    g_renderer_ptr->requestAccumulationReset();
-
-                    LOG_AMOURANTH(
-                        "{}MODE 1 — RAW HDR ENVMAP {} — FIRST TRUE LIGHT ACHIEVED{}",
-                        RASPBERRY_PINK,
-                        g_renderer_ptr->debugShowEnvMapOnly_ ? "ENGAGED" : "DISENGAGED",
-                        RESET
-                    );
-                }
             } else if (!pressed) {
                 key1Down = false;
             }

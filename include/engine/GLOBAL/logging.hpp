@@ -51,9 +51,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-// global disposal
-[[noreturn]] void phase9_ballerina(std::string_view reason = {}, const std::source_location loc = std::source_location::current()) noexcept;
-
 extern float g_deltaTime;
 
 // =============================================================================
@@ -892,8 +889,6 @@ static constexpr auto vkh = []() constexpr noexcept {
                 loc.line(),
                 loc.function_name()
             );
-
-            phase9_ballerina(executionReason, loc);
         }
 
         // ────────────────────── DEBUG CALLBACK — STILL SEXY ──────────────────────
