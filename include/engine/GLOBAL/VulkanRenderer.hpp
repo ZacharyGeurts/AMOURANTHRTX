@@ -148,6 +148,7 @@ public:
     void updateUniformBuffer(uint32_t frame, const Camera& camera, float deltaTime) noexcept;
     void updateTonemapUniform(uint32_t frame) noexcept;
     bool recreateTonemapUBOs() noexcept;
+	void addDefaultScene() noexcept;
 
     void destroyRTOutputImages() noexcept;
     void destroyAccumulationImages() noexcept;

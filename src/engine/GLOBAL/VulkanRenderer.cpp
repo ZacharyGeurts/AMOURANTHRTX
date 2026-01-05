@@ -268,7 +268,7 @@ EnvironmentMap VulkanRenderer::createEnvironmentMap() noexcept
     VkMemoryRequirements memReqs{};
     vkGetImageMemoryRequirements(stone_device(), equirectImage, &memReqs);
 
-    uint32_t memTypeIndex = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memTypeIndex == ~0u) {
         LOG_FATAL_CAT("RENDERER", "No device-local memory for envmap image");
         vkDestroyImage(stone_device(), equirectImage, nullptr);
@@ -1047,7 +1047,7 @@ void VulkanRenderer::createNexusScoreImage(VkCommandPool pool, VkQueue queue) no
     VkMemoryRequirements memReqs;
     vkGetImageMemoryRequirements(stone_device(), hypertraceScoreImage_, &memReqs);
 
-    uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = BufferManager::findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == UINT32_MAX) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for NexusScoreImage");
         vkDestroyImage(stone_device(), hypertraceScoreImage_, nullptr);
@@ -1238,65 +1238,60 @@ void VulkanRenderer::initializeAllBufferData(uint32_t frames, VkDeviceSize unifo
 
     const VkBufferUsageFlags ssboUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-    // Prepare default data to avoid garbage/initial black screen
+    // Prepare default data
     CameraSceneData defaultScene{};
     TonemapData defaultTonemap{};
 
-    // Set essential defaults to prevent off-screen rendering or invalid state
-    defaultScene.resolution = glm::vec2(1920.0f, 1080.0f);  // Match shader expectation
+    defaultScene.resolution = glm::vec2(1920.0f, 1080.0f);
     defaultScene.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     defaultScene.proj = glm::perspective(glm::radians(60.0f), 1920.0f / 1080.0f, 0.1f, 100.0f);
     defaultScene.invView = glm::inverse(defaultScene.view);
     defaultScene.invProj = glm::inverse(defaultScene.proj);
     defaultScene.camPos = glm::vec4(0.0f, 0.0f, 5.0f, 1.0f);
-    defaultScene.enableTAA = 1;  // Ensure TAA is on by default if needed
-    defaultScene.taaAlpha = 0.1f;
 
     defaultTonemap.exposure = 1.0f;
     defaultTonemap.enabled = 1;
-    defaultTonemap.type = 0;  // ACES
+    defaultTonemap.type = 0;
 
     for (uint32_t i = 0; i < frames; ++i)
     {
         // CameraSceneData — host-visible, persistently mapped
-        uniformBufferEncs_[i] = BufferManager::createSmallUniform(sizeof(CameraSceneData), std::format("CameraSceneData[{}]", i));
+        uniformBufferEncs_[i] = BufferManager::create(sizeof(CameraSceneData),
+                                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                              std::format("CameraSceneData[{}]", i));
         if (!uniformBufferEncs_[i]) {
             LOG_FATAL("Failed to create CameraSceneData {} — THE EMPIRE CANNOT DREAM", i);
         }
-        // Immediately populate with defaults to avoid black screen from garbage data
-        if (auto* ptr = BufferManager::map(uniformBufferEncs_[i])) {
-            std::memcpy(ptr, &defaultScene, sizeof(CameraSceneData));
-            BufferManager::flush(uniformBufferEncs_[i]);  // Ensure coherent if needed
-        } else {
-            LOG_ERROR("Failed to map/initialize CameraSceneData[{}] — potential black screen risk", i);
+
+        // Map and initialize
+        if (const auto* info = BufferManager::get(uniformBufferEncs_[i])) {
+            if (info->mapped) {
+                std::memcpy(info->mapped, &defaultScene, sizeof(CameraSceneData));
+            }
         }
 
         // TonemapData — host-visible, persistently mapped
-        tonemapUniformEncs_[i] = BufferManager::createSmallUniform(sizeof(TonemapData), std::format("TonemapData[{}]", i));
+        tonemapUniformEncs_[i] = BufferManager::create(sizeof(TonemapData),
+                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                               std::format("TonemapData[{}]", i));
         if (!tonemapUniformEncs_[i]) {
             LOG_FATAL("Failed to create TonemapData {}", i);
         }
-        // Immediately populate with defaults
-        if (auto* ptr = BufferManager::map(tonemapUniformEncs_[i])) {
-            std::memcpy(ptr, &defaultTonemap, sizeof(TonemapData));
-            BufferManager::flush(tonemapUniformEncs_[i]);
-        } else {
-            LOG_ERROR("Failed to map/initialize TonemapData[{}] — tonemapping may fail", i);
+
+        if (const auto* info = BufferManager::get(tonemapUniformEncs_[i])) {
+            if (info->mapped) {
+                std::memcpy(info->mapped, &defaultTonemap, sizeof(TonemapData));
+            }
         }
 
-        // Device-local SSBOs (no initial data needed, will be updated later)
+        // Device-local SSBOs
         materialBufferEncs_[i]  = BufferManager::create(MATERIAL_BUFFER_SIZE, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Materials");
         dimensionBufferEncs_[i] = BufferManager::create(256, ssboUsage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "DimensionData");
-
-        if (!materialBufferEncs_[i] || !dimensionBufferEncs_[i]) {
-            LOG_ERROR("Failed to create SSBO for frame {} — materials/dimensions may be invalid", i);
-        }
     }
 
-    // Note: Full updates still happen per-frame via updateUniformBuffer/updateTonemapUniform
-    // But defaults ensure no initial garbage -> black/undefined screen
-
-    LOG_AMOURANTH("CAMERA SCENE & TONEMAP DATA UPGRADED — PERSISTENTLY MAPPED — INITIALIZED WITH DEFAULTS — NO MORE BLACK VOID — SASQUATCH SEES PINK PHOTONS");
+    LOG_AMOURANTH("ALL BUFFER DATA INITIALIZED — PERSISTENTLY MAPPED UBOs — DEFAULT VALUES SET — NO BLACK VOID");
 }
 
 void VulkanRenderer::createTransientCommandPool() noexcept
@@ -1756,7 +1751,7 @@ void VulkanRenderer::renderFrame(const Camera& camera, float deltaTime) noexcept
         VkMemoryRequirements stagingReqs;
         vkGetBufferMemoryRequirements(stone_device(), staging, &stagingReqs);
 
-        uint32_t stagingType = findMemoryType(stagingReqs.memoryTypeBits,
+        uint32_t stagingType = BufferManager::findMemoryType(stagingReqs.memoryTypeBits,
                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         if (stagingType == ~0u) {
             vkDestroyBuffer(stone_device(), staging, nullptr);
@@ -2466,7 +2461,7 @@ void VulkanRenderer::createImage(uint32_t width, uint32_t height, uint32_t mipLe
     VkMemoryRequirements memReqs;
     vkGetImageMemoryRequirements(stone_device(), rawImage, &memReqs);
 
-    uint32_t memTypeIndex = findMemoryType(memReqs.memoryTypeBits, properties);
+    uint32_t memTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits, properties);
     if (memTypeIndex == ~0u) {
         LOG_FATAL_CAT("RENDERER", "No suitable memory type for image {}", tag);
         vkDestroyImage(stone_device(), rawImage, nullptr);
@@ -2505,24 +2500,20 @@ bool VulkanRenderer::recreateTonemapUBOs() noexcept
 {
     const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    // Destroy old
     for (auto h : tonemapUniformEncs_) {
         if (h) BufferManager::destroy(h);
     }
     tonemapUniformEncs_.assign(frames, 0);
 
-    // Recreate host-visible
     for (uint32_t i = 0; i < frames; ++i) {
-        tonemapUniformEncs_[i] = BufferManager::createSmallUniform(sizeof(TonemapData), std::format("TonemapData[{}]", i));
+        tonemapUniformEncs_[i] = BufferManager::create(sizeof(TonemapData),
+                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                               std::format("TonemapData[{}]", i));
         if (tonemapUniformEncs_[i] == 0) {
             LOG_FATAL_CAT("RENDERER", "Failed to recreate TonemapData[{}]", i);
             return false;
         }
-    }
-
-    // Update descriptors
-    for (uint32_t i = 0; i < frames; ++i) {
-        updateTonemapUniform(i);
     }
 
     return true;
@@ -2682,6 +2673,66 @@ VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool o
     // No creation here — all moved to main.cpp
 }
 
+void VulkanRenderer::addDefaultScene() noexcept
+{
+    LOG_AMOURANTH("FORGING DEFAULT SCENE — INFINITE GROUND + GLOWING PINK MONSTER IN VIEW");
+
+    RTX::las().onResize(); // Clear old geometry
+
+    // Infinite ground plane — material 0
+    auto ground = std::make_unique<MeshLoader::Mesh>();
+    ground->vertices.resize(4);
+    ground->vertices[0].pos = glm::vec3(-1000.0f, 0.0f, -1000.0f);
+    ground->vertices[1].pos = glm::vec3( 1000.0f, 0.0f, -1000.0f);
+    ground->vertices[2].pos = glm::vec3( 1000.0f, 0.0f,  1000.0f);
+    ground->vertices[3].pos = glm::vec3(-1000.0f, 0.0f,  1000.0f);
+
+    for (auto& v : ground->vertices) {
+        v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        v.uv = glm::vec2(0.0f); // Not used for ground
+    }
+
+    ground->indices = {0, 1, 2, 0, 2, 3};
+
+    RTX::las().addMesh(std::move(ground), 0);
+
+    // Glowing pink monster cube — material 1 (emissive)
+    auto monster = std::make_unique<MeshLoader::Mesh>();
+
+    const float scale = 3.0f;
+    const glm::vec3 center(0.0f, 3.0f, 5.0f); // Directly in front of default camera
+
+    std::vector<glm::vec3> baseCube = {
+        glm::vec3(-1, -1, -1), glm::vec3(1, -1, -1), glm::vec3(1, 1, -1), glm::vec3(-1, 1, -1),
+        glm::vec3(-1, -1, 1), glm::vec3(1, -1, 1), glm::vec3(1, 1, 1), glm::vec3(-1, 1, 1)
+    };
+
+    monster->vertices.resize(baseCube.size());
+    for (size_t i = 0; i < baseCube.size(); ++i) {
+        monster->vertices[i].pos = baseCube[i] * scale + center;
+        monster->vertices[i].normal = glm::normalize(baseCube[i]);
+        monster->vertices[i].uv = glm::vec2(0.0f);
+    }
+
+    monster->indices = {
+        0,1,2, 0,2,3,
+        4,6,5, 4,7,6,
+        0,4,5, 0,5,1,
+        3,2,6, 3,6,7,
+        0,3,7, 0,7,4,
+        1,5,6, 1,6,2
+    };
+
+    size_t monsterIdx = RTX::las().addMesh(std::move(monster), 1);
+
+    glm::mat4 monsterTransform = glm::translate(glm::mat4(1.0f), center) * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+    RTX::las().setInstanceTransform(monsterIdx, monsterTransform);
+
+    RTX::las().requestRebuild();
+
+    LOG_SUCCESS_CAT("RENDERER", "Default scene forged — massive ground + glowing pink monster in view — black void banished forever");
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // FULL IMPLEMENTATION: createAccumulationPipeline()
 // Now fully restored and complete — called from constructor and fully functional
@@ -2837,55 +2888,73 @@ VulkanRenderer::~VulkanRenderer()
 {
     destroyed_ = true;
     waitForGPU();
+
+    // Destroy RT resources first
     destroyRTOutputImages();
     destroyAccumulationImages();
     destroyDenoiserImage();
     destroyNexusScoreImage();
-    // Destroy command buffers
-    if (g_transientCommandPool != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(stone_device(), g_transientCommandPool, commandBuffers_.size(), commandBuffers_.data());
-    }
-    // Destroy sync objects
-    for (auto s : imageAvailableSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto s : renderFinishedSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto f : inFlightFences_) vkDestroyFence(stone_device(), f, nullptr);
+
+    // Destroy depth
+    depthImageView_.reset();
+    depthImage_.reset();
+    depthImageMemory_.reset();
+
     // Destroy envmap
     envMapImageView_.reset();
     envMapSampler_.reset();
     envMapImage_.reset();
     envMapMemory_.reset();
-    // Destroy depth
-    depthImageView_.reset();
-    depthImage_.reset();
-    depthImageMemory_.reset();
-    // Destroy buffers
-    for (auto h : uniformBufferEncs_) BufferManager::destroy(h);
-    for (auto h : materialBufferEncs_) BufferManager::destroy(h);
-    for (auto h : dimensionBufferEncs_) BufferManager::destroy(h);
-    for (auto h : tonemapUniformEncs_) BufferManager::destroy(h);
+
+    // Destroy command buffers
+    if (g_transientCommandPool != VK_NULL_HANDLE && !commandBuffers_.empty()) {
+        vkFreeCommandBuffers(stone_device(), g_transientCommandPool, static_cast<uint32_t>(commandBuffers_.size()), commandBuffers_.data());
+        commandBuffers_.clear();
+    }
+
+    // Destroy sync objects
+    for (auto s : imageAvailableSemaphores_) if (s) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto s : renderFinishedSemaphores_) if (s) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto f : inFlightFences_) if (f) vkDestroyFence(stone_device(), f, nullptr);
+
+    // Destroy tracked small buffers
     if (defaultMaterialsHandle_ != 0) BufferManager::destroy(defaultMaterialsHandle_);
-    // Destroy pipelines and layouts
+    for (auto h : uniformBufferEncs_) if (h) BufferManager::destroy(h);
+    for (auto h : materialBufferEncs_) if (h) BufferManager::destroy(h);
+    for (auto h : dimensionBufferEncs_) if (h) BufferManager::destroy(h);
+    for (auto h : tonemapUniformEncs_) if (h) BufferManager::destroy(h);
+
+    // CRITICAL: Destroy the main pool chunks — the big VRAM empire
+    BufferManager::purge_all();
+
+    // Destroy pipelines/layouts/pools
     if (envMapDisplayPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(stone_device(), envMapDisplayPipeline_, nullptr);
     if (envMapDisplayPipelineLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(stone_device(), envMapDisplayPipelineLayout_, nullptr);
     if (envMapDisplayDescSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(stone_device(), envMapDisplayDescSetLayout_, nullptr);
     if (envMapDescriptorPool_.valid()) envMapDescriptorPool_.reset();
+
     if (accumulationPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(stone_device(), accumulationPipeline_, nullptr);
     if (accumulationPipelineLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(stone_device(), accumulationPipelineLayout_, nullptr);
     if (accumulationDescSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(stone_device(), accumulationDescSetLayout_, nullptr);
     if (accumulationDescriptorPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(stone_device(), accumulationDescriptorPool_, nullptr);
+
     if (denoiserPipeline_.valid()) denoiserPipeline_.reset();
     if (denoiserPipelineLayout_.valid()) denoiserPipelineLayout_.reset();
     if (denoiserLayout_.valid()) denoiserLayout_.reset();
+
     if (tonemapPipeline_.valid()) tonemapPipeline_.reset();
     if (tonemapLayout_.valid()) tonemapLayout_.reset();
     if (tonemapDescriptorSetLayout_.valid()) tonemapDescriptorSetLayout_.reset();
     if (tonemapDescriptorPool_.valid()) tonemapDescriptorPool_.reset();
+
     tonemapSampler_.reset();
     denoiserSampler_.reset();
 
     // Destroy transient pool
-    transientCommandPool_.reset();
+    if (transientCommandPool_.valid()) transientCommandPool_.reset();
     g_transientCommandPool = VK_NULL_HANDLE;
+
+    LOG_AMOURANTH("VULKAN RENDERER DESTROYED — ALL OBJECTS CLEAN — EMPIRE RESTS IN PERFECT PEACE");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

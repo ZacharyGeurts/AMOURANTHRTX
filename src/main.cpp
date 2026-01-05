@@ -120,23 +120,28 @@ splash_end:
 {
     LOG_AMOURANTH("APOCALYPSE — {} — PHOTONS RETURNING HOME", reason);
 
+    // Wait for GPU — honor the last photons
     if (VkDevice dev = StoneKey::stone_device(); dev != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(dev);
     }
 
+    // Pink fallback one last time
     if (g_renderer) {
         g_renderer->forcePinkFallbackClear();
     }
 
-    BufferManager::purge_all();
+    // High-level cleanup
     RTX::las().requestRebuild();
     RTX::SwapchainManager::cleanup();
 
+    // Destroy transient pool safely
     if (StoneKey::g_transientCommandPool && StoneKey::stone_device()) {
         vkDestroyCommandPool(StoneKey::stone_device(), StoneKey::g_transientCommandPool, nullptr);
         StoneKey::g_transientCommandPool = VK_NULL_HANDLE;
     }
 
+    // DELETE RENDERER FIRST — it owns ALL Vulkan objects (buffers, pools, pipelines)
+    // Its destructor runs → BufferManager::purge_all() → main pool destroyed safely
     if (g_renderer) {
         delete g_renderer;
         g_renderer = nullptr;
@@ -144,11 +149,16 @@ splash_end:
         StoneKey::stone_seal_pipeline(nullptr);
     }
 
+    // Destroy global descriptor pool (from RTX::Context)
+    RTX::g_ctx().cleanup();
+
+    // NOW destroy device — all child objects already gone
     if (VkDevice dev = StoneKey::stone_device(); dev != VK_NULL_HANDLE) {
         vkDestroyDevice(dev, nullptr);
         StoneKey::stone_seal_device(VK_NULL_HANDLE);
     }
 
+    // Instance + surface
     if (VkInstance inst = StoneKey::stone_instance(); inst != VK_NULL_HANDLE) {
         if (VkSurfaceKHR surf = StoneKey::stone_surface(); surf != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(inst, surf, nullptr);
@@ -158,6 +168,7 @@ splash_end:
         StoneKey::stone_seal_instance(VK_NULL_HANDLE);
     }
 
+    // Window
     if (SDL_Window* win = StoneKey::stone_window(); win) {
         SDL_DestroyWindow(win);
         StoneKey::stone_seal_window(nullptr);
@@ -257,6 +268,8 @@ int main(int, char**)
 
     LOG_AMOURANTH("FORGING THE PERFECT RTX PIPELINE — PHOTONS PREPARE TO TRACE");
     g_renderer->pipelineManager_.forgeRTXPipeline(StoneKey::g_transientCommandPool, StoneKey::stone_graphics_queue(), nullptr);
+
+    g_renderer->addDefaultScene();
 
     StoneKey::stone_seal_final();
     LOG_AMOURANTH("EMPIRE FULLY FORGED — ALL SYSTEMS READY — PINK PHOTONS ETERNAL");

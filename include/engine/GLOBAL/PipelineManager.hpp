@@ -159,11 +159,11 @@ public:
     void cacheDeviceProperties();
 
     static inline bool s_crownForged = false;
+	Handle<VkDescriptorPool>      rtDescriptorPool_;
 
 private:
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkPipelineLayout>      rtPipelineLayout_;
-    Handle<VkDescriptorPool>      rtDescriptorPool_;
     Handle<VkPipeline>            rtPipeline_;
 
     Handle<VkBuffer>       sbtBuffer_;
