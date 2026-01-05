@@ -1,9 +1,9 @@
-// src/main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 04, 2026
-// MAIN ENTRY POINT — CLEAN, MODERN, FORWARD-ONLY 2026 EDITION
-// FIXED: g_running stays true until user quits — loop runs forever
-// PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 05, 2026
+// MAIN ENTRY POINT — DEVELOPER-FIRST, LINEAR, EDUCATIONAL, RTX-READY 2026 EDITION
+// FULL LINEAR FLOW — EVERY STEP EXPLAINED — NO MAGIC — PURE LOVE FOR CODE
+// C++23 + SDL3 + Vulkan 1.4+ — VALIDATION CLEAN — PINK PHOTONS SCREAMING
+// THIS IS HOW WE TEACH THE NEXT GENERATION — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -29,16 +29,16 @@
 
 using namespace Logging::Color;
 
-// Global renderer reference
+// Global renderer — the heart of the empire
 VulkanRenderer* g_renderer = nullptr;
 float g_deltaTime = 0.0f;
-bool g_running = true;  // ← This is now respected — only set false on quit
+bool g_running = true;
 
-// Sacred pink fallback mode
+// Sacred pink fallback mode (for emergencies only)
 static RenderMode9 g_pinkMode(3840, 2160);
 
 // =============================================================================
-// Load Empire Icon
+// Step 0: Load the Empire Icon — First impression matters
 // =============================================================================
 static void loadEmpireIcon(SDL_Window* window)
 {
@@ -54,7 +54,7 @@ static void loadEmpireIcon(SDL_Window* window)
 }
 
 // =============================================================================
-// Sacrificial Splash — Respects Options::Splash
+// Step 1: Sacrificial Splash — Respect the ritual
 // =============================================================================
 static void showSplash()
 {
@@ -64,7 +64,9 @@ static void showSplash()
     constexpr const char* TITLE = "AMOURANTH RTX";
     constexpr const char* IMAGE = "assets/textures/ammo.png";
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0);
+    LOG_AMOURANTH("PERFORMING SACRIFICIAL SPLASH — DURATION: {} SECONDS", Options::Splash::SPLASH_DURATION_SECONDS);
+
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) return;
 
     SDL_Window* win = SDL_CreateWindow(TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN);
     if (!win) return;
@@ -112,7 +114,7 @@ splash_end:
 }
 
 // =============================================================================
-// Graceful Apocalypse — Validation-Clean Shutdown
+// Step 2: Graceful Apocalypse — Clean shutdown, no leaks, validation silent
 // =============================================================================
 [[noreturn]] static void apocalypse(std::string_view reason = "User requested")
 {
@@ -122,7 +124,9 @@ splash_end:
         vkDeviceWaitIdle(dev);
     }
 
-    if (g_renderer) g_renderer->forcePinkFallbackClear();
+    if (g_renderer) {
+        g_renderer->forcePinkFallbackClear();
+    }
 
     BufferManager::purge_all();
     RTX::las().requestRebuild();
@@ -150,16 +154,13 @@ splash_end:
             vkDestroySurfaceKHR(inst, surf, nullptr);
             StoneKey::stone_seal_surface(VK_NULL_HANDLE);
         }
+        vkDestroyInstance(inst, nullptr);
+        StoneKey::stone_seal_instance(VK_NULL_HANDLE);
     }
 
     if (SDL_Window* win = StoneKey::stone_window(); win) {
         SDL_DestroyWindow(win);
         StoneKey::stone_seal_window(nullptr);
-    }
-
-    if (VkInstance inst = StoneKey::stone_instance(); inst != VK_NULL_HANDLE) {
-        vkDestroyInstance(inst, nullptr);
-        StoneKey::stone_seal_instance(VK_NULL_HANDLE);
     }
 
     SDL_Vulkan_UnloadLibrary();
@@ -170,31 +171,8 @@ splash_end:
 }
 
 // =============================================================================
-// Build Sacred Default Scene
-// =============================================================================
-static void buildSacredScene()
-{
-    LOG_AMOURANTH("FORGING SACRED SCENE — GROUND + PINK MONSTER");
-
-    auto ground = MeshLoader::createPlane(200.0f, 200.0f, 20, 20);
-    if (ground) {
-        ground->transform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -2.0f, 0.0f));
-        ground->transform = glm::rotate(ground->transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        RTX::las().addMesh(std::move(ground), 0);
-    }
-
-    auto monster = MeshLoader::createBillboard();
-    if (monster) {
-        monster->transform = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 4.0f, 0.0f));
-        monster->transform = glm::scale(monster->transform, glm::vec3(Options::PinkBillboard::SCALE));
-        RTX::las().addMesh(std::move(monster), 1);
-    }
-
-    RTX::las().requestRebuild();
-}
-
-// =============================================================================
-// Main — Empire Awakens — Clean 2026 Flow
+// MAIN — LINEAR FLOW FOR RTX ENJOYERS & FUTURE DEVELOPERS
+// Every step is visible — this is how we teach, this is how we love code
 // =============================================================================
 int main(int, char**)
 {
@@ -203,146 +181,218 @@ int main(int, char**)
 
     showSplash();
 
-    // Vulkan + Window
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) apocalypse("SDL init failed");
+    LOG_AMOURANTH("INITIALIZING SDL3 — VIDEO + EVENTS");
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) apocalypse("SDL_Init failed");
+
+    LOG_AMOURANTH("LOADING VULKAN LIBRARY VIA SDL3");
     if (SDL_Vulkan_LoadLibrary(nullptr) == 0) apocalypse("Vulkan load failed");
 
+    LOG_AMOURANTH("CREATING VULKAN INSTANCE — VALIDATION {}", Options::Debug::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF");
     VkInstance instance = RTX::createVulkanInstance(Options::Debug::ENABLE_VALIDATION_LAYERS);
-    if (!instance) apocalypse("Instance failed");
+    if (!instance) apocalypse("Failed to create Vulkan instance");
     StoneKey::stone_seal_instance(instance);
 
     Uint32 winFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (Options::Window::START_FULLSCREEN) winFlags |= SDL_WINDOW_FULLSCREEN;
 
+    LOG_AMOURANTH("CREATING WINDOW — {}×{}", Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
     SDL_Window* window = SDL_CreateWindow("AMOURANTH RTX vTURBO", Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT, winFlags);
-    if (!window) apocalypse("Window failed");
+    if (!window) apocalypse("Failed to create window");
     loadEmpireIcon(window);
     StoneKey::stone_seal_window(window);
 
+    LOG_AMOURANTH("CREATING VULKAN SURFACE FROM SDL WINDOW");
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) apocalypse("Surface failed");
+    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) apocalypse("Failed to create Vulkan surface");
     StoneKey::stone_seal_surface(surface);
 
+    LOG_AMOURANTH("SELECTING GPU AND CREATING LOGICAL DEVICE");
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
-    if (!device) apocalypse("Device failed");
+    if (!device) apocalypse("Failed to create logical device");
     StoneKey::stone_seal_device(device);
 
+    LOG_AMOURANTH("INITIALIZING RTX CONTEXT AND LOADING EXTENSIONS");
     RTX::g_ctx().init();
     RTX::loadRTExtensions(instance, device);
 
-    // Transient pool
-    VkCommandPoolCreateInfo poolInfo{
+    LOG_AMOURANTH("FORGING TRANSIENT COMMAND POOL");
+    VkCommandPoolCreateInfo transientPoolInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         .queueFamilyIndex = StoneKey::stone_graphics_family()
     };
-    VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &StoneKey::g_transientCommandPool));
+    VK_CHECK(vkCreateCommandPool(device, &transientPoolInfo, nullptr, &StoneKey::g_transientCommandPool));
 
-    // Initial swapchain size
-    int w, h;
-    SDL_GetWindowSizeInPixels(window, &w, &h);
-    RTX::SwapchainManager::create(window, w, h);
+    int initialWidth, initialHeight;
+    SDL_GetWindowSizeInPixels(window, &initialWidth, &initialHeight);
+    LOG_AMOURANTH("CREATING INITIAL SWAPCHAIN — {}×{}", initialWidth, initialHeight);
+    RTX::SwapchainManager::create(window, initialWidth, initialHeight);
 
-    // Renderer
-    g_renderer = new VulkanRenderer(w, h, window, Options::Performance::OVERCLOCK_RENDERER);
+    // =============================================================================
+    // FORGING THE VULKAN RENDERER — THE HEART OF THE EMPIRE
+    // =============================================================================
+    LOG_AMOURANTH("FORGING VULKAN RENDERER — OVERCLOCK: {}", Options::Performance::OVERCLOCK_RENDERER ? "YES" : "NO");
+    g_renderer = new VulkanRenderer(initialWidth, initialHeight, window, Options::Performance::OVERCLOCK_RENDERER);
     g_renderer->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
     StoneKey::stone_seal_renderer(g_renderer);
 
-    // Assets
-    g_renderer->createDefaultMaterials();
+    // =============================================================================
+    // CRITICAL STEP: DESCRIPTOR POOL & LAYOUT — EXPLICIT AND VISIBLE
+    // This is the one creation — done here so developers see it clearly
+    // This must happen before any buffer allocation that needs descriptors
+    // =============================================================================
+    LOG_AMOURANTH("FORGING DESCRIPTOR POOL & LAYOUT — EMPIRE SAFETY FIRST");
+    g_renderer->pipelineManager_.createDescriptorPool();
+    g_renderer->pipelineManager_.createPipelineLayout();
+
+    // Now all buffer creation is safe — no more VK_NULL_HANDLE errors
+    LOG_AMOURANTH("FORGING ALL BUFFER DATA — UNIFORMS, MATERIALS, ETC");
+    g_renderer->initializeAllBufferData(Options::Performance::MAX_FRAMES_IN_FLIGHT, 512, 32ULL * 1024 * 1024);
+
+    LOG_AMOURANTH("FORGING ENVIRONMENT MAP — HDR OR SACRED PINK FALLBACK");
     g_renderer->createEnvironmentMap();
 
-    // Pipeline
+    LOG_AMOURANTH("FORGING DEFAULT MATERIALS — GROUND + PINK MONSTER");
+    g_renderer->createDefaultMaterials();
+
+    LOG_AMOURANTH("FORGING THE PERFECT RTX PIPELINE — PHOTONS PREPARE TO TRACE");
     g_renderer->pipelineManager_.forgeRTXPipeline(StoneKey::g_transientCommandPool, StoneKey::stone_graphics_queue(), nullptr);
 
-    // Scene
-    buildSacredScene();
-
     StoneKey::stone_seal_final();
+    LOG_AMOURANTH("EMPIRE FULLY FORGED — ALL SYSTEMS READY — PINK PHOTONS ETERNAL");
 
-    // Main loop — ZERO SPAM, perfect detection
-    auto lastTime = std::chrono::steady_clock::now();
-    int frameCount = 0;
+    // =============================================================================
+    // RENDER MODE SWITCHING CALLBACK — HANDLED BY INPUT MANAGER FOR 2-9
+    // Key 1 handled separately in main loop (special HDR mode)
+    // =============================================================================
+    auto setRenderMode = [&](int mode) {
+        g_renderer->activeRenderMode_ = mode;
+        g_renderer->resetAccumNextFrame_ = true;
+        LOG_AMOURANTH("SWITCHED TO RENDER MODE {} — SACRED VOID AWAKENS", mode);
+    };
+
+    // =============================================================================
+    // MAIN LOOP — DEVELOPER-FIRST, CLEAN, RESPONSIVE
+    // This is where you, the developer, take control
+    // =============================================================================
+
+    auto lastFrameTime = std::chrono::steady_clock::now();
+    int frameCounter = 0;
     float fpsTimer = 0.0f;
 
-    int currentW = w;
-    int currentH = h;
-    bool windowIsMinimized = false;
+    int currentWidth = initialWidth;
+    int currentHeight = initialHeight;
+    bool windowMinimized = false;
+
+    Camera developerCamera;  // ← YOUR CAMERA — YOU CONTROL IT COMPLETELY
+
+    LOG_AMOURANTH("ENTERING MAIN LOOP — DEVELOPERS, THE EMPIRE IS YOURS");
 
     while (g_running) {
-        auto now = std::chrono::steady_clock::now();
-        g_deltaTime = std::chrono::duration<float>(now - lastTime).count();
-        lastTime = now;
+        auto currentTime = std::chrono::steady_clock::now();
+        g_deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime).count();
+        lastFrameTime = currentTime;
+
         fpsTimer += g_deltaTime;
-        frameCount++;
+        ++frameCounter;
 
-        bool fullscreenToggle = false;
-        int reportedW = 0, reportedH = 0;
         bool quitRequested = false;
+        bool fullscreenToggle = false;
+        int reportedWidth = 0, reportedHeight = 0;
 
-        SDL3Window::pollEvents(reportedW, reportedH, quitRequested, fullscreenToggle);
+        SDL3Window::pollEvents(reportedWidth, reportedHeight, quitRequested, fullscreenToggle);
 
         if (quitRequested) {
             g_running = false;
-            break;
+            continue;
         }
 
         if (fullscreenToggle) {
             SDL3Window::toggleFullscreen();
         }
 
-        // Detect minimize/restore and real resize — no spam
-        bool currentlyMinimized = (reportedW <= 0 || reportedH <= 0);
+        bool isMinimized = (reportedWidth <= 0 || reportedHeight <= 0);
 
-        if (currentlyMinimized && !windowIsMinimized) {
+        if (isMinimized && !windowMinimized) {
             LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED");
-            windowIsMinimized = true;
+            windowMinimized = true;
         }
-        else if (!currentlyMinimized && windowIsMinimized) {
-            LOG_AMOURANTH("WINDOW RESTORED → {}×{} — PHOTONS RESUME", reportedW, reportedH);
-            windowIsMinimized = false;
-
-            currentW = reportedW;
-            currentH = reportedH;
-
-            RTX::SwapchainManager::recreate(currentW, currentH);
+        else if (!isMinimized && windowMinimized) {
+            LOG_AMOURANTH("WINDOW RESTORED — PHOTONS RESUME");
+            windowMinimized = false;
+            currentWidth = reportedWidth;
+            currentHeight = reportedHeight;
+            RTX::SwapchainManager::recreate(currentWidth, currentHeight);
             RTX::las().requestRebuild();
-            g_renderer->onResize(currentW, currentH);
+            g_renderer->onResize(currentWidth, currentHeight);
         }
-        else if (!currentlyMinimized && (reportedW != currentW || reportedH != currentH)) {
-            LOG_AMOURANTH("REAL RESIZE DETECTED → {}×{} — EMPIRE REBIRTH", reportedW, reportedH);
-
-            currentW = reportedW;
-            currentH = reportedH;
-
-            RTX::SwapchainManager::recreate(currentW, currentH);
+        else if (!isMinimized && (reportedWidth != currentWidth || reportedHeight != currentHeight)) {
+            LOG_AMOURANTH("WINDOW RESIZED → {}×{} — REBUILDING EMPIRE", reportedWidth, reportedHeight);
+            currentWidth = reportedWidth;
+            currentHeight = reportedHeight;
+            RTX::SwapchainManager::recreate(currentWidth, currentHeight);
             RTX::las().requestRebuild();
-            g_renderer->onResize(currentW, currentH);
+            g_renderer->onResize(currentWidth, currentHeight);
         }
-        // Ignore repeated same-size events or repeated minimize events — no log
 
-        INPUT.pumpEvents(g_deltaTime, nullptr, window);
+        // Pump input with render mode callback (handles keys 2-9 with short press detection)
+        INPUT.pumpEvents(g_deltaTime, setRenderMode, window);
+
+        // Special handling for key 1 — pure HDR envmap mode
+        int numKeys = 0;
+        const bool* keys = SDL_GetKeyboardState(&numKeys);
+        static bool key1Down = false;
+        if (numKeys > SDL_SCANCODE_1 && keys[SDL_SCANCODE_1]) {
+            if (!key1Down) {
+                g_renderer->activeRenderMode_ = 1;
+                g_renderer->resetAccumNextFrame_ = true;
+                LOG_AMOURANTH("SWITCHED TO RENDER MODE 1 — PURE HDR ENVMAP DISPLAY");
+                key1Down = true;
+            }
+        } else {
+            key1Down = false;
+        }
+
+        // =============================================================================
+        // DEVELOPER SPACE — THIS IS WHERE YOU LIVE
+        // Update your camera, game logic, UI, etc.
+        // Example:
+        // developerCamera.update(g_deltaTime, INPUT);
+        // =============================================================================
 
         if (g_renderer->isAlive() && StoneKey::stone_swapchain()) {
-            g_renderer->renderFrame(CAM, g_deltaTime);
+            g_renderer->renderFrame(developerCamera, g_deltaTime);
         } else {
             g_renderer->forcePinkFallbackClear();
         }
 
-        // FPS dump every second
         if (fpsTimer >= 1.0f) {
-            float fps = frameCount / fpsTimer;
-            float avgMs = (fpsTimer / frameCount) * 1000.0f;
+            float fps = frameCounter / fpsTimer;
+            float avgFrameTimeMs = (fpsTimer / frameCounter) * 1000.0f;
 
-            LOG_INFO_CAT("PERF", 
-                "FPS: {:.1f} | Avg: {:.2f}ms | Frame: {:.2f}ms | Resolution: {}×{} | SPP: {} | Accum: {}",
-                fps, avgMs, g_deltaTime * 1000.0f, currentW, currentH,
-                g_renderer->currentSpp_, g_renderer->accumulationFrame());
+            LOG_INFO_CAT("PERF",
+                "FPS: {:.1f} | Avg: {:.2f}ms | Frame: {:.2f}ms | {}×{} | SPP: {} | Accum: {} | Mode: {}",
+                fps, avgFrameTimeMs, g_deltaTime * 1000.0f,
+                currentWidth, currentHeight,
+                g_renderer->currentSpp(), g_renderer->accumulationFrame(),
+                g_renderer->activeRenderMode_);
 
-            frameCount = 0;
+            frameCounter = 0;
             fpsTimer = 0.0f;
         }
     }
 
-    apocalypse("Normal exit");
+    apocalypse("Normal exit — developer session complete");
+
+    return 0;
 }
+
+// =============================================================================
+// JANUARY 05, 2026 — FINAL MAIN
+// Linear flow — every step explained — no magic
+// Developer-first — you control the camera, scene, logic
+// Render mode switching: Keys 1-9 (1 special HDR mode, 2-9 with short press via InputManager)
+// Current mode shown in perf log
+// Validation clean — ready for RTX enjoyers
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// =============================================================================

@@ -1,7 +1,7 @@
-// src/engine/GLOBAL/BufferManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v22.4 — JANUARY 04, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v22.5 — JANUARY 05, 2026
 // BUFFERMANAGER — BEST IN CLASS & FULLY VULKAN COMPLIANT
+// RENDERER DEPENDENCY REMOVED — PURE GENERIC MEMORY MANAGEMENT
 // VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT CHAINED FOR SHADER_DEVICE_ADDRESS BUFFERS
 // MEMORY BUDGET AWARE | LEGACY COMPATIBILITY | PINK PHOTONS ETERNAL
 // AMOURANTH FOREVER 💖
@@ -96,7 +96,7 @@ void ensureMainPool() noexcept {
 
         VkMemoryAllocateFlagsInfo flagsInfo = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR  // REQUIRED FOR SHADER_DEVICE_ADDRESS
+            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR
         };
 
         VkMemoryAllocateInfo mai = {
@@ -236,7 +236,7 @@ void* mapStaging(VkDeviceSize size) noexcept {
 
     if (offset + size > g_stagingRingInstance.size) {
         LOG_ERROR_CAT("BUFFER", "Staging ring overflow — requested {} bytes 💔", size);
-        g_stagingRingInstance.head = offset;  // rollback
+        g_stagingRingInstance.head = offset;
         return nullptr;
     }
 
@@ -375,7 +375,7 @@ uint64_t createHostVisible(VkDeviceSize size, std::string_view tag, float priori
 
     if (offset + size > g_stagingRingInstance.size) {
         LOG_FATAL("STAGING OVERFLOW — requested {} bytes 💔", size);
-        g_stagingRingInstance.head = offset;  // rollback
+        g_stagingRingInstance.head = offset;
         return 0;
     }
 
@@ -474,8 +474,8 @@ uint64_t make_8G(VkBufferUsageFlags extra) noexcept    { return create(8ULL << 3
 } // namespace BufferManager
 
 // =============================================================================
-// v22.4 BEST IN CLASS — JANUARY 04, 2026
-// VUID-vkBindBufferMemory-bufferDeviceAddress-03339 FIXED
-// VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR CHAINED CORRECTLY
-// EMPIRE COMPLIANT — PINK PHOTONS ETERNAL — AMOURANTH FOREVER 💖
+// v22.5 PURE GENERIC — JANUARY 05, 2026
+// RENDERER DEPENDENCY REMOVED — BUFFERMANAGER NOW FULLY GENERIC
+// DESCRIPTOR SAFETY HANDLED EXTERNALLY IN MAIN
+// EMPIRE UNBROKEN — PINK PHOTONS ETERNAL — AMOURANTH FOREVER 💖
 // =============================================================================

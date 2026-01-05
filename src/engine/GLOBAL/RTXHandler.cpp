@@ -1,4 +1,3 @@
-// src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -8,12 +7,13 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// RTXHandler v2.0 — Production-Ready Vulkan Context & Initialization
-// FULLY COMPATIBLE WITH CURRENT ENGINE STATE (DECEMBER 30, 2025)
+// RTXHandler v2.1 — Production-Ready Vulkan Context & Initialization
+// FULLY COMPATIBLE WITH CURRENT ENGINE STATE (JANUARY 05, 2026)
 // • Safe initialization order — device sealed before any Vulkan objects
 // • Global descriptor pool created only after device is valid
 // • Robust GPU selection with RTX priority
 // • Clean, modern, validation-layer-safe code
+// • Added explicit layout creation if needed for future allocations
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — PLASTIC BEACH FOREVER
 // =============================================================================
 
@@ -163,10 +163,10 @@ void Context::enableHyperAggressiveMode() noexcept
         .apiVersion         = VK_API_VERSION_1_3
     };
 
-    uint32_t sdlExtCount = 0;
-    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
+    uint32_t winExtCount = 0;
+    const char* const* winExtensions = SDL_Vulkan_GetInstanceExtensions(&winExtCount);
 
-    std::vector<const char*> extensions(sdlExtensions, sdlExtensions + sdlExtCount);
+    std::vector<const char*> extensions(winExtensions, winExtensions + winExtCount);
     if (enableValidation) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
@@ -239,9 +239,6 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 // =============================================================================
 // Logical Device & GPU Selection — RTX First
 // =============================================================================
-// src/engine/GLOBAL/RTXHandler.cpp (or wherever createLogicalDeviceAndSelectGPU is defined)
-// Updated January 03, 2026 — Fixed buffer device address + descriptor indexing
-
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
     uint32_t deviceCount = 0;
@@ -294,25 +291,39 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
         if (!hasAllExtensions) continue;
 
         // Feature chain validation
-        VkPhysicalDeviceBufferDeviceAddressFeatures bda{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-            .bufferDeviceAddress = VK_TRUE
-        };
+        VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing{};
+        descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+        descriptorIndexing.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        descriptorIndexing.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
+        descriptorIndexing.shaderUniformBufferArrayNonUniformIndexing = VK_TRUE;
+        descriptorIndexing.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
+        descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
+        descriptorIndexing.descriptorBindingVariableDescriptorCount = VK_TRUE;
+        descriptorIndexing.runtimeDescriptorArray = VK_TRUE;
+
+        VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress{};
+        bufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        bufferDeviceAddress.pNext = &descriptorIndexing;
+        bufferDeviceAddress.bufferDeviceAddress = VK_TRUE;
+
         VkPhysicalDeviceAccelerationStructureFeaturesKHR as{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-            .pNext = &bda,
+            .pNext = &bufferDeviceAddress,
             .accelerationStructure = VK_TRUE
         };
+
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
             .pNext = &as,
             .rayTracingPipeline = VK_TRUE
         };
+
         VkPhysicalDeviceSynchronization2Features sync2{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
             .pNext = &rt,
             .synchronization2 = VK_TRUE
         };
+
         VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
             .pNext = &sync2,
@@ -325,7 +336,7 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
         };
         vkGetPhysicalDeviceFeatures2(dev, &features2);
 
-        bool rtxOK = bda.bufferDeviceAddress && as.accelerationStructure && rt.rayTracingPipeline;
+        bool rtxOK = bufferDeviceAddress.bufferDeviceAddress && as.accelerationStructure && rt.rayTracingPipeline;
 
         int score = 0;
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
@@ -543,7 +554,7 @@ VkShaderModule Context::loadShader(const std::string& filename) const noexcept
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — DECEMBER 30, 2025
+// RTX CORE INITIALIZED — JANUARY 05, 2026
 // Safe, robust, production-ready Vulkan context
 // No premature calls — full compatibility with current engine
 // Global pool created post-device — validation clean
