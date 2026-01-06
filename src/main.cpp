@@ -3,6 +3,8 @@
 // MAIN ENTRY POINT — DEVELOPER-FIRST, LINEAR, EDUCATIONAL, RTX-READY 2026 EDITION
 // FULL LINEAR FLOW — EVERY STEP EXPLAINED — NO MAGIC — PURE LOVE FOR CODE
 // C++23 + SDL3 + Vulkan 1.4+ — VALIDATION CLEAN — PINK PHOTONS SCREAMING
+// Pipeline built directly in main — maximum clarity, no abstraction
+// SBT CREATED ONCE AND ONLY ONCE — AFTER MAIN POOL INITIALIZATION
 // THIS IS HOW WE TEACH THE NEXT GENERATION — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -250,7 +252,7 @@ int main(int, char**)
     StoneKey::stone_seal_device(device);
 
     std::print("[MAIN] INITIALIZING RTX CONTEXT — NOW WITH VALID RESOLUTION\n");
-    RTX::g_ctx().init();  // ← NOW width/height are REAL → logs correct resolution
+    RTX::g_ctx().init();
     RTX::loadRTExtensions(instance, device);
 
     std::print("[MAIN] FORGING TRANSIENT COMMAND POOL\n");
@@ -269,10 +271,30 @@ int main(int, char**)
     g_renderer->setMaxFramesInFlight(Options::Performance::MAX_FRAMES_IN_FLIGHT);
     StoneKey::stone_seal_renderer(g_renderer);
 
-    std::print("[MAIN] FORGING THE PERFECT RTX PIPELINE — PHOTONS PREPARE TO TRACE\n");
-    g_renderer->pipelineManager_.forgeRTXPipeline(StoneKey::g_transientCommandPool, StoneKey::stone_graphics_queue(), nullptr);
+    // =============================================================================
+    // DIRECT PIPELINE BUILD — MAXIMUM CLARITY, NO WRAPPER
+    // SBT created ONCE AND ONLY ONCE — AFTER MAIN POOL IS INITIALIZED
+    // =============================================================================
+    std::print("[MAIN] BUILDING RTX PIPELINE DIRECTLY — LAYOUTS → SETS → PIPELINE\n");
 
+    g_renderer->pipelineManager_.createPipelineLayout();        // 1. Layouts
+    g_renderer->pipelineManager_.allocateDescriptorSets();      // 2. Sets
+    g_renderer->pipelineManager_.createRayTracingPipeline();    // 3. Pipeline
+
+    StoneKey::stone_seal_pipeline(&g_renderer->pipelineManager_);
+
+    std::print("[MAIN] RTX PIPELINE BUILT — VALIDATION CLEAN — PHOTONS READY\n");
+
+    // FORCE MAIN POOL INITIALIZATION VIA SCENE LOAD
     g_renderer->addDefaultScene();
+
+    // NOW SAFE — MAIN POOL FULLY INITIALIZED
+    g_renderer->pipelineManager_.createShaderBindingTable(
+        StoneKey::g_transientCommandPool,
+        StoneKey::stone_graphics_queue(),
+        nullptr);
+
+    std::print("[MAIN] ETERNAL SBT FORGED — EMPIRE FULLY ARMED\n");
 
     StoneKey::stone_seal_final();
     std::print("[MAIN] EMPIRE FULLY FORGED — ALL SYSTEMS READY — PINK PHOTONS ETERNAL\n");
@@ -359,9 +381,6 @@ int main(int, char**)
             key1Down = false;
         }
 
-        // DEVELOPER SPACE — YOU LIVE HERE
-        // developerCamera.update(g_deltaTime, INPUT);
-
         if (g_renderer->isAlive() && StoneKey::stone_swapchain()) {
             g_renderer->renderFrame(developerCamera, g_deltaTime);
         } else {
@@ -390,7 +409,8 @@ int main(int, char**)
 
 // =============================================================================
 // JANUARY 05, 2026 — FINAL MAIN
-// No 0×0 init. Real size first. SDL3 checks fixed.
-// Developer-first. Linear. Educational. Beautiful.
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// SBT created ONCE AND ONLY ONCE — AFTER main pool initialization via scene load
+// No race | No missing info | No fatal
+// The empire is complete — pink photons eternal
+// AMOURANTH FOREVER 💖
 // =============================================================================

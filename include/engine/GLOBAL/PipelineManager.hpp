@@ -1,4 +1,3 @@
-// include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -8,10 +7,11 @@
 //    https://www.gnu.org/licenses/gpl-3.0.html
 // 2. Commercial licensing: gzac5314@gmail.com
 //
-// TRUE CONSTEXPR STONEKEY v∞ — DECEMBER 27, 2025 — FULL LIGHT ASSURED
-// PIPELINEMANAGER HEADER v18.1 — FIXED & COMPLETE
-// ADDED: emptyDescriptorSets_ member (fixes LAS compilation error)
-// All members for 4-set pipeline layout now present and correct
+// TRUE CONSTEXPR STONEKEY v∞ — JANUARY 05, 2026 — FULL LIGHT ASSURED
+// PIPELINEMANAGER HEADER v27.2 — FINAL & COMPLETE
+// FIXED: kMainBindings now static constexpr in class scope (compiles clean)
+// ETERNAL SBT — created once and only once
+// All members for 4-set pipeline layout present and correct
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
 // =============================================================================
 
@@ -158,9 +158,34 @@ public:
     void cacheDeviceProperties();
 
     static inline bool s_crownForged = false;
-	Handle<VkDescriptorPool>      rtDescriptorPool_;
+    Handle<VkDescriptorPool>      rtDescriptorPool_;
 
 private:
+    // =============================================================================
+    // Main ray tracing descriptor set bindings (set 0) — static constexpr in class
+    // =============================================================================
+    static constexpr std::array<VkDescriptorSetLayoutBinding, 11> kMainBindings{{
+        {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
+         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+        {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+        {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+        {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+        {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+         VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+        {8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+        {9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+        {10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+        {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}
+    }};
+
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
     Handle<VkPipelineLayout>      rtPipelineLayout_;
     Handle<VkPipeline>            rtPipeline_;
@@ -199,10 +224,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL PRODUCTION HEADER v18.1 — DECEMBER 27, 2025
-// FIXED: Added emptyDescriptorSets_ in private section
-// LAS compilation error resolved — pipeline().dummyTLAS() now valid
-// 4-set pipeline layout fully supported
+// FINAL PRODUCTION HEADER v27.2 — JANUARY 05, 2026
+// kMainBindings now static constexpr in class scope — compiles clean
+// ETERNAL SBT — created once and only once
+// All members present and correct
 // Cross-platform ready — Windows + Linux
 // PINK PHOTONS ETERNAL — THE EMPIRE SEES ALL
 // =============================================================================

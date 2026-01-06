@@ -1,6 +1,5 @@
-// src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v5.1 — JANUARY 04, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v5.1 — JANUARY 05, 2026
 // Light Acceleration System (LAS) v5.1 — FULLY COMPLETE BEST IN CLASS 2026 EDITION
 // BATCHED BLAS | FULL COMPACTION | TLAS UPDATE/REFIT | PERSISTENT SCRATCH & INSTANCES
 // LAZY REBUILD | PER-MESH DIRTY TRACKING | NO SHORTCUTS — EMPIRE PERFECTION
@@ -14,7 +13,6 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -28,14 +26,14 @@ LAS::LAS()
 {
     LOG_AMOURANTH("LAS v5.1 (2026 Best-in-Class Edition) initialized — pink photons ready for war");
 
-    // Persistent giant scratch — covers worst-case TLAS + many BLAS
+    // Persistent giant scratch buffer — 256 MiB covers worst-case scenarios
     persistentScratch = BufferManager::create(
         256ULL * 1024 * 1024,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "LAS_Persistent_Scratch");
 
-    // Persistent instance buffer — avoids re-upload every rebuild
+    // Persistent instance buffer — supports up to 65536 instances
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -78,9 +76,10 @@ size_t LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialInd
         return meshes_.size();
     }
 
-    auto vertexBuffer = BufferManager::create(
+    uint64_t vertexBuffer = BufferManager::create(
         mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "LAS_VertexBuffer");
@@ -88,9 +87,10 @@ size_t LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialInd
     BufferManager::uploadToBuffer(vertexBuffer, mesh->vertices.data(),
                                   mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
 
-    auto indexBuffer = BufferManager::create(
+    uint64_t indexBuffer = BufferManager::create(
         mesh->indices.size() * sizeof(uint32_t),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "LAS_IndexBuffer");
@@ -150,15 +150,15 @@ void LAS::update(VkCommandBuffer cmd)
 
     bool anyFailed = false;
 
-    // Batched BLAS build + compaction
+    // Phase 1: Batched BLAS build + full compaction
     if (pendingBlasBuilds) {
         if (!batchBuildAndCompactBLAS(cmd)) anyFailed = true;
         pendingBlasBuilds = false;
     }
 
-    // TLAS — prefer update if possible
+    // Phase 2: TLAS — prefer fast update/refit when possible
     if (tlasDirty) {
-        if (tlas && tlasUpdatePossible) {
+        if (tlas && tlasUpdatePossible && !anyFailed) {
             if (!updateTLAS(cmd)) anyFailed = true;
         } else {
             clearTLAS();
@@ -170,12 +170,12 @@ void LAS::update(VkCommandBuffer cmd)
     }
 
     if (anyFailed) {
-        LOG_WARNING_CAT("LAS", "AS update failed this frame — pink fallback active");
+        LOG_WARNING_CAT("LAS", "Acceleration structure update failed this frame — using fallback");
     }
 }
 
 // =============================================================================
-// Batched BLAS Build + Full Compaction
+// Batched BLAS Build + Full Compaction (2026 Best-in-Class)
 // =============================================================================
 
 bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
@@ -186,7 +186,7 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
     }
     if (pending.empty()) return true;
 
-    LOG_AMOURANTH("BATCH BLAS BUILD + COMPACTION — {} meshes", pending.size());
+    LOG_AMOURANTH("BATCH BLAS BUILD + FULL COMPACTION — {} meshes", pending.size());
 
     std::vector<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos(pending.size());
     std::vector<VkAccelerationStructureBuildRangeInfoKHR*> rangePtrs(pending.size());
@@ -201,7 +201,7 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
         VkDeviceAddress vAddr = BufferManager::get_device_address(m->vertexBuffer);
         VkDeviceAddress iAddr = BufferManager::get_device_address(m->indexBuffer);
 
-        VkAccelerationStructureGeometryTrianglesDataKHR triangles = {
+        VkAccelerationStructureGeometryTrianglesDataKHR triangles{
             .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
             .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
             .vertexData   = { .deviceAddress = vAddr },
@@ -211,11 +211,10 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
             .indexData    = { .deviceAddress = iAddr }
         };
 
-        VkAccelerationStructureGeometryKHR geometry = {
+        VkAccelerationStructureGeometryKHR geometry{
             .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-            .pNext        = nullptr,                                      // Required — was missing!
             .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-            .geometry     = { .triangles = triangles },                   // Must come BEFORE flags
+            .geometry     = { .triangles = triangles },
             .flags        = VK_GEOMETRY_OPAQUE_BIT_KHR
         };
 
@@ -223,7 +222,8 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
         info = {
             .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
             .type          = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-            .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR,
+            .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR,
             .mode          = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
             .geometryCount = 1,
             .pGeometries   = &geometry,
@@ -235,9 +235,10 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
         rangePtrs[i] = &ranges[i];
     }
 
-    // Allocate temp BLAS storage
+    // Allocate temporary BLAS storage
     for (size_t i = 0; i < pending.size(); ++i) {
         auto* m = pending[i];
+
         VkAccelerationStructureBuildSizesInfoKHR sizeInfo{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
         g_ext.vkGetAccelerationStructureBuildSizesKHR(
             stone_device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
@@ -255,24 +256,24 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
             .size = sizeInfo.accelerationStructureSize,
             .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
         };
-        g_ext.vkCreateAccelerationStructureKHR(stone_device(), &create, nullptr, &m->blas);
+        VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(stone_device(), &create, nullptr, &m->blas));
         buildInfos[i].dstAccelerationStructure = m->blas;
     }
 
-    // Batch build
+    // Batch build all BLAS
     g_ext.vkCmdBuildAccelerationStructuresKHR(
         cmd, static_cast<uint32_t>(buildInfos.size()), buildInfos.data(), rangePtrs.data());
 
     insertAccelerationStructureBarrier(cmd);
 
-    // Full compaction using query
+    // Query compacted sizes
     VkQueryPool queryPool = VK_NULL_HANDLE;
     VkQueryPoolCreateInfo queryInfo{
         .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
         .queryType  = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
         .queryCount = static_cast<uint32_t>(pending.size())
     };
-    vkCreateQueryPool(stone_device(), &queryInfo, nullptr, &queryPool);
+    VK_CHECK(vkCreateQueryPool(stone_device(), &queryInfo, nullptr, &queryPool));
 
     std::vector<VkAccelerationStructureKHR> tempBlas(pending.size());
     for (size_t i = 0; i < pending.size(); ++i) tempBlas[i] = pending[i]->blas;
@@ -284,12 +285,14 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
     insertAccelerationStructureBarrier(cmd);
 
     std::vector<VkDeviceSize> compactedSizes(pending.size());
-    vkGetQueryPoolResults(stone_device(), queryPool, 0, static_cast<uint32_t>(pending.size()),
-                          compactedSizes.size() * sizeof(VkDeviceSize), compactedSizes.data(),
-                          sizeof(VkDeviceSize), VK_QUERY_RESULT_WAIT_BIT);
+    VK_CHECK(vkGetQueryPoolResults(stone_device(), queryPool, 0, static_cast<uint32_t>(pending.size()),
+                                   compactedSizes.size() * sizeof(VkDeviceSize), compactedSizes.data(),
+                                   sizeof(VkDeviceSize), VK_QUERY_RESULT_WAIT_BIT));
 
+    // Compact each BLAS
     for (size_t i = 0; i < pending.size(); ++i) {
         auto* m = pending[i];
+
         m->compactedStorage = BufferManager::create(
             compactedSizes[i],
             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
@@ -302,7 +305,7 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
             .size = compactedSizes[i],
             .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
         };
-        g_ext.vkCreateAccelerationStructureKHR(stone_device(), &compactCreate, nullptr, &m->compactedBlas);
+        VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(stone_device(), &compactCreate, nullptr, &m->compactedBlas));
 
         VkCopyAccelerationStructureInfoKHR copyInfo{
             .sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR,
@@ -312,7 +315,7 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
         };
         g_ext.vkCmdCopyAccelerationStructureKHR(cmd, &copyInfo);
 
-        // Swap to compacted
+        // Swap to compacted version
         g_ext.vkDestroyAccelerationStructureKHR(stone_device(), m->blas, nullptr);
         BufferManager::destroy(m->blasStorage);
         m->blas = m->compactedBlas;
@@ -338,7 +341,7 @@ VkAccelerationStructureKHR LAS::getTLAS() const
 }
 
 // =============================================================================
-// TLAS Update (Fast Path)
+// TLAS Fast Update (Refit) — Preferred path
 // =============================================================================
 
 bool LAS::updateTLAS(VkCommandBuffer cmd)
@@ -407,7 +410,7 @@ bool LAS::updateTLAS(VkCommandBuffer cmd)
 }
 
 // =============================================================================
-// TLAS Full Build (Fallback)
+// TLAS Full Build — Fallback when update not possible
 // =============================================================================
 
 bool LAS::buildTLAS(VkCommandBuffer cmd)
@@ -477,7 +480,7 @@ bool LAS::buildTLAS(VkCommandBuffer cmd)
         .size = sizeInfo.accelerationStructureSize,
         .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
     };
-    g_ext.vkCreateAccelerationStructureKHR(stone_device(), &create, nullptr, &tlas);
+    VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(stone_device(), &create, nullptr, &tlas));
 
     buildInfo.dstAccelerationStructure = tlas;
 
@@ -523,38 +526,48 @@ void LAS::clearTLAS()
 
 void LAS::createDefaultDeveloperScene()
 {
-    // Eternal ground plane
+    // Massive infinite ground plane — material 0
     {
         auto ground = std::make_unique<MeshLoader::Mesh>();
-        ground->vertices = {
-            {{-100.0f, 0.0f, -100.0f}},
-            {{ 100.0f, 0.0f, -100.0f}},
-            {{ 100.0f, 0.0f,  100.0f}},
-            {{-100.0f, 0.0f,  100.0f}}
-        };
+        ground->vertices.resize(4);
+        ground->vertices[0].pos = glm::vec3(-1000.0f, 0.0f, -1000.0f);
+        ground->vertices[1].pos = glm::vec3( 1000.0f, 0.0f, -1000.0f);
+        ground->vertices[2].pos = glm::vec3( 1000.0f, 0.0f,  1000.0f);
+        ground->vertices[3].pos = glm::vec3(-1000.0f, 0.0f,  1000.0f);
+
+        for (auto& v : ground->vertices) {
+            v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            v.uv = glm::vec2(0.0f);
+        }
+
         ground->indices = {0, 1, 2, 0, 2, 3};
         addMesh(std::move(ground), 0);
     }
 
-    // Glowing pink triangle monster — heart of the empire
+    // Glowing pink monster triangle — sacred heart of the empire — material 1
     {
         auto monster = std::make_unique<MeshLoader::Mesh>();
-        monster->vertices = {
-            {{ 0.0f,  6.0f, 0.0f}},
-            {{-4.0f,  0.5f, 4.0f}},
-            {{ 4.0f,  0.5f, 4.0f}}
-        };
+        monster->vertices.resize(3);
+        monster->vertices[0].pos = glm::vec3( 0.0f,  8.0f, 0.0f);
+        monster->vertices[1].pos = glm::vec3(-6.0f,  0.0f, 6.0f);
+        monster->vertices[2].pos = glm::vec3( 6.0f,  0.0f, 6.0f);
+
+        for (auto& v : monster->vertices) {
+            v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            v.uv = glm::vec2(0.0f);
+        }
+
         monster->indices = {0, 1, 2};
         addMesh(std::move(monster), 1);
     }
 
-    LOG_AMOURANTH("Default developer scene forged — ground + pink triangle monster — empire ready");
+    LOG_AMOURANTH("Default developer scene forged — infinite ground + glowing pink triangle monster — black void banished forever");
 }
 
 } // namespace RTX
 
 // =============================================================================
-// LAS v5.1 — FULLY COMPLETE 2026 BEST IN CLASS — JANUARY 04, 2026
+// LAS v5.1 — FULLY COMPLETE BEST IN CLASS — JANUARY 05, 2026
 // NO SHORTCUTS | FULL COMPACTION | FULL UPDATE PATH | PERSISTENT EVERYTHING
 // PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
