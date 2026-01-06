@@ -102,7 +102,6 @@ endforeach()
 set(OUTPUT_DIRS
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/raytracing
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/compute
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/graphics
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/fonts
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/textures
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/models
