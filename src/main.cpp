@@ -3,7 +3,7 @@
 // MAIN ENTRY POINT — POLISHED EMPIRE EDITION
 // SACRIFICIAL SPLASH RESTORED — BRIEF BUT GLORIOUS
 // EMPTY VOID — FULL RTX PATH TRACING — ACCUMULATION ETERNAL
-// PERF COUNTER ENHANCED — FULL DATA EVERY SECOND
+// PERF COUNTER FORCED — GUARANTEED VISIBLE EVERY SECOND
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -33,6 +33,9 @@ using namespace std::chrono_literals;
 VulkanRenderer* g_renderer = nullptr;
 float g_deltaTime = 0.0f;
 bool g_running = true;
+
+// Total time accumulator for debug
+float totalTime_ = 0.0f;
 
 // =============================================================================
 // Step 0: Load the Empire Icon — Graceful, beautiful
@@ -194,7 +197,7 @@ splash_end:
 }
 
 // =============================================================================
-// MAIN — POLISHED EMPTY SCENE — FULL PERF DATA EVERY SECOND
+// MAIN — POLISHED EMPTY SCENE — PERF DATA GUARANTEED EVERY SECOND
 // =============================================================================
 int main(int, char**)
 {
@@ -283,6 +286,8 @@ int main(int, char**)
         g_deltaTime = std::chrono::duration<float>(currentTime - lastFrameTime).count();
         lastFrameTime = currentTime;
 
+        totalTime_ += g_deltaTime;
+
         fpsTimer += g_deltaTime;
         ++frameCounter;
 
@@ -322,23 +327,35 @@ int main(int, char**)
             g_renderer->renderFrame(developerCamera, g_deltaTime);
         }
 
-        // FULL PERFORMANCE DATA — ONCE PER SECOND
+        // GUARANTEED PERF DATA — EVERY SECOND — FORCED FLUSH
         if (fpsTimer >= 1.0f) {
             float fps = frameCounter / fpsTimer;
             float avgFrameMs = (fpsTimer / frameCounter) * 1000.0f;
             float currentFrameMs = g_deltaTime * 1000.0f;
 
-            std::print("[PERF] FPS: {:.1f} | Avg: {:.2f}ms | Current: {:.2f}ms | {}×{} | SPP: {} | Accum: {} | Exposure: {:.3f}\n",
+            std::print("[PERF] FPS: {:.1f} | Avg: {:.2f}ms | Curr: {:.2f}ms | {}×{} | SPP: {} | Accum: {} | Exp: {:.3f} | TotalTime: {:.1f}s\n",
                        fps,
                        avgFrameMs,
                        currentFrameMs,
                        currentWidth, currentHeight,
-                       g_renderer->currentSpp(),
-                       g_renderer->accumulationFrame(),
-                       g_renderer->currentExposure_);
+                       g_renderer ? g_renderer->currentSpp() : 0,
+                       g_renderer ? g_renderer->accumulationFrame() : 0,
+                       g_renderer ? g_renderer->currentExposure_ : 1.0f,
+                       totalTime_);
+
+            fflush(stdout);  // Force immediate visibility
 
             frameCounter = 0;
             fpsTimer = 0.0f;
+        }
+
+        // DEBUG HEARTBEAT — every 0.1s to prove loop is alive
+        static float debugTimer = 0.0f;
+        debugTimer += g_deltaTime;
+        if (debugTimer >= 0.1f) {
+            std::print("[HEARTBEAT] Loop alive | delta: {:.4f}s | total: {:.1f}s\n", g_deltaTime, totalTime_);
+            fflush(stdout);
+            debugTimer = 0.0f;
         }
     }
 
@@ -349,10 +366,9 @@ int main(int, char**)
 
 // =============================================================================
 // JANUARY 06, 2026 — POLISHED EMPIRE EDITION
-// Sacrificial splash restored — brief, beautiful, respectful
-// Empty void — pure path tracing
-// Accumulation eternal — SPP climbs forever
-// FULL PERF DATA EVERY SECOND — FPS, frame times, resolution, SPP, Accum, Exposure
-// We are polish — elegant, informative, powerful
+// Perf data GUARANTEED visible every second
+// Debug heartbeat every 0.1s
+// Forced flush — no more silence
+// The empire speaks — loud and clear
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

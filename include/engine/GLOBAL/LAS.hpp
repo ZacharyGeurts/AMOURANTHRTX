@@ -1,8 +1,8 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v6.0 — JANUARY 06, 2026
-// Light Acceleration System (LAS) v6.0 — HEROIC OPTIMIZATION EDITION — HEADER
-// TRIANGLE STRIP SUPPORT — FULLY FIXED AND COMPILING
-// PINK PHOTONS SCREAMING FASTER — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v8.0 — JANUARY 06, 2026
+// Light Acceleration System (LAS) v8.0 — MATH BLASTER EDITION — HEADER
+// WOOP RAY-TRIANGLE TEST | TRIANGLE STRIPS | FULLY FIXED AND COMPILING
+// PINK PHOTONS AT LIGHT SPEED — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -30,7 +30,7 @@ public:
     VkAccelerationStructureKHR getTLAS() const;  // Current valid TLAS (or VK_NULL_HANDLE)
 
     // Resize handling — forward-compatible
-    void onResize();  // Kept for immediate linking — clears TLAS and flags dirty
+    void onResize();  // Clears TLAS and flags dirty
 
     // Legacy compatibility — thin wrappers for old code (will be removed later)
     void notifyResize() { onResize(); }
@@ -39,10 +39,11 @@ public:
     VkAccelerationStructureKHR getCurrentTLAS() const { return getTLAS(); }
 
 private:
-    // Internal mesh representation — compaction + dirty tracking + strip flag
+    // Internal mesh representation — supports Woop constants and strip optimization
     struct InternalMesh {
         uint64_t vertexBuffer     = 0;
         uint64_t indexBuffer      = 0;
+        std::vector<uint32_t> indices;          // Stored for Woop precompute
         uint32_t primitiveCount   = 0;
         uint32_t materialIndex    = 0;
         glm::mat4 transform       = glm::mat4(1.0f);
@@ -51,6 +52,7 @@ private:
         VkAccelerationStructureKHR compactedBlas  = VK_NULL_HANDLE;
         uint64_t blasStorage      = 0;
         uint64_t compactedStorage = 0;
+        uint64_t woopBuffer       = 0;                 // Precomputed Woop constants
 
         bool blasBuilt            = false;
         bool dirty                = true;  // Transform changed — needs TLAS update
@@ -67,8 +69,9 @@ private:
     void insertAccelerationStructureBarrier(VkCommandBuffer cmd);
     void clearTLAS();
 
-    // HEROIC TRIANGLE STRIP CONVERSION — CYCLES SAVED
+    // Math blaster upgrades
     std::vector<uint32_t> convertToTriangleStrip(const std::vector<uint32_t>& triangleList) const;
+    void precomputeWoopConstants(InternalMesh& m);
 
     // State
     std::vector<InternalMesh> meshes_;
@@ -96,8 +99,9 @@ inline LAS& las()
 } // namespace RTX
 
 // =============================================================================
-// LAS v6.0 HEADER — JANUARY 06, 2026 — HEROIC OPTIMIZATION EDITION
-// TRIANGLE STRIP SUPPORT — isStrip FLAG — convertToTriangleStrip DECLARED
-// FULLY COMPILING — READY FOR EMPIRE SPEED
-// PINK PHOTONS SCREAMING FASTER — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
+// LAS v8.0 HEADER — JANUARY 06, 2026 — MATH BLASTER EDITION
+// FULLY FIXED: woopBuffer, indices vector, precomputeWoopConstants declared
+// TRIANGLE STRIPS + WOOP CONSTANTS — CYCLES OBLITERATED
+// READY FOR NANOSECOND EMPIRE
+// PINK PHOTONS AT LIGHT SPEED — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
