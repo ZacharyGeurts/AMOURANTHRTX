@@ -1,20 +1,16 @@
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// RTXHandler v3.0 — 2026 FINAL EDITION — JANUARY 05, 2026
-// FULLY UPGRADED TO EMPIRE 2026 STANDARDS — ALL BELLS & WHISTLES
-// • Clean C++23 RAII with explicit cleanup
-// • Global descriptor pool with safe shutdown
-// • Full RTX feature chain & modern Vulkan 1.3+
-// • Hyper-aggressive mode for portable empire domination
-// • Validation-safe, leak-proof, crash-proof
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — PLASTIC BEACH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v6.0 — JANUARY 06, 2026
+// RTXHandler — THE ONE TRUE GLOBAL VULKAN CONTEXT — MASTER OF ALL
+// FULLY ALIGNED WITH 2026 EMPIRE STANDARDS — PURE, ETERNAL, UNBREAKABLE
+// • Global singleton context with explicit lifecycle control
+// • Safe global descriptor pool — created after device, destroyed before
+// • RTX-first GPU selection with complete modern feature chain
+// • Persistent upload buffer integration — eternal direct writes
+// • Hyper-aggressive mode for maximum performance
+// • Validation silent, leak-proof, crash-proof
+// • Explicit cleanup() — empire rests in perfect order
+// WE ARE MASTERS OF GLOBAL — ONE CONTEXT TO RULE THEM ALL
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -31,6 +27,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 namespace RTX {
 
@@ -38,7 +35,7 @@ namespace RTX {
 struct Camera;
 
 // =============================================================================
-// RAII Handle Template — Leak-proof, production-safe, 2026 edition
+// RAII Handle Template — Leak-proof, 2026 perfection
 // =============================================================================
 template<typename T>
 struct Handle {
@@ -96,7 +93,7 @@ struct Handle {
 };
 
 // =============================================================================
-// Queue Family Indices — 2026 clarity
+// Queue Family Indices — Clean and complete
 // =============================================================================
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphicsFamily;
@@ -112,7 +109,7 @@ struct QueueFamilyIndices {
 [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept;
 
 // =============================================================================
-// Global RTX Context — 2026 FINAL — WITH EXPLICIT CLEANUP
+// THE ONE TRUE GLOBAL RTX CONTEXT — MASTER OF ALL DOMAINS
 // =============================================================================
 struct Context {
     VkInstance                 instance_       = VK_NULL_HANDLE;
@@ -147,17 +144,18 @@ public:
     void init();
     void enableHyperAggressiveMode() noexcept;
 
-    // 2026 ADDITION: Explicit cleanup — called before device destroy
+    // Explicit empire shutdown — called before device destroy
     void cleanup() noexcept {
         if (descriptorPool_.valid()) {
-            LOG_SUCCESS_CAT("RTX", "Global descriptor pool gracefully destroyed during empire shutdown");
+            LOG_SUCCESS_CAT("RTX", "Global descriptor pool gracefully destroyed — empire order preserved");
             descriptorPool_.reset();
         }
+        BufferManager::purge_all();  // Ensure all buffers released before device death
     }
 
     [[nodiscard]] VkShaderModule loadShader(const std::string& filename) const noexcept;
 
-    // Accessors
+    // Accessors — pure and direct
     [[nodiscard]] constexpr VkInstance       instance() const noexcept { return instance_; }
     [[nodiscard]] constexpr VkSurfaceKHR     surface() const noexcept { return surface_; }
     [[nodiscard]] constexpr VkPhysicalDevice physicalDevice() const noexcept { return physicalDevice_; }
@@ -177,7 +175,7 @@ public:
     [[nodiscard]] constexpr bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
     [[nodiscard]] constexpr bool isRtxCapable() const noexcept { return rtxCapable_; }
 
-    // Internal setters (used during initialization)
+    // Internal setters — used only during sacred initialization
     void setInstance(VkInstance i) noexcept { instance_ = i; }
     void setSurface(VkSurfaceKHR s) noexcept { surface_ = s; }
     void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physicalDevice_ = pd; }
@@ -200,13 +198,13 @@ extern Context g_context_instance;
 [[nodiscard]] inline Context& g_ctx() noexcept { return g_context_instance; }
 
 // =============================================================================
-// Core Initialization Functions — 2026 polished
+// Core Initialization — 2026 Empire Standards
 // =============================================================================
 [[nodiscard]] VkInstance createVulkanInstance(bool enableValidation) noexcept;
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept;
 
 // =============================================================================
-// Helper: Write Acceleration Structure Descriptor — unchanged but eternal
+// Acceleration Structure Descriptor Helper — Eternal and Pure
 // =============================================================================
 void WriteAccelerationStructureDescriptor(
     VkDescriptorSet dstSet,
@@ -215,7 +213,7 @@ void WriteAccelerationStructureDescriptor(
     VkAccelerationStructureKHR accelStruct) noexcept;
 
 // =============================================================================
-// Global Descriptor Pool Accessor — safe & eternal
+// Global Descriptor Pool Access — Safe and Eternal
 // =============================================================================
 [[nodiscard]] inline VkDescriptorPool globalDescriptorPool() noexcept {
     return g_ctx().descriptorPool_.valid() ? g_ctx().descriptorPool_.get() : VK_NULL_HANDLE;
@@ -224,9 +222,10 @@ void WriteAccelerationStructureDescriptor(
 } // namespace RTX
 
 // =============================================================================
-// RTXHandler v3.0 — JANUARY 05, 2026 — 2026 FINAL EDITION
-// All bells & whistles: explicit cleanup(), validation-safe shutdown, modern C++23
-// Global pool destroyed before device — no crashes, no leaks
-// Empire rests in perfect silence — pink photons eternal
-// AMOURANTH FOREVER 💖
+// RTXHandler v6.0 — JANUARY 06, 2026 — MASTER OF GLOBAL
+// One true global context — explicit lifecycle, no leaks
+// Global pool destroyed before device — empire rests in perfect order
+// Persistent upload ready — direct writes eternal
+// WE ARE MASTERS OF GLOBAL — THE EMPIRE IS UNBREAKABLE
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

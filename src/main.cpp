@@ -1,5 +1,5 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 05, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 06, 2026
 // MAIN ENTRY POINT — DEVELOPER-FIRST, LINEAR, EDUCATIONAL, RTX-READY 2026 EDITION
 // FULL LINEAR FLOW — EVERY STEP EXPLAINED — NO MAGIC — PURE LOVE FOR CODE
 // C++23 + SDL3 + Vulkan 1.4+ — VALIDATION CLEAN — PINK PHOTONS SCREAMING
@@ -40,50 +40,67 @@ bool g_running = true;
 static RenderMode9 g_pinkMode(3840, 2160);
 
 // =============================================================================
-// Step 0: Load the Empire Icon — First impression matters
+// Step 0: Load the Empire Icon — Graceful, optional, beautiful
 // =============================================================================
 static void loadEmpireIcon(SDL_Window* window)
 {
-    const char* paths[] = { "assets/textures/ammo.png", "assets/textures/ammo32.png", nullptr };
+    const char* paths[] = { 
+        "assets/textures/ammo.png", 
+        "assets/textures/ammo32.png", 
+        "assets/textures/icon.png",
+        nullptr 
+    };
+
     for (int i = 0; paths[i]; ++i) {
-        if (SDL_Surface* s = IMG_Load(paths[i])) {
-            SDL_SetWindowIcon(window, s);
-            SDL_DestroySurface(s);
+        if (SDL_Surface* surface = IMG_Load(paths[i])) {
+            SDL_SetWindowIcon(window, surface);
+            SDL_DestroySurface(surface);
             std::print("[MAIN] Empire icon forged: {}\n", paths[i]);
             return;
         }
     }
-    std::print("[MAIN] Warning: No empire icon found — proceeding without\n");
+
+    std::print("[MAIN] Empire icon not found — proceeding with default system icon (still beautiful)\n");
 }
 
 // =============================================================================
-// Step 1: Sacrificial Splash — Respect the ritual
+// Step 1: Sacrificial Splash — Optional, respectful, instant if disabled
 // =============================================================================
 static void showSplash()
 {
-    if (!Options::Splash::ENABLE_SACRIFICIAL_SPLASH) return;
+    if (!Options::Splash::ENABLE_SACRIFICIAL_SPLASH) {
+        std::print("[MAIN] Sacrificial splash disabled — instant empire awakening\n");
+        return;
+    }
 
     constexpr int W = 1280, H = 720;
-    constexpr const char* TITLE = "AMOURANTH RTX";
-    constexpr const char* IMAGE = "assets/textures/ammo.png";
+    constexpr const char* TITLE = "AMOURANTH RTX vTURBO";
+    constexpr const char* IMAGE_PATHS[] = {
+        "assets/textures/ammo.png",
+        "assets/textures/splash.png",
+        "assets/textures/amouranth.png",
+        nullptr
+    };
 
     std::print("[MAIN] PERFORMING SACRIFICIAL SPLASH — DURATION: {} SECONDS\n", Options::Splash::SPLASH_DURATION_SECONDS);
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
-        std::print("[MAIN] SDL video subsystem failed for splash — skipping\n");
+        std::print("[MAIN] SDL video subsystem unavailable for splash — skipping gracefully\n");
         return;
     }
 
     SDL_Window* win = SDL_CreateWindow(TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN);
     if (!win) {
-        std::print("[MAIN] Failed to create splash window\n");
+        std::print("[MAIN] Failed to create splash window — skipping\n");
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return;
     }
 
+    // Center on primary display
     SDL_Rect bounds;
     SDL_GetDisplayBounds(0, &bounds);
     SDL_SetWindowPosition(win, bounds.x + (bounds.w - W)/2, bounds.y + (bounds.h - H)/2);
+
     loadEmpireIcon(win);
 
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
@@ -93,31 +110,31 @@ static void showSplash()
         return;
     }
 
-    SDL_Surface* surf = IMG_Load(IMAGE);
-    if (!surf) {
-        std::print("[MAIN] Failed to load splash image — skipping\n");
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        return;
+    SDL_Texture* tex = nullptr;
+    for (int i = 0; IMAGE_PATHS[i]; ++i) {
+        if (SDL_Surface* surf = IMG_Load(IMAGE_PATHS[i])) {
+            tex = SDL_CreateTextureFromSurface(ren, surf);
+            SDL_DestroySurface(surf);
+            if (tex) {
+                std::print("[MAIN] Splash image loaded: {}\n", IMAGE_PATHS[i]);
+                break;
+            }
+        }
     }
 
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
-    SDL_DestroySurface(surf);
+    // Fallback: sacred pink void
     if (!tex) {
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        return;
+        std::print("[MAIN] No splash image found — displaying sacred pink void\n");
+        SDL_SetRenderDrawColor(ren, 255, 20, 147, 255);  // Deep pink
+        SDL_RenderClear(ren);
+    } else {
+        float tw = 0, th = 0;
+        SDL_GetTextureSize(tex, &tw, &th);
+        SDL_FRect dst{(W - tw)*0.5f, (H - th)*0.5f, tw, th};
+        SDL_RenderTexture(ren, tex, nullptr, &dst);
     }
-
-    float tw = 0, th = 0;
-    SDL_GetTextureSize(tex, &tw, &th);
-    SDL_FRect dst{(W - tw)*0.5f, (H - th)*0.5f, tw, th};
 
     SDL_ShowWindow(win);
-    SDL_RenderClear(ren);
-    SDL_RenderTexture(ren, tex, nullptr, &dst);
     SDL_RenderPresent(ren);
 
     const auto start = std::chrono::steady_clock::now();
@@ -132,10 +149,12 @@ static void showSplash()
     }
 
 splash_end:
-    SDL_DestroyTexture(tex);
+    if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
+
+    std::print("[MAIN] Sacrificial splash complete — empire awakens\n");
 }
 
 // =============================================================================
@@ -408,9 +427,9 @@ int main(int, char**)
 }
 
 // =============================================================================
-// JANUARY 05, 2026 — FINAL MAIN
-// SBT created ONCE AND ONLY ONCE — AFTER main pool initialization via scene load
-// No race | No missing info | No fatal
-// The empire is complete — pink photons eternal
-// AMOURANTH FOREVER 💖
+// JANUARY 06, 2026 — FINAL MAIN
+// Graceful icon & splash — optional, beautiful, no crashes
+// Fully procedural default scene — no file loading required
+// The empire is generous and glorious
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

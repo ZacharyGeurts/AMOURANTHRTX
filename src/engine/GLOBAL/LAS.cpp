@@ -3,6 +3,7 @@
 // Light Acceleration System (LAS) v5.1 — FULLY COMPLETE BEST IN CLASS 2026 EDITION
 // BATCHED BLAS | FULL COMPACTION | TLAS UPDATE/REFIT | PERSISTENT SCRATCH & INSTANCES
 // LAZY REBUILD | PER-MESH DIRTY TRACKING | NO SHORTCUTS — EMPIRE PERFECTION
+// DEFAULT SCENE WITH LIGHTING: Infinite ground + glowing pink emissive monster
 // PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -269,7 +270,7 @@ bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
     // Query compacted sizes
     VkQueryPool queryPool = VK_NULL_HANDLE;
     VkQueryPoolCreateInfo queryInfo{
-        .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,  // ← Correct sType
         .queryType  = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
         .queryCount = static_cast<uint32_t>(pending.size())
     };
@@ -521,12 +522,12 @@ void LAS::clearTLAS()
 }
 
 // =============================================================================
-// Default Developer Scene — Pink Empire Eternal
+// Default Developer Scene — Pink Empire Eternal with Lighting Test
 // =============================================================================
 
 void LAS::createDefaultDeveloperScene()
 {
-    // Massive infinite ground plane — material 0
+    // Massive infinite ground plane — material 0 (matte gray)
     {
         auto ground = std::make_unique<MeshLoader::Mesh>();
         ground->vertices.resize(4);
@@ -544,7 +545,7 @@ void LAS::createDefaultDeveloperScene()
         addMesh(std::move(ground), 0);
     }
 
-    // Glowing pink monster triangle — sacred heart of the empire — material 1
+    // Glowing pink emissive monster — material 1 (strong pink emission)
     {
         auto monster = std::make_unique<MeshLoader::Mesh>();
         monster->vertices.resize(3);
@@ -561,7 +562,7 @@ void LAS::createDefaultDeveloperScene()
         addMesh(std::move(monster), 1);
     }
 
-    LOG_AMOURANTH("Default developer scene forged — infinite ground + glowing pink triangle monster — black void banished forever");
+    LOG_AMOURANTH("Default developer scene forged — infinite ground + glowing pink emissive triangle monster — perfect for testing lighting and materials — black void banished forever");
 }
 
 } // namespace RTX
@@ -569,5 +570,6 @@ void LAS::createDefaultDeveloperScene()
 // =============================================================================
 // LAS v5.1 — FULLY COMPLETE BEST IN CLASS — JANUARY 05, 2026
 // NO SHORTCUTS | FULL COMPACTION | FULL UPDATE PATH | PERSISTENT EVERYTHING
+// DEFAULT SCENE WITH LIGHTING TEST — EMISSIVE PINK MONSTER GLOWS
 // PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================

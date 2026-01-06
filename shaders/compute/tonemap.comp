@@ -1,11 +1,10 @@
 // assets/shaders/compute/tonemap.comp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 — Perfect Tonemap Compute Shader
-// Production-ready, validation-clean, offscreen-friendly tonemapping
-// FIXED JANUARY 03, 2026 — Perfect descriptor usage
-// Binding 0: sampled HDR input (COMBINED_IMAGE_SAMPLER)
-// Binding 1: storage LDR output (FP16 capable offscreen target, never swapchain)
-// No swapchain storage image → validation silent forever
+// AMOURANTH RTX Engine © 2026 — Pure True HDR Tonemap — Realism First
+// NO BLOOM | NO VIGNETTE | NO GRAIN | NO FLARE — HOLLYWOOD TRICKS BANISHED
+// Only exposure + accurate ACES or crisp Reinhard + gamma
+// Validation clean | FP16 safe | Production perfect
+// PINK PHOTONS PURE AND ETERNAL — EMPIRE OF TRUTH — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #version 460
@@ -13,29 +12,22 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-// Bindings — perfect and validation-clean
-layout(set = 0, binding = 0) uniform sampler2D imgInput;          // HDR input (RT output or denoised) — sampled
-layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D imgOutput; // LDR output (rtOutput[slot] — FP16 storage)
+layout(set = 0, binding = 0) uniform sampler2D imgInput;          // HDR input — sampled
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D imgOutput; // FP16 storage output
 
 layout(set = 0, binding = 2, std140) uniform TonemapData {
     float  exposure;
-    uint   type;             // 0 = ACES, 1 = Filmic, 2 = Reinhard
+    uint   type;      // 0 = ACES (accurate filmic), 1 = Reinhard (maximum crispness)
     uint   enabled;
-    float  nexusScore;
-    uint   frame;
-    uint   spp;
+    float  _pad0;
+    uint   _pad1;
+    uint   _pad2;
 
-    float  gamma;
-    float  bloomThreshold;
-    float  bloomIntensity;
-    float  vignetteIntensity;
-    float  filmGrainStrength;
-    float  lensFlareIntensity;
-
-    float  _pad[2];
+    float  gamma;     // Usually 2.2
+    float  _pad3[9];
 } tonemap;
 
-// ACES fitted — sacred and perfect
+// ACES Fitted — the gold standard for accurate color (used in film/VFX)
 vec3 ACESFitted(vec3 color)
 {
     const mat3 ACESInputMat = mat3(
@@ -52,7 +44,6 @@ vec3 ACESFitted(vec3 color)
 
     color = ACESInputMat * color;
 
-    // RRT + ODT
     vec3 a = color * (color + 0.0245786) - 0.000090537;
     vec3 b = color * (0.983729 * color + 0.4329510) + 0.238081;
     color = a / b;
@@ -60,41 +51,10 @@ vec3 ACESFitted(vec3 color)
     return clamp(ACESOutputMat * color, 0.0, 1.0);
 }
 
-// Classic filmic curve
-vec3 FilmicTonemap(vec3 color)
-{
-    color = max(vec3(0.0), color - 0.004);
-    color = (color * (6.2 * color + 0.5)) / (color * (6.2 * color + 1.7) + 0.06);
-    return color;
-}
-
-// Simple Reinhard
-vec3 ReinhardTonemap(vec3 color)
+// Simple Reinhard — maximum crispness, no softness
+vec3 ReinhardCrisp(vec3 color)
 {
     return color / (color + 1.0);
-}
-
-// Bloom extraction — threshold only
-vec3 ExtractBloom(vec3 color)
-{
-    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    float contrib = smoothstep(tonemap.bloomThreshold, tonemap.bloomThreshold + 0.5, luminance);
-    return color * contrib;
-}
-
-// Classic film grain
-float FilmGrain(vec2 uv, float strength)
-{
-    float noise = fract(sin(dot(uv * (tonemap.frame + 1.0), vec2(12.9898, 78.233))) * 43758.5453);
-    return mix(1.0, noise, strength);
-}
-
-// Soft vignette
-float Vignette(vec2 uv)
-{
-    uv = uv * 2.0 - 1.0;
-    float dist = length(uv);
-    return 1.0 - smoothstep(0.7, 1.4, dist) * tonemap.vignetteIntensity;
 }
 
 void main()
@@ -107,38 +67,26 @@ void main()
 
     vec2 uv = (vec2(coord) + vec2(0.5)) / resolution;
 
-    // Sample HDR input
     vec3 hdrColor = texture(imgInput, uv).rgb;
 
-    // Apply exposure
+    // Apply exposure — pure physical control
     hdrColor *= tonemap.exposure;
 
-    // Tonemapping
     vec3 ldrColor = hdrColor;
+
     if (tonemap.type == 0u) {
+        // ACES — accurate, filmic, beautiful dynamic range
         ldrColor = ACESFitted(hdrColor);
-    } else if (tonemap.type == 1u) {
-        ldrColor = FilmicTonemap(hdrColor);
     } else {
-        ldrColor = ReinhardTonemap(hdrColor);
+        // Reinhard — crisp, punchy, maximum detail
+        ldrColor = ReinhardCrisp(hdrColor);
     }
 
-    // Bloom add
-    vec3 bloom = ExtractBloom(hdrColor) * tonemap.bloomIntensity;
-    ldrColor += bloom;
-
-    // Vignette
-    ldrColor *= Vignette(uv);
-
-    // Film grain
-    ldrColor *= FilmGrain(uv, tonemap.filmGrainStrength);
-
-    // Gamma correction
+    // Gamma correction — correct display referral
     ldrColor = pow(ldrColor, vec3(1.0 / tonemap.gamma));
 
-    // Clamp to FP16 safe range before output
+    // FP16 safe clamp
     ldrColor = clamp(ldrColor, 0.0, 65504.0);
 
-    // Write to offscreen FP16 target (rtOutput[slot])
     imageStore(imgOutput, coord, vec4(ldrColor, 1.0));
 }

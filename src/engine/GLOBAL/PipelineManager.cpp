@@ -462,14 +462,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
-    if (handles.size() > BufferManager::g_persistentUploadSize) {
+    // Use public accessor for persistent upload size — clean and safe
+    if (handles.size() > BufferManager::getPersistentUploadSize()) {
         std::print(stderr, "[FATAL] SBT handles too large for persistent upload buffer\n");
         BufferManager::destroy(sbtHandle);
         return;
     }
 
     // DIRECT WRITE — eternal mapped memory
-    std::memcpy(BufferManager::g_persistentUploadMapped, handles.data(), handles.size());
+    std::memcpy(BufferManager::getPersistentUploadMapped(), handles.data(), handles.size());
 
     bool tempCmd = (cmd == VK_NULL_HANDLE);
     VkCommandBuffer uploadCmd = cmd;
@@ -496,7 +497,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         .dstOffset = 0,
         .size      = handles.size()
     };
-    vkCmdCopyBuffer(uploadCmd, BufferManager::g_persistentUploadBuffer, sbtBuffer, 1, &copy);
+    vkCmdCopyBuffer(uploadCmd, BufferManager::getPersistentUploadBuffer(), sbtBuffer, 1, &copy);
 
     VkMemoryBarrier2 barrier{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
