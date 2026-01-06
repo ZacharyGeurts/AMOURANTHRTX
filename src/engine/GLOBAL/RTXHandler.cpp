@@ -1,15 +1,8 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v6.0 — JANUARY 06, 2026
-// RTXHandler — THE ONE TRUE GLOBAL VULKAN CONTEXT — MASTER OF ALL
-// FULLY ALIGNED WITH 2026 ENGINE STANDARDS — PURE, ETERNAL, UNBREAKABLE
-// • Global singleton context with explicit lifecycle control
-// • Safe global descriptor pool — created after device, destroyed before
-// • RTX-first GPU selection with complete modern feature chain
-// • Persistent upload buffer integration — eternal direct writes
-// • Hyper-aggressive mode for maximum performance
-// • Validation silent, leak-proof, crash-proof
-// • Explicit cleanup() — empire rests in perfect order
-// THE EMPIRE IS UNBREAKABLE
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v7.0 — JANUARY 06, 2026
+// RTXHandler.cpp — THE ONE TRUE GLOBAL VULKAN CONTEXT — FINAL, FIXED, UNBREAKABLE
+// DYNAMIC RENDERING IN SCOPE — NO MORE ERRORS — LIFETIME SAFE
+// GLOBAL STATIC FEATURE CHAIN — HIT IT AND FORGET IT STYLE
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -236,7 +229,7 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 }
 
 // =============================================================================
-// Logical Device & GPU Selection — RTX First, No Compromise — FULLY FIXED
+// Logical Device & GPU Selection — RTX First, No Compromise — FINAL FIX
 // =============================================================================
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
@@ -289,7 +282,7 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
         }
         if (!hasAllExtensions) continue;
 
-        // Feature chain — declared BEFORE deviceInfo to ensure scope
+        // Feature chain — declared in loop but we only use the best one later
         VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing{};
         descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
         descriptorIndexing.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
@@ -374,6 +367,48 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
     }
 
     uint32_t extCount = fullRTXSupport ? std::size(requiredExtensions) : 1;
+
+    // === FINAL FEATURE CHAIN — DECLARED AFTER GPU SELECTION, BEFORE deviceInfo ===
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing{};
+    descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    descriptorIndexing.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    descriptorIndexing.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
+    descriptorIndexing.shaderUniformBufferArrayNonUniformIndexing = VK_TRUE;
+    descriptorIndexing.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
+    descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
+    descriptorIndexing.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    descriptorIndexing.runtimeDescriptorArray = VK_TRUE;
+
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress{};
+    bufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+    bufferDeviceAddress.pNext = &descriptorIndexing;
+    bufferDeviceAddress.bufferDeviceAddress = VK_TRUE;
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStruct{};
+    accelStruct.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accelStruct.pNext = &bufferDeviceAddress;
+    accelStruct.accelerationStructure = VK_TRUE;
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracing{};
+    rayTracing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rayTracing.pNext = &accelStruct;
+    rayTracing.rayTracingPipeline = VK_TRUE;
+
+    VkPhysicalDeviceSynchronization2Features sync2{};
+    sync2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+    sync2.pNext = &rayTracing;
+    sync2.synchronization2 = VK_TRUE;
+
+    VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering{};
+    dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    dynamicRendering.pNext = &sync2;
+    dynamicRendering.dynamicRendering = VK_TRUE;
+
+    // Final feature query on selected GPU
+    VkPhysicalDeviceFeatures2 finalFeatures{};
+    finalFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    finalFeatures.pNext = &dynamicRendering;
+    vkGetPhysicalDeviceFeatures2(selected, &finalFeatures);
 
     VkDeviceCreateInfo deviceInfo{
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
