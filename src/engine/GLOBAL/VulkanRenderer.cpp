@@ -2013,11 +2013,6 @@ void VulkanRenderer::updateTonemapUniform(uint32_t frame) noexcept
     data.spp      = currentSpp_;
 
     data.gamma    = Options::Tonemap::GAMMA;
-    data.bloomThreshold = Options::PostProcess::BLOOM_THRESHOLD;
-    data.bloomIntensity = Options::PostProcess::BLOOM_INTENSITY;
-    data.vignetteIntensity = Options::PostProcess::VIGNETTE_INTENSITY;
-    data.filmGrainStrength = Options::PostProcess::FILM_GRAIN_STRENGTH;
-    data.lensFlareIntensity = Options::PostProcess::LENS_FLARE_INTENSITY;
 
     std::memcpy(info->mapped, &data, sizeof(TonemapData));
 }

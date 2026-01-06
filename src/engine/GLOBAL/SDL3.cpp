@@ -7,6 +7,7 @@
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
+#include "engine/GLOBAL/console.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -395,10 +396,7 @@ void SDL3Input::handleKeyboard(const SDL_KeyboardEvent& k, SDL_Window* window, S
             break;
 
         case SDLK_GRAVE:
-            if (Options::ENABLE_CONSOLE_LOG) {
-                consoleOpen = !consoleOpen;
-                LOG_INFO_CAT("Input", "{}Console → {}{}", OCEAN_TEAL, consoleOpen ? "OPEN" : "CLOSED", RESET);
-            }
+            Console::toggle();
             break;
     }
 }

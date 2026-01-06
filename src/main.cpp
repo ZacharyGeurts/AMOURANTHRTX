@@ -36,9 +36,6 @@ VulkanRenderer* g_renderer = nullptr;
 float g_deltaTime = 0.0f;
 bool g_running = true;
 
-// Sacred pink fallback mode (emergency only)
-static RenderMode9 g_pinkMode(3840, 2160);
-
 // =============================================================================
 // Step 0: Load the Empire Icon — Graceful, optional, beautiful
 // =============================================================================
@@ -385,20 +382,9 @@ int main(int, char**)
 
         INPUT.pumpEvents(g_deltaTime, setRenderMode, window);
 
-        // Special: Key 1 = Pure HDR Envmap Mode
-        int numKeys = 0;
-        const bool* keys = SDL_GetKeyboardState(&numKeys);
-        static bool key1Down = false;
-        if (numKeys > SDL_SCANCODE_1 && keys[SDL_SCANCODE_1]) {
-            if (!key1Down) {
-                g_renderer->activeRenderMode_ = 1;
-                g_renderer->resetAccumNextFrame_ = true;
-                std::print("[MAIN] SWITCHED TO RENDER MODE 1 — PURE HDR ENVMAP DISPLAY\n");
-                key1Down = true;
-            }
-        } else {
-            key1Down = false;
-        }
+        // Mode switching disabled — full RTX forever
+        // Key 1 now does nothing — no more envmap mode
+        // Accumulation always runs
 
         if (g_renderer->isAlive() && StoneKey::stone_swapchain()) {
             g_renderer->renderFrame(developerCamera, g_deltaTime);
@@ -428,8 +414,10 @@ int main(int, char**)
 
 // =============================================================================
 // JANUARY 06, 2026 — FINAL MAIN
-// Graceful icon & splash — optional, beautiful, no crashes
-// Fully procedural default scene — no file loading required
-// The empire is generous and glorious
+// Respects OptionsMenu.hpp philosophy — BEST ALWAYS — NO COMPROMISE
+// Accumulation always on — SPP climbs forever
+// No mode switching — full RTX path tracing from frame 1
+// No Hollywood tricks — pure HDR truth
+// The empire delivers maximum quality for the hardware
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

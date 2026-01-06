@@ -60,7 +60,6 @@ public:
     [[nodiscard]] glm::mat4 view() const noexcept;
     [[nodiscard]] glm::mat4 proj(float aspect) const noexcept;
 
-private:
     mutable std::mutex mtx_;
     std::atomic<uint64_t> gen_{1};
 
