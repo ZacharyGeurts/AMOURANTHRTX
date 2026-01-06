@@ -81,7 +81,6 @@ public:
     PipelineManager(PipelineManager&&) noexcept = default;
     PipelineManager& operator=(PipelineManager&&) noexcept = default;
 
-    void createDescriptorPool() noexcept;
     void createPipelineLayout();
     void createRayTracingPipeline();
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);

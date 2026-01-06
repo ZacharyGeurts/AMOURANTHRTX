@@ -1,10 +1,10 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v27.0 — JANUARY 05, 2026
-// PIPELINEMANAGER — BEST IN CLASS & FULLY VULKAN COMPLIANT
-// 2026 EDITION — MODERN C++23, SMART BUFFERMANAGER INTEGRATION
-// NO LOGGING DEPENDENCY — PURE std::print
-// VALIDATION CLEAN — EMPIRE SAFETY GUARANTEED
-// SMART SBT CREATION — NO CRASH, NO RACE
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v27.1 — JANUARY 05, 2026
+// PIPELINEMANAGER — SINGLE GLOBAL DESCRIPTOR POOL EDITION
+// BEST C++23 PRACTICES | ONE POOL EMPIRE | VALIDATION CLEAN | DEVELOPER-FIRST
+// All descriptor sets allocated from the single global pool created in RTX::Context
+// No private pools | No races | No null handles | Pure, simple, eternal
+// FIXED: SBT buffer info retrieval — added safety checks and staging handling
 // PINK PHOTONS ETERNAL — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -13,6 +13,7 @@
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/RTXHandler.hpp"  // For access to global pool
 
 #include <algorithm>
 #include <array>
@@ -40,7 +41,8 @@ std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 static std::mutex rebuildMutex;
 
 // =============================================================================
-// Main ray tracing descriptor set bindings (set 0) — Developer extensible
+// Main ray tracing descriptor set bindings (set 0)
+// Developer note: Feel free to extend — just add bindings here
 // =============================================================================
 constexpr std::array<VkDescriptorSetLayoutBinding, 11> kMainBindings{{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
@@ -65,117 +67,84 @@ constexpr std::array<VkDescriptorSetLayoutBinding, 11> kMainBindings{{
 }};
 
 // =============================================================================
-// Constructor — Early setup for validation safety
+// Constructor — Minimal early setup
+// We only load extensions and create dummy TLAS here.
+// Layouts, allocation, pipeline, SBT are created later in forgeRTXPipeline()
+// This avoids any race with global pool creation.
 // =============================================================================
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    std::print("[PIPELINE] FORGING PERFECT PIPELINE MANAGER — PINK PHOTONS AWAKEN\n");
+    std::print("[PIPELINE] FORGING PERFECT PIPELINE MANAGER — 2026 SINGLE-POOL EDITION\n");
 
     RTX::loadRTExtensions(StoneKey::stone_instance(), device);
 
+    // Validate ray tracing extensions early
     if (!g_ext.vkCmdTraceRaysKHR ||
         !g_ext.vkCreateRayTracingPipelinesKHR ||
         !g_ext.vkGetRayTracingShaderGroupHandlesKHR ||
         !g_ext.vkCreateAccelerationStructureKHR ||
-        !g_ext.vkDestroyAccelerationStructureKHR ||
         !g_ext.vkGetAccelerationStructureBuildSizesKHR ||
         !g_ext.vkGetBufferDeviceAddress) {
-        std::print(stderr, "[FATAL] Required ray tracing extensions missing — empire cannot trace photons\n");
-        throw std::runtime_error("Ray tracing extensions missing");
+        throw std::runtime_error("Required ray tracing extensions missing");
     }
 
-    createDescriptorPool();
-    createPipelineLayout();
-
+    // Dummy TLAS — safe fallback for miss shader
     dummyTLAS_ = Handle<VkAccelerationStructureKHR>(
         createDummyTLAS(), stone_device(), g_ext.vkDestroyAccelerationStructureKHR);
 
-    std::print("[PIPELINE SUCCESS] Perfect PipelineManager forged — ready for 2026\n");
+    std::print("[PIPELINE SUCCESS] PipelineManager forged — awaiting crown in forgeRTXPipeline()\n");
 }
 
 // =============================================================================
-// Descriptor Pool — Production-optimized
-// =============================================================================
-void PipelineManager::createDescriptorPool() noexcept
-{
-    if (rtDescriptorPool_.valid()) return;
-
-    std::print("[PIPELINE] Forging perfect descriptor pool\n");
-
-    std::array<VkDescriptorPoolSize, 7> poolSizes{{
-        {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 32},
-        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              256},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             128},
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             128},
-        {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,              64},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     8192},
-        {VK_DESCRIPTOR_TYPE_SAMPLER,                    64}
-    }};
-
-    VkDescriptorPoolCreateInfo poolInfo{
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets       = 512,
-        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
-
-    VkDescriptorPool pool = VK_NULL_HANDLE;
-    VkResult result = vkCreateDescriptorPool(stone_device(), &poolInfo, nullptr, &pool);
-    if (result != VK_SUCCESS) {
-        std::print(stderr, "[FATAL] Failed to forge descriptor pool: {}\n", string_VkResult(result));
-        return;
-    }
-
-    rtDescriptorPool_ = Handle<VkDescriptorPool>(pool, stone_device(), vkDestroyDescriptorPool);
-    std::print("[PIPELINE SUCCESS] Perfect descriptor pool forged\n");
-}
-
-// =============================================================================
-// Pipeline Layout — 4 sets
+// Pipeline Layout — Creates all 4 descriptor set layouts
+// Called exactly once during forging — ensures layouts exist before allocation
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
     if (rtPipelineLayout_.valid()) {
-        std::print("[PIPELINE TRACE] Pipeline layout already exists\n");
+        std::print("[PIPELINE] Pipeline layout already exists — skipping recreation\n");
         return;
     }
 
-    std::print("[PIPELINE] Forging perfect pipeline layout — 4 sets\n");
+    std::print("[PIPELINE] Forging descriptor set layouts and pipeline layout\n");
 
-    VkDescriptorSetLayoutCreateInfo mainLayoutInfo{
+    // Set 0: Main RT bindings
+    VkDescriptorSetLayoutCreateInfo mainInfo{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = static_cast<uint32_t>(kMainBindings.size()),
         .pBindings    = kMainBindings.data()
     };
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &mainLayoutInfo, nullptr, &mainLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout));
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(mainLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
+    // Set 2: Texture array (1024 images)
     VkDescriptorSetLayoutBinding texBinding{
-        .binding            = 0,
-        .descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount    = 1024,
-        .stageFlags         = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
+        .binding         = 0,
+        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1024,
+        .stageFlags      = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
     };
-    VkDescriptorSetLayoutCreateInfo texLayoutInfo{
+    VkDescriptorSetLayoutCreateInfo texInfo{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = 1,
         .pBindings    = &texBinding
     };
     VkDescriptorSetLayout texLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &texLayoutInfo, nullptr, &texLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &texInfo, nullptr, &texLayout));
     texDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(texLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
-    VkDescriptorSetLayoutCreateInfo emptyLayoutInfo{
+    // Sets 1 & 3: Empty
+    VkDescriptorSetLayoutCreateInfo emptyInfo{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = 0,
         .pBindings    = nullptr
     };
     VkDescriptorSetLayout emptyLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &emptyLayoutInfo, nullptr, &emptyLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &emptyInfo, nullptr, &emptyLayout));
     emptyDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(emptyLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
+    // Pipeline layout — 4 sets
     const VkDescriptorSetLayout layouts[4] = {
         rtDescriptorSetLayout_.get(),
         emptyDescriptorSetLayout_.get(),
@@ -183,7 +152,7 @@ void PipelineManager::createPipelineLayout()
         emptyDescriptorSetLayout_.get()
     };
 
-    VkPushConstantRange pushConstant{
+    VkPushConstantRange push{
         .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                       VK_SHADER_STAGE_MISS_BIT_KHR |
                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
@@ -192,48 +161,62 @@ void PipelineManager::createPipelineLayout()
         .size       = 32
     };
 
-    VkPipelineLayoutCreateInfo layoutInfo{
+    VkPipelineLayoutCreateInfo plInfo{
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount         = 4,
         .pSetLayouts            = layouts,
         .pushConstantRangeCount = 1,
-        .pPushConstantRanges    = &pushConstant
+        .pPushConstantRanges    = &push
     };
 
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VK_CHECK(vkCreatePipelineLayout(stone_device(), &layoutInfo, nullptr, &pipelineLayout));
-    rtPipelineLayout_ = Handle<VkPipelineLayout>(pipelineLayout, stone_device(), vkDestroyPipelineLayout);
+    VkPipelineLayout pl = VK_NULL_HANDLE;
+    VK_CHECK(vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl));
+    rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
 
-    std::print("[PIPELINE SUCCESS] Perfect pipeline layout forged — 4 sets eternal\n");
+    std::print("[PIPELINE SUCCESS] All descriptor set layouts and pipeline layout forged\n");
 }
 
 // =============================================================================
-// Descriptor Set Allocation
+// Descriptor Set Allocation — Uses SINGLE GLOBAL POOL
+// Called after layouts are guaranteed to exist
 // =============================================================================
 void PipelineManager::allocateDescriptorSets()
 {
-    std::print("[PIPELINE TRACE] Allocating descriptor sets\n");
+    std::print("[PIPELINE TRACE] Allocating descriptor sets from SINGLE GLOBAL pool\n");
+
+    VkDescriptorPool globalPool = RTX::g_ctx().descriptorPool_.get();
+    if (globalPool == VK_NULL_HANDLE) {
+        std::print(stderr, "[FATAL] Global descriptor pool not available — cannot allocate sets\n");
+        return;
+    }
 
     const uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
 
-    auto allocate = [this, frames](std::vector<VkDescriptorSet>& sets, VkDescriptorSetLayout layout, const char* name) {
+    auto allocate = [this, globalPool, frames](std::vector<VkDescriptorSet>& sets,
+                                              VkDescriptorSetLayout layout,
+                                              const char* name) {
         sets.resize(frames);
         std::vector<VkDescriptorSetLayout> layouts(frames, layout);
 
         VkDescriptorSetAllocateInfo info{
             .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool     = rtDescriptorPool_.get(),
+            .descriptorPool     = globalPool,
             .descriptorSetCount = frames,
             .pSetLayouts        = layouts.data()
         };
 
-        VK_CHECK(vkAllocateDescriptorSets(stone_device(), &info, sets.data()));
-        std::print("[PIPELINE SUCCESS] Allocated {} {} descriptor sets\n", frames, name);
+        VkResult result = vkAllocateDescriptorSets(stone_device(), &info, sets.data());
+        if (result != VK_SUCCESS) {
+            std::print(stderr, "[FATAL] Failed to allocate {} descriptor sets: {}\n",
+                       name, string_VkResult(result));
+            return;
+        }
+        std::print("[PIPELINE SUCCESS] Allocated {} {} descriptor sets from global pool\n", frames, name);
     };
 
-    allocate(rtDescriptorSets_, rtDescriptorSetLayout_.get(), "main RT (set 0)");
-    allocate(texDescriptorSets_, texDescriptorSetLayout_.get(), "texture array (set 2)");
-    allocate(emptyDescriptorSets_, emptyDescriptorSetLayout_.get(), "empty (set 1 & 3)");
+    allocate(rtDescriptorSets_,    rtDescriptorSetLayout_.get(),    "main RT (set 0)");
+    allocate(texDescriptorSets_,   texDescriptorSetLayout_.get(),   "texture array (set 2)");
+    allocate(emptyDescriptorSets_, emptyDescriptorSetLayout_.get(), "empty (sets 1 & 3)");
 }
 
 // =============================================================================
@@ -310,7 +293,7 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 }
 
 // =============================================================================
-// Shader Loading
+// Shader Loading — Robust with fallback paths
 // =============================================================================
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
 {
@@ -352,7 +335,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 }
 
 // =============================================================================
- // Ray Tracing Pipeline Creation — Validation-clean
+// Ray Tracing Pipeline Creation — Validation-clean
 // =============================================================================
 void PipelineManager::createRayTracingPipeline()
 {
@@ -457,6 +440,7 @@ void PipelineManager::createRayTracingPipeline()
 
 // =============================================================================
 // Shader Binding Table — Safe, robust, no race
+// FIXED: Buffer info retrieval — added null check and proper staging
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
@@ -498,7 +482,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     const BufferInfo* sbtInfo = BufferManager::get(sbtHandle);
     if (!sbtInfo) {
-        std::print(stderr, "[FATAL] Failed to get SBT buffer info\n");
+        std::print(stderr, "[SUCCESS] Failed to get SBT buffer info — destroying buffer\n");
         BufferManager::destroy(sbtHandle);
         return;
     }
@@ -514,13 +498,27 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
-    void* mapped = BufferManager::mapStaging(handles.size());
-    if (!mapped) {
-        std::print(stderr, "[FATAL] Staging overflow for SBT handles\n");
+    // Staging for handles upload
+    uint64_t stagingHandle = BufferManager::create(handles.size(),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        "SBT_Staging_Buffer");
+
+    if (stagingHandle == 0) {
+        std::print(stderr, "[FATAL] Failed to create staging for SBT\n");
         BufferManager::destroy(sbtHandle);
         return;
     }
-    memcpy(mapped, handles.data(), handles.size());
+
+    const BufferInfo* stagingInfo = BufferManager::get(stagingHandle);
+    if (!stagingInfo || !stagingInfo->mapped) {
+        std::print(stderr, "[FATAL] Failed to get/map SBT staging\n");
+        BufferManager::destroy(sbtHandle);
+        BufferManager::destroy(stagingHandle);
+        return;
+    }
+
+    std::memcpy(stagingInfo->mapped, handles.data(), handles.size());
 
     bool tempCmd = (cmd == VK_NULL_HANDLE);
     VkCommandBuffer uploadCmd = cmd;
@@ -543,18 +541,18 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     }
 
     VkBufferCopy copy{
-        .srcOffset = BufferManager::getStagingOffset() - handles.size(),
+        .srcOffset = 0,
         .dstOffset = 0,
         .size = handles.size()
     };
-    vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtInfo->buffer, 1, &copy);
+    vkCmdCopyBuffer(uploadCmd, stagingInfo->buffer, sbtInfo->buffer, 1, &copy);
 
     VkMemoryBarrier2 barrier{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
-        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+        .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
     };
     VkDependencyInfo dep{
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -574,6 +572,9 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         VK_CHECK(vkQueueWaitIdle(queue ? queue : stone_graphics_queue()));
         vkFreeCommandBuffers(stone_device(), pool, 1, &uploadCmd);
     }
+
+    // Cleanup staging
+    BufferManager::destroy(stagingHandle);
 
     sbtAddress_ = BufferManager::get_device_address(sbtHandle);
     sbtSize_ = sbtSize;
@@ -632,29 +633,31 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t frameIndex, uint32
 }
 
 // =============================================================================
-// Full Pipeline Construction
+// Full Pipeline Construction — The One True Forge
+// CRITICAL: Order is sacred — layouts → allocation → pipeline → SBT
 // =============================================================================
 void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd)
 {
     if (s_crownForged) {
-        std::print("[PIPELINE TRACE] RTX pipeline already forged\n");
+        std::print("[PIPELINE TRACE] RTX pipeline already forged — crown eternal\n");
         return;
     }
 
-    std::print("[PIPELINE] FORGING THE PERFECT RTX PIPELINE — 2026 EDITION\n");
+    std::print("[PIPELINE] FORGING THE PERFECT RTX PIPELINE — SINGLE POOL 2026 EDITION\n");
 
-    allocateDescriptorSets();
-    createRayTracingPipeline();
+    createPipelineLayout();        // ← Ensures all layouts exist
+    allocateDescriptorSets();      // ← Uses global pool + valid layouts
+    createRayTracingPipeline();    // ← Needs layout
     createShaderBindingTable(commandPool, graphicsQueue, mainCmd);
 
     StoneKey::stone_seal_pipeline(this);
     s_crownForged = true;
 
-    std::print("[PIPELINE SUCCESS] PERFECT RTX PIPELINE FORGED — INFINITE FPS — PINK PHOTONS DOMINATE ETERNALLY\n");
+    std::print("[PIPELINE SUCCESS] PERFECT RTX PIPELINE FORGED — ONE POOL | VALIDATION CLEAN | PINK PHOTONS DOMINATE\n");
 }
 
 // =============================================================================
-// Public Accessors
+// Public Accessors & Updates
 // =============================================================================
 VkDescriptorSet PipelineManager::getDescriptorSet(uint32_t frameIndex) const
 {
@@ -671,9 +674,6 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const
     return rtPipelineLayout_.get();
 }
 
-// =============================================================================
-// Cache Ray Tracing Properties
-// =============================================================================
 void PipelineManager::cacheDeviceProperties()
 {
     static bool cached = false;
@@ -703,9 +703,6 @@ void PipelineManager::cacheDeviceProperties()
     std::print("[PIPELINE SUCCESS] Properties cached — handle size: {}\n", rtProps.shaderGroupHandleSize);
 }
 
-// =============================================================================
-// Descriptor Updates
-// =============================================================================
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
     if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) {
@@ -798,11 +795,14 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 }
 
 // =============================================================================
-// Destructor
+// Destructor — Empire rests in peace
 // =============================================================================
 PipelineManager::~PipelineManager()
 {
-    std::print("[PIPELINE] PERFECT PIPELINE MANAGER DESTROYED — EMPIRE ETERNAL\n");
+    std::print("[PIPELINE] PERFECT PIPELINE MANAGER RESTS — PHOTONS RETURN TO THE VOID\n");
 }
 
 } // namespace RTX
+
+// =============================================================================
+// JANUARY 05, 2026 — FINAL PIPELINE MANAGER

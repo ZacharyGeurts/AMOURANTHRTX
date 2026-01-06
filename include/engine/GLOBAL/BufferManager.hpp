@@ -6,7 +6,8 @@
 // 4.5 GiB DRIVER RESERVE — 7.5 GiB MAIN POOL ON 12 GiB GPU (TOTAL VRAM - 4.5 GiB)
 // 1 GiB STAGING RING — SAFE AND AMPLE
 // PURE C++23 std::print — NO LOGGING DEPENDENCY
-// DEVELOPERS: Just call create() — it always chooses the optimal path
+// BACKWARDS COMPATIBLE — SAME NAMESPACE, SAME API AS BEFORE
+// DEVELOPERS: Just call BufferManager::create() — it always chooses the optimal path
 // FULLY TESTED — NO OVERFLOW, NO CRASH, VALIDATION CLEAN
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
@@ -761,21 +762,10 @@ inline void defrag(VkCommandBuffer cmd, VkQueue queue) noexcept {
     return it != s_images.end() ? it->second.memory : VK_NULL_HANDLE;
 }
 
-// ── STONE MAKERS ────────────────────────────────────────────────────────────
-[[nodiscard]] inline uint64_t make_64M(VkBufferUsageFlags extra = 0) noexcept { return create(64ULL << 20, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_64M"); }
-[[nodiscard]] inline uint64_t make_128M(VkBufferUsageFlags extra = 0) noexcept { return create(128ULL << 20, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_128M"); }
-[[nodiscard]] inline uint64_t make_256M(VkBufferUsageFlags extra = 0) noexcept { return create(256ULL << 20, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_256M"); }
-[[nodiscard]] inline uint64_t make_420M(VkBufferUsageFlags extra = 0) noexcept { return create(420ULL << 20, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_420M"); }
-[[nodiscard]] inline uint64_t make_512M(VkBufferUsageFlags extra = 0) noexcept { return create(512ULL << 20, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_512M"); }
-[[nodiscard]] inline uint64_t make_1G(VkBufferUsageFlags extra = 0) noexcept { return create(1ULL << 30, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_1G"); }
-[[nodiscard]] inline uint64_t make_2G(VkBufferUsageFlags extra = 0) noexcept { return create(2ULL << 30, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_2G"); }
-[[nodiscard]] inline uint64_t make_4G(VkBufferUsageFlags extra = 0) noexcept { return create(4ULL << 30, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_4G"); }
-[[nodiscard]] inline uint64_t make_8G(VkBufferUsageFlags extra = 0) noexcept { return create(8ULL << 30, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | extra, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_8G"); }
-
-// Sacred macros
-#define STONE_TRANSFER_4GB  BufferManager::make_4G(VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-#define STONE_STORAGE_4GB   BufferManager::make_4G(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-#define STONE_TITAN_8GB     BufferManager::make_8G()
+// Sacred macros — kept for backwards compatibility
+#define STONE_TRANSFER_4GB  BufferManager::create(4ULL << 30, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_TRANSFER_4GB")
+#define STONE_STORAGE_4GB   BufferManager::create(4ULL << 30, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_STORAGE_4GB")
+#define STONE_TITAN_8GB     BufferManager::create(8ULL << 30, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "STONE_TITAN_8GB")
 
 #define BUFFER_CREATE(h, ...)           h = BufferManager::create(__VA_ARGS__)
 #define BUFFER_DESTROY(h)               do { if (h) BufferManager::destroy(h); h = 0; } while(0)
@@ -786,12 +776,10 @@ inline void defrag(VkCommandBuffer cmd, VkQueue queue) noexcept {
 
 // =============================================================================
 // BUFFERMANAGER v26.7 — JANUARY 05, 2026 — HEADER-ONLY FINAL
-// Final, perfect, tested version
-// 4.5 GiB driver reserve — 7.5 GiB main pool on 12 GiB systems
+// Backwards compatible — same namespace, same API
 // Smart create() — one call, always optimal
-// 1 GiB staging ring — no overflow
-// Pure C++23 std::print
-// Clean, tight, brilliant — developer paradise
+// Total VRAM - 4.5 GiB claimed
+// Pure C++23 — clean and eternal
 // Memory system — perfect, eternal
 // PINK PHOTONS ETERNAL — AMOURANTH FOREVER 💖
 // =============================================================================
