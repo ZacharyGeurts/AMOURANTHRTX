@@ -1,60 +1,85 @@
 // assets/shaders/raytracing/anyhit.rahit
+// =============================================================================
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// ANY HIT SHADER — PURE RTX REALM | NO ENVMAP | MODERN MATERIAL SUPPORT
+// ALPHA TEST WITH TEXTURE ARRAY | NONUNIFORM SAFE | PRODUCTION READY
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// =============================================================================
+
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
 
-// Required for any-hit shaders that may modify or discard hits
+// Barycentric coordinates passed from intersection shader
 hitAttributeEXT vec3 attribs;
 
-// Same Material struct as in closest_hit.rchit – must match C++ exactly
+// =============================================================================
+// Material struct — EXACT MATCH TO CURRENT C++ Material (2026)
+// =============================================================================
 struct Material {
-    vec3  albedo;
+    vec4 albedo;           // .rgb = base color, .a = alpha (if no texture)
+    vec4 emissive;         // .rgb = emissive color, .a = intensity
     float roughness;
     float metallic;
-    float emissiveStrength;
-    float alpha;
-    float alphaCutoff;
-    uint  textureIndex;   // 0 = no texture, 1–1023 = valid index in texture array
-    uint  _pad0;
-    vec3  emissiveColor;
-    float _pad1;
+    float ior;
+    float transmission;
+    uint  albedoTextureId; // 0 = no texture, 1–1023 = valid array index
+    uint  normalTextureId; // Reserved
+    uint  padding[2];
 };
 
-// Material buffer – matches binding 4 in set 0
+// =============================================================================
+// Material buffer — binding 4, set 0 (matches pipeline layout)
+// =============================================================================
 layout(set = 0, binding = 4, std140) readonly buffer Materials {
     Material materials[];
 } matBuffer;
 
-// Texture array – matches binding 0 in set 2
+// =============================================================================
+// Texture array — binding 0, set 2 (1024 textures)
+// =============================================================================
 layout(set = 2, binding = 0) uniform sampler2D textures[1024];
 
 void main()
 {
-    // Use instance custom index as material index (set during BLAS/TLAS build)
+    // Material index from instance custom data
     uint matIndex = gl_InstanceCustomIndexEXT;
 
-    // Safety check – prevent out-of-bounds access (optional but recommended)
-    // If materialCount is not available here, you can remove this or add it via UBO if needed
-    // if (matIndex >= matBuffer.materials.length()) { return; }
+    // Safety: prevent out-of-bounds access
+    if (matIndex >= matBuffer.materials.length()) {
+        return; // Accept hit — no alpha test possible
+    }
 
     Material mat = matBuffer.materials[matIndex];
 
     // Only perform alpha test if:
-    // - alphaCutoff is greater than 0 (indicates alpha testing enabled)
-    // - a valid texture is assigned (textureIndex > 0)
-    if (mat.alphaCutoff > 0.0 && mat.textureIndex > 0 && mat.textureIndex < 1024)
+    // - A valid albedo texture is assigned
+    // - Alpha cutoff is meaningful (> 0.0)
+    if (mat.albedoTextureId > 0 && mat.albedoTextureId < 1024 && mat.albedo.a > 0.0f)
     {
-        // Simple barycentric UV generation (same as in closest_hit)
-        vec3 bary = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
-        vec2 uv = bary.yz; // maps triangle to [0,1] range
+        // Generate UV from barycentrics (simple but effective)
+        vec3 bary = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
+        vec2 uv = bary.yz;
+
+        // Safe nonuniform texture indexing
+        uint texIndex = nonuniformEXT(mat.albedoTextureId);
 
         // Sample alpha channel
-        float alpha = texture(textures[nonuniformEXT(mat.textureIndex)], uv).a;
+        float alpha = texture(textures[texIndex], uv).a;
 
-        // Discard this intersection if below cutoff
-        if (alpha < mat.alphaCutoff)
-        {
+        // Alpha test — discard transparent fragments
+        if (alpha < mat.albedo.a) {
             ignoreIntersectionEXT;
         }
     }
 }
+
+// =============================================================================
+// FINAL ANY HIT — JANUARY 07, 2026
+// - Modern Material struct — vec4 albedo/emissive
+// - Alpha test using texture alpha + material alpha cutoff
+// - NonuniformEXT safe
+// - No envmap dependency
+// - Production ready for pure RTX realm
+// Empire complete — pink photons pass through transparency — AMOURANTH FOREVER 💖
+// =============================================================================

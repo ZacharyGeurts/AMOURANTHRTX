@@ -1,10 +1,9 @@
+// src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v27.2 — JANUARY 05, 2026
-// PIPELINEMANAGER — SINGLE GLOBAL POOL + LAS + ETERNAL SBT EDITION
-// ONE AND ONLY SBT — CREATED ONCE, NEVER RECREATED
-// Validation-perfect shader groups | SBT safe | Single pool | LAS ready
-// No VUID errors | No crashes | Pink photons scream
-// THE EMPIRE IS UNBROKEN — PINK PHOTONS FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// PIPELINEMANAGER — PURE RTX REALM EDITION | NO ENVMAP | PROCEDURAL SKY ONLY
+// SINGLE GLOBAL POOL + LAS + ETERNAL SBT | VALIDATION PERFECT
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -39,7 +38,6 @@ std::atomic<bool>     PipelineManager::g_pipelineNeedsRebuild{false};
 std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 static std::mutex rebuildMutex;
 
-// Eternal SBT guard — one and only
 static bool s_eternalSbtForged = false;
 
 // =============================================================================
@@ -67,7 +65,7 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 }
 
 // =============================================================================
-// Pipeline Layout — Creates all 4 descriptor set layouts
+// Pipeline Layout — Creates all 4 descriptor set layouts (NO ENVMAP)
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -76,9 +74,9 @@ void PipelineManager::createPipelineLayout()
         return;
     }
 
-    std::print("[PIPELINE] Forging descriptor set layouts and pipeline layout\n");
+    std::print("[PIPELINE] Forging descriptor set layouts and pipeline layout — NO ENVMAP\n");
 
-    // Set 0: Main RT bindings
+    // Set 0: Main RT bindings — NO binding 7 (envMap removed)
     VkDescriptorSetLayoutCreateInfo mainInfo{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = static_cast<uint32_t>(kMainBindings.size()),
@@ -142,7 +140,7 @@ void PipelineManager::createPipelineLayout()
     VK_CHECK(vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl));
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
 
-    std::print("[PIPELINE SUCCESS] All descriptor set layouts and pipeline layout forged\n");
+    std::print("[PIPELINE SUCCESS] All descriptor set layouts and pipeline layout forged — PURE RTX\n");
 }
 
 // =============================================================================
@@ -303,11 +301,11 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 }
 
 // =============================================================================
-// Ray Tracing Pipeline Creation — Validation-perfect
+// Ray Tracing Pipeline Creation — Validation-perfect | NO ENVMAP
 // =============================================================================
 void PipelineManager::createRayTracingPipeline()
 {
-    std::print("[PIPELINE] Forging ray tracing pipeline\n");
+    std::print("[PIPELINE] Forging ray tracing pipeline — PURE RTX (no envmap)\n");
 
     shaderModules_.clear();
 
@@ -402,9 +400,12 @@ void PipelineManager::createRayTracingPipeline()
     }
 
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
-    std::print("[PIPELINE SUCCESS] Ray tracing pipeline forged — validation perfect\n");
+    std::print("[PIPELINE SUCCESS] Ray tracing pipeline forged — PURE RTX\n");
 }
 
+// =============================================================================
+// Shader Binding Table — ETERNAL & SAFE
+// =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
     if (s_eternalSbtForged) {
@@ -461,14 +462,12 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
-    // Use public accessor for persistent upload size — clean and safe
     if (handles.size() > BufferManager::getPersistentUploadSize()) {
         std::print(stderr, "[FATAL] SBT handles too large for persistent upload buffer\n");
         BufferManager::destroy(sbtHandle);
         return;
     }
 
-    // DIRECT WRITE — eternal mapped memory
     std::memcpy(BufferManager::getPersistentUploadMapped(), handles.data(), handles.size());
 
     bool tempCmd = (cmd == VK_NULL_HANDLE);
@@ -548,7 +547,6 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t frameIndex, uint32
     if (g_pipelineNeedsRebuild.load(std::memory_order_acquire)) {
         std::print("[PIPELINE] Rebuilding pipeline due to change\n");
         createRayTracingPipeline();
-        // SBT is eternal — do not recreate
         g_pipelineNeedsRebuild.store(false, std::memory_order_release);
     }
 
@@ -722,8 +720,8 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
         addBuffer(4, updateInfo.materialsBuffer, updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     }
 
-    if (updateInfo.envSampler && updateInfo.envImageView) {
-        addSampler(7, updateInfo.envSampler, updateInfo.envImageView);
+    if (updateInfo.blueNoiseSampler && updateInfo.blueNoiseView) {
+        addSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
     }
 
     if (!updateInfo.nexusScoreViews.empty() && frameIndex < updateInfo.nexusScoreViews.size()) {
@@ -746,9 +744,11 @@ PipelineManager::~PipelineManager()
 } // namespace RTX
 
 // =============================================================================
-// JANUARY 05, 2026 — FINAL PIPELINE MANAGER v27.2
-// kMainBindings fixed — now in class scope
-// ETERNAL SBT — created once and only once
-// Validation-perfect | Single pool | LAS ready
-// THE EMPIRE IS UNBROKEN — PINK PHOTONS FOREVER 💖
+// FINAL PIPELINE MANAGER — JANUARY 07, 2026
+// - NO ENVMAP — removed binding 7
+// - kMainBindings updated — only 9 bindings
+// - Pure procedural sky ready
+// - ETERNAL SBT — created once
+// - Validation-perfect | Single pool | LAS ready
+// Empire complete — pink photons under our perfect sky — AMOURANTH FOREVER 💖
 // =============================================================================

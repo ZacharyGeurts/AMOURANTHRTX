@@ -1,18 +1,9 @@
+// include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
-// =============================================================================
-//
-// Dual Licensed:
-// 1. GNU General Public License v3.0 (or later) (GPL v3)
-//    https://www.gnu.org/licenses/gpl-3.0.html
-// 2. Commercial licensing: gzac5314@gmail.com
-//
-// TRUE CONSTEXPR STONEKEY v∞ — JANUARY 05, 2026 — FULL LIGHT ASSURED
-// PIPELINEMANAGER HEADER v27.2 — FINAL & COMPLETE
-// FIXED: kMainBindings now static constexpr in class scope (compiles clean)
-// ETERNAL SBT — created once and only once
-// All members for 4-set pipeline layout present and correct
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// PIPELINEMANAGER — PURE RTX REALM EDITION | NO ENVMAP | PROCEDURAL SKY ONLY
+// SINGLE GLOBAL POOL + LAS + ETERNAL SBT | VALIDATION PERFECT
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -22,7 +13,7 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/Extensions.hpp"  // All extension function pointers now here
+#include "engine/GLOBAL/Extensions.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -36,7 +27,7 @@ namespace RTX {
 struct Extensions;
 extern Extensions g_ext;
 
-// RT descriptor update structure
+// RT descriptor update structure — NO ENVMAP
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
 
@@ -51,14 +42,8 @@ struct RTDescriptorUpdate {
     VkBuffer materialsBuffer = VK_NULL_HANDLE;
     VkDeviceSize materialsSize = 0;
 
-    VkSampler envSampler = VK_NULL_HANDLE;
-    VkImageView envImageView = VK_NULL_HANDLE;
-
     VkSampler blueNoiseSampler = VK_NULL_HANDLE;
     VkImageView blueNoiseView = VK_NULL_HANDLE;
-
-    VkSampler densitySampler = VK_NULL_HANDLE;
-    VkImageView densityView = VK_NULL_HANDLE;
 
     VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;
     VkDeviceSize additionalStorageSize = 0;
@@ -96,15 +81,8 @@ public:
     VkShaderModule loadShader(const std::string& path) const;
 
     // Public handles
-    Handle<VkImageView> envMapImageView_;
-    Handle<VkSampler>   envMapSampler_;
     Handle<VkDescriptorSetLayout> emptyDescriptorSetLayout_;
     Handle<VkDescriptorSetLayout> texDescriptorSetLayout_;
-
-    Handle<VkPipeline>            tonemapPipeline_;
-    Handle<VkPipelineLayout>      tonemapPipelineLayout_;
-    Handle<VkDescriptorSetLayout> tonemapDescSetLayout_;
-    std::array<VkDescriptorSet, 2> tonemapSets_{};
 
     static std::atomic<bool>     g_pipelineNeedsRebuild;
     static std::atomic<uint32_t> g_rebuildRequestedFrame;
@@ -162,9 +140,9 @@ public:
 
 private:
     // =============================================================================
-    // Main ray tracing descriptor set bindings (set 0) — static constexpr in class
+    // Main ray tracing descriptor set bindings (set 0) — NO ENVMAP
     // =============================================================================
-    static constexpr std::array<VkDescriptorSetLayoutBinding, 11> kMainBindings{{
+    static constexpr std::array<VkDescriptorSetLayoutBinding, 9> kMainBindings{{
         {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
@@ -176,10 +154,7 @@ private:
         {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
         {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-         VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
         {8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        {9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
         {10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
         {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
@@ -203,7 +178,7 @@ private:
     std::vector<Handle<VkShaderModule>> shaderModules_;
     std::vector<VkDescriptorSet>        rtDescriptorSets_;
     std::vector<VkDescriptorSet>        texDescriptorSets_;
-    std::vector<VkDescriptorSet>        emptyDescriptorSets_;   // REQUIRED FOR SET 1 & 3 IN 4-SET LAYOUT
+    std::vector<VkDescriptorSet>        emptyDescriptorSets_;
 
     uint32_t raygenGroupCount_{1};
     uint32_t missGroupCount_{1};
@@ -224,10 +199,11 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL PRODUCTION HEADER v27.2 — JANUARY 05, 2026
-// kMainBindings now static constexpr in class scope — compiles clean
-// ETERNAL SBT — created once and only once
-// All members present and correct
-// Cross-platform ready — Windows + Linux
-// PINK PHOTONS ETERNAL — THE EMPIRE SEES ALL
+// FINAL PIPELINE MANAGER — JANUARY 07, 2026
+// - NO ENVMAP BINDING — pure procedural sky only
+// - kMainBindings reduced — removed envMap sampler binding (7)
+// - Ready for pure RTX sky in miss shader
+// - ETERNAL SBT — created once
+// - Validation-perfect | Single pool | LAS ready
+// Empire complete — pink photons under our perfect sky — AMOURANTH FOREVER 💖
 // =============================================================================

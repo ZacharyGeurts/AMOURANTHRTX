@@ -40,7 +40,7 @@ void init(SDL_Window*, SDL_Renderer* renderer)
 {
     g_sdlRenderer = renderer;
 
-    if (TTF_Init() != 0) {
+    if (TTF_Init() == 0) {
         LOG_ERROR_CAT("CONSOLE", "TTF_Init failed: {}", SDL_GetError());
         return;
     }

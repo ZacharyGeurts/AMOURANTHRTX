@@ -1,4 +1,3 @@
-// assets/shaders/compute/tonemap.comp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — Pure True HDR Tonemap — Realism First
 // NO BLOOM | NO VIGNETTE | NO GRAIN | NO FLARE — HOLLYWOOD TRICKS BANISHED
@@ -9,6 +8,7 @@
 
 #version 460
 #extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
@@ -19,31 +19,27 @@ layout(set = 0, binding = 2, std140) uniform TonemapData {
     float  exposure;
     uint   type;      // 0 = ACES (accurate filmic), 1 = Reinhard (maximum crispness)
     uint   enabled;
-    float  _pad0;
-    uint   _pad1;
-    uint   _pad2;
-
     float  gamma;     // Usually 2.2
-    float  _pad3[9];
 } tonemap;
 
 // ACES Fitted — the gold standard for accurate color (used in film/VFX)
 vec3 ACESFitted(vec3 color)
 {
     const mat3 ACESInputMat = mat3(
-        vec3( 0.59719, 0.07600, 0.02840),
-        vec3( 0.35458, 0.90834, 0.13383),
-        vec3( 0.04823, 0.01566, 0.83777)
+        vec3( 0.59719, 0.35458, 0.04823),
+        vec3( 0.07600, 0.90834, 0.01566),
+        vec3( 0.02840, 0.13383, 0.83777)
     );
 
     const mat3 ACESOutputMat = mat3(
-        vec3( 1.60475, -0.10208, -0.00327),
-        vec3(-0.53108,  1.10813, -0.07276),
-        vec3(-0.07367, -0.00605,  1.07602)
+        vec3( 1.60475, -0.53108, -0.07367),
+        vec3(-0.10208,  1.10813, -0.00605),
+        vec3(-0.00327, -0.07276,  1.07602)
     );
 
     color = ACESInputMat * color;
 
+    // RRT and ODT fit
     vec3 a = color * (color + 0.0245786) - 0.000090537;
     vec3 b = color * (0.983729 * color + 0.4329510) + 0.238081;
     color = a / b;
@@ -54,18 +50,18 @@ vec3 ACESFitted(vec3 color)
 // Simple Reinhard — maximum crispness, no softness
 vec3 ReinhardCrisp(vec3 color)
 {
-    return color / (color + 1.0);
+    return color / (color + vec3(1.0));
 }
 
 void main()
 {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    vec2 resolution = vec2(imageSize(imgOutput));
+    ivec2 size = imageSize(imgOutput);
 
-    if (coord.x >= uint(resolution.x) || coord.y >= uint(resolution.y))
+    if (coord.x >= size.x || coord.y >= size.y)
         return;
 
-    vec2 uv = (vec2(coord) + vec2(0.5)) / resolution;
+    vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(size);
 
     vec3 hdrColor = texture(imgInput, uv).rgb;
 
@@ -74,18 +70,20 @@ void main()
 
     vec3 ldrColor = hdrColor;
 
-    if (tonemap.type == 0u) {
-        // ACES — accurate, filmic, beautiful dynamic range
-        ldrColor = ACESFitted(hdrColor);
-    } else {
-        // Reinhard — crisp, punchy, maximum detail
-        ldrColor = ReinhardCrisp(hdrColor);
+    if (tonemap.enabled != 0u) {
+        if (tonemap.type == 0u) {
+            // ACES — accurate, filmic, beautiful dynamic range
+            ldrColor = ACESFitted(hdrColor);
+        } else {
+            // Reinhard — crisp, punchy, maximum detail
+            ldrColor = ReinhardCrisp(hdrColor);
+        }
+
+        // Gamma correction — correct display referral
+        ldrColor = pow(ldrColor, vec3(1.0 / tonemap.gamma));
     }
 
-    // Gamma correction — correct display referral
-    ldrColor = pow(ldrColor, vec3(1.0 / tonemap.gamma));
-
-    // FP16 safe clamp
+    // FP16 safe clamp — prevent NaN/inf
     ldrColor = clamp(ldrColor, 0.0, 65504.0);
 
     imageStore(imgOutput, coord, vec4(ldrColor, 1.0));
