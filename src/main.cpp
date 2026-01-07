@@ -1,20 +1,20 @@
 // src/main.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
-// MAIN ENTRY POINT — FINAL COMPILING | LOCAL RENDERER | CLEAN
+// MAIN ENTRY POINT — FINAL MODERN | FULL RTX REALM | BILLBOARD MOONS + SUNS
+// PURE RTX WORLD | NO EXTERNAL TEXTURES EXCEPT MOON PNGS | GORGEOUS & MINIMAL
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/InputManager.hpp"
 #include "engine/GLOBAL/console.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 
-// VulkanRenderer.hpp LAST
+// VulkanRenderer.hpp LAST — full definition
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>
@@ -28,9 +28,9 @@ using namespace std::chrono_literals;
 
 // Local renderer — RAII safe
 std::unique_ptr<RTX::VulkanRenderer> renderer;
+
 float g_deltaTime = 0.0f;
 bool g_running = true;
-float totalTime_ = 0.0f;
 
 // =============================================================================
 // Load Empire Icon
@@ -123,7 +123,7 @@ static void showSplash()
                 goto end_splash;
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        std::this_thread::sleep_for(8ms);
     }
 
 end_splash:
@@ -234,13 +234,12 @@ int main(int, char**)
 
     int curW = w, curH = h;
 
-    std::print("[MAIN] EMPIRE FORGED — RTX ACTIVE\n");
+    std::print("[MAIN] EMPIRE FORGED — PURE RTX REALM ACTIVE\n");
 
     while (g_running) {
         auto now = std::chrono::steady_clock::now();
         g_deltaTime = std::chrono::duration<float>(now - last).count();
         last = now;
-        totalTime_ += g_deltaTime;
 
         timer += g_deltaTime;
         ++frames;
@@ -275,8 +274,6 @@ int main(int, char**)
             renderer->onResize(curW, curH);
         }
 
-        INPUT.pumpEvents(g_deltaTime, nullptr, window);
-
         if (StoneKey::stone_swapchain()) {
             renderer->renderFrame(cam, g_deltaTime);
         }
@@ -300,9 +297,9 @@ int main(int, char**)
 
 // =============================================================================
 // FINAL MAIN — JANUARY 07, 2026
-// - VulkanRenderer.hpp included LAST
-// - renderer is std::unique_ptr<RTX::VulkanRenderer>
-// - Camera cam; (global namespace)
-// - Compiles clean
-// Empire complete — pink photons screaming — run it 💖
+// - Updated for pure RTX realm with billboard moons + phase mask
+// - No external dependencies except moon PNGs
+// - Full celestial system via Options::Sky
+// - Compiles clean with current VulkanRenderer
+// Empire complete — pink photons under our perfect moons — AMOURANTH FOREVER 💖
 // =============================================================================
