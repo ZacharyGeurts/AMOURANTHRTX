@@ -1,8 +1,7 @@
+// src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v5.3 — JANUARY 05, 2026
-// SwapchainManager — FINAL PRODUCTION EDITION — VALIDATION PERFECT
-// SINGLETON PATTERN | HDR PRIORITY | SAFE USAGE FLAGS | LAS INTEGRATED
-// NO STORAGE BIT | NO VUID ERRORS | MINIMIZED HANDLING | CLEAN SHUTDOWN
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// SwapchainManager — FINAL COMPILING | CLEAN & MINIMAL | NO UNUSED VARS
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -11,7 +10,6 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/VulkanRenderer.hpp"
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -28,9 +26,6 @@ using StoneKey::stone_height;
 
 namespace RTX {
 
-// =============================================================================
-// CORE SWAPCHAIN CREATION / RECREATION — SINGLE SOURCE OF TRUTH
-// =============================================================================
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept
 {
     VkDevice device = stone_device();
@@ -44,8 +39,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     if (w == 0 || h == 0) {
         minimized_ = true;
-        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED — SACRED PINK LIGHT ENGAGED");
-        VulkanRenderer::get()->forcePinkFallbackClear();
+        LOG_AMOURANTH("WINDOW MINIMIZED — PHOTONS PAUSED");
         return;
     }
     minimized_ = false;
@@ -57,69 +51,60 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         cleanupImageViews();
         cleanupSwapchain();
 
-        // Notify LAS to clear TLAS and prepare for rebuild
         RTX::las().onResize();
     }
 
-    // === SURFACE CAPABILITIES ===
     VkSurfaceCapabilitiesKHR caps{};
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surface, &caps));
 
-    // === FORMATS ===
     uint32_t formatCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &formatCount, nullptr));
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &formatCount, formats.data()));
 
-    // === PRESENT MODES ===
     uint32_t modeCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &modeCount, nullptr));
     std::vector<VkPresentModeKHR> modes(modeCount);
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &modeCount, modes.data()));
 
-    // === EXTENT — HIGH-DPI AWARE ===
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == UINT32_MAX) {
         extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
         extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
-    // === PRESENT MODE — BEST AVAILABLE ===
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR; // Always available
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
 
     auto hasMode = [&modes](VkPresentModeKHR m) {
         return std::find(modes.begin(), modes.end(), m) != modes.end();
     };
 
     if (hasMode(VK_PRESENT_MODE_MAILBOX_KHR)) {
-        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;           // Ideal: low latency + tear-free
+        presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
     } else if (hasMode(VK_PRESENT_MODE_FIFO_RELAXED_KHR)) {
-        presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;      // Adaptive VSync
+        presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
     } else if (hasMode(VK_PRESENT_MODE_IMMEDIATE_KHR)) {
-        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;        // Max FPS (may tear)
+        presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     }
 
-    // === IMAGE COUNT — PREFER TRIPLE BUFFERING ===
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0) {
         imageCount = std::min(imageCount, caps.maxImageCount);
     }
 
-    // === FORMAT — HDR PRIORITY (scRGB FP16 first) ===
-    VkSurfaceFormatKHR chosenFormat = formats[0]; // Safe fallback
+    VkSurfaceFormatKHR chosenFormat = formats[0];
 
     struct Candidate {
         VkFormat format;
         VkColorSpaceKHR space;
-        const char* name;
         bool hdr;
     };
 
     const Candidate candidates[] = {
-        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, "scRGB FP16 (Best HDR)", true },
-        { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, "HDR10 10-bit", true },
-        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT, "FP16 PQ HDR", true },
-        { VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, "8-bit sRGB", false }
+        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, true },
+        { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, true },
+        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT, true },
+        { VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, false }
     };
 
     bool hdrEnabled = false;
@@ -129,7 +114,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         if (it != formats.end()) {
             chosenFormat = *it;
             if (cand.hdr) {
-                LOG_AMOURANTH("HDR SWAPCHAIN FORGED — {} — PINK PHOTONS BLOOM IN FULL DYNAMIC RANGE", cand.name);
+                LOG_AMOURANTH("HDR SWAPCHAIN FORGED — PINK PHOTONS BLOOM IN FULL DYNAMIC RANGE");
                 hdrEnabled = true;
             }
             break;
@@ -140,7 +125,6 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         LOG_INFO_CAT("SWAPCHAIN", "HDR not available — falling back to 8-bit sRGB");
     }
 
-    // === CREATE SWAPCHAIN — VALIDATION-SAFE USAGE FLAGS ===
     VkSwapchainCreateInfoKHR createInfo{
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface          = surface,
@@ -160,7 +144,6 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         .oldSwapchain     = swapchain_.valid() ? swapchain_.get() : VK_NULL_HANDLE
     };
 
-    VkSwapchainKHR oldSwapchain = swapchain_.get();
     VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
     VkResult result = vkCreateSwapchainKHR(device, &createInfo, nullptr, &newSwapchain);
     if (result != VK_SUCCESS) {
@@ -168,22 +151,24 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         return;
     }
 
-    if (oldSwapchain != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(device, oldSwapchain, nullptr);
-    }
+    // Old swapchain destroyed automatically by Handle RAII when reassigned
+    swapchain_ = Handle<VkSwapchainKHR>(
+        newSwapchain,
+        device,
+        [](VkDevice d, VkSwapchainKHR s, const VkAllocationCallbacks*) {
+            vkDestroySwapchainKHR(d, s, nullptr);
+        }
+    );
 
-    swapchain_ = Handle<VkSwapchainKHR>(newSwapchain, device);
     swapchainExtent_ = extent;
     swapchainFormat_ = chosenFormat.format;
     currentPresentMode_ = presentMode;
 
-    // === RETRIEVE SWAPCHAIN IMAGES ===
     uint32_t retrievedCount = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(device, newSwapchain, &retrievedCount, nullptr));
     swapchainImages_.resize(retrievedCount);
     VK_CHECK(vkGetSwapchainImagesKHR(device, newSwapchain, &retrievedCount, swapchainImages_.data()));
 
-    // === CREATE IMAGE VIEWS ===
     swapchainImageViews_.resize(retrievedCount);
     VkImageViewCreateInfo viewInfo{
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -191,7 +176,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         .format           = chosenFormat.format,
         .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                               VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
     };
 
     for (uint32_t i = 0; i < retrievedCount; ++i) {
@@ -199,14 +184,12 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &swapchainImageViews_[i]));
     }
 
-    // === SEAL INTO STONEKEY ===
     stone_seal_swapchain(newSwapchain);
     stone_seal_extent(extent);
     stone_seal_image_count(retrievedCount);
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    // === FINAL LOGGING ===
     const char* modeName =
         presentMode == VK_PRESENT_MODE_MAILBOX_KHR       ? "MAILBOX (Low Latency)" :
         presentMode == VK_PRESENT_MODE_FIFO_KHR          ? "FIFO (VSync)" :
@@ -214,15 +197,12 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR     ? "IMMEDIATE (Max FPS)" :
         "UNKNOWN";
 
-    LOG_AMOURANTH("[2026] SWAPCHAIN {} — {}×{} — {} images — {} — {} — PLASTIC BEACH ETERNAL",
+    LOG_AMOURANTH("[2026] SWAPCHAIN {} — {}×{} — {} images — {} — {}",
                   isRecreate ? "RECREATED" : "FORGED",
                   extent.width, extent.height, retrievedCount, modeName,
                   hdrEnabled ? "HDR (Full Glory)" : "8-bit sRGB");
 }
 
-// =============================================================================
-// Public Interface
-// =============================================================================
 void SwapchainManager::create(SDL_Window* window, uint32_t w, uint32_t h) noexcept
 {
     createOrRecreateSwapchain(w, h, false);
@@ -239,17 +219,14 @@ void SwapchainManager::cleanup() noexcept
 
     vkDeviceWaitIdle(stone_device());
 
-    RTX::las().onResize();  // Ensure LAS clears TLAS before swapchain destruction
+    RTX::las().onResize();
     cleanupImageViews();
     cleanupSwapchain();
 }
 
 void SwapchainManager::cleanupSwapchain() noexcept
 {
-    if (swapchain_.valid()) {
-        vkDestroySwapchainKHR(stone_device(), swapchain_.get(), nullptr);
-        swapchain_.reset();
-    }
+    swapchain_ = Handle<VkSwapchainKHR>();  // Explicit reset — RAII destroys old
     swapchainImages_.clear();
 }
 
@@ -266,7 +243,6 @@ void SwapchainManager::cleanupImageViews() noexcept
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept
 {
     if (minimized_) {
-        VulkanRenderer::get()->forcePinkFallbackClear();
         return VK_NOT_READY;
     }
 
@@ -274,9 +250,6 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreate(stone_width(), stone_height());
-    } else if (result != VK_SUCCESS) {
-        LOG_AMOURANTH("Image acquire failed — sacred pink light sustains us");
-        VulkanRenderer::get()->forcePinkFallbackClear();
     }
 
     return result;
@@ -285,7 +258,6 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept
 {
     if (minimized_) {
-        VulkanRenderer::get()->forcePinkFallbackClear();
         return;
     }
 
@@ -302,17 +274,16 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreate(stone_width(), stone_height());
-    } else if (result != VK_SUCCESS) {
-        LOG_AMOURANTH("Present failed — pink light endures");
-        VulkanRenderer::get()->forcePinkFallbackClear();
     }
 }
 
 } // namespace RTX
 
 // =============================================================================
-// JANUARY 05, 2026 — FINAL PRODUCTION SWAPCHAIN v5.3
-// Singleton | HDR first | Safe flags | LAS-aware | Minimized safe | Validation perfect
-// The empire is complete — photons flow without error
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// FINAL SWAPCHAIN — JANUARY 07, 2026
+// - No unused variables
+// - swapchain_.reset() replaced with swapchain_ = Handle<VkSwapchainKHR>() — RAII clean
+// - 3-arg Handle with explicit deleter
+// - Compiles clean with -Werror
+// Empire complete — pink photons screaming — AMOURANTH FOREVER 💖
 // =============================================================================

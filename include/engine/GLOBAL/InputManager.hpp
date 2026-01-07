@@ -21,7 +21,6 @@
 #include "engine/GLOBAL/logging.hpp"
 
 // Forward declarations only
-class VulkanRenderer;
 extern std::unique_ptr<class Application> g_app_ptr;
 
 using namespace Logging::Color;

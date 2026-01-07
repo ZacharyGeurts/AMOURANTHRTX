@@ -169,7 +169,7 @@ namespace {
         CameraAutoInitializer() noexcept
         {
             CAM.init(
-                Options::Camera::CAMERA_START_POSITION,
+                Options::Camera::START_POSITION,
                 Options::Camera::DEFAULT_FOV,
                 Options::Camera::DEFAULT_APERTURE,
                 Options::Camera::DEFAULT_FOCUS_DISTANCE

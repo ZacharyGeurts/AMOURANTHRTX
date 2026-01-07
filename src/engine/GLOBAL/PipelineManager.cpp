@@ -309,7 +309,6 @@ void PipelineManager::createRayTracingPipeline()
 {
     std::print("[PIPELINE] Forging ray tracing pipeline\n");
 
-    rtPipeline_.reset();
     shaderModules_.clear();
 
     auto load = [this](const char* path) -> VkShaderModule {

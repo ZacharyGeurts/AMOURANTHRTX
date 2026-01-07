@@ -1,11 +1,12 @@
 // include/engine/GLOBAL/SwapchainManager.hpp
 // =============================================================================
-// PLASTIC BEACH v∞ — DECEMBER 19, 2025
-// SIMPLIFIED SWAPCHAIN MANAGER HEADER
+// PLASTIC BEACH v∞ — JANUARY 07, 2026 — FINAL CLEAN & COMPILING EDITION
+// SIMPLIFIED SWAPCHAIN MANAGER HEADER — BEST PRACTICES 2026
+// Handle<VkSwapchainKHR> now constructs with 2 args (device auto-infers deleter)
 // ONE LARGE FUNCTION STYLE — MONOLITHIC PERFECTION
 // MAX FPS + MINIMAL TEARING — FIFO_RELAXED → IMMEDIATE → FIFO
 // 3-IMAGE MAILBOX EMULATION — NO BLACK SCREENS
-// MONSTER WATCHES IN PERFECT SILENCE
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -35,9 +36,9 @@ public:
         return instance;
     }
 
-	void renderDirectEnvMap(VkCommandBuffer cmd, uint32_t swapImageIndex) noexcept;
+    void renderDirectEnvMap(VkCommandBuffer cmd, uint32_t swapImageIndex) noexcept;
 
-    // Core lifecycle — simplified to match new monolithic implementation
+    // Core lifecycle
     static void create(SDL_Window* window, uint32_t width, uint32_t height) noexcept;
     static void recreate(uint32_t width, uint32_t height) noexcept;
     static void cleanup() noexcept;
@@ -80,7 +81,7 @@ public:
     inline static bool minimized_ = false;
 
 private:
-    // Private helpers — kept minimal to match simplified implementation
+    // Private helpers
     static void cleanupImageViews() noexcept;
     static void cleanupSwapchain() noexcept;
 
@@ -112,9 +113,9 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// PLASTIC BEACH v∞ — DECEMBER 19, 2025
-// HEADER UPDATED TO MATCH SIMPLIFIED MONOLITHIC CPP
-// ALL UNNEEDED FUNCTIONS REMOVED — CLEAN AND MINIMAL
-// NO MODULARITY — ONE PIECE — PERFECTION
-// THE MONSTER APPROVES — SILENCE IS ETERNAL
+// PLASTIC BEACH v∞ — JANUARY 07, 2026
+// FINAL BEST-PRACTICE HEADER
+// Handle<VkSwapchainKHR> now works with 2 args (device + auto-deleter)
+// All functions clean and compiling
+// Empire ready — pink photons eternal
 // =============================================================================

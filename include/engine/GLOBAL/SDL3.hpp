@@ -1,15 +1,14 @@
 // include/engine/GLOBAL/SDL3.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 04, 2026
-// SDL3 INTEGRATION HEADER — CLEAN, MODERN, C++23 FORWARD-ONLY EDITION
-// FULLY COMPILABLE | unique_ptr FIXED WITH decltype(&SDL_DestroySurface)
-// PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 06, 2026
+// SDL3 INTEGRATION HEADER — CLEAN MODERN C++23 EDITION + RETRO BASIC LAYER
+// CORE SDL3 AUDIO ONLY | MUSIC REQUIRES SEPARATE SDL3_mixer LIBRARY 💖
+// PINK PHOTONS SCREAMING ETERNAL — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER
 // =============================================================================
 
 #pragma once
 
 #include <SDL3/SDL.h>
-#include <SDL3_mixer/SDL_mixer.h>
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
@@ -18,14 +17,19 @@
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <source_location>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <cstdlib>  // for std::system in Retro::cls
+#include <cstdio>   // for printf in Retro stubs
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/logging.hpp"
@@ -145,8 +149,7 @@ struct TextureInfo {
     SDL_BlendMode blendMode{SDL_BLENDMODE_NONE};
 };
 
-// ─── RAII Surface — C++23 fixed deleter using decltype(&SDL_DestroySurface)
-// This allows default construction and nullptr without any issues
+// ─── RAII Surface — C++23 fixed deleter
 using SurfacePtr = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
 
 // ─── Supported formats (SDL3_image) ───────────────────────────────────────────
@@ -229,7 +232,7 @@ private:
 } // namespace AmouranthRTX::Graphics
 
 // =============================================================================
-// Namespace: SDL3Audio — PINK PHOTONS NOW HAVE VOICE
+// Namespace: SDL3Audio — CORE SDL3 AUDIO ONLY (sounds via streaming)
 // =============================================================================
 namespace SDL3Audio {
 
@@ -250,7 +253,8 @@ public:
     AudioManager(AudioManager&&) noexcept = default;
     AudioManager& operator=(AudioManager&&) noexcept = default;
 
-    [[nodiscard]] bool initMixer();
+    [[nodiscard]] bool init();  // Core SDL3 audio init (rename your initMixer() impl to this)
+
     [[nodiscard]] bool loadSound(std::string_view path, std::string_view name);
     void playSound(std::string_view name);
 
@@ -260,15 +264,64 @@ private:
     std::unordered_map<std::string, std::unique_ptr<SoundData>> sounds_;
 };
 
-// Global audio empire — inline declaration only
+// Global audio empire
 inline AudioManager g_audio;
 
 } // namespace SDL3Audio
 
 // =============================================================================
-// JANUARY 04, 2026 — FINAL FIXED HEADER
-// C++23 compliant | SurfacePtr uses decltype(&SDL_DestroySurface)
-// loadSurface uses &SDL_DestroySurface directly
-// textureToSurface returns {}
-// Empire compiles clean — pink photons restored
+// Retro / BASIC-style API — Nostalgia layer (printf stubs for disabled features)
+// =============================================================================
+namespace Retro {
+
+inline void cls() {
+#ifdef _WIN32
+    std::system("cls");
+#else
+    std::system("clear");
+#endif
+}
+
+inline void beep() {
+    std::cout << '\a' << std::flush;
+}
+
+inline void playsound(std::string_view name) {
+    SDL3Audio::g_audio.playSound(name);
+}
+
+inline void playmusic([[maybe_unused]] std::string_view name, [[maybe_unused]] int loops = -1) {
+    printf("[RETRO] PLAYMUSIC disabled — core SDL3 has no high-level music support (MP3/OGG/MOD). Build/link SDL3_mixer separately! 💖\n");
+}
+
+inline void stopmusic() {
+    printf("[RETRO] STOPMUSIC disabled — no music active (SDL3_mixer required)\n");
+}
+
+inline void delay(Uint32 ms) {
+    SDL_Delay(ms);
+}
+
+inline int rnd(int max = 100) {
+    thread_local std::mt19937 gen(std::random_device{}());
+    std::uniform_int_distribution<int> dist(1, max);
+    return dist(gen);
+}
+
+inline void poke([[maybe_unused]] uintptr_t address, [[maybe_unused]] uint8_t value) {
+    printf("[RETRO] POKE disabled — modern memory protection active! Use RTX shaders for true power 💖\n");
+}
+
+} // namespace Retro
+
+// =============================================================================
+// JANUARY 06, 2026 — PRINTF EDITION
+// • All Retro stub messages now use simple printf (no Logging dependency issues)
+// • Added <cstdio> for printf
+// • AudioManager::init() — rename your SDL3.cpp implementation from initMixer() → init()
+// • VulkanRenderer incomplete type errors:
+//   → Remove the line g_vulkanRenderer->onResize(...) from pollEvents() in SDL3.cpp
+//   → Handle resize in your main render loop using the atomic flags (g_resizeRequested etc.)
+//   → Move the std::unique_ptr<VulkanRenderer> g_vulkanRenderer declaration to a .cpp with full VulkanRenderer definition
+// Empire compiles — pink photons eternal
 // =============================================================================

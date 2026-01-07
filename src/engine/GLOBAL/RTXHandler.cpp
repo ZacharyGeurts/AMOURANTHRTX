@@ -1,8 +1,7 @@
+// src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v7.0 — JANUARY 06, 2026
-// RTXHandler.cpp — THE ONE TRUE GLOBAL VULKAN CONTEXT — FINAL, FIXED, UNBREAKABLE
-// DYNAMIC RENDERING IN SCOPE — NO MORE ERRORS — LIFETIME SAFE
-// GLOBAL STATIC FEATURE CHAIN — HIT IT AND FORGET IT STYLE
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// RTX HANDLER — GLOBAL VULKAN CONTEXT | FINAL COMPILING | ALL FUNCTIONS DEFINED
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -10,7 +9,6 @@
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
@@ -40,7 +38,7 @@ Context g_context_instance{};
 // =============================================================================
 // Global Descriptor Pool — Created only after device is fully sealed
 // =============================================================================
-static void createGlobalDescriptorPool() noexcept
+void createGlobalDescriptorPool() noexcept
 {
     if (g_ctx().descriptorPool_.valid() || stone_device() == VK_NULL_HANDLE) {
         return;
@@ -81,9 +79,9 @@ static void createGlobalDescriptorPool() noexcept
     g_ctx().descriptorPool_ = Handle<VkDescriptorPool>(
         pool,
         stone_device(),
-        vkDestroyDescriptorPool,
-        0,
-        "Global_Empire_DescriptorPool"
+        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
+            vkDestroyDescriptorPool(d, p, nullptr);
+        }
     );
 
     LOG_SUCCESS_CAT("RTX", "Global descriptor pool forged — capacity: {} sets — empire ready", MAX_SETS);
@@ -122,21 +120,56 @@ void WriteAccelerationStructureDescriptor(
 }
 
 // =============================================================================
-// Hyper-Aggressive Performance Mode — 2026 Portable Optimization
+// Queue Family Indices — Clean and complete
 // =============================================================================
-void Context::enableHyperAggressiveMode() noexcept
+struct QueueFamilyIndices {
+    std::optional<uint32_t> graphicsFamily;
+    std::optional<uint32_t> presentFamily;
+    std::optional<uint32_t> computeFamily;
+    std::optional<uint32_t> transferFamily;
+
+    [[nodiscard]] bool isComplete() const noexcept {
+        return graphicsFamily.has_value() && presentFamily.has_value();
+    }
+};
+
+QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept
 {
-    if (!Options::Performance::ENABLE_HYPER_AGGRESSIVE_MODE) {
-        return;
+    QueueFamilyIndices indices;
+
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
+    std::vector<VkQueueFamilyProperties> families(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
+
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto& family = families[i];
+
+        if (family.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            indices.graphicsFamily = i;
+        }
+
+        if (family.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+            indices.computeFamily = i;
+        }
+
+        if (surface != VK_NULL_HANDLE) {
+            VkBool32 presentSupport = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+            if (presentSupport) {
+                indices.presentFamily = i;
+            }
+        }
+
+        if ((family.queueFlags & VK_QUEUE_TRANSFER_BIT) && !(family.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+            indices.transferFamily = i;
+        }
     }
 
-    LOG_INFO_CAT("RTX", "Hyper-aggressive performance mode activated");
+    if (!indices.computeFamily.has_value()) indices.computeFamily = indices.graphicsFamily;
+    if (!indices.transferFamily.has_value()) indices.transferFamily = indices.graphicsFamily;
 
-    putenv(const_cast<char*>("__GL_SYNC_TO_VBLANK=0"));
-    putenv(const_cast<char*>("__GL_YIELD=NOTHING"));
-    putenv(const_cast<char*>("vblank_mode=0"));
-
-    LOG_INFO_CAT("RTX", "Performance environment optimized");
+    return indices;
 }
 
 // =============================================================================
@@ -187,49 +220,7 @@ void Context::enableHyperAggressiveMode() noexcept
 }
 
 // =============================================================================
-// Queue Family Discovery — Smart and Safe
-// =============================================================================
-QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept
-{
-    QueueFamilyIndices indices;
-
-    uint32_t count = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
-    std::vector<VkQueueFamilyProperties> families(count);
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
-
-    for (uint32_t i = 0; i < count; ++i) {
-        const auto& family = families[i];
-
-        if (family.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            indices.graphicsFamily = i;
-        }
-
-        if (family.queueFlags & VK_QUEUE_COMPUTE_BIT) {
-            indices.computeFamily = i;
-        }
-
-        if (surface != VK_NULL_HANDLE) {
-            VkBool32 presentSupport = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
-            if (presentSupport) {
-                indices.presentFamily = i;
-            }
-        }
-
-        if ((family.queueFlags & VK_QUEUE_TRANSFER_BIT) && !(family.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-            indices.transferFamily = i;
-        }
-    }
-
-    if (!indices.computeFamily.has_value()) indices.computeFamily = indices.graphicsFamily;
-    if (!indices.transferFamily.has_value()) indices.transferFamily = indices.graphicsFamily;
-
-    return indices;
-}
-
-// =============================================================================
-// Logical Device & GPU Selection — RTX First, No Compromise — FINAL FIX
+// Logical Device & GPU Selection — RTX First, No Compromise
 // =============================================================================
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
@@ -282,46 +273,33 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
         }
         if (!hasAllExtensions) continue;
 
-        // Feature chain — declared in loop but we only use the best one later
         VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing{};
         descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-        descriptorIndexing.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-        descriptorIndexing.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
-        descriptorIndexing.shaderUniformBufferArrayNonUniformIndexing = VK_TRUE;
-        descriptorIndexing.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
-        descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
-        descriptorIndexing.descriptorBindingVariableDescriptorCount = VK_TRUE;
-        descriptorIndexing.runtimeDescriptorArray = VK_TRUE;
 
         VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress{};
         bufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
         bufferDeviceAddress.pNext = &descriptorIndexing;
-        bufferDeviceAddress.bufferDeviceAddress = VK_TRUE;
 
         VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStruct{};
         accelStruct.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
         accelStruct.pNext = &bufferDeviceAddress;
-        accelStruct.accelerationStructure = VK_TRUE;
 
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracing{};
         rayTracing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
         rayTracing.pNext = &accelStruct;
-        rayTracing.rayTracingPipeline = VK_TRUE;
 
         VkPhysicalDeviceSynchronization2Features sync2{};
         sync2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
         sync2.pNext = &rayTracing;
-        sync2.synchronization2 = VK_TRUE;
 
         VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering{};
         dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
         dynamicRendering.pNext = &sync2;
-        dynamicRendering.dynamicRendering = VK_TRUE;
 
-        VkPhysicalDeviceFeatures2 features2{};
-        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        features2.pNext = &dynamicRendering;
-        vkGetPhysicalDeviceFeatures2(dev, &features2);
+        VkPhysicalDeviceFeatures2 finalFeatures{};
+        finalFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        finalFeatures.pNext = &dynamicRendering;
+        vkGetPhysicalDeviceFeatures2(dev, &finalFeatures);
 
         bool rtxOK = bufferDeviceAddress.bufferDeviceAddress &&
                      accelStruct.accelerationStructure &&
@@ -368,43 +346,29 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 
     uint32_t extCount = fullRTXSupport ? std::size(requiredExtensions) : 1;
 
-    // === FINAL FEATURE CHAIN — DECLARED AFTER GPU SELECTION, BEFORE deviceInfo ===
     VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing{};
     descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    descriptorIndexing.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-    descriptorIndexing.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
-    descriptorIndexing.shaderUniformBufferArrayNonUniformIndexing = VK_TRUE;
-    descriptorIndexing.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
-    descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
-    descriptorIndexing.descriptorBindingVariableDescriptorCount = VK_TRUE;
-    descriptorIndexing.runtimeDescriptorArray = VK_TRUE;
 
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress{};
     bufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
     bufferDeviceAddress.pNext = &descriptorIndexing;
-    bufferDeviceAddress.bufferDeviceAddress = VK_TRUE;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStruct{};
     accelStruct.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     accelStruct.pNext = &bufferDeviceAddress;
-    accelStruct.accelerationStructure = VK_TRUE;
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracing{};
     rayTracing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     rayTracing.pNext = &accelStruct;
-    rayTracing.rayTracingPipeline = VK_TRUE;
 
     VkPhysicalDeviceSynchronization2Features sync2{};
     sync2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
     sync2.pNext = &rayTracing;
-    sync2.synchronization2 = VK_TRUE;
 
     VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering{};
     dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     dynamicRendering.pNext = &sync2;
-    dynamicRendering.dynamicRendering = VK_TRUE;
 
-    // Final feature query on selected GPU
     VkPhysicalDeviceFeatures2 finalFeatures{};
     finalFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     finalFeatures.pNext = &dynamicRendering;
@@ -442,13 +406,13 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 
     stone_seal_device(device);
     stone_seal_physical(selected);
-    stone_seal_graphics_family(g_ctx().graphicsFamily());
+    stone_seal_graphics_family(g_ctx().graphicsFamily_);
     stone_seal_graphics_queue(g_ctx().graphicsQueue_);
-    stone_seal_present_family(g_ctx().presentFamily());
+    stone_seal_present_family(g_ctx().presentFamily_);
     stone_seal_present_queue(g_ctx().presentQueue_);
-    stone_seal_transfer_family(g_ctx().transferFamily());
+    stone_seal_transfer_family(g_ctx().transferFamily_);
     stone_seal_transfer_queue(g_ctx().transferQueue_);
-    stone_seal_compute_family(g_ctx().computeFamily());
+    stone_seal_compute_family(g_ctx().computeFamily_);
     stone_seal_compute_queue(g_ctx().computeQueue_);
 
     createGlobalDescriptorPool();
@@ -462,89 +426,19 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 // =============================================================================
 // Context Initialization — Final Seal
 // =============================================================================
-void Context::init()
+void Context::init() noexcept
 {
-    window = stone_window();
-    width = stone_width();
-    height = stone_height();
-
+    // Window and size are set by main after swapchain creation
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
-    LOG_AMOURANTH("RTX context fully initialized — resolution {}×{} — empire armed", width, height);
-}
-
-// =============================================================================
-// Shader Loading — Robust and Eternal
-// =============================================================================
-VkShaderModule Context::loadShader(const std::string& filename) const noexcept
-{
-    if (stone_device() == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("Shader", "Cannot load shader — device not ready");
-        return VK_NULL_HANDLE;
-    }
-
-    std::vector<std::string> paths = {
-        filename,
-        "build/bin/Linux/" + filename,
-        "assets/shaders/spirv/" + filename
-    };
-
-    FILE* file = nullptr;
-    for (const auto& path : paths) {
-        file = fopen(path.c_str(), "rb");
-        if (file) break;
-    }
-
-    if (!file) {
-        LOG_ERROR_CAT("Shader", "Failed to open shader file (tried multiple paths): {}", filename);
-        return VK_NULL_HANDLE;
-    }
-
-    fseek(file, 0, SEEK_END);
-    size_t size = ftell(file);
-    rewind(file);
-
-    if (size < 128 || size % 4 != 0) {
-        fclose(file);
-        LOG_ERROR_CAT("Shader", "Invalid SPIR-V size: {} bytes — {}", size, filename);
-        return VK_NULL_HANDLE;
-    }
-
-    std::vector<uint32_t> code(size / 4);
-    if (fread(code.data(), 1, size, file) != size) {
-        fclose(file);
-        LOG_ERROR_CAT("Shader", "Failed to read shader file: {}", filename);
-        return VK_NULL_HANDLE;
-    }
-    fclose(file);
-
-    if (code[0] != 0x07230203) {
-        LOG_ERROR_CAT("Shader", "Invalid SPIR-V magic number in {}", filename);
-        return VK_NULL_HANDLE;
-    }
-
-    VkShaderModuleCreateInfo createInfo{
-        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = size,
-        .pCode    = code.data()
-    };
-
-    VkShaderModule module = VK_NULL_HANDLE;
-    VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR_CAT("Shader", "vkCreateShaderModule failed for {}: {}", filename, string_VkResult(result));
-        return VK_NULL_HANDLE;
-    }
-
-    LOG_SUCCESS_CAT("Shader", "Shader loaded: {}", filename);
-    return module;
+    LOG_AMOURANTH("RTX context fully initialized — empire armed");
 }
 
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — JANUARY 06, 2026
+// RTX CORE INITIALIZED — JANUARY 07, 2026
 // Safe, robust, production-ready Vulkan context
 // Global pool + persistent upload ready post-device
 // RTX-first selection — truth and performance

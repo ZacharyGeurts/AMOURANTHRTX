@@ -37,7 +37,6 @@ using StoneKey::stone_window;
 // =============================================================================
 // Global state
 // =============================================================================
-std::unique_ptr<VulkanRenderer> g_vulkanRenderer;
 SDLWindowPtr                    g_sdl_window;
 std::atomic<int>  g_resizeWidth{0};
 std::atomic<int>  g_resizeHeight{0};
@@ -163,11 +162,6 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
             {
                 outW = pendingW;
                 outH = pendingH;
-
-                if (g_vulkanRenderer)
-                {
-                    g_vulkanRenderer->onResize(pendingW, pendingH);
-                }
 
                 // Update last valid after successful resize
                 lastValidW = pendingW;
@@ -648,7 +642,7 @@ AudioManager::~AudioManager()
     sounds_.clear();
 }
 
-bool AudioManager::initMixer()
+bool AudioManager::init()
 {
     if (device_) return true;
 

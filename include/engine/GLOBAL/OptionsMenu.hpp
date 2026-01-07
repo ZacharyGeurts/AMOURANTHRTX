@@ -1,12 +1,19 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v8.1 — JANUARY 06, 2026
-// OptionsMenu.hpp — PURE HDR PHILOSOPHY — NO HOLLYWOOD TRICKS
-// WE ARE HDR PURE COLOR PIXEL DABBLERS — NOT SCENE MONKEYS
-// BLOOM, VIGNETTE, GRAIN, FLARE — BANISHED
-// ONLY WHAT SERVES TRUTH AND CLARITY REMAINS
-// ACCUMULATION, DENOISING, TONEMAP — ENABLED FOR PERFECTION
-// ALL OTHER "EFFECTS" ARE INHERENTLY INFERIOR
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// =============================================================================
+//
+// Dual Licensed:
+// 1. GNU General Public License v3.0 (or later) (GPL v3)
+//    https://www.gnu.org/licenses/gpl-3.0.html
+// 2. Commercial licensing: gzac5314@gmail.com
+//
+// OPTIONS MENU v∞ — JANUARY 06, 2026 — FINAL CLEAN CONFIGURATION
+// PURE HDR PHILOSOPHY — NO HOLLYWOOD TRICKS
+// BLOOM, VIGNETTE, GRAIN, FLARE — BANISHED FOREVER
+// ONLY WHAT SERVES TRUTH, CLARITY, AND PERFORMANCE REMAINS
+// ACCUMULATION + DENOISING + TONEMAP — ENABLED FOR PERFECTION
+// CAMERA FULLY CONFIGURABLE — CENTRALIZED CONTROL
+// PINK PHOTONS ETERNAL — THE EMPIRE SEES CLEARLY — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -17,13 +24,6 @@
 namespace Options {
 
 // ── THE EMPIRE'S CREED: PURE HDR TRUTH ──────────────────────────────────────
-// We do not chase cinematic illusions.
-// We chase perfect, clean, accurate color from infinite light.
-// Accumulation refines truth.
-// Denoising removes noise without softening reality.
-// Tonemapping maps infinite range to display — correctly.
-// Everything else is distraction.
-
 constexpr bool ENABLE_EVERYTHING_ESSENTIAL = true;
 
 // ── SPLASH — RESPECTFUL BUT BRIEF
@@ -69,14 +69,6 @@ namespace OptionsRTX {
     constexpr float    HYPERTRACE_JITTER_SCALE     = 380.0f;
 }
 
-// ── POST-PROCESSING — ONLY WHAT SERVES CLARITY
-namespace PostProcess {
-    constexpr bool     ENABLE_BLOOM                = false;  // Banished — softens truth
-    constexpr bool     ENABLE_VIGNETTE             = false;  // Banished — artificial framing
-    constexpr bool     ENABLE_FILM_GRAIN           = false;  // Banished — adds noise
-    constexpr bool     ENABLE_LENS_FLARE           = false;  // Banished — unrealistic artifact
-}
-
 // ── ENVIRONMENT & LIGHTING — PHYSICALLY ACCURATE
 namespace Environment {
     constexpr bool     ENABLE_ENV_MAP              = true;
@@ -91,7 +83,7 @@ namespace Environment {
 
 // ── TONEMAPPING — PURE AND ACCURATE
 namespace Tonemap {
-    constexpr bool     ENABLE_TONEMAPPING          = true;   // Required for HDR display
+    constexpr bool     ENABLE_TONEMAPPING          = false;   // Required for HDR display
     constexpr uint32_t TONEMAP_OPERATOR            = 0;      // 0 = ACES — most accurate
     constexpr float    GAMMA                       = 2.2f;
 }
@@ -116,13 +108,10 @@ namespace Debug {
     constexpr bool     ENABLE_VALIDATION_LAYERS    = false;
 }
 
-// ── CAMERA — SMOOTH AND PRECISE
+// ── CAMERA — SMOOTH, PRECISE, AND FULLY CONFIGURABLE
 namespace Camera {
     constexpr glm::vec3 START_POSITION             = glm::vec3(0.0f, 5.0f, 15.0f);
-    constexpr glm::vec3 CAMERA_START_POSITION      = START_POSITION;
 
-    constexpr float    START_YAW                   = -90.0f;
-    constexpr float    START_PITCH                 = 0.0f;
     constexpr float    DEFAULT_FOV                 = 80.0f;
     constexpr float    DEFAULT_APERTURE            = 16.0f;
     constexpr float    DEFAULT_FOCUS_DISTANCE      = 10.0f;
@@ -133,6 +122,16 @@ namespace Camera {
 
     constexpr float    MOVEMENT_SPEED              = 14.0f;
     constexpr float    SPRINT_MULTIPLIER           = 2.8f;
+
+    // Immersion effects — enabled by default for maximum realism
+    constexpr bool     ENABLE_HEAD_BOB             = true;
+    constexpr float    HEAD_BOB_FREQUENCY          = 2.2f;
+    constexpr float    HEAD_BOB_INTENSITY          = 0.08f;
+
+    constexpr bool     ENABLE_BREATHING            = true;
+    constexpr float    BREATHING_INTENSITY         = 0.03f;
+
+    constexpr bool     ENABLE_CAMERA_SHAKE         = true;
 }
 
 // ── RENDER MODES — FULL RTX ALWAYS
@@ -140,7 +139,7 @@ namespace RenderMode {
     constexpr uint32_t RTX_PATH_TRACING            = 0;
     constexpr uint32_t PURE_PINK_VOID              = 1;
     constexpr uint32_t DEFAULT_MODE                = RTX_PATH_TRACING;
-    constexpr bool     ENABLE_MODE_SWITCHING       = false;  // No switching — pure RTX forever
+    constexpr bool     ENABLE_MODE_SWITCHING       = false;  // Pure RTX forever
 }
 
 // ── PINK BILLBOARD — SACRED FALLBACK
@@ -156,12 +155,10 @@ namespace PinkBillboard {
 } // namespace Options
 
 // =============================================================================
-// FINAL CONFIGURATION v8.1 — JANUARY 06, 2026
+// FINAL CONFIGURATION — JANUARY 06, 2026
 // PURE HDR PHILOSOPHY — NO HOLLYWOOD TRICKS
 // BLOOM, VIGNETTE, GRAIN, FLARE — BANISHED
 // ACCUMULATION + DENOISING + TONEMAP — ENABLED FOR CLARITY AND TRUTH
-// ALL OTHER EFFECTS ARE INHERENTLY INFERIOR
-// WE ARE HDR PURE COLOR PIXEL DABBLERS
-// THE EMPIRE SEES CLEARLY
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// CAMERA FULLY CONFIGURABLE — CENTRALIZED CONTROL
+// THE EMPIRE SEES CLEARLY — PINK PHOTONS ETERNAL
 // =============================================================================

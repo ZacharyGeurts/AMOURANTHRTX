@@ -1,6 +1,6 @@
 // include/engine/GLOBAL/StoneKey.hpp
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
 //
 // Dual Licensed:
@@ -22,20 +22,17 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 #include <source_location>
-#include <atomic>
 #include <vector>
 #include <cstdio>
 #include <format>
 #include "engine/GLOBAL/logging.hpp"
 
 // Forward declarations
-class VulkanRenderer;
 namespace RTX { class PipelineManager; }
 
 namespace StoneKey {
 
-    // Global transient command pool — shared across renderer, LAS, main, etc.
-    // Created once in VulkanRenderer::createTransientCommandPool()
+    // Global transient command pool — shared across all modules
     static inline VkCommandPool g_transientCommandPool = VK_NULL_HANDLE;
 
     struct Empire final {
@@ -55,9 +52,8 @@ namespace StoneKey {
         static inline uint32_t transferFamily = ~0u;
         static inline uint32_t computeFamily = ~0u;
 
-        static inline std::atomic<VulkanRenderer*>     renderer_ = nullptr;
-        static inline std::atomic<RTX::PipelineManager*> pipeline = nullptr;
-        static inline std::atomic<SDL_Window*>          window = nullptr;
+        static inline RTX::PipelineManager* pipeline = nullptr;
+        static inline SDL_Window* window = nullptr;
 
         static inline std::vector<VkImage>     images;
         static inline std::vector<VkImageView> views;
@@ -75,7 +71,7 @@ namespace StoneKey {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
         };
 
-        static inline std::atomic<bool> sealed{ false };
+        static inline bool sealed{ false };
     };
 
     // GETTERS
@@ -95,9 +91,8 @@ namespace StoneKey {
     [[nodiscard]] inline uint32_t& stone_transfer_family() noexcept { return Empire::transferFamily; }
     [[nodiscard]] inline uint32_t& stone_compute_family() noexcept { return Empire::computeFamily; }
 
-    [[nodiscard]] inline VulkanRenderer* stone_renderer() noexcept { return Empire::renderer_.load(std::memory_order_acquire); }
-    [[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept { return Empire::pipeline.load(std::memory_order_acquire); }
-    [[nodiscard]] inline SDL_Window* stone_window() noexcept { return Empire::window.load(std::memory_order_acquire); }
+    [[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept { return Empire::pipeline; }
+    [[nodiscard]] inline SDL_Window* stone_window() noexcept { return Empire::window; }
 
     [[nodiscard]] inline auto& stone_images() noexcept { return Empire::images; }
     [[nodiscard]] inline auto& stone_views() noexcept { return Empire::views; }
@@ -149,18 +144,17 @@ namespace StoneKey {
     inline void stone_seal_transfer_family(uint32_t idx) noexcept { Empire::transferFamily = idx; }
     inline void stone_seal_compute_family(uint32_t idx) noexcept { Empire::computeFamily = idx; }
 
-    inline void stone_seal_renderer(VulkanRenderer* r) noexcept { Empire::renderer_.store(r, std::memory_order_release); }
-    inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept { Empire::pipeline.store(p, std::memory_order_release); }
-    inline void stone_seal_window(SDL_Window* w) noexcept { Empire::window.store(w, std::memory_order_release); }
+    inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept { Empire::pipeline = p; }
+    inline void stone_seal_window(SDL_Window* w) noexcept { Empire::window = w; }
 
     inline void stone_seal_width(uint32_t w) noexcept { Empire::extent.width = w; }
     inline void stone_seal_height(uint32_t h) noexcept { Empire::extent.height = h; }
 
     inline void stone_seal_images(const std::vector<VkImage>& imgs) noexcept { Empire::images = imgs; }
-    inline void stone_seal_images(std::vector<VkImage>&& imgs) noexcept       { Empire::images = std::move(imgs); }
+    inline void stone_seal_images(std::vector<VkImage>&& imgs) noexcept { Empire::images = std::move(imgs); }
 
     inline void stone_seal_views(const std::vector<VkImageView>& vws) noexcept { Empire::views = vws; }
-    inline void stone_seal_views(std::vector<VkImageView>&& vws) noexcept      { Empire::views = std::move(vws); }
+    inline void stone_seal_views(std::vector<VkImageView>&& vws) noexcept { Empire::views = std::move(vws); }
 
     inline void stone_seal_pass(VkRenderPass p) noexcept { Empire::pass = p; }
     inline void stone_seal_extent(VkExtent2D ext) noexcept { Empire::extent = ext; }
@@ -171,7 +165,7 @@ namespace StoneKey {
     inline void stone_seal_mesh(VkBuffer vb, VkDeviceMemory vm,
                                 VkBuffer ib, VkDeviceMemory im,
                                 uint32_t ic) noexcept
-    {
+{
         Empire::stone_mesh_vertex_buffer = vb;
         Empire::stone_mesh_vertex_memory = vm;
         Empire::stone_mesh_index_buffer  = ib;
@@ -182,7 +176,9 @@ namespace StoneKey {
     // FINAL SEAL — VALIDATES EVERY VALUE WITH SIZE & HANDLE DISPLAY
     inline void stone_seal_final() noexcept
     {
-        const bool was_sealed = Empire::sealed.exchange(true, std::memory_order_acq_rel);
+        const bool was_sealed = Empire::sealed;
+        Empire::sealed = true;
+
         if (was_sealed) {
             LOG_INFO_CAT("EMPIRE", "Stone seal already complete — empire eternal.");
             return;
@@ -219,41 +215,33 @@ namespace StoneKey {
             }
         };
 
-        // Core Vulkan objects
         CHECK_HANDLE(Empire::instance != VK_NULL_HANDLE, "VkInstance", Empire::instance);
         CHECK_HANDLE(Empire::device != VK_NULL_HANDLE, "VkDevice", Empire::device);
         CHECK_HANDLE(Empire::physical != VK_NULL_HANDLE, "VkPhysicalDevice", Empire::physical);
         CHECK_HANDLE(Empire::surface != VK_NULL_HANDLE, "VkSurfaceKHR", Empire::surface);
         CHECK_HANDLE(Empire::swapchain != VK_NULL_HANDLE, "VkSwapchainKHR", Empire::swapchain);
 
-        // Queues
         CHECK_HANDLE(Empire::graphicsQueue != VK_NULL_HANDLE, "Graphics Queue", Empire::graphicsQueue);
         CHECK_HANDLE(Empire::presentQueue != VK_NULL_HANDLE, "Present Queue", Empire::presentQueue);
         CHECK_HANDLE(Empire::computeQueue != VK_NULL_HANDLE, "Compute Queue", Empire::computeQueue);
         CHECK_HANDLE(Empire::transferQueue != VK_NULL_HANDLE, "Transfer Queue", Empire::transferQueue);
 
-        // Queue families
         CHECK_VALUE(Empire::graphicsFamily != ~0u, "Graphics Family Index", Empire::graphicsFamily);
         CHECK_VALUE(Empire::presentFamily != ~0u, "Present Family Index", Empire::presentFamily);
         CHECK_VALUE(Empire::transferFamily != ~0u, "Transfer Family Index", Empire::transferFamily);
         CHECK_VALUE(Empire::computeFamily != ~0u, "Compute Family Index", Empire::computeFamily);
 
-        // Critical engine objects
-        CHECK_HANDLE(Empire::renderer_.load() != nullptr, "VulkanRenderer*", Empire::renderer_.load());
-        CHECK_HANDLE(Empire::pipeline.load() != nullptr, "PipelineManager*", Empire::pipeline.load());
-        CHECK_HANDLE(Empire::window.load() != nullptr, "SDL_Window*", Empire::window.load());
+        CHECK_HANDLE(Empire::pipeline != nullptr, "PipelineManager*", Empire::pipeline);
+        CHECK_HANDLE(Empire::window != nullptr, "SDL_Window*", Empire::window);
 
-        // Swapchain data
         CHECK_VECTOR(!Empire::images.empty(), "Swapchain Images Vector", Empire::images, Empire::images.size() * sizeof(VkImage));
         CHECK_VECTOR(!Empire::views.empty(), "Swapchain Image Views Vector", Empire::views, Empire::views.size() * sizeof(VkImageView));
         CHECK_VALUE(Empire::image_count > 0, "Swapchain Image Count", Empire::image_count);
         CHECK_VALUE(Empire::extent.width > 0 && Empire::extent.height > 0, "Swapchain Extent", Empire::extent.width * Empire::extent.height * 4);
 
-        // Ray tracing support
-        CHECK_VALUE(Empire::rtProps.shaderGroupHandleSize > 0, "Ray Tracing Support (Handle Size)", Empire::rtProps.shaderGroupHandleSize);
+        CHECK_VALUE(Empire::rtProps.shaderGroupHandleSize > 0, "Ray Tracing Handle Size", Empire::rtProps.shaderGroupHandleSize);
         CHECK_VALUE(Empire::rtProps.maxRayRecursionDepth > 0, "Ray Tracing Max Recursion Depth", Empire::rtProps.maxRayRecursionDepth);
 
-        // Transient command pool
         CHECK_HANDLE(g_transientCommandPool != VK_NULL_HANDLE, "Transient Command Pool", g_transientCommandPool);
 
         // Mesh data (optional but validated if present)
@@ -297,15 +285,14 @@ namespace StoneKey {
         detail::g_runtimeObfuscator = key ? key : detail::kStoneObfuscatorBase;
     }
 
-    // FINAL MACROS — NOW WORKS EVERYWHERE
     #define STONE_FINAL_OBFUSCATE(val)   (static_cast<uint64_t>(val) ^ ::StoneKey::stone_get_obfuscator())
     #define STONE_FINAL_DEOBFUSCATE(val) (static_cast<uint64_t>(val) ^ ::StoneKey::stone_get_obfuscator())
 
     #define STONE_OBFUSCATE_RT(val)  STONE_FINAL_OBFUSCATE(val)
     #define STONE_DEOBFUSCATE_RT(val) STONE_FINAL_DEOBFUSCATE(val)
 
-    // =============================================================================
-    // THE EMPIRE IS COMPLETE — GLOBAL TRANSIENT POOL ADDED — SEAL PURE AND ETERNAL
-    // PINK PHOTONS ETERNAL — DECEMBER 20, 2025 — FINAL LIGHT
-    // =============================================================================
-}
+} // namespace StoneKey
+
+// =============================================================================
+// FINAL STONEKEY — JANUARY 07, 2026
+// - No VulkanRenderer forward decl
