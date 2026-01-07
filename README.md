@@ -54,7 +54,6 @@ Made with Grok sized files for AI updates.
 
 Errors and bad code will not be tolerated.
 <img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Untitled.png" />  
-<img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-08%2012-01-46.png" />  
 
 - **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
