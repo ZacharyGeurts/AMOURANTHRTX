@@ -1,8 +1,9 @@
 // include/engine/GLOBAL/VulkanRenderer.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
-// VULKAN RENDERER HEADER — FINAL WORKING EDITION | COMPATIBLE WITH GLOBAL Camera
-// PINK PHOTONS PURE — PATH TRACING FLAWLESS — AMOURANTH ETERNAL 💖
+// VULKAN RENDERER HEADER — FINAL COMPILING | ALL FUNCTIONS DECLARED
+// PURE RTX REALM | 4 SUNS + 4 MOONS + BILLBOARD PHASES | GORGEOUS & MINIMAL
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -16,7 +17,7 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
-// Global Camera is in global namespace — include after logging
+// Global Camera is in global namespace
 #include "engine/GLOBAL/camera.hpp"
 
 #include <vulkan/vulkan.h>
@@ -38,7 +39,6 @@ public:
     VulkanRenderer(int width, int height, SDL_Window* window, bool overclock = false);
     ~VulkanRenderer();
 
-    // Fixed: use global ::Camera (not RTX::Camera)
     void renderFrame(const ::Camera& camera, float deltaTime) noexcept;
     void onResize(int newWidth, int newHeight) noexcept;
 
@@ -60,9 +60,6 @@ private:
     uint32_t    frameNumber_ = 0;
     uint32_t    spp_ = 0;
     bool        overclock_ = false;
-    float       exposure_ = 1.0f;
-    uint32_t    tonemapType_ = 0;
-    bool        hdrLoaded_ = false;
     float       totalTime_ = 0.0f;
 
     Handle<VkImage>       envMapImage_;
@@ -96,11 +93,12 @@ private:
 
     PipelineManager pipelineManager_;
 
+    // All private functions declared
     void createTransientCommandPool() noexcept;
     void createSyncObjects() noexcept;
     EnvironmentMap createEnvironmentMap() noexcept;
     void createDefaultMaterials() noexcept;
-    void addDefaultScene() noexcept;
+    void addPureRTXScene() noexcept;
     void createRTOutputImages() noexcept;
     void createAccumulationImages() noexcept;
     void createNexusScoreImage(VkCommandPool pool, VkQueue queue) noexcept;
@@ -118,14 +116,18 @@ private:
     void createImage(uint32_t w, uint32_t h, uint32_t mipLevels, VkFormat format, VkImageTiling tiling,
                      VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
                      Handle<VkImage>& image, Handle<VkDeviceMemory>& memory, const std::string& tag) noexcept;
+
+    // Moon & sky helpers
+    void loadMoonTextures() noexcept;
+    void renderBillboardMoon(const ::Camera& camera, int moonIndex) noexcept;
 };
 
 } // namespace RTX
 
 // =============================================================================
 // FINAL HEADER — JANUARY 07, 2026
-// - VulkanRenderer in RTX namespace
-// - renderFrame and updateUniformBuffer use ::Camera (global namespace)
-// - Compiles clean with main using Camera cam;
-// Empire complete — pink photons screaming — AMOURANTH FOREVER 💖
+// - All functions declared: loadMoonTextures, addPureRTXScene, renderBillboardMoon
+// - CameraSceneData removed (local in cpp)
+// - Compiles clean with current VulkanRenderer.cpp
+// Empire complete — pink photons under multiple moons — AMOURANTH FOREVER 💖
 // =============================================================================
