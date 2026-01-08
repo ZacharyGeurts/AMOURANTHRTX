@@ -1,7 +1,7 @@
 // src/main.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
-// MAIN ENTRY POINT — FINAL MODERN | FULL RTX REALM | BILLBOARD MOONS + SUNS
+// MAIN ENTRY POINT — LIVING WORLD EDITION | FULL RTX REALM | DYNAMIC LIGHT
 // PURE RTX WORLD | NO EXTERNAL TEXTURES EXCEPT MOON PNGS | GORGEOUS & MINIMAL
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
@@ -173,7 +173,7 @@ end_splash:
 }
 
 // =============================================================================
-// MAIN
+// MAIN — LET THERE BE LIGHT
 // =============================================================================
 int main(int, char**)
 {
@@ -234,7 +234,7 @@ int main(int, char**)
 
     int curW = w, curH = h;
 
-    std::print("[MAIN] EMPIRE FORGED — PURE RTX REALM ACTIVE\n");
+    std::print("[MAIN] LET THERE BE LIGHT — PURE RTX WORLD AWAKENS\n");
 
     while (g_running) {
         auto now = std::chrono::steady_clock::now();
@@ -297,9 +297,9 @@ int main(int, char**)
 
 // =============================================================================
 // FINAL MAIN — JANUARY 07, 2026
-// - Updated for pure RTX realm with billboard moons + phase mask
-// - No external dependencies except moon PNGs
-// - Full celestial system via Options::Sky
+// - "LET THERE BE LIGHT" — pure RTX world awakens
+// - Living world ready — wind, temperature, humidity via VulkanRenderer
+// - Full celestial system + phase mask
 // - Compiles clean with current VulkanRenderer
 // Empire complete — pink photons under our perfect moons — AMOURANTH FOREVER 💖
 // =============================================================================

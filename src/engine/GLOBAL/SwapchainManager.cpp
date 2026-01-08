@@ -1,7 +1,8 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
-// SwapchainManager — FINAL COMPILING | CLEAN & MINIMAL | NO UNUSED VARS
+// SwapchainManager — ZERO-COST RTX EDITION | DIRECT STORAGE USAGE | LIVING WORLD READY
+// RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES | NO BLIT | MAXIMUM SPEED
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -25,6 +26,8 @@ using StoneKey::stone_width;
 using StoneKey::stone_height;
 
 namespace RTX {
+
+// No definitions here — all static members are inline in header
 
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept
 {
@@ -98,13 +101,14 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         VkFormat format;
         VkColorSpaceKHR space;
         bool hdr;
+        const char* name;
     };
 
     const Candidate candidates[] = {
-        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, true },
-        { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, true },
-        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT, true },
-        { VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, false }
+        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, true, "16-bit Float HDR" },
+        { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, true, "10-bit HDR10" },
+        { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT, true, "16-bit HDR10" },
+        { VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, false, "8-bit sRGB" }
     };
 
     bool hdrEnabled = false;
@@ -114,7 +118,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         if (it != formats.end()) {
             chosenFormat = *it;
             if (cand.hdr) {
-                LOG_AMOURANTH("HDR SWAPCHAIN FORGED — PINK PHOTONS BLOOM IN FULL DYNAMIC RANGE");
+                LOG_AMOURANTH("HDR SWAPCHAIN FORGED — {} — PINK PHOTONS IN FULL DYNAMIC RANGE", cand.name);
                 hdrEnabled = true;
             }
             break;
@@ -125,6 +129,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         LOG_INFO_CAT("SWAPCHAIN", "HDR not available — falling back to 8-bit sRGB");
     }
 
+    // ZERO-COST RTX: Allow ray tracing shaders to write directly into swapchain images
     VkSwapchainCreateInfoKHR createInfo{
         .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface          = surface,
@@ -135,7 +140,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         .imageArrayLayers = 1,
         .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                            VK_IMAGE_USAGE_STORAGE_BIT, // ← CRITICAL: Direct RTX write
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform     = caps.currentTransform,
         .compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -151,7 +157,6 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         return;
     }
 
-    // Old swapchain destroyed automatically by Handle RAII when reassigned
     swapchain_ = Handle<VkSwapchainKHR>(
         newSwapchain,
         device,
@@ -174,8 +179,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .viewType         = VK_IMAGE_VIEW_TYPE_2D,
         .format           = chosenFormat.format,
-        .components       = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                              VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+        .components       = { VK_COMPONENT_SWIZZLE_IDENTITY },
         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
     };
 
@@ -191,13 +195,13 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_views(swapchainImageViews_);
 
     const char* modeName =
-        presentMode == VK_PRESENT_MODE_MAILBOX_KHR       ? "MAILBOX (Low Latency)" :
+        presentMode == VK_PRESENT_MODE_MAILBOX_KHR       ? "MAILBOX (Triple Buffer)" :
         presentMode == VK_PRESENT_MODE_FIFO_KHR          ? "FIFO (VSync)" :
         presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR  ? "FIFO_RELAXED (Adaptive)" :
-        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR     ? "IMMEDIATE (Max FPS)" :
+        presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR     ? "IMMEDIATE (Tearing)" :
         "UNKNOWN";
 
-    LOG_AMOURANTH("[2026] SWAPCHAIN {} — {}×{} — {} images — {} — {}",
+    LOG_AMOURANTH("[2026] SWAPCHAIN {} — {}×{} — {} images — {} — {} — ZERO-COST RTX DIRECT",
                   isRecreate ? "RECREATED" : "FORGED",
                   extent.width, extent.height, retrievedCount, modeName,
                   hdrEnabled ? "HDR (Full Glory)" : "8-bit sRGB");
@@ -226,7 +230,7 @@ void SwapchainManager::cleanup() noexcept
 
 void SwapchainManager::cleanupSwapchain() noexcept
 {
-    swapchain_ = Handle<VkSwapchainKHR>();  // Explicit reset — RAII destroys old
+    swapchain_ = Handle<VkSwapchainKHR>();
     swapchainImages_.clear();
 }
 
@@ -281,9 +285,9 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 
 // =============================================================================
 // FINAL SWAPCHAIN — JANUARY 07, 2026
-// - No unused variables
-// - swapchain_.reset() replaced with swapchain_ = Handle<VkSwapchainKHR>() — RAII clean
-// - 3-arg Handle with explicit deleter
-// - Compiles clean with -Werror
-// Empire complete — pink photons screaming — AMOURANTH FOREVER 💖
+// - ZERO-COST RTX: VK_IMAGE_USAGE_STORAGE_BIT added
+// - Rays write directly into swapchain images
+// - No blit/copy — maximum performance
+// - Living world ready — safe recreation
+// Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================

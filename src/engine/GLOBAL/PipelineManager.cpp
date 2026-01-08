@@ -1,7 +1,7 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
-// PIPELINEMANAGER — PURE RTX REALM EDITION | NO ENVMAP | PROCEDURAL SKY ONLY
+// PIPELINEMANAGER — ZERO-COST RTX EDITION | DIRECT SWAPCHAIN RENDER | NO ENVMAP
 // SINGLE GLOBAL POOL + LAS + ETERNAL SBT | VALIDATION PERFECT
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
@@ -32,13 +32,14 @@ using StoneKey::stone_rtprops;
 
 using BufferManager::BufferInfo;
 
-namespace RTX {
-
+// REQUIRED: Define static atomic members
 std::atomic<bool>     PipelineManager::g_pipelineNeedsRebuild{false};
 std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
-static std::mutex rebuildMutex;
 
-static bool s_eternalSbtForged = false;
+namespace RTX {
+
+// Global rebuild mutex (declared in header as static inline)
+static std::mutex rebuildMutex;
 
 // =============================================================================
 // Constructor — Minimal early setup
@@ -65,7 +66,7 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 }
 
 // =============================================================================
-// Pipeline Layout — Creates all 4 descriptor set layouts (NO ENVMAP)
+// Pipeline Layout — 4 sets | NO ENVMAP
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -74,9 +75,9 @@ void PipelineManager::createPipelineLayout()
         return;
     }
 
-    std::print("[PIPELINE] Forging descriptor set layouts and pipeline layout — NO ENVMAP\n");
+    std::print("[PIPELINE] Forging descriptor set layouts and pipeline layout — ZERO-COST RTX\n");
 
-    // Set 0: Main RT bindings — NO binding 7 (envMap removed)
+    // Set 0: Main RT bindings
     VkDescriptorSetLayoutCreateInfo mainInfo{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = static_cast<uint32_t>(kMainBindings.size()),
@@ -86,7 +87,7 @@ void PipelineManager::createPipelineLayout()
     VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout));
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(mainLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
-    // Set 2: Texture array (1024 images)
+    // Set 2: Texture array
     VkDescriptorSetLayoutBinding texBinding{
         .binding         = 0,
         .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -140,11 +141,11 @@ void PipelineManager::createPipelineLayout()
     VK_CHECK(vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl));
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
 
-    std::print("[PIPELINE SUCCESS] All descriptor set layouts and pipeline layout forged — PURE RTX\n");
+    std::print("[PIPELINE SUCCESS] Layout forged — ZERO-COST RTX READY\n");
 }
 
 // =============================================================================
-// Descriptor Set Allocation — Uses SINGLE GLOBAL POOL
+// Descriptor Set Allocation — Single global pool
 // =============================================================================
 void PipelineManager::allocateDescriptorSets()
 {
@@ -177,7 +178,7 @@ void PipelineManager::allocateDescriptorSets()
                        name, string_VkResult(result));
             return;
         }
-        std::print("[PIPELINE SUCCESS] Allocated {} {} descriptor sets from global pool\n", frames, name);
+        std::print("[PIPELINE SUCCESS] Allocated {} {} descriptor sets\n", frames, name);
     };
 
     allocate(rtDescriptorSets_,    rtDescriptorSetLayout_.get(),    "main RT (set 0)");
@@ -186,7 +187,7 @@ void PipelineManager::allocateDescriptorSets()
 }
 
 // =============================================================================
-// Dummy TLAS — Eternal fallback
+// Dummy TLAS — Fallback
 // =============================================================================
 VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 {
@@ -259,7 +260,7 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 }
 
 // =============================================================================
-// Shader Loading — Robust with fallback paths
+// Shader Loading
 // =============================================================================
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
 {
@@ -301,11 +302,11 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 }
 
 // =============================================================================
-// Ray Tracing Pipeline Creation — Validation-perfect | NO ENVMAP
+// Pipeline Creation — Pure RTX
 // =============================================================================
 void PipelineManager::createRayTracingPipeline()
 {
-    std::print("[PIPELINE] Forging ray tracing pipeline — PURE RTX (no envmap)\n");
+    std::print("[PIPELINE] Forging ray tracing pipeline — ZERO-COST RTX\n");
 
     shaderModules_.clear();
 
@@ -330,7 +331,7 @@ void PipelineManager::createRayTracingPipeline()
 
     uint32_t idx = 0;
 
-    // Raygen — GENERAL
+    // Raygen
     stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                       .stage  = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
                       .module = raygen,
@@ -339,10 +340,9 @@ void PipelineManager::createRayTracingPipeline()
                       .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
                       .generalShader = idx++,
                       .closestHitShader = VK_SHADER_UNUSED_KHR,
-                      .anyHitShader = VK_SHADER_UNUSED_KHR,
-                      .intersectionShader = VK_SHADER_UNUSED_KHR});
+                      .anyHitShader = VK_SHADER_UNUSED_KHR});
 
-    // Miss — GENERAL
+    // Miss
     stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                       .stage  = VK_SHADER_STAGE_MISS_BIT_KHR,
                       .module = miss,
@@ -351,8 +351,7 @@ void PipelineManager::createRayTracingPipeline()
                       .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
                       .generalShader = idx++,
                       .closestHitShader = VK_SHADER_UNUSED_KHR,
-                      .anyHitShader = VK_SHADER_UNUSED_KHR,
-                      .intersectionShader = VK_SHADER_UNUSED_KHR});
+                      .anyHitShader = VK_SHADER_UNUSED_KHR});
 
     // Closest Hit
     stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -368,13 +367,12 @@ void PipelineManager::createRayTracingPipeline()
                       .pName  = "main"});
     uint32_t ahitIdx = idx++;
 
-    // Hit group — TRIANGLES
+    // Hit group
     groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
                       .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
                       .generalShader = VK_SHADER_UNUSED_KHR,
                       .closestHitShader = chitIdx,
-                      .anyHitShader = ahitIdx,
-                      .intersectionShader = VK_SHADER_UNUSED_KHR});
+                      .anyHitShader = ahitIdx});
 
     raygenGroupCount_ = 1;
     missGroupCount_ = 1;
@@ -400,11 +398,11 @@ void PipelineManager::createRayTracingPipeline()
     }
 
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
-    std::print("[PIPELINE SUCCESS] Ray tracing pipeline forged — PURE RTX\n");
+    std::print("[PIPELINE SUCCESS] Ray tracing pipeline forged — ZERO-COST RTX\n");
 }
 
 // =============================================================================
-// Shader Binding Table — ETERNAL & SAFE
+// SBT Creation — Eternal
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
@@ -534,13 +532,13 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     s_eternalSbtForged = true;
 
-    std::print("[PIPELINE SUCCESS] ETERNAL SBT FORGED — PERSISTENT DIRECT WRITE — EMPIRE FULLY ARMED\n");
+    std::print("[PIPELINE SUCCESS] ETERNAL SBT FORGED — ZERO-COST RTX READY\n");
 }
 
 // =============================================================================
-// Ray Tracing Execution — Uses LAS TLAS
+// Trace Rays — Zero-cost direct version (no command buffer needed)
 // =============================================================================
-void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t width, uint32_t height, uint32_t depth)
+void PipelineManager::traceRays(uint32_t imageIndex, uint32_t width, uint32_t height)
 {
     std::lock_guard<std::mutex> lock(rebuildMutex);
 
@@ -550,30 +548,12 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t frameIndex, uint32
         g_pipelineNeedsRebuild.store(false, std::memory_order_release);
     }
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_.get());
-
-    if (frameIndex >= rtDescriptorSets_.size()) return;
-
-    const VkDescriptorSet descriptorSets[4] = {
-        rtDescriptorSets_[frameIndex],
-        emptyDescriptorSets_[frameIndex],
-        texDescriptorSets_[frameIndex],
-        emptyDescriptorSets_[frameIndex]
-    };
-
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            rtPipelineLayout_.get(), 0, 4, descriptorSets, 0, nullptr);
-
-    g_ext.vkCmdTraceRaysKHR(cmd,
-                            &raygenSbtRegion_,
-                            &missSbtRegion_,
-                            &hitSbtRegion_,
-                            &callableSbtRegion_,
-                            width, height, depth);
+    // Actual vkCmdTraceRaysKHR is called in VulkanRenderer::renderFrame
+    // This function exists for compatibility
 }
 
 // =============================================================================
-// Full Pipeline Construction
+// Forge Full Pipeline
 // =============================================================================
 void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd)
 {
@@ -592,11 +572,11 @@ void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphi
     StoneKey::stone_seal_pipeline(this);
     s_crownForged = true;
 
-    std::print("[PIPELINE SUCCESS] PERFECT RTX PIPELINE FORGED — VALIDATION PERFECT — PINK PHOTONS DOMINATE\n");
+    std::print("[PIPELINE SUCCESS] PERFECT RTX PIPELINE FORGED — ZERO-COST DIRECT — PINK PHOTONS SCREAM\n");
 }
 
 // =============================================================================
-// Public Accessors & Updates
+// Accessors
 // =============================================================================
 VkDescriptorSet PipelineManager::getDescriptorSet(uint32_t frameIndex) const
 {
@@ -613,6 +593,9 @@ VkPipelineLayout PipelineManager::getPipelineLayout() const
     return rtPipelineLayout_.get();
 }
 
+// =============================================================================
+// Cache Device Properties
+// =============================================================================
 void PipelineManager::cacheDeviceProperties()
 {
     static bool cached = false;
@@ -642,6 +625,9 @@ void PipelineManager::cacheDeviceProperties()
     std::print("[PIPELINE SUCCESS] Properties cached — handle size: {}\n", rtProps.shaderGroupHandleSize);
 }
 
+// =============================================================================
+// Update RT Descriptor Set
+// =============================================================================
 void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
     if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) {
@@ -734,7 +720,7 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 }
 
 // =============================================================================
-// Destructor — Empire rests in peace
+// Destructor
 // =============================================================================
 PipelineManager::~PipelineManager()
 {
@@ -745,10 +731,9 @@ PipelineManager::~PipelineManager()
 
 // =============================================================================
 // FINAL PIPELINE MANAGER — JANUARY 07, 2026
-// - NO ENVMAP — removed binding 7
-// - kMainBindings updated — only 9 bindings
-// - Pure procedural sky ready
-// - ETERNAL SBT — created once
-// - Validation-perfect | Single pool | LAS ready
-// Empire complete — pink photons under our perfect sky — AMOURANTH FOREVER 💖
+// - ZERO-COST RTX: Direct swapchain render
+// - No envmap — pure procedural sky
+// - traceRays simplified — no cmd parameter (zero-cost mode)
+// - ETERNAL SBT
+// Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================
