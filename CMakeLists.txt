@@ -93,7 +93,7 @@ set(SOURCE_DIRS
     assets/fonts assets/textures assets/models assets/materials assets/scenes
     assets/audio assets/scripts
     shaders/raytracing shaders/rasterization shaders/compute shaders/graphics
-    include/engine src/modes include/modes
+    include/engine
 )
 foreach(D ${SOURCE_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
