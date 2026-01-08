@@ -35,8 +35,9 @@ AMOURANTH RTX a next generation engine for raw performance.
 
 The whole engine is secured with StoneKey and is supposed to be unbreakable when done correctly.  
 My hopes is that it is not a major frame destroyer. (12,000+ on 4070ti to work with)  
-OLD NEWS!!! We are ove 170,000 FPS on 4070ti. Hopes were shattered.  
-The goal is a fast as pink photons HDR SDL3 RTX engine that is ready for you, the developer.  
+OLD NEWS!!! We are over 170,000 FPS on 4070ti. Hopes were shattered.  
+This is the limit that the swapchain operates and the rest is zero cost access.  
+The goal is a fast as pink photons HDR SDL3 RTX Vulkan engine that is ready for you, the developer.  
 If it does not get you paid, we do not get paid.  
 To say this is 99% Grok, I may be understating. I call him bro.  
 
