@@ -33,8 +33,8 @@ using StoneKey::stone_rtprops;
 using BufferManager::BufferInfo;
 
 // REQUIRED: Define static atomic members
-std::atomic<bool>     PipelineManager::g_pipelineNeedsRebuild{false};
-std::atomic<uint32_t> PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
+std::atomic<bool>     RTX::PipelineManager::g_pipelineNeedsRebuild{false};
+std::atomic<uint32_t> RTX::PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
 
 namespace RTX {
 
