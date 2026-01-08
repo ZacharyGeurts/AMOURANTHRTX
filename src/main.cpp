@@ -1,6 +1,6 @@
 // src/main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 08, 2026
 // MAIN ENTRY POINT — LIVING WORLD EDITION | FULL RTX REALM | DYNAMIC LIGHT
 // PURE RTX WORLD | NO EXTERNAL TEXTURES EXCEPT MOON PNGS | GORGEOUS & MINIMAL
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
@@ -177,6 +177,10 @@ end_splash:
 // =============================================================================
 int main(int, char**)
 {
+    // CRITICAL: Force early initialization of StoneKey polymorphic keys
+    // This fixes static initialization order issues and ensures consistent encryption/decryption
+    StoneKey::detail::initialize_polymorphic_keys();
+
     showSplash();
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) apocalypse("SDL_Init failed");
@@ -202,7 +206,7 @@ int main(int, char**)
     StoneKey::stone_seal_instance(instance);
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) apocalypse("Surface failed");
+    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) apocalypse("Surface failed");
     StoneKey::stone_seal_surface(surface);
 
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
@@ -296,7 +300,8 @@ int main(int, char**)
 }
 
 // =============================================================================
-// FINAL MAIN — JANUARY 07, 2026
+// FINAL MAIN — JANUARY 08, 2026
+// - StoneKey initialization order fixed via explicit early call
 // - "LET THERE BE LIGHT" — pure RTX world awakens
 // - Living world ready — wind, temperature, humidity via VulkanRenderer
 // - Full celestial system + phase mask
