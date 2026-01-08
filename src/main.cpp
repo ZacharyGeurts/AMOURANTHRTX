@@ -206,7 +206,7 @@ int main(int, char**)
     StoneKey::stone_seal_instance(instance);
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) apocalypse("Surface failed");
+    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) apocalypse("Surface failed");
     StoneKey::stone_seal_surface(surface);
 
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
