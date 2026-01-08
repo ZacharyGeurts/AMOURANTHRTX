@@ -135,7 +135,7 @@ namespace VR {
 // ── DEBUG
 namespace Debug {
     constexpr bool SHOW_FPS_OVERLAY          = true;
-    constexpr bool ENABLE_VALIDATION_LAYERS  = false;
+    constexpr bool ENABLE_VALIDATION_LAYERS  = true;
 }
 
 } // namespace Options
