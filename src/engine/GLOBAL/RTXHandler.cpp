@@ -1,6 +1,6 @@
 // src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 08, 2026
 // RTX HANDLER — GLOBAL VULKAN CONTEXT | FINAL COMPILING | ALL FUNCTIONS DEFINED
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
@@ -346,6 +346,7 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 
     uint32_t extCount = fullRTXSupport ? std::size(requiredExtensions) : 1;
 
+    // Rebuild feature chain for device creation
     VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing{};
     descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
 
@@ -369,14 +370,33 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
     dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     dynamicRendering.pNext = &sync2;
 
-    VkPhysicalDeviceFeatures2 finalFeatures{};
-    finalFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    finalFeatures.pNext = &dynamicRendering;
-    vkGetPhysicalDeviceFeatures2(selected, &finalFeatures);
+    // Re-query features on the selected device to fill support values
+    VkPhysicalDeviceFeatures2 tempFeatures{};
+    tempFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    tempFeatures.pNext = &dynamicRendering;
+    vkGetPhysicalDeviceFeatures2(selected, &tempFeatures);
+
+    // Explicitly enable required descriptor indexing features for UPDATE_AFTER_BIND pools
+    descriptorIndexing.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
+    descriptorIndexing.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    descriptorIndexing.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
+    descriptorIndexing.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+    descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
+    descriptorIndexing.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    descriptorIndexing.runtimeDescriptorArray = VK_TRUE;
+
+    // Enable RTX features if supported
+    bufferDeviceAddress.bufferDeviceAddress = fullRTXSupport ? VK_TRUE : VK_FALSE;
+    accelStruct.accelerationStructure = fullRTXSupport ? VK_TRUE : VK_FALSE;
+    rayTracing.rayTracingPipeline = fullRTXSupport ? VK_TRUE : VK_FALSE;
+
+    // Always enable these modern features
+    dynamicRendering.dynamicRendering = VK_TRUE;
+    sync2.synchronization2 = VK_TRUE;
 
     VkDeviceCreateInfo deviceInfo{
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext                   = &dynamicRendering,
+        .pNext                   = &dynamicRendering,  // Chain starts here
         .queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size()),
         .pQueueCreateInfos       = queueCreateInfos.data(),
         .enabledExtensionCount   = extCount,
@@ -428,7 +448,6 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 // =============================================================================
 void Context::init() noexcept
 {
-    // Window and size are set by main after swapchain creation
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
@@ -438,8 +457,9 @@ void Context::init() noexcept
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — JANUARY 07, 2026
+// RTX CORE INITIALIZED — JANUARY 08, 2026
 // Safe, robust, production-ready Vulkan context
+// Fixed: Explicitly enable descriptor indexing features for UPDATE_AFTER_BIND pools
 // Global pool + persistent upload ready post-device
 // RTX-first selection — truth and performance
 // THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN
