@@ -1,9 +1,10 @@
 // src/engine/GLOBAL/VulkanRenderer.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.0 — JANUARY 08, 2026
 // VULKAN RENDERER — LIVING WORLD EDITION | ZERO-COST DIRECT RENDER
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES | NO BLIT | MAXIMUM SPEED
 // PURE RTX REALM | PROCEDURAL SKY + GRASS | DYNAMIC LIGHTING
+// FULLY COMPATIBLE WITH BUFFERMANAGER v28.0 — MODERN C++23
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -239,8 +240,9 @@ void RTX::VulkanRenderer::createDefaultMaterials() noexcept {
     materials[0].albedo = glm::vec4(0.1f, 0.4f, 0.1f, 1.0f);
     materials[0].emissive = glm::vec4(0.0f);
 
-    defaultMaterialsHandle_ = BufferManager::create(sizeof(materials), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "DefaultMaterials");
+    defaultMaterialsHandle_ = BufferManager::create(sizeof(materials),
+                                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                    "DefaultMaterials");
 
     BufferManager::uploadToBuffer(defaultMaterialsHandle_, materials.data(), sizeof(materials));
 }
@@ -320,10 +322,11 @@ void RTX::VulkanRenderer::onResize(int newWidth, int newHeight) noexcept {
 }
 
 // =============================================================================
-// FINAL RENDERER — JANUARY 07, 2026
+// FINAL RENDERER v28.0 — JANUARY 08, 2026
 // - ZERO-COST DIRECT RENDER — rays write straight into swapchain images
 // - No blit, no extra images — maximum speed
 // - Living world updated every frame
 // - Pure RTX — no envmap
+// - Fully compatible with BufferManager v28.0 (no memory property flags)
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================

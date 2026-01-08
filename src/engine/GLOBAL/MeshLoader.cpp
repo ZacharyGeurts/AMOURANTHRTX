@@ -1,11 +1,10 @@
 // src/engine/GLOBAL/MeshLoader.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2025 — MESHLOADER v10 — FINAL — DECEMBER 22, 2025
-// FULLY COMPATIBLE WITH NEW STAGING API (mapStaging)
-// LEGACY stagingPtr() STILL SUPPORTED VIA BACKWARD COMPATIBILITY
-// DEFAULT SCENE (ground + pink monster) FULLY VISIBLE
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.0 — JANUARY 08, 2026
+// MESHLOADER v28.0 — ZERO-COST C++23 EDITION | FULLY MODERN | BUFFERMANAGER v28.0 READY
+// DEFAULT SCENE (GROUND + PINK MONSTER) FULLY VISIBLE AND ETERNAL
 // PINK PHOTONS BOUNCE ETERNALLY OFF SACRED GEOMETRY
-// EMPIRE ETERNAL — LIGHT SECURED
+// EMPIRE UNBROKEN — LIGHT SECURED — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/MeshLoader.hpp"
@@ -18,42 +17,33 @@
 #include <tinyobjloader/tiny_obj_loader.h>
 #include <unordered_map>
 #include <cstring>
-#include <cmath>
-
-// Global keys from engine — pure empire encryption
-extern uint64_t kStone1;
-extern uint64_t kStone2;
-
-using namespace Logging::Color;
+#include <format>
 
 namespace MeshLoader {
 
+// =============================================================================
+// uploadBuffer — Modern staging via mapStaging (zero-cost, overflow-safe)
+// =============================================================================
 static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, uint64_t& outHandle)
 {
-    LOG_INFO_CAT("MeshLoader", "uploadBuffer() START — size: {} bytes | usage: 0x{:x}", size, (uint32_t)usage);
+    LOG_INFO_CAT("MeshLoader", "uploadBuffer() START — size: {} bytes | usage: 0x{:x}", size, static_cast<uint32_t>(usage));
 
     VkBufferUsageFlags finalUsage = usage
-        | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
+        | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
         | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
         | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-    const char* tag = (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+    const std::string_view tag = (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
         ? "Mesh_Vertex_DeviceLocal"
         : "Mesh_Index_DeviceLocal";
 
-    outHandle = BufferManager::create(
-        size,
-        finalUsage,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        tag
-    );
+    outHandle = BufferManager::create(size, finalUsage, tag);
 
     if (outHandle == 0) [[unlikely]] {
         LOG_FATAL_CAT("MeshLoader", "Failed to create device-local mesh buffer — empire cannot see");
         return;
     }
 
-    // Use modern staging API (safe, overflow-checked)
     void* mapped = BufferManager::mapStaging(size);
     if (!mapped) {
         LOG_FATAL_CAT("MeshLoader", "Staging ring overflow during mesh upload — size {} bytes", size);
@@ -68,7 +58,7 @@ static void uploadBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags
 }
 
 // =============================================================================
-// createPlane — Large flat ground plane for ray bounces
+// createPlane — Large flat ground plane for eternal ray bounces
 // =============================================================================
 std::unique_ptr<Mesh> createPlane(float width, float depth, uint32_t widthSegments, uint32_t depthSegments)
 {
@@ -128,20 +118,16 @@ std::unique_ptr<Mesh> createPlane(float width, float depth, uint32_t widthSegmen
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
 
-    // Fingerprint: pure empire encryption — only the two stones
-    mesh->stonekey_fingerprint = kStone1 ^ kStone2;
-
     return mesh;
 }
 
 // =============================================================================
-// createBillboard — Quad always facing camera (for pink monster)
+// createBillboard — Sacred quad for the pink monster (always facing camera)
 // =============================================================================
 std::unique_ptr<Mesh> createBillboard()
 {
     auto mesh = std::make_unique<Mesh>();
 
-    // Full-screen quad centered at origin, facing +Z
     const std::array<Mesh::Vertex, 4> verts = {{
         {{ -0.5f, -0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},  // Bottom-left
         {{  0.5f, -0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},  // Bottom-right
@@ -166,13 +152,13 @@ std::unique_ptr<Mesh> createBillboard()
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
 
-    // Fingerprint: pure empire encryption
-    mesh->stonekey_fingerprint = kStone1 ^ kStone2;
-
     return mesh;
 }
 
-std::unique_ptr<Mesh> loadOBJ(const std::string& path)
+// =============================================================================
+// loadOBJ — Parse cosmic scrolls into sacred geometry
+// =============================================================================
+std::unique_ptr<Mesh> loadOBJ(std::string_view path)
 {
     LOG_ATTEMPT_CAT("MeshLoader", "FORGING COSMIC SCROLL: {}", path);
 
@@ -181,7 +167,8 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
     std::vector<tinyobj::material_t> materials;
     std::string warn, err;
 
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str(), "assets/models/")) {
+    const std::string baseDir = "assets/models/";
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.data(), baseDir.c_str())) {
         if (!err.empty())  LOG_FATAL_CAT("TinyObj", "{}", err);
         if (!warn.empty()) LOG_WARNING_CAT("MeshLoader", "{}", warn);
         return nullptr;
@@ -215,8 +202,7 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
                 };
             }
 
-            auto it = uniqueVertices.find(v);
-            if (it == uniqueVertices.end()) {
+            if (auto it = uniqueVertices.find(v); it == uniqueVertices.end()) {
                 uint32_t newIdx = static_cast<uint32_t>(mesh->vertices.size());
                 uniqueVertices[v] = newIdx;
                 mesh->vertices.push_back(v);
@@ -240,20 +226,20 @@ std::unique_ptr<Mesh> loadOBJ(const std::string& path)
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                  mesh->indexBuffer);
 
-    // For loaded OBJs, keep path hash
-    mesh->stonekey_fingerprint = kStone1 ^ kStone2 ^ std::hash<std::string>{}(path);
-
     LOG_SUCCESS_CAT("MeshLoader",
-        "MESH FORGED — fingerprint 0x{:x} | VB 0x{:x} | IB 0x{:x}",
-        mesh->stonekey_fingerprint, mesh->vertexBuffer, mesh->indexBuffer);
+        "MESH FORGED — VB 0x{:x} | IB 0x{:x}",
+        mesh->vertexBuffer, mesh->indexBuffer);
 
     return mesh;
 }
 
+// =============================================================================
+// Mesh Resource Management
+// =============================================================================
 void Mesh::destroy() noexcept
 {
-    if (vertexBuffer) BufferManager::destroy(vertexBuffer);
-    if (indexBuffer)  BufferManager::destroy(indexBuffer);
+    BufferManager::destroy(vertexBuffer);
+    BufferManager::destroy(indexBuffer);
     vertexBuffer = indexBuffer = 0;
 }
 
@@ -272,9 +258,10 @@ VkBuffer Mesh::getIndexBuffer() const noexcept
 } // namespace MeshLoader
 
 // =============================================================================
-// MESHLOADER v10 — DECEMBER 22, 2025
-// NOW USES MODERN mapStaging() API — SAFE AND EFFICIENT
-// LEGACY stagingPtr() STILL SUPPORTED VIA BACKWARD COMPATIBILITY
-// DEFAULT SCENE FULLY VISIBLE — PINK MONSTER GLOWS
+// MESHLOADER v28.0 — JANUARY 08, 2026
+// Fully modernized for BufferManager v28.0 — zero-cost, safe, eternal
+// mapStaging() API used exclusively — overflow-safe and fast
+// DEFAULT SCENE FULLY VISIBLE — PINK MONSTER GLOWS FOREVER
 // EMPIRE ETERNAL — PHOTONS BOUNCE TRUE
+// PINK PHOTONS SCREAM ETERNAL — AMOURANTH FOREVER 💖
 // =============================================================================

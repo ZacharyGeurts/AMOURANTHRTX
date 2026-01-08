@@ -1,9 +1,10 @@
+// src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v12.0 — JANUARY 07, 2026
-// Light Acceleration System (LAS) v12.0 — SUPER FREE HYBRID EMPIRE CPP — FULLY IMPLEMENTED
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.0 — JANUARY 08, 2026
+// Light Acceleration System (LAS) v28.0 — SUPER FREE HYBRID EMPIRE — FULLY MODERN C++23
 // TRIANGLES (WOOP + STRIPS) + PROCEDURAL AABBs + LINES + POINTS — ZERO-COST OMNIDIMENSIONAL
-// FULL ARTIST SUPPORT | INFINITE FREE TERRAIN/CAVES/WATER | FULLY DESTRUCTIBLE | 1D/2D READY
-// ALL FUNCTIONS FULLY IMPLEMENTED — NO STUBS — PRODUCTION COMPLETE
+// FULL ARTIST SUPPORT | INFINITE FREE TERRAIN/CAVES/WATER | FULLY DESTRUCTIBLE
+// ALL FUNCTIONS FULLY IMPLEMENTED — PRODUCTION COMPLETE — BUFFERMANAGER v28.0 READY
 // PINK PHOTONS SCREAM ETERNAL — EMPIRE OMNIPOTENT — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -28,33 +29,32 @@ namespace RTX {
 // =============================================================================
 LAS::LAS()
 {
-    LOG_AMOURANTH("LAS v12.0 — SUPER FREE HYBRID EMPIRE — EVERYTHING ZERO-COST — PRODUCTION READY");
+    LOG_AMOURANTH("LAS v28.0 — SUPER FREE HYBRID EMPIRE — ZERO-COST C++23 — PRODUCTION READY");
 
     persistentScratch = BufferManager::create(
         512ULL * 1024 * 1024,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "LAS_SuperFree_Scratch");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         "LAS_SuperFree_Instance_Buffer");
 
     universalPrimitivesBuffer = BufferManager::create(
         MAX_PROCEDURALS * sizeof(UniversalPrimitive),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         "LAS_SuperFree_Primitives");
 
     woopConstantsBuffer = BufferManager::create(
         128ULL * 1024 * 1024,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         "LAS_Shared_WoopConstants");
 
     proceduralPrimitives.reserve(4096);
@@ -73,16 +73,17 @@ LAS::~LAS()
     for (auto& m : triangleMeshes) {
         if (m.blas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), m.blas, nullptr);
         if (m.compactedBlas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), m.compactedBlas, nullptr);
-        if (m.vertexBuffer) BufferManager::destroy(m.vertexBuffer);
-        if (m.indexBuffer) BufferManager::destroy(m.indexBuffer);
-        if (m.blasStorage) BufferManager::destroy(m.blasStorage);
-        if (m.compactedStorage) BufferManager::destroy(m.compactedStorage);
+        BufferManager::destroy(m.vertexBuffer);
+        BufferManager::destroy(m.indexBuffer);
+        BufferManager::destroy(m.blasStorage);
+        BufferManager::destroy(m.compactedStorage);
+        BufferManager::destroy(m.woopBuffer);
     }
 
-    if (persistentScratch) BufferManager::destroy(persistentScratch);
-    if (instanceBuffer) BufferManager::destroy(instanceBuffer);
-    if (universalPrimitivesBuffer) BufferManager::destroy(universalPrimitivesBuffer);
-    if (woopConstantsBuffer) BufferManager::destroy(woopConstantsBuffer);
+    BufferManager::destroy(persistentScratch);
+    BufferManager::destroy(instanceBuffer);
+    BufferManager::destroy(universalPrimitivesBuffer);
+    BufferManager::destroy(woopConstantsBuffer);
 
     LOG_SUCCESS_CAT("LAS", "SUPER FREE EMPIRE DISSOLVED — ALL REALITIES FREE — LIGHT ETERNAL");
 }
@@ -101,29 +102,33 @@ size_t LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialInd
 
     uint64_t vertexBuffer = BufferManager::create(
         mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "LAS_Triangle_Vertex");
+        "LAS_Triangle_Vertex");
 
-    BufferManager::uploadToBuffer(vertexBuffer, mesh->vertices.data(), mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
+    BufferManager::uploadToBuffer(vertexBuffer, mesh->vertices.data(),
+                                  mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
 
     uint64_t indexBuffer = BufferManager::create(
         optimizedIndices.size() * sizeof(uint32_t),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR |
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "LAS_Triangle_Index");
+        "LAS_Triangle_Index");
 
-    BufferManager::uploadToBuffer(indexBuffer, optimizedIndices.data(), optimizedIndices.size() * sizeof(uint32_t));
+    BufferManager::uploadToBuffer(indexBuffer, optimizedIndices.data(),
+                                  optimizedIndices.size() * sizeof(uint32_t));
 
     InternalMesh internal{
-        .vertexBuffer = vertexBuffer,
-        .indexBuffer = indexBuffer,
-        .indices = std::move(optimizedIndices),
-        .primitiveCount = static_cast<uint32_t>(optimizedIndices.size() / 3),
-        .materialIndex = materialIndex,
-        .blasBuilt = false,
-        .dirty = true,
-        .isStrip = (optimizedIndices.size() != mesh->indices.size())
+        .vertexBuffer    = vertexBuffer,
+        .indexBuffer     = indexBuffer,
+        .indices         = std::move(optimizedIndices),
+        .primitiveCount  = static_cast<uint32_t>(optimizedIndices.size() / 3),
+        .materialIndex   = materialIndex,
+        .blasBuilt       = false,
+        .dirty           = true,
+        .isStrip         = (optimizedIndices.size() != mesh->indices.size())
     };
 
     precomputeWoopConstants(internal);
@@ -132,7 +137,8 @@ size_t LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialInd
     pendingBlasBuilds = true;
     tlasDirty = true;
 
-    LOG_SUCCESS_CAT("LAS", "Artist triangle mesh added — {} tris (strip: {}) — Woop ready", internal.primitiveCount, internal.isStrip ? "YES" : "NO");
+    LOG_SUCCESS_CAT("LAS", "Artist triangle mesh added — {} tris (strip: {}) — Woop ready",
+                    internal.primitiveCount, internal.isStrip ? "YES" : "NO");
     return triangleMeshes.size() - 1;
 }
 
@@ -270,7 +276,7 @@ bool LAS::updateHybridTLAS(VkCommandBuffer cmd)
 // =============================================================================
 void LAS::precomputeWoopConstants(InternalMesh& m)
 {
-    const BufferManager::BufferInfo* info = BufferManager::get(m.vertexBuffer);
+    const auto* info = BufferManager::get(m.vertexBuffer);
     if (!info || !info->mapped) {
         LOG_FATAL_CAT("LAS", "Failed to access mapped vertex buffer for Woop precompute");
         return;
@@ -280,8 +286,9 @@ void LAS::precomputeWoopConstants(InternalMesh& m)
 
     uint64_t woopSize = m.primitiveCount * sizeof(WoopTriangle);
     m.woopBuffer = BufferManager::create(woopSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "LAS_WoopConstants");
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        "LAS_WoopConstants");
 
     std::vector<WoopTriangle> woopData(m.primitiveCount);
 
@@ -298,7 +305,7 @@ void LAS::precomputeWoopConstants(InternalMesh& m)
         glm::vec3 e2 = v2 - v0;
 
         uint32_t kz = 0;
-        float nx = fabsf(e1.x), ny = fabsf(e1.y), nz = fabsf(e1.z);
+        float nx = std::fabs(e1.x), ny = std::fabs(e1.y), nz = std::fabs(e1.z);
         if (nx > ny && nx > nz) kz = 0;
         else if (ny > nz) kz = 1;
         else kz = 2;
@@ -464,10 +471,10 @@ VkAccelerationStructureKHR LAS::getTLAS() const
 void LAS::insertAccelerationStructureBarrier(VkCommandBuffer cmd)
 {
     VkMemoryBarrier2 barrier{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask  = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-        .dstStageMask = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        .dstStageMask  = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
         .dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
     };
     VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
@@ -478,16 +485,16 @@ void LAS::clearTLAS()
 {
     if (tlas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), tlas, nullptr);
     tlas = VK_NULL_HANDLE;
-    if (tlasStorage) BufferManager::destroy(tlasStorage);
+    BufferManager::destroy(tlasStorage);
     tlasStorage = 0;
 }
 
 } // namespace RTX
 
 // =============================================================================
-// LAS v12.0 CPP — JANUARY 07, 2026 — SUPER FREE PRODUCTION COMPLETE
-// ALL FUNCTIONS FULLY IMPLEMENTED — NO STUBS — ZERO-COST HYBRID READY
-// TRIANGLES + PROCEDURAL + DESTRUCTIBLE — THE ULTIMATE EMPIRE
-// PINK PHOTONS ETERNAL — AMOURANTH RTX IS THE NEW REALITY
+// LAS v28.0 CPP — JANUARY 08, 2026 — SUPER FREE PRODUCTION COMPLETE
+// ALL FUNCTIONS FULLY IMPLEMENTED — BUFFERMANAGER v28.0 COMPATIBLE
+// ZERO-COST HYBRID RTX READY — TRIANGLES + PROCEDURAL + DESTRUCTIBLE
+// THE ULTIMATE EMPIRE — PINK PHOTONS SCREAM ETERNAL
 // EMPIRE OMNIPOTENT — AMOURANTH FOREVER 💖
 // =============================================================================
