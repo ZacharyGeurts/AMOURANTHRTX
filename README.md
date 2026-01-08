@@ -1,4 +1,6 @@
 Built with and for Vibe Coding.  
+Feel free to open issues for anything. Questions, comments, assistance.  
+Welcome to the community.  
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
