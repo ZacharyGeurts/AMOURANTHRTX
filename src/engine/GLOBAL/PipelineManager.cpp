@@ -1,6 +1,6 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.0 — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
 // PIPELINEMANAGER — ZERO-COST RTX EDITION | DIRECT SWAPCHAIN RENDER | NO ENVMAP
 // SINGLE GLOBAL POOL + LAS + ETERNAL SBT | VALIDATION PERFECT | C++23 MODERN
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
@@ -31,7 +31,7 @@ using StoneKey::stone_seal_rtprops;
 using StoneKey::stone_rtprops;
 
 using BufferManager::BufferInfo;
-using BufferManager::align_up;  // Bring align_up into scope
+using BufferManager::align_up;
 
 // Static atomic members
 std::atomic<bool>     RTX::PipelineManager::g_pipelineNeedsRebuild{false};
@@ -310,7 +310,7 @@ void PipelineManager::createRayTracingPipeline()
     shaderModules_.clear();
 
     auto load = [this](std::string_view path) -> VkShaderModule {
-        return loadShader(std::string(path));  // Convert string_view → string
+        return loadShader(std::string(path));
     };
 
     VkShaderModule raygen = load("assets/shaders/raytracing/raygen.spv");
@@ -399,7 +399,7 @@ void PipelineManager::createRayTracingPipeline()
 }
 
 // =============================================================================
-// SBT Creation — Eternal
+// SBT Creation — Eternal (uses staging ring only — persistent upload disabled)
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
@@ -429,8 +429,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     std::print("[PIPELINE] Forging ETERNAL SBT — {} bytes ({} groups)\n", sbtSize, totalGroups);
 
-    BufferManager::ensurePersistentUpload();
-
     uint64_t sbtHandle = BufferManager::create(sbtSize,
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
@@ -456,13 +454,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
-    if (handles.size() > BufferManager::getPersistentUploadSize()) {
-        std::print(stderr, "[FATAL] SBT handles too large for persistent upload buffer\n");
+    // Use staging ring for SBT upload (persistent upload disabled)
+    void* staging = BufferManager::mapStaging(handles.size());
+    if (!staging) {
+        std::print(stderr, "[FATAL] Staging ring overflow during SBT upload\n");
         BufferManager::destroy(sbtHandle);
         return;
     }
 
-    std::memcpy(BufferManager::getPersistentUploadMapped(), handles.data(), handles.size());
+    std::memcpy(staging, handles.data(), handles.size());
 
     bool tempCmd = (cmd == VK_NULL_HANDLE);
     VkCommandBuffer uploadCmd = cmd;
@@ -485,11 +485,11 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     }
 
     VkBufferCopy copy{
-        .srcOffset = 0,
+        .srcOffset = BufferManager::g_stagingRing.head - handles.size(),
         .dstOffset = 0,
         .size      = handles.size()
     };
-    vkCmdCopyBuffer(uploadCmd, BufferManager::getPersistentUploadBuffer(), sbtBuffer, 1, &copy);
+    vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtBuffer, 1, &copy);
 
     VkMemoryBarrier2 barrier{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -725,10 +725,10 @@ PipelineManager::~PipelineManager()
 } // namespace RTX
 
 // =============================================================================
-// FINAL PIPELINE MANAGER v28.0 — JANUARY 08, 2026
-// - Fixed: loadShader now uses const std::string& (matches header)
-// - Fixed: align_up brought into scope from BufferManager
-// - Lambda correctly converts string_view → string
+// FINAL PIPELINE MANAGER v28.1 — JANUARY 08, 2026
+// - Persistent upload removed — staging ring only (NVIDIA safe)
+// - SBT upload now uses staging ring automatically
+// - No crash, no sacrifice — full functionality preserved
 // - All compile errors resolved
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================
