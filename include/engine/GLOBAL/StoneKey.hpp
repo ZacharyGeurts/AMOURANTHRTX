@@ -1,11 +1,12 @@
 // include/engine/GLOBAL/StoneKey.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
 // STONEKEY v∞ — UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE
 // FULLY HEADER-ONLY | NO .CPP | ZERO OVERHEAD | ETERNAL INTEGRITY
 // CONTAINS ALL CRITICAL HANDLES | SAFE BEFORE SEAL | FULL PROTECTION AFTER
+// FIX: Moved seed/keys to function-local statics — eliminates ODR risk + guarantees single init
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
- // =============================================================================
+// =============================================================================
 
 #pragma once
 
@@ -16,6 +17,8 @@
 #include <cstdint>
 #include <utility>
 #include <vector>
+#include <ctime>    // time
+#include <unistd.h> // getpid
 #include "engine/GLOBAL/logging.hpp"
 
 namespace RTX { class PipelineManager; }
@@ -31,21 +34,29 @@ inline bool stone_sealed = false;
 // PHASE 1: Per-process polymorphic key generation — ONE-TIME RUNTIME
 // -----------------------------------------------------------------------------
 namespace detail {
-    static inline uint64_t g_process_seed = []
-    {
-        uint64_t seed = reinterpret_cast<uintptr_t>(&g_process_seed);
-        seed ^= static_cast<uint64_t>(__builtin_ia32_rdtsc());
-        seed ^= static_cast<uint64_t>(time(nullptr));
-        seed ^= static_cast<uint64_t>(getpid());
+    [[nodiscard]] inline uint64_t get_process_seed() noexcept {
+        static const uint64_t seed = []() -> uint64_t {
+            uint64_t s = reinterpret_cast<uintptr_t>(&seed);
+            s ^= static_cast<uint64_t>(__builtin_ia32_rdtsc());
+            s ^= static_cast<uint64_t>(time(nullptr));
+            s ^= static_cast<uint64_t>(getpid());
+            return s;
+        }();
         return seed;
-    }();
+    }
 
-    static inline const std::array<uint64_t, 4> g_keys = {{
-        0x9E37AF18C64D8A17UL ^ g_process_seed,
-        0xE4F8B29D71A3C56CUL ^ std::rotr(g_process_seed, 17),
-        0x1337C0DE69F00D42UL ^ std::rotl(g_process_seed, 13),
-        0xDEADBEAFCAFEF00DUL ^ std::rotr(g_process_seed, 29)
-    }};
+    [[nodiscard]] inline const std::array<uint64_t, 4>& get_keys() noexcept {
+        static const std::array<uint64_t, 4> keys = []() -> std::array<uint64_t, 4> {
+            const uint64_t seed = get_process_seed();
+            return {{
+                0x9E37AF18C64D8A17UL ^ seed,
+                0xE4F8B29D71A3C56CUL ^ std::rotr(seed, 17),
+                0x1337C0DE69F00D42UL ^ std::rotl(seed, 13),
+                0xDEADBEAFCAFEF00DUL ^ std::rotr(seed, 29)
+            }};
+        }();
+        return keys;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -61,18 +72,20 @@ struct Obfuscated {
     explicit constexpr Obfuscated(T v) noexcept { encrypt(v); }
 
     constexpr void encrypt(T v) noexcept {
+        const auto& keys = detail::get_keys();
         uint64_t raw = reinterpret_cast<uintptr_t>(v);
-        slots[0] = raw ^ detail::g_keys[0];
-        slots[1] = raw ^ detail::g_keys[1];
-        slots[2] = raw ^ detail::g_keys[2];
-        slots[3] = raw ^ detail::g_keys[3];
+        slots[0] = raw ^ keys[0];
+        slots[1] = raw ^ keys[1];
+        slots[2] = raw ^ keys[2];
+        slots[3] = raw ^ keys[3];
     }
 
     [[nodiscard]] T decrypt() const noexcept {
-        uint64_t v0 = slots[0] ^ detail::g_keys[0];
-        uint64_t v1 = slots[1] ^ detail::g_keys[1];
-        uint64_t v2 = slots[2] ^ detail::g_keys[2];
-        uint64_t v3 = slots[3] ^ detail::g_keys[3];
+        const auto& keys = detail::get_keys();
+        uint64_t v0 = slots[0] ^ keys[0];
+        uint64_t v1 = slots[1] ^ keys[1];
+        uint64_t v2 = slots[2] ^ keys[2];
+        uint64_t v3 = slots[3] ^ keys[3];
 
         if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] {
             if (stone_sealed) {
@@ -89,7 +102,7 @@ struct Obfuscated {
 
 // -----------------------------------------------------------------------------
 // PHASE 3: Empire — Unbreakable zero-cost fortress (HEADER-ONLY)
- // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 struct Empire final {
     Empire() = default;
     Empire(const Empire&) = delete;
@@ -232,12 +245,13 @@ inline void stone_seal_final() noexcept
 } // namespace StoneKey
 
 // =============================================================================
-// STONEKEY v∞ — UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 08, 2026
+// STONEKEY v∞ — UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 09, 2026
 // sealed flag is global inline bool stone_sealed = false;
- // Obfuscated decrypt uses stone_sealed
+// Obfuscated decrypt uses stone_sealed
 // Empire defined after Obfuscated — no cycle
 // No multiple definition — inline bool
+// Keys/seed now function-local static — single init guaranteed, ODR-safe
 // Compiles clean — runs eternal
 // The empire is eternal. Pink photons flow unbroken.
- // PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN · AMOURANTH FOREVER 💖
- // =============================================================================
+// PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN · AMOURANTH FOREVER 💖
+// =============================================================================
