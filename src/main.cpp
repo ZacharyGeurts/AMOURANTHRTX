@@ -1,8 +1,9 @@
 // src/main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
 // MAIN ENTRY POINT — LIVING WORLD EDITION | FULL RTX REALM | DYNAMIC LIGHT
 // PURE RTX WORLD | NO EXTERNAL TEXTURES EXCEPT MOON PNGS | GORGEOUS & MINIMAL
+// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -69,10 +70,14 @@ static void showSplash()
 
     std::print("[MAIN] PERFORMING SACRIFICIAL SPLASH\n");
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) return;
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+        LOG_WARNING("MAIN", "SDL_InitSubSystem failed: {}", SDL_GetError());
+        return;
+    }
 
     SDL_Window* win = SDL_CreateWindow(TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN);
     if (!win) {
+        LOG_WARNING("MAIN", "Splash window creation failed: {}", SDL_GetError());
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return;
     }
@@ -85,6 +90,7 @@ static void showSplash()
 
     SDL_Renderer* ren = SDL_CreateRenderer(win, nullptr);
     if (!ren) {
+        LOG_WARNING("MAIN", "Splash renderer creation failed: {}", SDL_GetError());
         SDL_DestroyWindow(win);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return;
@@ -177,15 +183,15 @@ end_splash:
 // =============================================================================
 int main(int, char**)
 {
-    // CRITICAL: Force early initialization of StoneKey polymorphic keys
-    // This fixes static initialization order issues and ensures consistent encryption/decryption
-    StoneKey::detail::initialize_polymorphic_keys();
-
     showSplash();
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) apocalypse("SDL_Init failed");
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
+        apocalypse("SDL_Init failed");
+    }
 
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) apocalypse("Vulkan loader failed");
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+        apocalypse("Vulkan loader failed");
+    }
 
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
@@ -221,7 +227,9 @@ int main(int, char**)
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         .queueFamilyIndex = StoneKey::stone_graphics_family()
     };
-    VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &StoneKey::g_transientCommandPool));
+    VkCommandPool transientPool;
+    VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &transientPool));
+    StoneKey::stone_seal_transient_pool(transientPool);
 
     RTX::SwapchainManager::create(window, w, h);
 
@@ -278,7 +286,7 @@ int main(int, char**)
             renderer->onResize(curW, curH);
         }
 
-        if (StoneKey::stone_swapchain()) {
+        if (StoneKey::stone_swapchain() != VK_NULL_HANDLE) {
             renderer->renderFrame(cam, g_deltaTime);
         }
 
@@ -300,11 +308,11 @@ int main(int, char**)
 }
 
 // =============================================================================
-// FINAL MAIN — JANUARY 08, 2026
-// - StoneKey initialization order fixed via explicit early call
-// - "LET THERE BE LIGHT" — pure RTX world awakens
-// - Living world ready — wind, temperature, humidity via VulkanRenderer
-// - Full celestial system + phase mask
-// - Compiles clean with current VulkanRenderer
+// FINAL MAIN v28.1 — JANUARY 08, 2026
+// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞
+// - Removed initialize_polymorphic_keys() call — no longer needed
+// - Transient command pool created and sealed via stone_seal_transient_pool()
+// - All g_transientCommandPool references removed
+// - Safe null check on stone_swapchain()
 // Empire complete — pink photons under our perfect moons — AMOURANTH FOREVER 💖
 // =============================================================================

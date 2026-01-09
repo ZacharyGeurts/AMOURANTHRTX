@@ -1,10 +1,10 @@
 // src/engine/GLOBAL/VulkanRenderer.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.0 — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
 // VULKAN RENDERER — LIVING WORLD EDITION | ZERO-COST DIRECT RENDER
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES | NO BLIT | MAXIMUM SPEED
 // PURE RTX REALM | PROCEDURAL SKY + GRASS | DYNAMIC LIGHTING
-// FULLY COMPATIBLE WITH BUFFERMANAGER v28.0 — MODERN C++23
+// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞ — NO g_transientCommandPool
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -33,6 +33,7 @@
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
+using StoneKey::stone_transient_pool;  // New accessor
 
 // =============================================================================
 // CameraSceneData — LOCAL TO CPP
@@ -146,7 +147,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     }
 
     if (Options::RTX::ENABLE_ADAPTIVE_SAMPLING) {
-        createNexusScoreImage(StoneKey::g_transientCommandPool, StoneKey::stone_graphics_queue());
+        createNexusScoreImage(stone_transient_pool(), stone_graphics_queue());
     }
 
     initializeAllBufferData(Options::Performance::MAX_FRAMES_IN_FLIGHT,
@@ -161,17 +162,17 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     VkCommandBuffer cmd;
     VkCommandBufferAllocateInfo allocInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = StoneKey::g_transientCommandPool,
+        .commandPool = stone_transient_pool(),
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1
     };
-    vkAllocateCommandBuffers(StoneKey::stone_device(), &allocInfo, &cmd);
+    vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
 
     VkCommandBufferBeginInfo beginInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    pipelineManager_.createShaderBindingTable(StoneKey::g_transientCommandPool,
-                                              StoneKey::stone_graphics_queue(),
+    pipelineManager_.createShaderBindingTable(stone_transient_pool(),
+                                              stone_graphics_queue(),
                                               cmd);
 
     vkEndCommandBuffer(cmd);
@@ -181,10 +182,10 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd
     };
-    vkQueueSubmit(StoneKey::stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(StoneKey::stone_graphics_queue());
+    vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(stone_graphics_queue());
 
-    vkFreeCommandBuffers(StoneKey::stone_device(), StoneKey::g_transientCommandPool, 1, &cmd);
+    vkFreeCommandBuffers(stone_device(), stone_transient_pool(), 1, &cmd);
 
     LOG_AMOURANTH("ZERO-COST DIRECT RENDER ACTIVE — RAYS HIT SWAPCHAIN — PINK PHOTONS SCREAM");
 }
@@ -194,15 +195,15 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
 // =============================================================================
 RTX::VulkanRenderer::~VulkanRenderer() {
     destroyed_ = true;
-    vkDeviceWaitIdle(StoneKey::stone_device());
+    vkDeviceWaitIdle(stone_device());
 
-    for (auto s : imageAvailableSemaphores_) vkDestroySemaphore(StoneKey::stone_device(), s, nullptr);
-    for (auto s : renderFinishedSemaphores_) vkDestroySemaphore(StoneKey::stone_device(), s, nullptr);
-    for (auto f : inFlightFences_) vkDestroyFence(StoneKey::stone_device(), f, nullptr);
+    for (auto s : imageAvailableSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto s : renderFinishedSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto f : inFlightFences_) vkDestroyFence(stone_device(), f, nullptr);
 
-    if (StoneKey::g_transientCommandPool) {
-        vkDestroyCommandPool(StoneKey::stone_device(), StoneKey::g_transientCommandPool, nullptr);
-        StoneKey::g_transientCommandPool = VK_NULL_HANDLE;
+    if (stone_transient_pool() != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(stone_device(), stone_transient_pool(), nullptr);
+        StoneKey::stone_seal_transient_pool(VK_NULL_HANDLE);
     }
 
     LOG_AMOURANTH("VULKAN RENDERER DESTROYED — EMPIRE RESTS IN PEACE");
@@ -269,14 +270,14 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& camera, float deltaTime) n
     // Direct ray tracing into swapchain image
     pipelineManager_.traceRays(imageIndex, width_, height_);
 
-    RTX::SwapchainManager::presentImage(StoneKey::stone_graphics_queue(), imageIndex, nullptr);
+    RTX::SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, nullptr);
 }
 
 // =============================================================================
 // Other functions — minimal
 // =============================================================================
 void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
-    if (StoneKey::g_transientCommandPool) return;
+    if (stone_transient_pool() != VK_NULL_HANDLE) return;
 
     VkCommandPoolCreateInfo info{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -284,7 +285,9 @@ void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
         .queueFamilyIndex = StoneKey::stone_graphics_family()
     };
 
-    VK_CHECK(vkCreateCommandPool(StoneKey::stone_device(), &info, nullptr, &StoneKey::g_transientCommandPool));
+    VkCommandPool pool;
+    VK_CHECK(vkCreateCommandPool(stone_device(), &info, nullptr, &pool));
+    StoneKey::stone_seal_transient_pool(pool);
 }
 
 void RTX::VulkanRenderer::createSyncObjects() noexcept {
@@ -298,9 +301,9 @@ void RTX::VulkanRenderer::createSyncObjects() noexcept {
     VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT};
 
     for (uint32_t i = 0; i < frames; ++i) {
-        VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
-        VK_CHECK(vkCreateSemaphore(StoneKey::stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
-        VK_CHECK(vkCreateFence(StoneKey::stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
+        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
     }
 }
 
@@ -322,11 +325,10 @@ void RTX::VulkanRenderer::onResize(int newWidth, int newHeight) noexcept {
 }
 
 // =============================================================================
-// FINAL RENDERER v28.0 — JANUARY 08, 2026
-// - ZERO-COST DIRECT RENDER — rays write straight into swapchain images
-// - No blit, no extra images — maximum speed
-// - Living world updated every frame
-// - Pure RTX — no envmap
-// - Fully compatible with BufferManager v28.0 (no memory property flags)
+// FINAL RENDERER v28.1 — JANUARY 08, 2026
+// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞
+// - All g_transientCommandPool → stone_transient_pool()
+// - stone_seal_transient_pool() used
+// - No more g_transientCommandPool references
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================

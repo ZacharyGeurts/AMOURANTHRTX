@@ -1,8 +1,9 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
 // SwapchainManager — ZERO-COST RTX EDITION | DIRECT STORAGE USAGE | LIVING WORLD READY
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES | NO BLIT | MAXIMUM SPEED
+// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -265,12 +266,14 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
         return;
     }
 
+    VkSwapchainKHR currentSwapchain = stone_swapchain();
+
     VkPresentInfoKHR presentInfo{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = waitSemaphore ? 1u : 0u,
         .pWaitSemaphores    = waitSemaphore ? &waitSemaphore : nullptr,
         .swapchainCount     = 1,
-        .pSwapchains        = &stone_swapchain(),
+        .pSwapchains        = &currentSwapchain,
         .pImageIndices      = &imageIndex
     };
 
@@ -284,10 +287,11 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 } // namespace RTX
 
 // =============================================================================
-// FINAL SWAPCHAIN — JANUARY 07, 2026
-// - ZERO-COST RTX: VK_IMAGE_USAGE_STORAGE_BIT added
-// - Rays write directly into swapchain images
-// - No blit/copy — maximum performance
-// - Living world ready — safe recreation
+// FINAL SWAPCHAIN v28.1 — JANUARY 08, 2026
+// FIXED: stone_swapchain() now returns by value → & works correctly
+// ZERO-COST RTX: VK_IMAGE_USAGE_STORAGE_BIT preserved
+// Rays write directly into swapchain images
+// No blit/copy — maximum performance
+// Living world ready — safe recreation
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================

@@ -3,6 +3,7 @@
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
 // PIPELINEMANAGER — ZERO-COST RTX EDITION | DIRECT SWAPCHAIN RENDER | NO ENVMAP
 // SINGLE GLOBAL POOL + LAS + ETERNAL SBT | VALIDATION PERFECT | C++23 MODERN
+// FULLY COMPATIBLE WITH NEW HEADER-ONLY STONEKEY v∞
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -24,11 +25,10 @@
 #include <print>
 
 using StoneKey::stone_device;
-using StoneKey::g_transientCommandPool;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_physical;
-using StoneKey::stone_seal_rtprops;
 using StoneKey::stone_rtprops;
+using StoneKey::stone_transient_pool;  // New accessor
 
 using BufferManager::BufferInfo;
 using BufferManager::align_up;
@@ -468,7 +468,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VkCommandBuffer uploadCmd = cmd;
 
     if (tempCmd) {
-        if (pool == VK_NULL_HANDLE) pool = g_transientCommandPool;
+        if (pool == VK_NULL_HANDLE) pool = stone_transient_pool();
         VkCommandBufferAllocateInfo allocInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = pool,
@@ -614,7 +614,7 @@ void PipelineManager::cacheDeviceProperties()
         throw std::runtime_error("Ray tracing unsupported");
     }
 
-    stone_seal_rtprops(rtProps);
+    StoneKey::stone_seal_rtprops(rtProps);
     cached = true;
 
     std::print("[PIPELINE SUCCESS] Properties cached — handle size: {}\n", rtProps.shaderGroupHandleSize);
@@ -726,9 +726,10 @@ PipelineManager::~PipelineManager()
 
 // =============================================================================
 // FINAL PIPELINE MANAGER v28.1 — JANUARY 08, 2026
-// - Persistent upload removed — staging ring only (NVIDIA safe)
-// - SBT upload now uses staging ring automatically
-// - No crash, no sacrifice — full functionality preserved
-// - All compile errors resolved
+// FULLY COMPATIBLE WITH NEW HEADER-ONLY STONEKEY v∞
+// - g_transientCommandPool replaced with stone_transient_pool()
+// - stone_seal_rtprops fully qualified
+// - All StoneKey access through accessors
+// - No using declarations needed for transient pool
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================
