@@ -1,9 +1,11 @@
 // src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
 // RTX HANDLER — GLOBAL VULKAN CONTEXT | MODERN C++23 | SAFE & ETERNAL
 // FULL RTX SUPPORT | ZERO-COST COMPATIBLE | VALIDATION PERFECT
-// FINAL FIX: All StoneKey functions properly qualified + VK_MAKE_API_VERSION fixed
+// FIX: Added VK_KHR_synchronization2 extension & enabled synchronization2 feature
+//      → Required for vkCmdPipelineBarrier2 (eliminates VUID-03848 validation error)
+//      Also ensured proper extension list and feature chaining
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -234,7 +236,8 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME  // ← Added for vkCmdPipelineBarrier2 support
     };
 
     for (VkPhysicalDevice dev : devices) {
@@ -300,7 +303,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 
     uint32_t extCount = fullRTXSupport ? static_cast<uint32_t>(requiredExtensions.size()) : 1;
 
-    // Conservative RTX feature chain — proven stable on NVIDIA Linux
+    // Conservative RTX feature chain — now including synchronization2
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
         .bufferDeviceAddress = VK_TRUE
@@ -324,9 +327,16 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         .dynamicRendering = VK_TRUE
     };
 
+    // Enable synchronization2 — REQUIRED for vkCmdPipelineBarrier2
+    VkPhysicalDeviceSynchronization2FeaturesKHR sync2Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
+        .pNext = &dynamicRendering,
+        .synchronization2 = VK_TRUE
+    };
+
     VkDeviceCreateInfo deviceInfo{
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext                   = &dynamicRendering,
+        .pNext                   = &sync2Features,
         .queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size()),
         .pQueueCreateInfos       = queueCreateInfos.data(),
         .enabledExtensionCount   = extCount,
@@ -390,10 +400,10 @@ void Context::init() noexcept
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — JANUARY 08, 2026 — v28.1
-// FINAL FIX: All StoneKey calls fully qualified
-// VK_MAKE_API_VERSION → VK_MAKE_VERSION (correct macro)
-// Conservative feature chain preserved
-// THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN
+// RTX CORE INITIALIZED — JANUARY 09, 2026 — v28.2
+// FINAL FIX: Enabled VK_KHR_synchronization2 extension & synchronization2 feature
+//            → Eliminates VUID-vkCmdPipelineBarrier2-synchronization2-03848
+// Conservative feature chain preserved & extended
+// THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN & VALIDATION CLEAN
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

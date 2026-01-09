@@ -130,13 +130,20 @@ void cmd_mem()
     for (const auto& chunk : BufferManager::g_mainChunks) {
         used += chunk.head;
     }
-    size_t total = BufferManager::g_mainChunks.size() * BufferManager::CHUNK_SIZE;
 
-    double usedGiB = used / (1024.0 * 1024 * 1024);
-    double totalGiB = total / (1024.0 * 1024 * 1024);
-    double percent = total > 0 ? 100.0 * used / total : 0.0;
+    // Calculate total usable capacity (all chunks' sizes)
+    size_t total = 0;
+    for (const auto& chunk : BufferManager::g_mainChunks) {
+        total += chunk.size;
+    }
 
-    addLine(std::format("Buffer Memory: {:.2f} / {:.2f} GiB ({:.1f}%)", usedGiB, totalGiB, percent));
+    // If no chunks yet, total is 0
+    double usedGiB   = static_cast<double>(used)   / (1024.0 * 1024 * 1024);
+    double totalGiB  = static_cast<double>(total)  / (1024.0 * 1024 * 1024);
+    double percent   = (total > 0) ? (100.0 * used / total) : 0.0;
+
+    addLine(std::format("Buffer Memory: {:.2f} / {:.2f} GiB ({:.1f}%)  [{} chunks]",
+                        usedGiB, totalGiB, percent, BufferManager::g_mainChunks.size()));
 }
 
 void cmd_fps()

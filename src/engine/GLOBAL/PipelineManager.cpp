@@ -1,9 +1,13 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
 // PIPELINEMANAGER — ZERO-COST RTX EDITION | DIRECT SWAPCHAIN RENDER | NO ENVMAP
 // SINGLE GLOBAL POOL + LAS + ETERNAL SBT | VALIDATION PERFECT | C++23 MODERN
 // FULLY COMPATIBLE WITH NEW HEADER-ONLY STONEKEY v∞
+// FIXES:
+// - Corrected shader group setup: General groups must have closestHit/anyHit/intersection = VK_SHADER_UNUSED_KHR
+// - Triangles hit group must have intersectionShader = VK_SHADER_UNUSED_KHR
+// - Proper indices assignment for stages/groups
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -28,7 +32,7 @@ using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_physical;
 using StoneKey::stone_rtprops;
-using StoneKey::stone_transient_pool;  // New accessor
+using StoneKey::stone_transient_pool;
 
 using BufferManager::BufferInfo;
 using BufferManager::align_up;
@@ -259,7 +263,7 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 }
 
 // =============================================================================
-// Shader Loading — Modern C++23 (matches header: const std::string&)
+// Shader Loading — Modern C++23
 // =============================================================================
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
 {
@@ -301,7 +305,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 }
 
 // =============================================================================
-// Pipeline Creation — Pure RTX
+// Pipeline Creation — FIXED SHADER GROUPS (validation compliant)
 // =============================================================================
 void PipelineManager::createRayTracingPipeline()
 {
@@ -318,58 +322,63 @@ void PipelineManager::createRayTracingPipeline()
     VkShaderModule chit   = load("assets/shaders/raytracing/closest_hit.spv");
     VkShaderModule ahit   = load("assets/shaders/raytracing/anyhit.spv");
 
+    if (!raygen || !miss || !chit || !ahit) {
+        std::print(stderr, "[ERROR] One or more shaders failed to load\n");
+        return;
+    }
+
     shaderModules_.emplace_back(raygen, stone_device(), vkDestroyShaderModule);
     shaderModules_.emplace_back(miss,   stone_device(), vkDestroyShaderModule);
     shaderModules_.emplace_back(chit,   stone_device(), vkDestroyShaderModule);
     shaderModules_.emplace_back(ahit,   stone_device(), vkDestroyShaderModule);
 
-    std::vector<VkPipelineShaderStageCreateInfo> stages;
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
+    std::vector<VkPipelineShaderStageCreateInfo> stages(4);
 
-    uint32_t idx = 0;
+    stages[0] = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                 .stage  = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
+                 .module = raygen,
+                 .pName  = "main"};
 
-    // Raygen
-    stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                      .stage  = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
-                      .module = raygen,
-                      .pName  = "main"});
-    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                      .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-                      .generalShader = idx++,
-                      .closestHitShader = VK_SHADER_UNUSED_KHR,
-                      .anyHitShader = VK_SHADER_UNUSED_KHR});
+    stages[1] = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                 .stage  = VK_SHADER_STAGE_MISS_BIT_KHR,
+                 .module = miss,
+                 .pName  = "main"};
 
-    // Miss
-    stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                      .stage  = VK_SHADER_STAGE_MISS_BIT_KHR,
-                      .module = miss,
-                      .pName  = "main"});
-    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                      .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-                      .generalShader = idx++,
-                      .closestHitShader = VK_SHADER_UNUSED_KHR,
-                      .anyHitShader = VK_SHADER_UNUSED_KHR});
+    stages[2] = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                 .stage  = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
+                 .module = chit,
+                 .pName  = "main"};
 
-    // Closest Hit
-    stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                      .stage  = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
-                      .module = chit,
-                      .pName  = "main"});
-    uint32_t chitIdx = idx++;
+    stages[3] = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                 .stage  = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+                 .module = ahit,
+                 .pName  = "main"};
 
-    // Any Hit
-    stages.push_back({.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                      .stage  = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
-                      .module = ahit,
-                      .pName  = "main"});
-    uint32_t ahitIdx = idx++;
+    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups(3);
 
-    // Hit group
-    groups.push_back({.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-                      .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
-                      .generalShader = VK_SHADER_UNUSED_KHR,
-                      .closestHitShader = chitIdx,
-                      .anyHitShader = ahitIdx});
+    // Group 0: Raygen (GENERAL)
+    groups[0] = {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                 .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+                 .generalShader = 0,
+                 .closestHitShader = VK_SHADER_UNUSED_KHR,
+                 .anyHitShader = VK_SHADER_UNUSED_KHR,
+                 .intersectionShader = VK_SHADER_UNUSED_KHR};
+
+    // Group 1: Miss (GENERAL)
+    groups[1] = {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                 .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+                 .generalShader = 1,
+                 .closestHitShader = VK_SHADER_UNUSED_KHR,
+                 .anyHitShader = VK_SHADER_UNUSED_KHR,
+                 .intersectionShader = VK_SHADER_UNUSED_KHR};
+
+    // Group 2: Hit group (TRIANGLES_HIT_GROUP)
+    groups[2] = {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+                 .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+                 .generalShader = VK_SHADER_UNUSED_KHR,
+                 .closestHitShader = 2,
+                 .anyHitShader = 3,
+                 .intersectionShader = VK_SHADER_UNUSED_KHR};
 
     raygenGroupCount_ = 1;
     missGroupCount_   = 1;
@@ -399,7 +408,7 @@ void PipelineManager::createRayTracingPipeline()
 }
 
 // =============================================================================
-// SBT Creation — Eternal (uses staging ring only — persistent upload disabled)
+// SBT Creation — Eternal (uses staging ring only)
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
@@ -454,7 +463,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
-    // Use staging ring for SBT upload (persistent upload disabled)
+    // Use staging ring for SBT upload
     void* staging = BufferManager::mapStaging(handles.size());
     if (!staging) {
         std::print(stderr, "[FATAL] Staging ring overflow during SBT upload\n");
@@ -725,11 +734,11 @@ PipelineManager::~PipelineManager()
 } // namespace RTX
 
 // =============================================================================
-// FINAL PIPELINE MANAGER v28.1 — JANUARY 08, 2026
-// FULLY COMPATIBLE WITH NEW HEADER-ONLY STONEKEY v∞
-// - g_transientCommandPool replaced with stone_transient_pool()
-// - stone_seal_rtprops fully qualified
-// - All StoneKey access through accessors
-// - No using declarations needed for transient pool
+// FINAL PIPELINE MANAGER v28.2 — JANUARY 09, 2026
+// FIXED VALIDATION ERRORS:
+// - General groups (raygen/miss) now correctly set closestHit/anyHit/intersection = VK_SHADER_UNUSED_KHR
+// - Triangles hit group explicitly sets intersectionShader = VK_SHADER_UNUSED_KHR
+// - Proper stage/group indexing (0=raygen, 1=miss, 2=chit, 3=ahit)
+// - No more VUID-03475 / VUID-03477 violations
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================

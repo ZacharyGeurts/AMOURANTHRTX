@@ -1,9 +1,11 @@
 // src/engine/GLOBAL/SwapchainManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
 // SwapchainManager — ZERO-COST RTX EDITION | DIRECT STORAGE USAGE | LIVING WORLD READY
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES | NO BLIT | MAXIMUM SPEED
 // FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞
+// FIX: Format selection now verifies required usage features (including STORAGE_IMAGE_BIT) via vkGetPhysicalDeviceFormatProperties
+//      Fallback changed to VK_FORMAT_B8G8R8A8_UNORM + SRGB_NONLINEAR for broad storage support on NVIDIA/others
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -27,6 +29,24 @@ using StoneKey::stone_width;
 using StoneKey::stone_height;
 
 namespace RTX {
+
+// Helper to check if format supports required features for swapchain usage
+[[nodiscard]] bool supportsRequiredUsage(VkPhysicalDevice phys, VkFormat format) noexcept {
+    VkFormatProperties props{};
+    vkGetPhysicalDeviceFormatProperties(phys, format, &props);
+
+    VkFormatFeatureFlags required = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
+                                    VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                                    VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                                    VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+
+    if ((props.optimalTilingFeatures & required) != required) {
+        LOG_WARNING_CAT("SWAPCHAIN", "Format {} does not support required features (missing: {:#x})",
+                        string_VkFormat(format), required & ~props.optimalTilingFeatures);
+        return false;
+    }
+    return true;
+}
 
 // No definitions here — all static members are inline in header
 
@@ -97,6 +117,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     }
 
     VkSurfaceFormatKHR chosenFormat = formats[0];
+    bool hdrEnabled = false;
 
     struct Candidate {
         VkFormat format;
@@ -109,25 +130,25 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, true, "16-bit Float HDR" },
         { VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT, true, "10-bit HDR10" },
         { VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_HDR10_ST2084_EXT, true, "16-bit HDR10" },
-        { VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, false, "8-bit sRGB" }
+        { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, false, "8-bit UNORM sRGB" }  // Changed to UNORM for storage support
     };
 
-    bool hdrEnabled = false;
+    bool foundValid = false;
     for (const auto& cand : candidates) {
         auto it = std::find_if(formats.begin(), formats.end(),
             [&](const VkSurfaceFormatKHR& f) { return f.format == cand.format && f.colorSpace == cand.space; });
-        if (it != formats.end()) {
+        if (it != formats.end() && supportsRequiredUsage(phys, cand.format)) {
             chosenFormat = *it;
-            if (cand.hdr) {
-                LOG_AMOURANTH("HDR SWAPCHAIN FORGED — {} — PINK PHOTONS IN FULL DYNAMIC RANGE", cand.name);
-                hdrEnabled = true;
-            }
+            hdrEnabled = cand.hdr;
+            foundValid = true;
+            LOG_AMOURANTH("SWAPCHAIN FORMAT SELECTED: {} — HDR: {} — STORAGE SUPPORTED", cand.name, cand.hdr ? "YES" : "NO");
             break;
         }
     }
 
-    if (!hdrEnabled) {
-        LOG_INFO_CAT("SWAPCHAIN", "HDR not available — falling back to 8-bit sRGB");
+    if (!foundValid) {
+        LOG_FATAL_CAT("SWAPCHAIN", "No surface format supports required usage (including STORAGE_BIT)");
+        return;
     }
 
     // ZERO-COST RTX: Allow ray tracing shaders to write directly into swapchain images
@@ -287,8 +308,10 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 } // namespace RTX
 
 // =============================================================================
-// FINAL SWAPCHAIN v28.1 — JANUARY 08, 2026
-// FIXED: stone_swapchain() now returns by value → & works correctly
+// FINAL SWAPCHAIN v28.2 — JANUARY 09, 2026
+// FIXED: Format selection now enforces STORAGE_IMAGE_BIT + other required features
+//        Fallback to UNORM for 8-bit to ensure storage support (SRGB often lacks it on NVIDIA)
+//        Validation compliance — no more VUID-VkSwapchainCreateInfoKHR-imageFormat-01778
 // ZERO-COST RTX: VK_IMAGE_USAGE_STORAGE_BIT preserved
 // Rays write directly into swapchain images
 // No blit/copy — maximum performance

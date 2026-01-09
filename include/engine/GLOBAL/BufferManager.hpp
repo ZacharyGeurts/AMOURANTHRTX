@@ -1,13 +1,16 @@
 // include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
 // BUFFERMANAGER — HEADER-ONLY 2026 ULTIMATE EDITION — PROFESSIONAL PRODUCTION RELEASE
 // ZERO-COST C++23 PHILOSOPHY | FULLY MODERN | SAFE & ETERNAL
-// 256 MiB DEVICE-LOCAL CHUNKS — MAXIMUM VRAM CONTROL WITH DRIVER RESERVE
+// ON-DEMAND DEVICE-LOCAL CHUNKS — MAXIMUM VRAM CONTROL WITH DRIVER RESERVE
+// UNIFIED POOL VIEW — DEVELOPERS SEE ONE INFINITE POOL (USABLE VRAM)
+// LARGE ALLOCATIONS (>256 MiB) CREATE DEDICATED CHUNKS OF EXACT SIZE
 // 1 GiB PERSISTENTLY MAPPED STAGING RING — RING-BUFFERED TRANSFERS
 // PERSISTENT DIRECT UPLOAD DISABLED — STAGING RING ONLY (NVIDIA DRIVER SAFE)
 // SMART PATH: ≤64KiB UNIFORMS → HOST-VISIBLE | ALL ELSE → DEVICE-LOCAL + BDA
 // SBT SAFETY PADDING | ZERO FRAGMENTATION | VALIDATION CLEAN
+// NO FATAL ON EXHAUST — LOG_ERROR + RETURN 0
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -30,12 +33,15 @@
 namespace BufferManager {
 
 // ── CONFIGURATION — TUNED FOR 2026 HIGH-END GPUs ───────────────────────────
-inline constexpr VkDeviceSize CHUNK_SIZE          = 256ULL << 20;           // 256 MiB
-inline constexpr VkDeviceSize DRIVER_RESERVE      = 4'831'838'208ULL;       // ~4.5 GiB safe reserve
-inline constexpr VkDeviceSize STAGING_RING_SIZE   = 1ULL   << 30;           // 1 GiB persistent staging
+inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;            // 256 MiB base chunk size
+inline constexpr VkDeviceSize DRIVER_RESERVE     = 4'831'838'208ULL;       // ~4.5 GiB safe reserve
+inline constexpr VkDeviceSize STAGING_RING_SIZE  = 1ULL   << 30;           // 1 GiB persistent staging
 
 inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 64ULL << 10;         // 64 KiB
 inline constexpr VkDeviceSize SBT_MINIMUM_SIZE       = 512;
+
+// Total device-local VRAM (computed once)
+inline VkDeviceSize g_total_device_local = 0;
 
 // ── UTILITIES ───────────────────────────────────────────────────────────────
 [[nodiscard]] constexpr VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
@@ -51,8 +57,23 @@ inline constexpr VkDeviceSize SBT_MINIMUM_SIZE       = 512;
             return i;
         }
     }
-    LOG_FATAL("BufferManager", "No suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
+    LOG_ERROR("BufferManager", "No suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
     return ~0u;
+}
+
+[[nodiscard]] inline VkDeviceSize getTotalDeviceLocal() noexcept {
+    if (g_total_device_local == 0) {
+        VkPhysicalDeviceMemoryProperties2 memProps2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+        vkGetPhysicalDeviceMemoryProperties2(StoneKey::stone_physical(), &memProps2);
+
+        for (uint32_t i = 0; i < memProps2.memoryProperties.memoryHeapCount; ++i) {
+            if (memProps2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+                g_total_device_local += memProps2.memoryProperties.memoryHeaps[i].size;
+            }
+        }
+        LOG_INFO("BufferManager", "Detected total device-local VRAM: {:.2f} GiB", g_total_device_local / 1e9);
+    }
+    return g_total_device_local;
 }
 
 // ── INTERNAL STRUCTURES ────────────────────────────────────────────────────
@@ -71,7 +92,7 @@ struct BufferInfo {
 struct Chunk {
     VkBuffer         buffer   = VK_NULL_HANDLE;
     VkDeviceMemory   memory   = VK_NULL_HANDLE;
-    VkDeviceSize     size     = CHUNK_SIZE;
+    VkDeviceSize     size     = 0;  // Actual size (may > DEFAULT_CHUNK_SIZE for large)
     VkDeviceAddress  baseAddr = 0;
     VkDeviceSize     head     = 0;
     std::string      tag;
@@ -91,35 +112,16 @@ inline std::vector<Chunk>                       g_mainChunks;
 inline StagingRing                              g_stagingRing{};
 inline std::unordered_map<uint64_t, BufferInfo> g_buffers;
 inline uint64_t                                 g_nextHandle = 0x00000001ULL;
+inline VkDeviceSize                             g_total_allocated = 0;
 
-// ── MAIN DEVICE-LOCAL POOL — CLAIM MAXIMUM SAFE VRAM ───────────────────────
-inline void ensureMainPool() noexcept {
-    if (!g_mainChunks.empty()) return;
+// ── CREATE NEW CHUNK ON-DEMAND ─────────────────────────────────────────────
+[[nodiscard]] inline Chunk* createChunk(VkDeviceSize minSize, VkBufferUsageFlags usage) noexcept {
+    VkDeviceSize chunkSize = std::max(DEFAULT_CHUNK_SIZE, minSize);
 
-    LOG_INFO("BufferManager", "Initializing device-local main pool — claiming maximum safe VRAM");
-
-    VkPhysicalDeviceMemoryProperties2 memProps2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
-    vkGetPhysicalDeviceMemoryProperties2(StoneKey::stone_physical(), &memProps2);
-
-    VkDeviceSize totalDeviceLocal = 0;
-    for (uint32_t i = 0; i < memProps2.memoryProperties.memoryHeapCount; ++i) {
-        if (memProps2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-            totalDeviceLocal += memProps2.memoryProperties.memoryHeaps[i].size;
-        }
+    if (g_total_allocated + chunkSize > getTotalDeviceLocal() - DRIVER_RESERVE) {
+        LOG_ERROR("BufferManager", "Cannot create chunk of {} bytes — exceeds safe VRAM limit", chunkSize);
+        return nullptr;
     }
-
-    VkDeviceSize usable = totalDeviceLocal - DRIVER_RESERVE;
-    uint32_t chunkCount = static_cast<uint32_t>(usable / CHUNK_SIZE);
-
-    if (chunkCount == 0) {
-        LOG_FATAL("BufferManager", "Insufficient device-local memory after 4.5 GiB driver reserve");
-        return;
-    }
-
-    g_mainChunks.reserve(chunkCount);
-
-    LOG_INFO("BufferManager", "Total VRAM: {:.2f} GiB | Usable: {:.2f} GiB | Creating {} × 256 MiB chunks",
-             totalDeviceLocal / 1e9, usable / 1e9, chunkCount);
 
     constexpr VkBufferUsageFlags universalUsage =
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -131,49 +133,65 @@ inline void ensureMainPool() noexcept {
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 
-    for (uint32_t i = 0; i < chunkCount; ++i) {
-        VkBufferCreateInfo bci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                               .size = CHUNK_SIZE,
-                               .usage = universalUsage,
-                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    VkBufferCreateInfo bci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                           .size = chunkSize,
+                           .usage = universalUsage,
+                           .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
 
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VK_CHECK(vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &buffer));
-
-        VkMemoryRequirements req{};
-        vkGetBufferMemoryRequirements(StoneKey::stone_device(), buffer, &req);
-
-        uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        if (memType == ~0u) {
-            vkDestroyBuffer(StoneKey::stone_device(), buffer, nullptr);
-            LOG_FATAL("BufferManager", "No device-local memory type available");
-            return;
-        }
-
-        VkMemoryAllocateFlagsInfo flags{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-                                        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT};
-
-        VkMemoryAllocateInfo mai{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                                 .pNext = &flags,
-                                 .allocationSize = req.size,
-                                 .memoryTypeIndex = memType};
-
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-        VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &memory));
-        VK_CHECK(vkBindBufferMemory(StoneKey::stone_device(), buffer, memory, 0));
-
-        VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer};
-        VkDeviceAddress baseAddr = RTX::ext().vkGetBufferDeviceAddress(StoneKey::stone_device(), &addrInfo);
-
-        g_mainChunks.push_back(Chunk{
-            .buffer   = buffer,
-            .memory   = memory,
-            .baseAddr = baseAddr,
-            .tag      = std::format("MainChunk_{}", i)
-        });
+    VkBuffer buffer = VK_NULL_HANDLE;
+    if (vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &buffer) != VK_SUCCESS) {
+        LOG_ERROR("BufferManager", "Failed to create chunk buffer of {} bytes", chunkSize);
+        return nullptr;
     }
 
-    LOG_SUCCESS("BufferManager", "Main device-local pool ready — {} chunks claimed", g_mainChunks.size());
+    VkMemoryRequirements req{};
+    vkGetBufferMemoryRequirements(StoneKey::stone_device(), buffer, &req);
+
+    uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (memType == ~0u) {
+        vkDestroyBuffer(StoneKey::stone_device(), buffer, nullptr);
+        return nullptr;
+    }
+
+    VkMemoryAllocateFlagsInfo flags{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                    .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT};
+
+    VkMemoryAllocateInfo mai{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                             .pNext = &flags,
+                             .allocationSize = req.size,
+                             .memoryTypeIndex = memType};
+
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &memory) != VK_SUCCESS) {
+        vkDestroyBuffer(StoneKey::stone_device(), buffer, nullptr);
+        LOG_ERROR("BufferManager", "Failed to allocate memory for chunk of {} bytes", chunkSize);
+        return nullptr;
+    }
+
+    if (vkBindBufferMemory(StoneKey::stone_device(), buffer, memory, 0) != VK_SUCCESS) {
+        vkFreeMemory(StoneKey::stone_device(), memory, nullptr);
+        vkDestroyBuffer(StoneKey::stone_device(), buffer, nullptr);
+        LOG_ERROR("BufferManager", "Failed to bind memory for chunk");
+        return nullptr;
+    }
+
+    VkBufferDeviceAddressInfo addrInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer};
+    VkDeviceAddress baseAddr = RTX::ext().vkGetBufferDeviceAddress(StoneKey::stone_device(), &addrInfo);
+
+    g_mainChunks.push_back(Chunk{
+        .buffer   = buffer,
+        .memory   = memory,
+        .size     = chunkSize,
+        .baseAddr = baseAddr,
+        .head     = 0,
+        .tag      = std::format("Chunk_{}_size_{}MiB", g_mainChunks.size(), chunkSize >> 20)
+    });
+
+    g_total_allocated += req.size;
+    LOG_INFO("BufferManager", "New chunk created: {} MiB (total allocated: {:.2f} GiB)",
+             chunkSize >> 20, g_total_allocated / 1e9);
+
+    return &g_mainChunks.back();
 }
 
 // ── 1 GiB STAGING RING — PERSISTENTLY MAPPED RING BUFFER ───────────────────
@@ -215,14 +233,7 @@ inline void ensureStagingRing() noexcept {
 [[nodiscard]] inline void* mapStaging(VkDeviceSize size) noexcept {
     ensureStagingRing();
     VkDeviceSize offset = g_stagingRing.head;
-    g_stagingRing.head += size;
-
-    if (offset + size > g_stagingRing.size) {
-        LOG_WARN("BufferManager", "Staging ring overflow — wrapping ({} bytes)", size);
-        g_stagingRing.head = size;
-        offset = 0;
-    }
-
+    g_stagingRing.head = (g_stagingRing.head + size) % g_stagingRing.size;  // True ring wrap
     return static_cast<std::byte*>(g_stagingRing.mapped) + offset;
 }
 
@@ -249,13 +260,7 @@ inline void ensureStagingRing() noexcept {
         ensureStagingRing();
 
         VkDeviceSize offset = g_stagingRing.head;
-        g_stagingRing.head += size;
-
-        if (offset + size > g_stagingRing.size) {
-            LOG_WARN("BufferManager", "Staging ring overflow on uniform — wrapping");
-            g_stagingRing.head = size;
-            offset = 0;
-        }
+        g_stagingRing.head = (g_stagingRing.head + size) % g_stagingRing.size;
 
         uint64_t handle = ++g_nextHandle;
         g_buffers.emplace(handle, BufferInfo{
@@ -272,9 +277,23 @@ inline void ensureStagingRing() noexcept {
         return handle;
     }
 
-    ensureMainPool();
+    // Device-local path — unified pool
+    VkBufferCreateInfo tempBci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                               .size = size,
+                               .usage = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
 
-    VkDeviceSize aligned = align_up(size, 256ULL);
+    VkBuffer tempBuffer = VK_NULL_HANDLE;
+    if (vkCreateBuffer(StoneKey::stone_device(), &tempBci, nullptr, &tempBuffer) != VK_SUCCESS) {
+        LOG_ERROR("BufferManager", "Failed to create temp buffer for req (size: {})", size);
+        return 0;
+    }
+
+    VkMemoryRequirements req{};
+    vkGetBufferMemoryRequirements(StoneKey::stone_device(), tempBuffer, &req);
+    vkDestroyBuffer(StoneKey::stone_device(), tempBuffer, nullptr);
+
+    VkDeviceSize aligned = align_up(size, req.alignment);
 
     Chunk* chosen = nullptr;
     VkDeviceSize offsetInChunk = 0;
@@ -289,8 +308,13 @@ inline void ensureStagingRing() noexcept {
     }
 
     if (!chosen) {
-        LOG_FATAL("BufferManager", "Device-local pool exhausted — requested {} bytes", size);
-        return 0;
+        // Create new chunk sized to fit (large if needed)
+        VkDeviceSize minChunkSize = align_up(aligned, req.alignment);
+        chosen = createChunk(minChunkSize, usage);
+        if (!chosen) return 0;
+
+        offsetInChunk = 0;
+        chosen->head = aligned;
     }
 
     uint64_t handle = ++g_nextHandle;
@@ -351,7 +375,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     memcpy(staging, data, size);
 
     VkBufferCopy copy{
-        .srcOffset = g_stagingRing.head - size,
+        .srcOffset = (reinterpret_cast<uintptr_t>(staging) - reinterpret_cast<uintptr_t>(g_stagingRing.mapped)),
         .dstOffset = info->offset,
         .size = size
     };
@@ -407,6 +431,7 @@ inline void purge_all() noexcept {
         if (chunk.memory) vkFreeMemory(dev, chunk.memory, nullptr);
     }
     g_mainChunks.clear();
+    g_total_allocated = 0;
 
     if (g_stagingRing.buffer) {
         if (g_stagingRing.mapped) vkUnmapMemory(dev, g_stagingRing.memory);
@@ -428,12 +453,14 @@ inline void purge_all() noexcept {
 } // namespace BufferManager
 
 // =============================================================================
-// BUFFERMANAGER v28.1 — JANUARY 08, 2026 — FINAL NVIDIA-SAFE PRODUCTION RELEASE
-// - All globals properly declared inline
-// - Persistent direct upload fully removed — staging ring only (no driver abort)
-// - All functionality preserved via 1 GiB staging ring
-// - No sacrifice — engine runs reliably on all drivers
-// Zero-cost | Modern C++23 | Eternal and unbreakable
+// BUFFERMANAGER v28.2 — JANUARY 09, 2026 — FINAL NVIDIA-SAFE PRODUCTION RELEASE
+// - On-demand chunk allocation — no preclaim, grow as needed up to safe limit
+// - Unified pool: Developers request any size up to usable VRAM
+// - Large allocs (>256 MiB) create dedicated exact-size "chunks"
+// - No fatal on exhaust — LOG_ERROR + return 0
+// - Staging ring now true wrap-around (% size)
+// - Upload srcOffset calculated from mapped ptr diff
+// - All globals inline | Modern C++23 | Eternal and unbreakable
 // The memory dominion is complete — the empire stands forever
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

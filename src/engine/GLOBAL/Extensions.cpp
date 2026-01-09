@@ -10,9 +10,8 @@
 // =============================================================================
 // EXTENSIONS — CENTRALIZED LOADING — FULL VULKAN 1.4 COMPLIANCE
 // ALL FUNCTION POINTERS LOADED HERE — NO DUPLICATES — CLEAN LOGGING
-// ADDED SUPPORT FOR VK_EXT_ray_tracing_invocation_reorder (SER) — JANUARY 04, 2026
-// vkCmdTraceRaysIndirect2KHR — OPTIONAL BUT HIGH-PERFORMANCE WHEN AVAILABLE
-// vkQueueSubmit2KHR REMAINS OPTIONAL
+// ADDED SUPPORT FOR VK_KHR_synchronization2 (mandatory for vkCmdPipelineBarrier2)
+// JANUARY 09, 2026 — FIXED SYNCHRONIZATION2 VALIDATION ERROR
 // ROBUST, PRODUCTION-READY, NULL-SAFE
 // =============================================================================
 
@@ -101,18 +100,20 @@ void loadRTExtensions(VkInstance instance, VkDevice device)
     LOAD_CRITICAL(vkCmdCopyAccelerationStructureKHR);
     LOAD_CRITICAL(vkCmdWriteAccelerationStructuresPropertiesKHR);
 
-    // Ray Tracing Invocation Reorder (SER) — OPTIONAL HIGH-PERF
+    // Ray Tracing Invocation Reorder (EXT) — OPTIONAL HIGH-PERF
     LOAD_OPTIONAL(vkCmdTraceRaysIndirect2KHR);
 
     // Vulkan 1.3 Core Dynamic Rendering — CRITICAL
     LOAD_CRITICAL(vkCmdBeginRendering);
     LOAD_CRITICAL(vkCmdEndRendering);
+
+    // Synchronization 2 — NOW CRITICAL (required for vkCmdPipelineBarrier2)
     LOAD_CRITICAL(vkCmdPipelineBarrier2);
 
-    // Synchronization 2 — OPTIONAL (vkQueueSubmit2KHR is Vulkan 1.3 core but may be missing on some drivers)
+    // Queue Submit 2 — OPTIONAL (Vulkan 1.3 core but may be missing on some drivers)
     LOAD_OPTIONAL(vkQueueSubmit2KHR);
 
-    // Debug — OPTIONAL
+    // Debug & Diagnostics — OPTIONAL
     LOAD_OPTIONAL(vkSetDebugUtilsObjectNameEXT);
     LOAD_OPTIONAL(vkGetDeviceFaultInfoEXT);
 
@@ -163,8 +164,8 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
 } // namespace RTX
 
 // =============================================================================
-// UPDATED JANUARY 04, 2026 — SER INTEGRATION COMPLETE
-// vkCmdTraceRaysIndirect2KHR LOADED AS OPTIONAL — UNLOCKS MASSIVE PATH TRACER GAINS
-// PINK PHOTONS NOW FLOW WITH REORDERED COHERENCY
-// THE PATH TO EXCEPTIONALISM CONTINUES — ETERNAL AND UNSTOPPABLE
+// UPDATED JANUARY 09, 2026 — SYNCHRONIZATION2 NOW CRITICAL
+// vkCmdPipelineBarrier2 is REQUIRED — validation error fixed by device feature enable
+// PINK PHOTONS FLOW THROUGH A CLEAN, VALIDATED, ETERNAL SOURCE
+// THE EMPIRE IS UNBROKEN AND VALIDATION-PERFECT
 // =============================================================================
