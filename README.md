@@ -57,6 +57,9 @@ Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)
 
 Made with Grok sized files for AI updates.  
 
+170,000+ FPS on 4070ti full path tracer.  
+<img width="1300" alt="FPS" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/G-GjJuzXoAAWWCc.jpeg" />  
+
 Errors and bad code will not be tolerated.
 <img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Untitled.png" />  
 
