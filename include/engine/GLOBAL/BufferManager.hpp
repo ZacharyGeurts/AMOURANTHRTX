@@ -1,10 +1,11 @@
+// include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.0 — JANUARY 08, 2026
 // BUFFERMANAGER — HEADER-ONLY 2026 ULTIMATE EDITION — PROFESSIONAL PRODUCTION RELEASE
 // ZERO-COST C++23 PHILOSOPHY | FULLY MODERN | SAFE & ETERNAL
 // 256 MiB DEVICE-LOCAL CHUNKS — MAXIMUM VRAM CONTROL WITH DRIVER RESERVE
 // 1 GiB PERSISTENTLY MAPPED STAGING RING — RING-BUFFERED TRANSFERS
-// 1 MiB PERSISTENT DIRECT UPLOAD BUFFER — IMMEDIATE CPU WRITES
+// 1 MiB PERSISTENT DIRECT UPLOAD BUFFER — IMMEDIATE CPU WRITES (SAFE FALLBACK)
 // SMART PATH: ≤64KiB UNIFORMS → HOST-VISIBLE | ALL ELSE → DEVICE-LOCAL + BDA
 // SBT SAFETY PADDING | ZERO FRAGMENTATION | VALIDATION CLEAN
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
@@ -83,7 +84,7 @@ struct StagingRing {
     VkDeviceSize   size   = STAGING_RING_SIZE;
     void*          mapped = nullptr;
     VkDeviceSize   head   = 0;
-    bool           ready  = false;  // Use regular bool — manual control
+    bool           ready  = false;
 };
 
 // ── GLOBAL EMPIRE STATE ────────────────────────────────────────────────────
@@ -180,36 +181,74 @@ inline void ensureMainPool() noexcept {
     LOG_SUCCESS("BufferManager", "Main device-local pool ready — {} chunks claimed", g_mainChunks.size());
 }
 
-// ── PERSISTENT 1 MiB DIRECT UPLOAD BUFFER — IMMEDIATE CPU ACCESS ─────────────
+// ── PERSISTENT 1 MiB DIRECT UPLOAD BUFFER — SAFE & DEFENSIVE (NO SACRIFICE) ──
 inline void ensurePersistentUpload() noexcept {
     if (g_persistentUploadBuffer != VK_NULL_HANDLE) return;
 
-    LOG_INFO("BufferManager", "Creating persistent 1 MiB direct upload buffer");
+    LOG_INFO("BufferManager", "Attempting persistent 1 MiB direct upload buffer");
 
     VkBufferCreateInfo bci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                            .size = PERSISTENT_UPLOAD_SIZE,
                            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                            .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
 
-    VK_CHECK(vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &g_persistentUploadBuffer));
+    VkResult result = vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &g_persistentUploadBuffer);
+    if (result != VK_SUCCESS) {
+        LOG_WARNING("BufferManager", "Failed to create persistent upload buffer: {}", string_VkResult(result));
+        g_persistentUploadBuffer = VK_NULL_HANDLE;
+        return;
+    }
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(StoneKey::stone_device(), g_persistentUploadBuffer, &req);
 
+    // Try coherent first
     uint32_t memType = findMemoryType(req.memoryTypeBits,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (memType == ~0u) {
-        LOG_FATAL("BufferManager", "No host-visible coherent memory for persistent upload buffer");
-        return;
+        // Fallback: host-visible without coherent (will need flushes)
+        memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        if (memType == ~0u) {
+            LOG_WARNING("BufferManager", "No host-visible memory available — persistent upload disabled");
+            vkDestroyBuffer(StoneKey::stone_device(), g_persistentUploadBuffer, nullptr);
+            g_persistentUploadBuffer = VK_NULL_HANDLE;
+            return;
+        }
+        LOG_INFO("BufferManager", "Using non-coherent host-visible memory for persistent upload");
     }
 
     VkMemoryAllocateInfo mai{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                              .allocationSize = req.size,
                              .memoryTypeIndex = memType};
 
-    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &g_persistentUploadMemory));
-    VK_CHECK(vkBindBufferMemory(StoneKey::stone_device(), g_persistentUploadBuffer, g_persistentUploadMemory, 0));
-    VK_CHECK(vkMapMemory(StoneKey::stone_device(), g_persistentUploadMemory, 0, VK_WHOLE_SIZE, 0, &g_persistentUploadMapped));
+    result = vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &g_persistentUploadMemory);
+    if (result != VK_SUCCESS) {
+        LOG_WARNING("BufferManager", "Failed to allocate memory for persistent upload: {}", string_VkResult(result));
+        vkDestroyBuffer(StoneKey::stone_device(), g_persistentUploadBuffer, nullptr);
+        g_persistentUploadBuffer = VK_NULL_HANDLE;
+        return;
+    }
+
+    result = vkBindBufferMemory(StoneKey::stone_device(), g_persistentUploadBuffer, g_persistentUploadMemory, 0);
+    if (result != VK_SUCCESS) {
+        LOG_WARNING("BufferManager", "Failed to bind memory for persistent upload");
+        vkFreeMemory(StoneKey::stone_device(), g_persistentUploadMemory, nullptr);
+        vkDestroyBuffer(StoneKey::stone_device(), g_persistentUploadBuffer, nullptr);
+        g_persistentUploadBuffer = VK_NULL_HANDLE;
+        g_persistentUploadMemory = VK_NULL_HANDLE;
+        return;
+    }
+
+    result = vkMapMemory(StoneKey::stone_device(), g_persistentUploadMemory, 0, VK_WHOLE_SIZE, 0, &g_persistentUploadMapped);
+    if (result != VK_SUCCESS) {
+        LOG_WARNING("BufferManager", "Failed to map persistent upload buffer — falling back to staging only: {}", string_VkResult(result));
+        vkFreeMemory(StoneKey::stone_device(), g_persistentUploadMemory, nullptr);
+        vkDestroyBuffer(StoneKey::stone_device(), g_persistentUploadBuffer, nullptr);
+        g_persistentUploadBuffer = VK_NULL_HANDLE;
+        g_persistentUploadMemory = VK_NULL_HANDLE;
+        g_persistentUploadMapped = nullptr;
+        return;
+    }
 
     LOG_SUCCESS("BufferManager", "Persistent direct upload buffer ready — 1 MiB eternal mapping");
 }
@@ -456,9 +495,11 @@ inline void purge_all() noexcept {
     g_stagingRing = {};
 
     if (g_persistentUploadBuffer) {
+        if (g_persistentUploadMapped) vkUnmapMemory(dev, g_persistentUploadMemory);
         vkDestroyBuffer(dev, g_persistentUploadBuffer, nullptr);
         vkFreeMemory(dev, g_persistentUploadMemory, nullptr);
         g_persistentUploadBuffer = VK_NULL_HANDLE;
+        g_persistentUploadMemory = VK_NULL_HANDLE;
         g_persistentUploadMapped = nullptr;
     }
 
@@ -478,8 +519,11 @@ inline void purge_all() noexcept {
 } // namespace BufferManager
 
 // =============================================================================
-// BUFFERMANAGER v28.0 — JANUARY 08, 2026 — FINAL FIXED PRODUCTION RELEASE
-// All compile errors resolved | Full compatibility with existing code
+// BUFFERMANAGER v28.0 — JANUARY 08, 2026 — FINAL SAFE PRODUCTION RELEASE
+// - Persistent upload now defensive: no crash on failure
+// - Falls back gracefully to staging ring only
+// - No sacrifice — engine continues even if host-visible memory is restricted
+// - All compile errors resolved | Full compatibility with existing code
 // Zero-cost | Modern C++23 | Eternal and unbreakable
 // The memory dominion is complete — the empire stands forever
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
