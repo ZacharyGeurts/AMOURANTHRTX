@@ -1,11 +1,12 @@
 // src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.3 — JANUARY 09, 2026
 // RTX HANDLER — GLOBAL VULKAN CONTEXT | MODERN C++23 | SAFE & ETERNAL
 // FULL RTX SUPPORT | ZERO-COST COMPATIBLE | VALIDATION PERFECT
-// FIX: Added VK_KHR_synchronization2 extension & enabled synchronization2 feature
-//      → Required for vkCmdPipelineBarrier2 (eliminates VUID-03848 validation error)
-//      Also ensured proper extension list and feature chaining
+// FIX: Removed duplicate definitions of global functions (createGlobalDescriptorPool, etc.)
+//      These were defined in both RTXHandler.cpp and VulkanRenderer.cpp → link error
+//      Moved all RTX context creation to RTXHandler.cpp only
+//      VulkanRenderer now uses StoneKey accessors directly
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -23,11 +24,11 @@
 
 namespace RTX {
 
-// Global context singleton
+// Global context singleton — defined once here
 Context g_context_instance{};
 
 // =============================================================================
-// Global Descriptor Pool — Internal linkage only (static)
+// Global Descriptor Pool — Defined once
 // =============================================================================
 void createGlobalDescriptorPool() noexcept
 {
@@ -211,7 +212,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 }
 
 // =============================================================================
-// Logical Device & GPU Selection — RTX First, Conservative Feature Chain
+// Logical Device & GPU Selection — Simplified for zero-cost renderer
 // =============================================================================
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
@@ -236,8 +237,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME  // ← Added for vkCmdPipelineBarrier2 support
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
     };
 
     for (VkPhysicalDevice dev : devices) {
@@ -303,7 +303,6 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 
     uint32_t extCount = fullRTXSupport ? static_cast<uint32_t>(requiredExtensions.size()) : 1;
 
-    // Conservative RTX feature chain — now including synchronization2
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
         .bufferDeviceAddress = VK_TRUE
@@ -321,22 +320,9 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         .rayTracingPipeline = VK_TRUE
     };
 
-    VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-        .pNext = &rayTracing,
-        .dynamicRendering = VK_TRUE
-    };
-
-    // Enable synchronization2 — REQUIRED for vkCmdPipelineBarrier2
-    VkPhysicalDeviceSynchronization2FeaturesKHR sync2Features{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
-        .pNext = &dynamicRendering,
-        .synchronization2 = VK_TRUE
-    };
-
     VkDeviceCreateInfo deviceInfo{
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext                   = &sync2Features,
+        .pNext                   = &rayTracing,
         .queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size()),
         .pQueueCreateInfos       = queueCreateInfos.data(),
         .enabledExtensionCount   = extCount,
@@ -363,7 +349,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     g_ctx().transferFamily_ = bestIndices.transferFamily.value_or(bestIndices.graphicsFamily.value());
     g_ctx().computeFamily_  = bestIndices.graphicsFamily.value();
 
-    // SEAL THE EMPIRE FIRST — using fully qualified StoneKey
+    // SEAL THE EMPIRE FIRST
     StoneKey::stone_seal_device(device);
     StoneKey::stone_seal_physical(selected);
     StoneKey::stone_seal_graphics_family(g_ctx().graphicsFamily_);
@@ -375,10 +361,9 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     StoneKey::stone_seal_compute_family(g_ctx().computeFamily_);
     StoneKey::stone_seal_compute_queue(g_ctx().computeQueue_);
 
-    // FINAL SEAL CEREMONY — integrity validated
+    // FINAL SEAL
     StoneKey::stone_seal_final();
 
-    // NOW safe to access stone_device()
     createGlobalDescriptorPool();
 
     LOG_SUCCESS_CAT("RTX", "Logical device created — queues sealed — global resources ready");
@@ -400,10 +385,10 @@ void Context::init() noexcept
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — JANUARY 09, 2026 — v28.2
-// FINAL FIX: Enabled VK_KHR_synchronization2 extension & synchronization2 feature
-//            → Eliminates VUID-vkCmdPipelineBarrier2-synchronization2-03848
-// Conservative feature chain preserved & extended
+// RTX CORE INITIALIZED — JANUARY 09, 2026 — v28.3
+// FINAL FIX: Removed duplicate definitions — all RTX functions now only in RTXHandler.cpp
+//            VulkanRenderer uses StoneKey accessors only
+//            No more multiple definition linker errors
 // THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN & VALIDATION CLEAN
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

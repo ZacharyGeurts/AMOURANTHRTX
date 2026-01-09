@@ -1,13 +1,13 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.3 — JANUARY 09, 2026
 // PIPELINEMANAGER — ZERO-COST RTX EDITION | DIRECT SWAPCHAIN RENDER | NO ENVMAP
 // SINGLE GLOBAL POOL + LAS + ETERNAL SBT | VALIDATION PERFECT | C++23 MODERN
 // FULLY COMPATIBLE WITH NEW HEADER-ONLY STONEKEY v∞
-// FIXES:
-// - Corrected shader group setup: General groups must have closestHit/anyHit/intersection = VK_SHADER_UNUSED_KHR
-// - Triangles hit group must have intersectionShader = VK_SHADER_UNUSED_KHR
-// - Proper indices assignment for stages/groups
+// FIXES (v28.3):
+// - Replaced vkCmdPipelineBarrier2 with classic vkCmdPipelineBarrier (no sync2 dependency)
+// - Validation clean — no VUID-synchronization2-03848
+// - Zero-cost preserved — minimal sync
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -408,7 +408,7 @@ void PipelineManager::createRayTracingPipeline()
 }
 
 // =============================================================================
-// SBT Creation — Eternal (uses staging ring only)
+// SBT Creation — Eternal (classic barrier — no sync2)
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
@@ -500,19 +500,22 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     };
     vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtBuffer, 1, &copy);
 
-    VkMemoryBarrier2 barrier{
-        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstStageMask  = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
-        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT
+    // Classic barrier — no sync2 required
+    VkMemoryBarrier memBarrier{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
     };
-    VkDependencyInfo dep{
-        .sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .memoryBarrierCount = 1,
-        .pMemoryBarriers    = &barrier
-    };
-    g_ext.vkCmdPipelineBarrier2(uploadCmd, &dep);
+
+    vkCmdPipelineBarrier(
+        uploadCmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0,
+        1, &memBarrier,
+        0, nullptr,
+        0, nullptr
+    );
 
     if (tempCmd) {
         VK_CHECK(vkEndCommandBuffer(uploadCmd));
@@ -734,11 +737,10 @@ PipelineManager::~PipelineManager()
 } // namespace RTX
 
 // =============================================================================
-// FINAL PIPELINE MANAGER v28.2 — JANUARY 09, 2026
-// FIXED VALIDATION ERRORS:
-// - General groups (raygen/miss) now correctly set closestHit/anyHit/intersection = VK_SHADER_UNUSED_KHR
-// - Triangles hit group explicitly sets intersectionShader = VK_SHADER_UNUSED_KHR
-// - Proper stage/group indexing (0=raygen, 1=miss, 2=chit, 3=ahit)
-// - No more VUID-03475 / VUID-03477 violations
+// FINAL PIPELINE MANAGER v28.3 — JANUARY 09, 2026
+// FIXED:
+// - Classic vkCmdPipelineBarrier in SBT — no sync2 dependency
+// - Validation clean — no VUID-synchronization2-03848
+// - Zero-cost RTX preserved
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================
