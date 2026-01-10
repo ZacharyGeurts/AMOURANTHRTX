@@ -1,161 +1,79 @@
-// assets/shaders/raytracing/raygen.rgen
-// =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
-// RAYGEN SHADER — PURE RTX REALM | PROCEDURAL SKY + SUNS + MOONS + STARS
-// NO ENVMAP | FULL DAY/NIGHT | REALISTIC TWINKLE | GORGEOUS
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// Filename: raygen.glsl
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL
+// RAY GENERATION SHADER — PRIMARY RAY LAUNCH + TEMPORAL ACCUMULATION
+// PINK PHOTONS SCREAM ETERNAL — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
-#extension GL_EXT_buffer_reference2 : require
-#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_nonuniform_qualifier : require
 
-layout(push_constant) uniform PushConstants {
-    uint frameNumber;
-    uint sampleOffset;
-    float padding[6];
-} push;
+layout(location = 0) rayPayloadEXT vec3 hitColor;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
 layout(set = 0, binding = 1, rgba32f) uniform image2D rtOutput;
-layout(set = 0, binding = 2) uniform CameraSceneData {
+layout(set = 0, binding = 2) uniform CameraUBO {
     mat4 viewInverse;
     mat4 projInverse;
-    mat4 view;
-    mat4 proj;
-
     vec4 cameraPos;
-    vec4 prevCameraPos;
-
-    float exposure;
-    float totalTime;
     uint frameNumber;
-    uint randomSeed;
-
     uint spp;
-    uint maxDepth;
-    uint enableAccumulation;
-    uint enableDenoising;
+    uint seed;
+    float exposure;
+    float time;
+} ubo;
 
-    uint tonemapType;
-    uint padding[3];
-} cam;
+layout(push_constant) uniform PushConstants {
+    float time;
+    uint frame;
+} push;
 
-layout(set = 0, binding = 3, rgba32f) uniform image2D accumulation;
-layout(set = 0, binding = 6, rgba32f) uniform image2D nexusScore;
-layout(set = 0, binding = 8) uniform sampler2D blueNoise;
-
-layout(set = 2, binding = 0) uniform sampler2D textures[1024];
-
-layout(location = 0) rayPayloadEXT vec3 payloadColor;
-layout(location = 1) rayPayloadEXT bool isShadowed;
-
-// =============================================================================
-// Hash & Noise — For stars and twinkle
-// =============================================================================
-float hash11(float p) {
-    p = fract(p * 0.1031);
-    p *= p + 33.33;
-    return fract(p * p);
-}
-
-vec3 hash33(vec3 p3) {
-    p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
-    p3 += dot(p3, p3.yxz + 33.33);
-    return fract((p3.xxy + p3.yxx)*p3.zyx);
-}
-
-// =============================================================================
-// Procedural Sky — Gorgeous day/night + stars + twinkle
-// =============================================================================
-vec3 proceduralSky(vec3 dir) {
-    float up = dir.y * 0.5 + 0.5;
-
-    // Day/night blend based on sun height (simplified)
-    float sunHeight = dir.y; // Approximate
-    float dayFactor = smoothstep(-0.1, 0.1, sunHeight);
-
-    vec3 dayZenith   = vec3(0.3, 0.55, 1.0);
-    vec3 dayHorizon  = vec3(0.6, 0.8, 1.0);
-    vec3 nightZenith = vec3(0.01, 0.02, 0.05);
-    vec3 nightHorizon= vec3(0.03, 0.03, 0.08);
-
-    vec3 zenith  = mix(nightZenith, dayZenith, dayFactor);
-    vec3 horizon = mix(nightHorizon, dayHorizon, dayFactor);
-
-    vec3 sky = mix(horizon, zenith, up);
-
-    // Stars at night
-    if (dayFactor < 0.1) {
-        vec3 starHash = hash33(dir * 400.0 + cam.totalTime * 0.001);
-        float star = smoothstep(0.98, 1.0, starHash.x) * 0.8;
-
-        // Twinkle
-        float twinkle = 1.0 + sin(cam.totalTime * 3.0 + starHash.y * 10.0) * 0.3;
-        sky += star * twinkle;
-    }
-
-    return sky;
+// Simple PCG RNG for noise
+uint pcg(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    state = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    state = (state >> 22u) ^ state;
+    return state;
 }
 
 void main() {
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-    const vec2 uv = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
-    const vec2 ndc = uv * 2.0 - 1.0;
+    ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
+    ivec2 resolution = ivec2(gl_LaunchSizeEXT.xy);
 
-    vec4 near = cam.projInverse * vec4(ndc, 0.0, 1.0);
-    near /= near.w;
-    vec4 far  = cam.projInverse * vec4(ndc, 1.0, 1.0);
-    far  /= far.w;
+    // Simple camera ray generation
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(resolution);
+    uv = uv * 2.0 - 1.0;
 
-    vec3 origin = cam.viewInverse[3].xyz;
-    vec3 direction = normalize((cam.viewInverse * far).xyz - origin);
+    vec4 target = ubo.projInverse * vec4(uv.x, uv.y, 1.0, 1.0);
+    target /= target.w;
 
-    // Blue noise jitter
-    vec2 noise = texture(blueNoise, uv + float(push.frameNumber) * 0.01337).rg;
-    noise = noise * 2.0 - 1.0;
-    direction += noise.xyy * 0.001;
-    direction = normalize(direction);
+    vec4 direction = ubo.viewInverse * target;
+    vec3 rayDir = normalize(direction.xyz);
+    vec3 rayOrigin = ubo.cameraPos.xyz;
 
-    payloadColor = vec3(0.0);
+    // Simple RNG seed per pixel + frame
+    uint seed = pcg(pixel.x + pixel.y * resolution.x + ubo.frameNumber * 1664525u);
 
-    uint flags = gl_RayFlagsOpaqueEXT;
-    traceRayEXT(tlas, flags, 0xFF, 0, 0, 0, origin, 0.001, direction, 10000.0, 0);
+    // Trace primary ray (your path tracing starts here)
+    traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, 0.001, rayDir, 10000.0, 0);
 
-    vec3 color = payloadColor;
+    // Temporal accumulation
+    vec3 newColor = hitColor;  // result from path tracer
+    vec3 prevColor = imageLoad(rtOutput, pixel).rgb;
 
-    // If miss (no hit), use procedural sky
-    if (length(color) < 0.001) {
-        color = proceduralSky(direction);
+    vec3 finalColor;
+    if (ubo.spp == 0) {
+        // First frame: direct write (no accumulation)
+        finalColor = newColor;
+    } else {
+        // Exponential moving average — stable, no division blowup
+        float alpha = 1.0 / (ubo.spp + 1.0);
+        finalColor = mix(prevColor, newColor, alpha);
     }
 
-    // Accumulation
-    if (cam.enableAccumulation > 0 && push.frameNumber > 0) {
-        vec3 prev = imageLoad(accumulation, ivec2(gl_LaunchIDEXT.xy)).rgb;
-        float mixFactor = 1.0 / float(push.frameNumber + 1);
-        color = mix(prev, color, mixFactor);
-        imageStore(accumulation, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1.0));
-    }
+    // Optional: tone mapping / exposure
+    finalColor *= ubo.exposure;
 
-    // Nexus score for adaptive sampling
-    if (cam.enableDenoising > 0 && push.frameNumber > 0) {
-        vec3 prev = imageLoad(accumulation, ivec2(gl_LaunchIDEXT.xy)).rgb;
-        float variance = length(color - prev);
-        imageStore(nexusScore, ivec2(gl_LaunchIDEXT.xy), vec4(variance));
-    }
-
-    imageStore(rtOutput, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1.0));
+    imageStore(rtOutput, pixel, vec4(finalColor, 1.0));
 }
-
-// =============================================================================
-// FINAL RAYGEN — JANUARY 07, 2026
-// - Pure procedural sky — no envmap needed
-// - Day/night blend + stars with twinkle
-// - hash33 defined locally
-// - totalTime from cam struct
-// - Accumulation + denoising ready
-// Empire complete — pink photons under our perfect sky — AMOURANTH FOREVER 💖
-// =============================================================================
