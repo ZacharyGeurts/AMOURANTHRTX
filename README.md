@@ -1,5 +1,5 @@
 Pre-Alpha Built with and for Vibe Coding.  
-We keep file sizes small for AI coding (700 lines on the big one)  
+We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
 Welcome to the community.  
 ```
