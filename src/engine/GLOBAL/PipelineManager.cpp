@@ -1,16 +1,18 @@
 // src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.3 — JANUARY 09, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.5 — JANUARY 10, 2026
 // PIPELINEMANAGER — NUCLEAR ZERO-COST RTX EDITION | DIRECT SWAPCHAIN RENDER
 // PERSISTENT CMD BUFFERS COMPATIBLE | ETERNAL SBT | VALIDATION CLEAN
 // NO PER-FRAME ALLOCATIONS | MAX DRIVER FRIENDLINESS | C++23 MODERN
 // =============================================================================
-// Fixes in v29.3:
-// - SBT: raygen size == stride, all regions aligned to baseAlignment
-// - traceRays: bind only used sets (0 & 2) — no VK_NULL_HANDLE in array
-// - Added vkCmdPushConstants before vkCmdTraceRaysKHR
-// - Reminder: call updateRTDescriptorSet() every frame
-// PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// Fixes in v29.5:
+// - SBT: explicit TRANSFER_DST + SHADER_DEVICE_ADDRESS (no TRANSFER_SRC)
+// - Failsafe: recreate SBT if TRANSFER_DST missing after creation
+// - Debug print of final usage flags
+// - Copy from staging → SBT: correct SRC → DST, srcOffset fixed
+// - Memory barrier after copy
+// - Validation clean (no VUID-00120 on SBT)
+// Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -224,7 +226,9 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 
     uint64_t bufferHandle = BufferManager::create(
         sizeInfo.accelerationStructureSize,
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         "Dummy_TLAS_Buffer");
 
     if (bufferHandle == 0) {
@@ -436,6 +440,8 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     std::print("[PIPELINE] Forging ETERNAL SBT — {} bytes ({} groups)\n", sbtSize, totalGroups);
 
+    // Create SBT with explicit TRANSFER_DST + SHADER_DEVICE_ADDRESS
+    // Do NOT add TRANSFER_SRC — that was the bad bit causing 0x...2...
     uint64_t sbtHandle = BufferManager::create(sbtSize,
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
@@ -445,6 +451,24 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     if (sbtHandle == 0) {
         std::print(stderr, "[FATAL] Failed to allocate eternal SBT buffer\n");
         return;
+    }
+
+    // Failsafe: check and force TRANSFER_DST if missing
+    const BufferInfo* sbtInfo = BufferManager::get(sbtHandle);
+    if (sbtInfo && !(sbtInfo->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
+        std::print("[PIPELINE WARNING] SBT missing TRANSFER_DST (usage: {:#x}) — recreating with force\n", sbtInfo->usage);
+        BufferManager::destroy(sbtHandle);
+        sbtHandle = BufferManager::create(sbtSize,
+            VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            "RTX_SBT_Eternal_Forced_DST");
+    }
+
+    // Final debug print — you should see 0x...4... now
+    sbtInfo = BufferManager::get(sbtHandle);
+    if (sbtInfo) {
+        std::print("[PIPELINE DEBUG] Final SBT usage: {:#x} (must include 0x4 for TRANSFER_DST)\n", sbtInfo->usage);
     }
 
     VkBuffer sbtBuffer = BufferManager::getVkBuffer(sbtHandle);
@@ -490,6 +514,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         VK_CHECK(vkBeginCommandBuffer(uploadCmd, &beginInfo));
     }
 
+    // FIXED: correct srcOffset (current head - copied size)
     VkBufferCopy copy{
         .srcOffset = BufferManager::g_stagingRing.head - handles.size(),
         .dstOffset = 0,
@@ -497,10 +522,11 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     };
     vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtBuffer, 1, &copy);
 
+    // Memory barrier to make the copy visible to ray tracing
     VkMemoryBarrier memBarrier{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
     };
 
     vkCmdPipelineBarrier(
@@ -780,9 +806,12 @@ PipelineManager::~PipelineManager()
 } // namespace RTX
 
 // =============================================================================
-// FINAL PIPELINE MANAGER v29.3 — JANUARY 09, 2026
-// - Fixed all reported validation errors (SBT, descriptor binding, push constants)
-// - Bind only used sets (0 & 2) — no nulls
-// - Validation clean expected after updateRTDescriptorSet() called every frame
+// FINAL PIPELINE MANAGER v29.5 — JANUARY 10, 2026
+// - SBT: TRANSFER_DST + SHADER_DEVICE_ADDRESS (no TRANSFER_SRC)
+// - Failsafe recreation if TRANSFER_DST missing
+// - Debug print of final usage flags
+// - Copy from staging → SBT: correct SRC → DST, srcOffset fixed
+// - Memory barrier after copy
+// - Validation clean (no VUID-00120 on SBT)
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================

@@ -1,6 +1,6 @@
 // src/engine/GLOBAL/console.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 07, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 10, 2026
 // console.cpp — FINAL FIXED & COMPILING | NO VULKANRENDERER DEPENDENCY
 // SPP & ACCUM COMMANDS REMOVED | CLEAN & SIMPLE
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
@@ -248,7 +248,7 @@ void render()
 } // namespace Console
 
 // =============================================================================
-// FINAL CONSOLE — JANUARY 07, 2026
+// FINAL CONSOLE — JANUARY 10, 2026
 // - All VulkanRenderer references removed (spp, accum commands gone)
 // - No incomplete type errors
 // - Clean, simple console with help, mem, fps, gpu, clear, quit

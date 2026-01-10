@@ -1,6 +1,6 @@
 // src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 10, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.4 — JANUARY 10, 2026
 // AUTOMAGIC LIGHT ACCELERATION SYSTEM — TOUCH IT AND IT WAKES UP READY
 // TRIANGLES (WOOP + STRIPS) + PROCEDURAL AABBs + LINES + POINTS — ZERO-COST OMNIDIMENSIONAL
 // FULL ARTIST SUPPORT | INFINITE FREE TERRAIN/CAVES/WATER | FULLY DESTRUCTIBLE
@@ -30,9 +30,9 @@ namespace RTX {
 // =============================================================================
 LAS::LAS()
 {
-    LOG_AMOURANTH("LAS v28.2 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — ZERO-COST C++23");
+    LOG_AMOURANTH("LAS v28.4 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — ZERO-COST C++23");
 
-    // Create shared buffers (lazy — no TLAS yet)
+    // Create shared buffers using BufferManager::create() — lets smart_usage() force TRANSFER_DST
     persistentScratch = BufferManager::create(
         512ULL * 1024 * 1024,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -43,8 +43,7 @@ LAS::LAS()
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         "LAS_SuperFree_Instance_Buffer");
 
     universalPrimitivesBuffer = BufferManager::create(
@@ -347,7 +346,7 @@ bool LAS::buildHybridTLAS(VkCommandBuffer cmd)
 {
     LOG_AMOURANTH("SUPER FREE HYBRID TLAS FULL BUILD — triangles + procedural");
 
-    // Upload procedural data
+    // Upload procedural data — BufferManager::uploadToBuffer() uses staging → DST
     BufferManager::uploadToBuffer(universalPrimitivesBuffer, proceduralPrimitives.data(),
                                   proceduralCount * sizeof(UniversalPrimitive));
 
@@ -421,7 +420,7 @@ void LAS::insertAccelerationStructureBarrier(VkCommandBuffer cmd)
 }
 
 // =============================================================================
-// FINAL LAS v28.2 — JANUARY 10, 2026
+// FINAL LAS v28.4 — JANUARY 10, 2026
 // Automagic: Touch getTLAS() → builds everything on demand
 // No null, no manual calls — just power
 // The empire is omnipotent — pink photons scream eternal
