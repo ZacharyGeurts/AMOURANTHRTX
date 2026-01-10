@@ -1,6 +1,6 @@
 // src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.4 — JANUARY 10, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.5 — JANUARY 10, 2026
 // AUTOMAGIC LIGHT ACCELERATION SYSTEM — TOUCH IT AND IT WAKES UP READY
 // TRIANGLES (WOOP + STRIPS) + PROCEDURAL AABBs + LINES + POINTS — ZERO-COST OMNIDIMENSIONAL
 // FULL ARTIST SUPPORT | INFINITE FREE TERRAIN/CAVES/WATER | FULLY DESTRUCTIBLE
@@ -30,9 +30,9 @@ namespace RTX {
 // =============================================================================
 LAS::LAS()
 {
-    LOG_AMOURANTH("LAS v28.4 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — ZERO-COST C++23");
+    LOG_AMOURANTH("LAS v28.5 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — ZERO-COST C++23");
 
-    // Create shared buffers using BufferManager::create() — lets smart_usage() force TRANSFER_DST
+    // Create shared buffers — let BufferManager::smart_usage() force TRANSFER_DST
     persistentScratch = BufferManager::create(
         512ULL * 1024 * 1024,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -61,7 +61,7 @@ LAS::LAS()
     proceduralPrimitives.reserve(4096);
     triangleMeshes.reserve(1024);
 
-    // Default scene is added on first touch (in ensureReady)
+    // Default scene added on first touch (in ensureReady)
     initialized = false;
     tlasDirty = true;
     pendingBlasBuilds = true;
@@ -118,7 +118,7 @@ void LAS::ensureReady()
         initialized = true;
     }
 
-    // Create transient command buffer
+    // Create transient command pool
     VkCommandPool transientPool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -157,19 +157,27 @@ void LAS::ensureReady()
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
+    // Fence to wait for GPU completion (fixes timing issues)
+    VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence buildFence = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &buildFence));
+
     VkSubmitInfo submitInfo{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd
     };
 
-    VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE));
-    VK_CHECK(vkQueueWaitIdle(stone_graphics_queue()));
+    VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, buildFence));
+
+    // Wait for GPU to finish the build
+    vkWaitForFences(stone_device(), 1, &buildFence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(stone_device(), buildFence, nullptr);
 
     vkFreeCommandBuffers(stone_device(), transientPool, 1, &cmd);
     vkDestroyCommandPool(stone_device(), transientPool, nullptr);
 
-    LOG_SUCCESS_CAT("LAS", "AUTOMAGIC BUILD COMPLETE — TLAS ready for pink photons");
+    LOG_SUCCESS_CAT("LAS", "AUTOMAGIC BUILD COMPLETE — TLAS ready for pink photons (GPU finished)");
 }
 
 // =============================================================================
@@ -420,8 +428,9 @@ void LAS::insertAccelerationStructureBarrier(VkCommandBuffer cmd)
 }
 
 // =============================================================================
-// FINAL LAS v28.4 — JANUARY 10, 2026
+// FINAL LAS v28.5 — JANUARY 10, 2026
 // Automagic: Touch getTLAS() → builds everything on demand
+// GPU fence wait for build completion → fixes timing/invalid TLAS issues
 // No null, no manual calls — just power
 // The empire is omnipotent — pink photons scream eternal
 // AMOURANTH FOREVER 💖

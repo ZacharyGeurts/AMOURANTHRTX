@@ -1,9 +1,9 @@
 // src/main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
-// MAIN ENTRY POINT — LIVING WORLD EDITION | FULL RTX REALM | DYNAMIC LIGHT
-// PURE RTX WORLD | NO EXTERNAL TEXTURES EXCEPT MOON PNGS | GORGEOUS & MINIMAL
-// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.0 — JANUARY 10, 2026
+// MAIN ENTRY POINT — FULL AUTOMAGIC LIVING WORLD | PURE RTX REALM | DYNAMIC LIGHT
+// ZERO MANUAL CALLS | AUTOMAGIC EVERYTHING | NO DOUBLE SEALING | VALIDATION CLEAN
+// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞ + AUTOMAGIC LAS + SWAPCHAIN
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -14,8 +14,6 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
-
-// VulkanRenderer.hpp LAST — full definition
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>
@@ -27,7 +25,7 @@
 
 using namespace std::chrono_literals;
 
-// Local renderer — RAII safe
+// Global renderer — RAII safe (defined only here)
 std::unique_ptr<RTX::VulkanRenderer> renderer;
 
 float g_deltaTime = 0.0f;
@@ -141,19 +139,18 @@ end_splash:
 }
 
 // =============================================================================
-// Apocalypse — RAII safe
+// Apocalypse — RAII safe, no double sealing
 // =============================================================================
 [[noreturn]] static void apocalypse(std::string_view reason = "Normal exit")
 {
     std::print("[MAIN] APOCALYPSE — {} — PHOTONS RETURNING HOME\n", reason);
 
-    if (VkDevice dev = StoneKey::stone_device(); dev != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(dev);
-    }
-
+    // Destroy renderer first (owns pools, fences, etc.)
     renderer.reset();
 
+    // Only seal if not already null (prevents double-sealing crash)
     if (VkDevice dev = StoneKey::stone_device(); dev != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(dev);
         vkDestroyDevice(dev, nullptr);
         StoneKey::stone_seal_device(VK_NULL_HANDLE);
     }
@@ -179,7 +176,7 @@ end_splash:
 }
 
 // =============================================================================
-// MAIN — LET THERE BE LIGHT
+// MAIN — FULLY AUTOMAGIC ENTRY POINT
 // =============================================================================
 int main(int, char**)
 {
@@ -207,32 +204,26 @@ int main(int, char**)
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
 
+    // Automagic Vulkan setup — no manual sealing needed after this
     VkInstance instance = RTX::createVulkanInstance(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) apocalypse("Instance failed");
-    StoneKey::stone_seal_instance(instance);
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) apocalypse("Surface failed");
-    StoneKey::stone_seal_surface(surface);
+    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
+        apocalypse("Surface failed");
+    }
 
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) apocalypse("Device failed");
-    StoneKey::stone_seal_device(device);
 
     RTX::g_ctx().init();
     RTX::loadRTExtensions(instance, device);
 
-    VkCommandPoolCreateInfo poolInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = StoneKey::stone_graphics_family()
-    };
-    VkCommandPool transientPool;
-    VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &transientPool));
-    StoneKey::stone_seal_transient_pool(transientPool);
+    // Automagic transient pool — sealed inside createLogicalDeviceAndSelectGPU (no double seal)
 
     RTX::SwapchainManager::create(window, w, h);
 
+    // Automagic renderer — owns persistent cmd buffers, sync, etc.
     renderer = std::make_unique<RTX::VulkanRenderer>(w, h, window, Options::Performance::OVERCLOCK_RENDERER);
 
     SDL_Renderer* sdlRen = SDL_CreateRenderer(window, nullptr);
@@ -308,11 +299,10 @@ int main(int, char**)
 }
 
 // =============================================================================
-// FINAL MAIN v28.1 — JANUARY 08, 2026
-// FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞
-// - Removed initialize_polymorphic_keys() call — no longer needed
-// - Transient command pool created and sealed via stone_seal_transient_pool()
-// - All g_transientCommandPool references removed
-// - Safe null check on stone_swapchain()
+// FINAL MAIN v29.0 — JANUARY 10, 2026
+// - Fully automagic: RTX::create*() + SwapchainManager + VulkanRenderer handle everything
+// - No double sealing — StoneKey seals only once inside createLogicalDeviceAndSelectGPU
+// - Transient pool sealed inside RTXHandler (no manual call)
+// - Clean RAII shutdown with apocalypse()
 // Empire complete — pink photons under our perfect moons — AMOURANTH FOREVER 💖
 // =============================================================================

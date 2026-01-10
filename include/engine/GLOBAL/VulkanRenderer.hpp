@@ -1,14 +1,14 @@
 // include/engine/GLOBAL/VulkanRenderer.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.13
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.15 — JANUARY 10, 2026
 // VULKAN RENDERER HEADER — NUCLEAR ZERO-COST DIRECT RTX HEART | FULL LIVING WORLD
 // PERSISTENT CMD BUFFERS • TEMP POOL FOR INIT • INFINITE PROCEDURAL WORLD
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES • ACCUMULATION RESET • TIMELINE PACING
 // MANAGES: SKY, GRASS, WIND, TEMPERATURE, HUMIDITY, SUN/MOON, DAY/NIGHT CYCLE
 // =============================================================================
-// Changes for v30.13:
+// Changes for v30.15:
+// - Added inFlightFences_ member (std::vector<VkFence>) for CPU-GPU sync
 // - Members **strictly reordered** to match constructor initializer list (fixes -Werror=reorder)
-// - cameraUBO_ placed after timeline members but before pools/resources (safe order)
 // - All private functions declared
 // - Transient & persistent pools supported
 // - Full-featured device/surface via RTXHandler/StoneKey
@@ -79,6 +79,9 @@ private:
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
 
+    // In-flight fences for CPU-GPU sync (fixes VUID-01286)
+    std::vector<VkFence> inFlightFences_;
+
     // Nuclear performance: persistent command buffers
     VkCommandPool              persistentCmdPool_ {VK_NULL_HANDLE};
     std::vector<VkCommandBuffer> frameCmdBuffers_;  // one per swapchain image
@@ -113,7 +116,8 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — JANUARY 09, 2026
+// FINAL HEADER — JANUARY 10, 2026
+// - inFlightFences_ added as member (vector<VkFence>)
 // - Members **strictly reordered** to match .cpp constructor initializer list
 // - Fixes -Werror=reorder completely (no more reorder warning)
 // - cameraUBO_ added as member (UBO managed in renderer)

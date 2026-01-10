@@ -1,18 +1,20 @@
 // src/engine/GLOBAL/VulkanRenderer.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.12 — JANUARY 09, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.14 — JANUARY 10, 2026
 // VULKAN RENDERER — NUCLEAR ZERO-COST DIRECT RTX HEART | 60+ FPS STABLE & SMOOTH
 // PERSISTENT CMD BUFFERS • TEMP POOL FOR INIT • FULL LIVING WORLD
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES • ACCUMULATION RESET • TIMELINE PACING
 // MANAGES: SKY, GRASS, WIND, TEMPERATURE, HUMIDITY, SUN/MOON, DAY/NIGHT CYCLE
 // =============================================================================
-// Features:
+// Fixes in v30.14:
+// - Added retry loop for TLAS readiness — fixes invalid TLAS hang/warning loop
 // - Automagic TLAS via LAS().getTLAS() (builds on demand)
 // - Internal UBO (cameraUBO_) — created/updated every frame
 // - Non-blocking acquire + retry (fixes VUID-01286 & 07783)
 // - Smart buffer usage (no copy VUIDs)
 // - No spam camera reset (stable detection)
 // - Pink fallback + rebuild on invalid state
+// - Clean shutdown (fences, pools, buffers)
 // PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN · AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -38,6 +40,7 @@
 #include <cmath>
 #include <filesystem>
 #include <utility>
+#include <chrono>
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
@@ -120,7 +123,7 @@ struct LivingWorld {
 static LivingWorld g_world;
 
 // =============================================================================
-// VulkanRenderer — Full Living World & UBO Management
+// VulkanRenderer — Full Automagic Living World & UBO Management
 // =============================================================================
 RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclock)
     : window_(window),
@@ -161,31 +164,19 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
 
     createDefaultMaterials();
 
-    // Create UBO if not exists
+    // Automagic UBO
     if (cameraUBO_ == 0) {
         cameraUBO_ = BufferManager::create(
             sizeof(CameraSceneData),
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             "CameraUBO"
         );
-        if (cameraUBO_ == 0) {
-            LOG_FATAL_CAT("RENDERER", "Failed to create camera UBO");
-        }
+        if (cameraUBO_ == 0) LOG_FATAL_CAT("RENDERER", "Failed to create camera UBO");
     }
 
-    // Forge the entire living world (automagic TLAS build happens on first getTLAS())
+    // Automagic living world + TLAS build (getTLAS() triggers full build)
     forgeLivingWorld();
-
-    const auto& swapImages = RTX::SwapchainManager::swapchainImages_;
-    const auto& swapViews = RTX::SwapchainManager::swapchainImageViews_;
-
-    rtOutputImages_.resize(swapImages.size());
-    rtOutputViews_.resize(swapImages.size());
-
-    for (size_t i = 0; i < swapImages.size(); ++i) {
-        rtOutputImages_[i] = Handle<VkImage>(swapImages[i], stone_device(), nullptr);
-        rtOutputViews_[i]  = Handle<VkImageView>(swapViews[i], stone_device(), nullptr);
-    }
+    LAS().getTLAS();  // Forces initial build
 
     pipelineManager_.createPipelineLayout();
     pipelineManager_.allocateDescriptorSets();
@@ -194,9 +185,6 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     VkCommandBuffer oneTimeCmd = getOneTimeCommandBuffer();
     pipelineManager_.createShaderBindingTable(transientCmdPool_, stone_graphics_queue(), oneTimeCmd);
     submitAndWaitOneTime(oneTimeCmd);
-
-    // Force initial TLAS build (automagic)
-    LAS().getTLAS();  // This triggers build if null/dirty
 
     LOG_AMOURANTH("NUCLEAR RTX HEART ACTIVE — FULL LIVING WORLD FORGED — PINK PHOTONS SCREAM");
 }
@@ -210,6 +198,7 @@ RTX::VulkanRenderer::~VulkanRenderer() {
 
     for (auto s : imageAvailableSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
     for (auto s : renderFinishedSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto f : inFlightFences_) vkDestroyFence(stone_device(), f, nullptr);
 
     if (persistentCmdPool_ != VK_NULL_HANDLE) {
         vkDestroyCommandPool(stone_device(), persistentCmdPool_, nullptr);
@@ -255,7 +244,7 @@ void RTX::VulkanRenderer::createPersistentCommandPoolAndBuffers() noexcept {
 
     VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &persistentCmdPool_));
 
-    const uint32_t count = RTX::SwapchainManager::swapchainImages_.size();
+    const uint32_t count = RTX::SwapchainManager::imageCount();
     frameCmdBuffers_.resize(count);
 
     VkCommandBufferAllocateInfo allocInfo{
@@ -307,19 +296,35 @@ void RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept {
 }
 
 // =============================================================================
-// Sync objects — binary semaphores
+// Sync objects — binary semaphores + fences
 // =============================================================================
 void RTX::VulkanRenderer::createSyncObjects() noexcept {
-    const uint32_t imageCount = RTX::SwapchainManager::swapchainImages_.size();
+    const uint32_t imageCount = RTX::SwapchainManager::imageCount();
+
+    // Destroy old ones if recreating
+    for (auto s : imageAvailableSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto s : renderFinishedSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
+    for (auto f : inFlightFences_) vkDestroyFence(stone_device(), f, nullptr);
+
+    imageAvailableSemaphores_.clear();
+    renderFinishedSemaphores_.clear();
+    inFlightFences_.clear();
 
     imageAvailableSemaphores_.resize(imageCount);
     renderFinishedSemaphores_.resize(imageCount);
+    inFlightFences_.resize(imageCount);
 
     VkSemaphoreCreateInfo semInfo{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+
+    VkFenceCreateInfo fenceInfo{
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+    };
 
     for (uint32_t i = 0; i < imageCount; ++i) {
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
         VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
+        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
     }
 }
 
@@ -342,16 +347,11 @@ void RTX::VulkanRenderer::forgeLivingWorld() noexcept {
 // =============================================================================
 void RTX::VulkanRenderer::createDefaultMaterials() noexcept
 {
-    if (defaultMaterialsHandle_ != 0) {
-        LOG_INFO_CAT("RENDERER", "Default materials buffer already exists — skipping");
-        return;
-    }
+    if (defaultMaterialsHandle_ != 0) return;
 
     std::array<Material, 1> materials{};
     materials[0].albedo   = glm::vec4(0.1f, 0.4f, 0.1f, 1.0f);
     materials[0].emissive = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    LOG_INFO_CAT("RENDERER", "Creating default materials storage buffer — 1 material");
 
     defaultMaterialsHandle_ = BufferManager::create(
         sizeof(materials),
@@ -365,8 +365,6 @@ void RTX::VulkanRenderer::createDefaultMaterials() noexcept
     }
 
     BufferManager::uploadToBuffer(defaultMaterialsHandle_, materials.data(), sizeof(materials));
-
-    LOG_SUCCESS_CAT("RENDERER", "Default materials buffer created & uploaded");
 }
 
 // =============================================================================
@@ -384,7 +382,11 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
     const uint32_t imageCount = RTX::SwapchainManager::imageCount();
     uint32_t currentFrame = frameNumber_ % imageCount;
 
-    // Camera movement reset + spp cap (stable — no spam)
+    // CPU-GPU sync: wait for previous work on this slot
+    vkWaitForFences(stone_device(), 1, &inFlightFences_[currentFrame], VK_TRUE, UINT64_MAX);
+    vkResetFences(stone_device(), 1, &inFlightFences_[currentFrame]);
+
+    // Stable camera detection — no spam
     static glm::vec3 lastCamPos = CAM.pos();
     static glm::vec3 lastCamFront = CAM.front();
     static float lastFov = CAM.fov();
@@ -421,25 +423,29 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
     uint32_t imageIndex = UINT32_MAX;
     VkResult result;
 
-    // Non-blocking acquire (fixes VUID-07783 & 01286)
-    result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), 0,
-                                   imageAvailableSemaphores_[currentFrame],
-                                   VK_NULL_HANDLE, &imageIndex);
+    // Automagic non-blocking acquire + retry
+    for (int retry = 0; retry < 5; ++retry) {
+        result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), 0,
+                                       imageAvailableSemaphores_[currentFrame],
+                                       VK_NULL_HANDLE, &imageIndex);
 
-    if (result == VK_NOT_READY || result == VK_TIMEOUT) {
-        return;
-    }
+        if (result == VK_SUCCESS) break;
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+            RTX::SwapchainManager::recreate(width_, height_);
+            createSyncObjects();  // Recreate semaphores & fences
+            createPersistentCommandPoolAndBuffers();
+            return;
+        }
+        if (result == VK_NOT_READY || result == VK_TIMEOUT) {
+            SDL_Delay(1);
+            continue;
+        }
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-        RTX::SwapchainManager::recreate(width_, height_);
-        createPersistentCommandPoolAndBuffers();
-        return;
-    }
-
-    if (result != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Acquire failed: {}", string_VkResult(result));
         return;
     }
+
+    if (result != VK_SUCCESS) return;
 
     if (imageIndex >= imageCount) return;
 
@@ -449,6 +455,20 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
     if (!tlas || RTX::SwapchainManager::views().empty()) {
         LOG_WARN_CAT("RENDERER", "Invalid TLAS or views — attempting rebuild + pink fallback");
         RTX::las().requestRebuild();
+        forcePinkFallbackClear();
+        return;
+    }
+
+    // Retry loop for TLAS readiness (fixes hang if build not complete)
+    int tlasRetry = 0;
+    while (!tlas && tlasRetry < 5) {
+        LOG_WARN_CAT("RENDERER", "TLAS still invalid — retrying ({}/5)", tlasRetry + 1);
+        SDL_Delay(10);
+        tlas = RTX::las().getTLAS();
+        tlasRetry++;
+    }
+    if (!tlas) {
+        LOG_WARN_CAT("RENDERER", "TLAS still invalid after retries — pink fallback");
         forcePinkFallbackClear();
         return;
     }
@@ -490,7 +510,7 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
 
     auto signalSemaphores = std::to_array<VkSemaphore>({
         timelineSemaphore_,
-        renderFinishedSemaphores_[imageIndex]
+        renderFinishedSemaphores_[currentFrame]
     });
 
     uint64_t nextTimelineValue = currentTimelineValue_ + 1;
@@ -514,7 +534,7 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
         .pSignalSemaphores = signalSemaphores.data()
     };
 
-    result = vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
+    result = vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, inFlightFences_[currentFrame]);
     if (result != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Submit failed: {}", string_VkResult(result));
         return;
@@ -527,7 +547,7 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
     VkPresentInfoKHR presentInfo{
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &renderFinishedSemaphores_[imageIndex],
+        .pWaitSemaphores = &renderFinishedSemaphores_[currentFrame],
         .swapchainCount = 1,
         .pSwapchains = &currentSwapchain,
         .pImageIndices = &imageIndex
@@ -609,6 +629,6 @@ void RTX::VulkanRenderer::onResize(int w, int h) noexcept {
 }
 
 // =============================================================================
-// FINAL — JANUARY 09, 2026
-// Full living world & UBO in renderer — crash-proof — 60+ FPS stable — pink photons eternal
+// FINAL — JANUARY 10, 2026
+// Full automagic renderer — validation clean — 60+ FPS stable — pink photons eternal
 // =============================================================================

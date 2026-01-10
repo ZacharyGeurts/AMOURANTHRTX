@@ -1,17 +1,17 @@
 // src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.1 — JANUARY 09, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.4 — JANUARY 10, 2026
 // RTX HANDLER — GLOBAL VULKAN CONTEXT | FULL-FEATURED DEVICE & SURFACE
 // TIMELINE SEMAPHORE ENABLED | RTX FEATURES ACTIVATED | DESCRIPTOR INDEXING FIXED
-// FULLY VALIDATION CLEAN | ETERNAL EMPIRE READY
+// FULLY VALIDATION CLEAN | ETERNAL EMPIRE READY | STABLE & SAFE POOL
 // =============================================================================
-// Fixes in v29.1:
-// - Enabled descriptorIndexing in VkPhysicalDeviceVulkan12Features (fixes VUID-02833)
-// - TimelineSemaphore kept enabled
-// - Proper physical device & surface selection with RTX checks
-// - All ray tracing extensions & features activated
-// - Clean error paths with logging
-// - Centralized context + final StoneKey seal
+// Fixes in v29.4:
+// - Reduced MAX_SETS to 200'000 — driver-safe & sufficient (fixes abort/OOM)
+// - Lowered pool sizes to realistic values
+// - Added null device check + better error logging
+// - No main() — pure helpers
+// - Clean error paths
+// - Removed StoneKey::stone_seal_final() — avoid crash if called multiple times
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -34,28 +34,36 @@ namespace RTX {
 Context g_context_instance{};
 
 // =============================================================================
-// Global Descriptor Pool
+// Global Descriptor Pool — Realistic & Driver-Safe (200k sets max)
 // =============================================================================
 void createGlobalDescriptorPool() noexcept
 {
-    if (g_ctx().descriptorPool_.valid() || StoneKey::stone_device() == VK_NULL_HANDLE) {
+    VkDevice dev = StoneKey::stone_device();
+    if (dev == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("RTX", "Cannot create descriptor pool — device is NULL");
+        return;
+    }
+
+    if (g_ctx().descriptorPool_.valid()) {
+        LOG_INFO_CAT("RTX", "Global descriptor pool already exists — skipping");
         return;
     }
 
     LOG_INFO_CAT("RTX", "Forging global descriptor pool — empire scale");
 
-    constexpr uint32_t MAX_SETS = 2'000'000;
+    // Realistic & driver-safe (most drivers handle ~200k–500k total sets well)
+    constexpr uint32_t MAX_SETS = 200'000;
 
     const std::array poolSizes = {
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,              200'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,              MAX_SETS},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,               MAX_SETS},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,      1'600'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,               MAX_SETS},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER,                     100'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 200'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,            20'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,      50'000}
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,              50'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,              100'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,               100'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,      200'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,               100'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER,                     50'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 50'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,            10'000},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,      10'000}
     };
 
     VkDescriptorPoolCreateInfo info{
@@ -68,15 +76,15 @@ void createGlobalDescriptorPool() noexcept
     };
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
-    VkResult result = vkCreateDescriptorPool(StoneKey::stone_device(), &info, nullptr, &pool);
+    VkResult result = vkCreateDescriptorPool(dev, &info, nullptr, &pool);
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("RTX", "Failed to forge global descriptor pool: {}", string_VkResult(result));
+        LOG_FATAL_CAT("RTX", "vkCreateDescriptorPool failed: {} (check driver/VRAM limits)", string_VkResult(result));
         return;
     }
 
     g_ctx().descriptorPool_ = Handle<VkDescriptorPool>(
         pool,
-        StoneKey::stone_device(),
+        dev,
         [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
             vkDestroyDescriptorPool(d, p, nullptr);
         }
@@ -210,7 +218,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME  // Explicitly required
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
     };
 
     for (VkPhysicalDevice dev : devices) {
@@ -275,9 +283,9 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     // Enable timelineSemaphore + descriptorIndexing + all ray tracing features
     VkPhysicalDeviceVulkan12Features vk12Features{};
     vk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12Features.timelineSemaphore = VK_TRUE;         // Required for timeline semaphores
-    vk12Features.bufferDeviceAddress = VK_TRUE;       // Required for SBT
-    vk12Features.descriptorIndexing = VK_TRUE;        // Required for VK_EXT_descriptor_indexing
+    vk12Features.timelineSemaphore = VK_TRUE;
+    vk12Features.bufferDeviceAddress = VK_TRUE;
+    vk12Features.descriptorIndexing = VK_TRUE;
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStruct{};
     accelStruct.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -318,7 +326,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     g_ctx().transferFamily_ = bestIndices.transferFamily.value_or(bestIndices.graphicsFamily.value());
     g_ctx().computeFamily_  = bestIndices.graphicsFamily.value();
 
-    // Seal everything to StoneKey
+    // Seal everything to StoneKey (only once here)
     StoneKey::stone_seal_device(device);
     StoneKey::stone_seal_physical(selected);
     StoneKey::stone_seal_graphics_family(g_ctx().graphicsFamily_);
@@ -330,7 +338,8 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     StoneKey::stone_seal_compute_family(g_ctx().computeFamily_);
     StoneKey::stone_seal_compute_queue(g_ctx().computeQueue_);
 
-    StoneKey::stone_seal_final();
+    // Removed StoneKey::stone_seal_final() — prevents crash on double call
+    // It is not needed for normal operation and causes abort if called multiple times
 
     createGlobalDescriptorPool();
 
@@ -353,8 +362,12 @@ void Context::init() noexcept
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — JANUARY 09, 2026 — v29.1
-// Fixed descriptor indexing validation error — all features enabled
+// RTX CORE INITIALIZED — JANUARY 10, 2026 — v29.4
+// - No main() — pure helpers
+// - Realistic descriptor pool sizes (200k max sets) — prevents abort/OOM
+// - Removed stone_seal_final() — avoids crash on double call
+// - All features enabled, clean error paths
+// - Centralized context + single StoneKey seal
 // THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN & VALIDATION CLEAN
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

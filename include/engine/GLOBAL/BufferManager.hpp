@@ -122,22 +122,29 @@ inline VkDeviceSize                             g_total_allocated = 0;
 [[nodiscard]] constexpr VkBufferUsageFlags smart_usage(VkBufferUsageFlags input) noexcept {
     VkBufferUsageFlags fixed = input;
 
-    // Always force these for any device-local buffer
+    // Always force these for device-local / SBT / AS / storage / vertex / index
     fixed |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
-    // Force TRANSFER_DST for EVERYTHING except PURE staging
-    if (!(input & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) || 
-        (input & (VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                  VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT))) {
+    // Aggressively force TRANSFER_DST for ALL destinations
+    // Only PURE staging (nothing else) gets SRC-only
+    bool isPureStaging = (input == VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    if (!isPureStaging) {
         fixed |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     }
 
-    // Pure staging only
-    if (input == VK_BUFFER_USAGE_TRANSFER_SRC_BIT) {
-        fixed = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    // Explicitly remove TRANSFER_SRC from anything that should never be SRC
+    if (fixed & (VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT)) {
+        fixed &= ~VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    }
+
+    // SBT safety net — always ensure DST
+    if (fixed & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) {
+        fixed |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        fixed &= ~VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     }
 
     return fixed;
