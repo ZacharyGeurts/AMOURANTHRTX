@@ -6,14 +6,13 @@
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES • ACCUMULATION RESET • TIMELINE PACING
 // MANAGES: SKY, GRASS, WIND, TEMPERATURE, HUMIDITY, SUN/MOON, DAY/NIGHT CYCLE
 // =============================================================================
-// Fixes in v30.12:
-// - Constructor initializer list matches header declaration order (fixes -Werror=reorder)
-// - All private functions fully implemented (including createDefaultMaterials)
-// - BufferManager smarter: auto-detects correct usage flags, adds SBT padding, prevents invalid copy ops
-// - Robust camera detection — no spam/reset when static
-// - Non-blocking acquire (timeout=0) + retry (fixes VUID-01286 & 07783)
-// - TLAS null case: rebuild attempt + pink fallback (no skip spam)
-// - 60+ FPS feel — accumulation builds when static
+// Features:
+// - Automagic TLAS via LAS().getTLAS() (builds on demand)
+// - Internal UBO (cameraUBO_) — created/updated every frame
+// - Non-blocking acquire + retry (fixes VUID-01286 & 07783)
+// - Smart buffer usage (no copy VUIDs)
+// - No spam camera reset (stable detection)
+// - Pink fallback + rebuild on invalid state
 // PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN · AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -146,8 +145,8 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
 
     lazyCam(width, height);
 
-    createTransientCommandPool();  // for one-time operations
-    createPersistentCommandPoolAndBuffers();  // for rendering
+    createTransientCommandPool();
+    createPersistentCommandPoolAndBuffers();
 
     VkSemaphoreTypeCreateInfo timelineType{
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
@@ -174,7 +173,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
         }
     }
 
-    // Forge the entire living world
+    // Forge the entire living world (automagic TLAS build happens on first getTLAS())
     forgeLivingWorld();
 
     const auto& swapImages = RTX::SwapchainManager::swapchainImages_;
@@ -195,6 +194,9 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     VkCommandBuffer oneTimeCmd = getOneTimeCommandBuffer();
     pipelineManager_.createShaderBindingTable(transientCmdPool_, stone_graphics_queue(), oneTimeCmd);
     submitAndWaitOneTime(oneTimeCmd);
+
+    // Force initial TLAS build (automagic)
+    LAS().getTLAS();  // This triggers build if null/dirty
 
     LOG_AMOURANTH("NUCLEAR RTX HEART ACTIVE — FULL LIVING WORLD FORGED — PINK PHOTONS SCREAM");
 }
@@ -327,7 +329,6 @@ void RTX::VulkanRenderer::createSyncObjects() noexcept {
 void RTX::VulkanRenderer::forgeLivingWorld() noexcept {
     LOG_AMOURANTH("FORGING FULL LIVING WORLD — INFINITE PROCEDURAL REALM");
 
-    // Infinite terrain base plane (procedural grass & wind handled in shaders)
     auto floor = MeshLoader::createPlane(10000.0f, 10000.0f, 200, 200);
     LAS().addMesh(std::move(floor), 0);
 
@@ -426,7 +427,7 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
                                    VK_NULL_HANDLE, &imageIndex);
 
     if (result == VK_NOT_READY || result == VK_TIMEOUT) {
-        return;  // Skip — next frame will try
+        return;
     }
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
