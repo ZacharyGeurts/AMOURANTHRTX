@@ -26,10 +26,13 @@ If you do not like where it crashes, come back tomorrow and I will show you a ne
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
 Commercial is subject to license.  
-Unreal developers may consider some of this parody.  
-I welcome those whose minds seek knowledge and education.  
-Linux for now, and Windows toolchain currently under development.  
-Hearer and Console are not part of the RTX program.  
+
+Why Amouranth RTX?  
+We developed at zero computational cost to create the fastest RTX engine on the planet.  
+We implement compression and optimizations to make everything faster than what is currently available.  
+FPS and limitations are purely hardware related since we bring no overhead.  
+By using Grok AI we are able to scour the planet for the fastest implementations, theoritical or not.  
+All files are open to developers who want to extend or enhance their development.  
 
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
 AMOURANTH RTX a next generation engine for raw performance.  
