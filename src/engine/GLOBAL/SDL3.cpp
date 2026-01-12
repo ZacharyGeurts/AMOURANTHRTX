@@ -1,8 +1,10 @@
 // src/engine/GLOBAL/SDL3.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 04, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 11, 2026
 // SDL3 INTEGRATION — CLEAN, MODERN, C++23 FORWARD-ONLY EDITION
 // FULLY COMPILABLE | unique_ptr FIXED | RESIZE FIXED | QUIT HANDLING PERFECT
+// SINGLETON LAS ACCESS — LAS::instance() — NO RTX::las()
+// SDL3 SUCCESS CHECKS: == 0 (SDL3 returns 0 on success)
 // PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -14,7 +16,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
-#include "engine/GLOBAL/LAS.hpp"
+#include "engine/GLOBAL/LAS.hpp"  // singleton LAS::instance()
 
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
@@ -32,6 +34,7 @@
 #include <string>
 
 using namespace Logging::Color;
+using RTX::LAS;
 using StoneKey::stone_window;
 
 // =============================================================================
@@ -122,7 +125,7 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
                         g_resizeHeight.store(h);
                         g_resizeRequested.store(true);
 
-                        RTX::las().requestRebuild();
+                        LAS::instance().requestRebuild();  // Singleton access
                     }
                     // Real resize while visible
                     else if (!currentlyMinimized && (w != lastValidW || h != lastValidH)) {
@@ -135,7 +138,7 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
                         g_resizeHeight.store(h);
                         g_resizeRequested.store(true);
 
-                        RTX::las().requestRebuild();
+                        LAS::instance().requestRebuild();  // Singleton access
                     }
                     // Ignore repeated same-size or repeated 0x0 events
                 }
@@ -177,8 +180,9 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
 void toggleFullscreen() noexcept
 {
     if (!g_sdl_window) return;
-    bool isFS = SDL_GetWindowFlags(g_sdl_window.get()) & SDL_WINDOW_FULLSCREEN;
-    SDL_SetWindowFullscreen(g_sdl_window.get(), !isFS);
+    Uint32 flags = SDL_GetWindowFlags(g_sdl_window.get());
+    bool isFS = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+    SDL_SetWindowFullscreen(g_sdl_window.get(), isFS ? 0 : SDL_WINDOW_FULLSCREEN);
     LOG_SUCCESS_CAT("Window", "FULLSCREEN {}", isFS ? "OFF" : "ON");
 }
 
@@ -363,9 +367,10 @@ void SDL3Input::handleKeyboard(const SDL_KeyboardEvent& k, SDL_Window* window, S
 
     switch (k.key) {
         case SDLK_F: {
-            bool fs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) == 0;
-            SDL_SetWindowFullscreen(window, !fs);
-            LOG_INFO_CAT("Input", "{}Fullscreen → {}{}", OCEAN_TEAL, !fs ? "ENABLED" : "DISABLED", RESET);
+            Uint32 flags = SDL_GetWindowFlags(window);
+            bool isFS = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+            SDL_SetWindowFullscreen(window, isFS ? 0 : SDL_WINDOW_FULLSCREEN);
+            LOG_INFO_CAT("Input", "{}Fullscreen → {}{}", OCEAN_TEAL, !isFS ? "ENABLED" : "DISABLED", RESET);
         } break;
 
         case SDLK_ESCAPE: {
@@ -691,10 +696,12 @@ void AudioManager::playSound(std::string_view name)
 } // namespace SDL3Audio
 
 // =============================================================================
-// JANUARY 04, 2026 — FINAL FIXED SDL3.cpp
-// C++23 compliant | loadSurface uses explicit deleter &SDL_DestroySurface
-// textureToSurface returns SurfacePtr(nullptr, &SDL_DestroySurface)
-// SDL_GetTextureProperties used correctly
-// No duplicate g_audio
+// JANUARY 11, 2026 — FINAL FIXED SDL3.cpp
+// - Replaced RTX::las() with LAS::instance() — singleton access
+// - SDL3 success checks: == 0 (SDL3 returns 0 on success)
+// - C++23 compliant | loadSurface uses explicit deleter &SDL_DestroySurface
+// - textureToSurface returns SurfacePtr(nullptr, &SDL_DestroySurface)
+// - SDL_GetTextureProperties used correctly
+// - No duplicate g_audio
 // Empire compiles clean — pink photons restored
 // =============================================================================

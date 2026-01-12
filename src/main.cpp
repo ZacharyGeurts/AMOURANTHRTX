@@ -1,9 +1,10 @@
 // src/main.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.0 — JANUARY 10, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.4 — JANUARY 10, 2026
 // MAIN ENTRY POINT — FULL AUTOMAGIC LIVING WORLD | PURE RTX REALM | DYNAMIC LIGHT
 // ZERO MANUAL CALLS | AUTOMAGIC EVERYTHING | NO DOUBLE SEALING | VALIDATION CLEAN
 // FULLY COMPATIBLE WITH HEADER-ONLY STONEKEY v∞ + AUTOMAGIC LAS + SWAPCHAIN
+// SDL3 SUCCESS = 0 | SURFACE SEALED AFTER CREATION
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -15,6 +16,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
+#include "engine/GLOBAL/Extensions.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3_image/SDL_image.h>
@@ -54,7 +56,7 @@ static void loadEmpireIcon(SDL_Window* window)
 }
 
 // =============================================================================
-// Sacrificial Splash
+// Sacrificial Splash — SDL3 success = 0
 // =============================================================================
 static void showSplash()
 {
@@ -145,7 +147,7 @@ end_splash:
 {
     std::print("[MAIN] APOCALYPSE — {} — PHOTONS RETURNING HOME\n", reason);
 
-    // Destroy renderer first (owns pools, fences, etc.)
+    // Destroy renderer first (owns pools, fences, cmd buffers, etc.)
     renderer.reset();
 
     // Only seal if not already null (prevents double-sealing crash)
@@ -204,29 +206,45 @@ int main(int, char**)
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window, &w, &h);
 
-    // Automagic Vulkan setup — no manual sealing needed after this
+    // Automagic Vulkan instance (seals instance inside)
     VkInstance instance = RTX::createVulkanInstance(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) apocalypse("Instance failed");
 
+    // Automagic instance extensions (surface queries)
+    RTX::loadInstanceExtensions(instance);
+
+    // Create surface
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
         apocalypse("Surface failed");
     }
 
+    // Seal surface (was missing — fixes "core Vulkan objects missing")
+    StoneKey::stone_seal_surface(surface);
+
+    // Automagic logical device (seals device + queues inside)
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) apocalypse("Device failed");
 
+    // Automagic device extensions (swapchain + ray tracing)
+    RTX::loadDeviceExtensions(device);
+
     RTX::g_ctx().init();
-    RTX::loadRTExtensions(instance, device);
 
-    // Automagic transient pool — sealed inside createLogicalDeviceAndSelectGPU (no double seal)
-
+    // Automagic swapchain creation (now safe — surface sealed)
     RTX::SwapchainManager::create(window, w, h);
 
-    // Automagic renderer — owns persistent cmd buffers, sync, etc.
+    // Automagic renderer creation (transient pool, timeline, materials, living world, pipeline, SBT)
     renderer = std::make_unique<RTX::VulkanRenderer>(w, h, window, Options::Performance::OVERCLOCK_RENDERER);
 
+    // NOW create persistent command buffers (swapchain exists → imageCount > 0)
+    renderer->createPersistentCommandPoolAndBuffers();
+
     SDL_Renderer* sdlRen = SDL_CreateRenderer(window, nullptr);
+    if (!sdlRen) {
+        LOG_WARNING("MAIN", "SDL_CreateRenderer failed: {}", SDL_GetError());
+    }
+
     Console::init(window, sdlRen);
 
     Camera cam;  // Global namespace Camera
@@ -275,6 +293,7 @@ int main(int, char**)
             curH = newH;
             RTX::SwapchainManager::recreate(curW, curH);
             renderer->onResize(curW, curH);
+            renderer->createPersistentCommandPoolAndBuffers();  // Re-allocate cmd buffers on resize
         }
 
         if (StoneKey::stone_swapchain() != VK_NULL_HANDLE) {
@@ -299,10 +318,12 @@ int main(int, char**)
 }
 
 // =============================================================================
-// FINAL MAIN v29.0 — JANUARY 10, 2026
-// - Fully automagic: RTX::create*() + SwapchainManager + VulkanRenderer handle everything
-// - No double sealing — StoneKey seals only once inside createLogicalDeviceAndSelectGPU
-// - Transient pool sealed inside RTXHandler (no manual call)
+// FINAL MAIN v29.4 — JANUARY 10, 2026
+// - Surface sealed after creation (fixes "core Vulkan objects missing")
+// - SDL3 success checks fixed (== 0 = success)
+// - Persistent cmd buffers created AFTER swapchain
+// - Re-allocate persistent pool on resize
+// - No double sealing — all StoneKey seals encapsulated
 // - Clean RAII shutdown with apocalypse()
 // Empire complete — pink photons under our perfect moons — AMOURANTH FOREVER 💖
 // =============================================================================

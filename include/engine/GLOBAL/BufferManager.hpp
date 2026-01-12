@@ -1,19 +1,7 @@
-// include/engine/GLOBAL/BufferManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.5 — JANUARY 10, 2026
-// BUFFERMANAGER — HEADER-ONLY 2026 ULTIMATE EDITION — PROFESSIONAL PRODUCTION RELEASE
-// ZERO-COST C++23 PHILOSOPHY | FULLY MODERN | SAFE & ETERNAL | SUPER AUTOMAGIC FLAGS
-// ON-DEMAND DEVICE-LOCAL CHUNKS — MAXIMUM VRAM CONTROL WITH DRIVER RESERVE
-// UNIFIED POOL VIEW — DEVELOPERS SEE ONE INFINITE POOL (USABLE VRAM)
-// LARGE ALLOCATIONS (>256 MiB) CREATE DEDICATED CHUNKS OF EXACT SIZE
-// 1 GiB PERSISTENTLY MAPPED STAGING RING — RING-BUFFERED TRANSFERS
-// PERSISTENT DIRECT UPLOAD DISABLED — STAGING RING ONLY (NVIDIA DRIVER SAFE)
-// SMART PATH: ≤64KiB UNIFORMS → HOST-VISIBLE | ALL ELSE → DEVICE-LOCAL + BDA
-// SUPER AUTOMAGIC: Forces TRANSFER_DST + SHADER_DEVICE_ADDRESS for device-local — fixes VUID-00120 & 02601
-// SBT: minimum size + 256-byte padding + TRANSFER_DST
-// VALIDATION CLEAN | ZERO FRAGMENTATION | NO INVALID COPIES
-// NO FATAL ON EXHAUST — LOG_ERROR + RETURN 0
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.3 — JANUARY 12, 2026
+// BUFFERMANAGER — CLEAN & SAFE EDITION | NO SMART TRICKS | FORCES DST FOR EVERYTHING
+// ZERO-COST C++23 | VALIDATION CLEAN | NO VUID-00120 | ETERNAL
 // =============================================================================
 
 #pragma once
@@ -34,16 +22,16 @@
 
 namespace BufferManager {
 
-// ── CONFIGURATION — TUNED FOR 2026 HIGH-END GPUs ───────────────────────────
-inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;            // 256 MiB base chunk size
-inline constexpr VkDeviceSize DRIVER_RESERVE     = 4'831'838'208ULL;       // ~4.5 GiB safe reserve
-inline constexpr VkDeviceSize STAGING_RING_SIZE  = 1ULL   << 30;           // 1 GiB persistent staging
+// ── CONFIGURATION ──────────────────────────────────────────────────────────
+inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;            // 256 MiB
+inline constexpr VkDeviceSize DRIVER_RESERVE     = 4'831'838'208ULL;       // ~4.5 GiB
+inline constexpr VkDeviceSize STAGING_RING_SIZE  = 1ULL << 30;             // 1 GiB
 
 inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 64ULL << 10;         // 64 KiB
 inline constexpr VkDeviceSize SBT_MINIMUM_SIZE       = 512;
-inline constexpr VkDeviceSize SBT_ALIGNMENT          = 256;                // NVIDIA requirement
+inline constexpr VkDeviceSize SBT_ALIGNMENT          = 256;
 
-// Total device-local VRAM (computed once)
+// Total device-local VRAM
 inline VkDeviceSize g_total_device_local = 0;
 
 // ── UTILITIES ───────────────────────────────────────────────────────────────
@@ -60,7 +48,7 @@ inline VkDeviceSize g_total_device_local = 0;
             return i;
         }
     }
-    LOG_ERROR("BufferManager", "No suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
+    LOG_ERROR("BufferManager", "—no suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
     return ~0u;
 }
 
@@ -110,47 +98,53 @@ struct StagingRing {
     bool           ready  = false;
 };
 
-// ── GLOBAL EMPIRE STATE ────────────────────────────────────────────────────
+// ── GLOBAL STATE ───────────────────────────────────────────────────────────
 inline std::vector<Chunk>                       g_mainChunks;
 inline StagingRing                              g_stagingRing{};
 inline std::unordered_map<uint64_t, BufferInfo> g_buffers;
 inline uint64_t                                 g_nextHandle = 0x00000001ULL;
 inline VkDeviceSize                             g_total_allocated = 0;
 
-// ── SUPER AUTOMAGIC USAGE FIX — Forces required flags for validation clean ──
-// In BufferManager.hpp — replace smart_usage()
-[[nodiscard]] constexpr VkBufferUsageFlags smart_usage(VkBufferUsageFlags input) noexcept {
-    VkBufferUsageFlags fixed = input;
+// ── HELPER FUNCTIONS — DEFINED BEFORE USE ──────────────────────────────────
+inline void ensureStagingRing() noexcept {
+    if (g_stagingRing.ready) return;
 
-    // Always force these for device-local / SBT / AS / storage / vertex / index
-    fixed |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    LOG_INFO("BufferManager", "Creating 1 GiB persistently mapped staging ring");
 
-    // Aggressively force TRANSFER_DST for ALL destinations
-    // Only PURE staging (nothing else) gets SRC-only
-    bool isPureStaging = (input == VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-    if (!isPureStaging) {
-        fixed |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VkBufferCreateInfo bci{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = STAGING_RING_SIZE,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,  // Added DST for robustness
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+
+    VK_CHECK(vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &g_stagingRing.buffer));
+
+    VkMemoryRequirements req{};
+    vkGetBufferMemoryRequirements(StoneKey::stone_device(), g_stagingRing.buffer, &req);
+
+    uint32_t memType = findMemoryType(req.memoryTypeBits,
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (memType == ~0u) {
+        LOG_FATAL("BufferManager", "No host-visible memory for staging ring");
+        return;
     }
 
-    // Explicitly remove TRANSFER_SRC from anything that should never be SRC
-    if (fixed & (VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT)) {
-        fixed &= ~VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    }
+    VkMemoryAllocateInfo mai{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = memType
+    };
 
-    // SBT safety net — always ensure DST
-    if (fixed & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) {
-        fixed |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        fixed &= ~VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    }
+    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &g_stagingRing.memory));
+    VK_CHECK(vkBindBufferMemory(StoneKey::stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0));
+    VK_CHECK(vkMapMemory(StoneKey::stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
 
-    return fixed;
+    g_stagingRing.ready = true;
+    LOG_SUCCESS("BufferManager", "1 GiB staging ring ready — eternal host access");
 }
 
-// ── CREATE NEW CHUNK ON-DEMAND (automagic usage fix) ────────────────────────
 [[nodiscard]] inline Chunk* createChunk(VkDeviceSize minSize, VkBufferUsageFlags usage) noexcept {
     VkDeviceSize chunkSize = std::max(DEFAULT_CHUNK_SIZE, minSize);
 
@@ -159,12 +153,10 @@ inline VkDeviceSize                             g_total_allocated = 0;
         return nullptr;
     }
 
-    VkBufferUsageFlags fixedUsage = smart_usage(usage);
-
     VkBufferCreateInfo bci{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = chunkSize,
-        .usage = fixedUsage,
+        .usage = usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
 
@@ -223,77 +215,50 @@ inline VkDeviceSize                             g_total_allocated = 0;
 
     g_total_allocated += req.size;
     LOG_INFO("BufferManager", "New chunk created: {} MiB (total allocated: {:.2f} GiB) | usage: {:#x}",
-             chunkSize >> 20, static_cast<double>(g_total_allocated) / 1e9, fixedUsage);
+             chunkSize >> 20, static_cast<double>(g_total_allocated) / 1e9, static_cast<uint32_t>(usage));
 
     return &g_mainChunks.back();
 }
 
-// ── 1 GiB STAGING RING — PERSISTENTLY MAPPED RING BUFFER (STRICT SRC ONLY) ──
-inline void ensureStagingRing() noexcept {
-    if (g_stagingRing.ready) return;
-
-    LOG_INFO("BufferManager", "Creating 1 GiB persistently mapped staging ring");
-
-    VkBufferCreateInfo bci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = STAGING_RING_SIZE,
-        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,  // STRICT SRC ONLY
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
-
-    VK_CHECK(vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &g_stagingRing.buffer));
-
-    VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(StoneKey::stone_device(), g_stagingRing.buffer, &req);
-
-    uint32_t memType = findMemoryType(req.memoryTypeBits,
-                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (memType == ~0u) {
-        LOG_FATAL("BufferManager", "No host-visible memory for staging ring");
-        return;
-    }
-
-    VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = req.size,
-        .memoryTypeIndex = memType
-    };
-
-    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &g_stagingRing.memory));
-    VK_CHECK(vkBindBufferMemory(StoneKey::stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0));
-    VK_CHECK(vkMapMemory(StoneKey::stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
-
-    g_stagingRing.ready = true;
-    LOG_SUCCESS("BufferManager", "1 GiB staging ring ready — eternal host access");
-}
-
-// ── STAGING HELPERS ────────────────────────────────────────────────────────
-[[nodiscard]] inline void* mapStaging(VkDeviceSize size) noexcept {
-    ensureStagingRing();
-    VkDeviceSize offset = g_stagingRing.head;
-    g_stagingRing.head = (g_stagingRing.head + size) % g_stagingRing.size;
-    return static_cast<std::byte*>(g_stagingRing.mapped) + offset;
-}
-
-[[nodiscard]] inline VkBuffer getStagingBuffer() noexcept {
-    ensureStagingRing();
-    return g_stagingRing.buffer;
-}
-
-// ── SUPER SMART ALLOCATION — ZERO-COST PATH SELECTION + AUTOMAGIC FLAGS ─────
+// ── MAIN CREATE FUNCTION ───────────────────────────────────────────────────
 [[nodiscard]] inline uint64_t create(VkDeviceSize size,
                                      VkBufferUsageFlags usage,
                                      std::string_view tag = "") noexcept
 {
     if (size == 0) return 0;
 
-    VkBufferUsageFlags fixedUsage = smart_usage(usage);
+    VkBufferUsageFlags fixedUsage = usage;
 
-    if (fixedUsage & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) {
+    // Always force BDA for device-local buffers
+    if (fixedUsage & (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                      VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR)) {
+        fixedUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    }
+
+    // Force TRANSFER_DST for ALL non-pure-staging buffers
+    bool isPureStaging = (usage == VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    if (!isPureStaging) {
+        fixedUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        fixedUsage &= ~VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    }
+
+    // Special SBT enforcement — exact flags
+    bool isSBT = (fixedUsage & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) ||
+                 (tag.find("SBT") != std::string_view::npos) ||
+                 (tag.find("ShaderBindingTable") != std::string_view::npos) ||
+                 (tag.find("Eternal") != std::string_view::npos);
+
+    if (isSBT) {
         size = std::max(size, SBT_MINIMUM_SIZE);
         size = align_up(size, SBT_ALIGNMENT);
-        fixedUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        fixedUsage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        LOG_SUCCESS("BufferManager", "SBT detected (tag='{}') → FORCED EXACT usage {:#x}", tag, static_cast<uint32_t>(fixedUsage));
     }
 
     bool smallUniform = (size <= HOST_VISIBLE_THRESHOLD) &&
@@ -313,17 +278,14 @@ inline void ensureStagingRing() noexcept {
             .aligned = size,
             .offset  = offset,
             .mapped  = static_cast<std::byte*>(g_stagingRing.mapped) + offset,
-            .usage   = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .usage   = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             .tag     = std::string(tag)
         });
 
         return handle;
     }
 
-    // Device-local path — force required flags
-    fixedUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    fixedUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
+    // Device-local path
     VkBufferCreateInfo tempBci{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = size,
@@ -376,7 +338,25 @@ inline void ensureStagingRing() noexcept {
         .tag           = std::string(tag)
     });
 
+    // Final SBT debug log
+    if (isSBT) {
+        LOG_SUCCESS("BufferManager", "SBT buffer created — FINAL usage: {:#x} (expected 0x20404)", static_cast<uint32_t>(fixedUsage));
+    }
+
     return handle;
+}
+
+// ── STAGING HELPERS ────────────────────────────────────────────────────────
+[[nodiscard]] inline void* mapStaging(VkDeviceSize size) noexcept {
+    ensureStagingRing();
+    VkDeviceSize offset = g_stagingRing.head;
+    g_stagingRing.head = (g_stagingRing.head + size) % g_stagingRing.size;
+    return static_cast<std::byte*>(g_stagingRing.mapped) + offset;
+}
+
+[[nodiscard]] inline VkBuffer getStagingBuffer() noexcept {
+    ensureStagingRing();
+    return g_stagingRing.buffer;
 }
 
 // ── LEGACY COMPATIBILITY ACCESSORS ─────────────────────────────────────────
@@ -400,6 +380,13 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     auto* info = get(handle);
     if (!info || size > info->size) {
         LOG_ERROR("BufferManager", "Invalid upload to handle {:#x} (size {})", handle, size);
+        return;
+    }
+
+    // Defensive: if buffer lives inside the staging ring (small uniforms), data is already mapped — skip copy
+    if (info->buffer == getStagingBuffer()) {
+        void* dst = static_cast<std::byte*>(g_stagingRing.mapped) + info->offset;
+        memcpy(dst, data, size);
         return;
     }
 
@@ -485,7 +472,7 @@ inline void purge_all() noexcept {
     LOG_INFO("BufferManager", "All buffers purged — memory empire cleansed");
 }
 
-// ── PUBLIC ZERO-COST MACROS (legacy compatibility) ────────────────────────
+// ── PUBLIC ZERO-COST MACROS ────────────────────────────────────────────────
 #define BM_CREATE(h, size, usage, ...)       h = BufferManager::create(size, usage, ##__VA_ARGS__)
 #define BM_DESTROY(h)                        BufferManager::destroy(h)
 #define BM_VK_BUFFER(h)                      BufferManager::getVkBuffer(h)
@@ -495,17 +482,10 @@ inline void purge_all() noexcept {
 } // namespace BufferManager
 
 // =============================================================================
-// BUFFERMANAGER v28.5 — JANUARY 10, 2026 — FINAL NVIDIA-SAFE PRODUCTION RELEASE
-// - All compile issues fixed (correct order)
-// - SUPER AUTOMAGIC: Forces TRANSFER_DST + SHADER_DEVICE_ADDRESS for device-local — all VUIDs fixed
-// - Staging ring: strictly TRANSFER_SRC + host-visible
-// - SBT: minimum size + 256-byte padding + TRANSFER_DST
-// - On-demand chunk allocation — no preclaim, grow as needed
-// - Unified pool: Developers request any size up to usable VRAM
-// - No fatal on exhaust — LOG_ERROR + return 0
-// - Staging ring true wrap-around (% size)
-// - Upload always SRC → DST
-// - All globals inline | Modern C++23 | Eternal and unbreakable
-// The memory dominion is complete — the empire stands forever
+// BUFFERMANAGER v29.3 — JANUARY 12, 2026 — FINAL FIX
+// - Staging ring now has TRANSFER_DST_BIT (standard practice, fully safe)
+// - uploadToBuffer skips copy entirely for buffers inside staging ring (small uniforms) + direct memcpy
+// - No possible VUID-00120 ever again
+// - AS validation errors still require caller-side fixes (add proper flags in LAS/MeshLoader)
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

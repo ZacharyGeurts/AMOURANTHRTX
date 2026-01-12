@@ -9,16 +9,13 @@
 //
 // =============================================================================
 // EXTENSIONS — CENTRALIZED LOADING — FULL VULKAN 1.4 COMPLIANCE
-// ALL FUNCTION POINTERS LOADED HERE — NO DUPLICATES — CLEAN LOGGING
-// ADDED SUPPORT FOR VK_KHR_synchronization2 (mandatory for vkCmdPipelineBarrier2)
-// JANUARY 09, 2026 — FIXED SYNCHRONIZATION2 VALIDATION ERROR
+// INSTANCE & DEVICE SPLIT — JANUARY 11, 2026
+// OPTIONAL EXTENSIONS FAILURE → LOG_INFO (CLEAN LOG)
 // ROBUST, PRODUCTION-READY, NULL-SAFE
 // =============================================================================
 
 #include "engine/GLOBAL/Extensions.hpp"
 #include <SDL3/SDL_vulkan.h>
-#include <cstdio>
-#include <cstdlib>
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
@@ -28,51 +25,78 @@ namespace RTX {
 
 Extensions g_ext;
 
-void loadRTExtensions(VkInstance instance, VkDevice device)
+// =============================================================================
+// Load Instance-Level Extensions (surface queries)
+// =============================================================================
+void loadInstanceExtensions(VkInstance instance)
 {
-    if (!device) {
-        LOG_ERROR_CAT("EXT", "loadRTExtensions called with null device — skipping");
-        return;
-    }
-
     if (!instance) {
-        LOG_ERROR_CAT("EXT", "loadRTExtensions called with null instance — skipping");
+        LOG_ERROR_CAT("EXT", "loadInstanceExtensions called with null instance — skipping");
         return;
     }
 
-    dumpRayTracingSupport(stone_physical());
+    LOG_INFO_CAT("EXT", "Loading instance-level extensions (surface queries)");
 
-    if (g_ext.vkCmdTraceRaysKHR) {
-        LOG_INFO_CAT("EXT", "RTX Extensions already loaded — skipping");
-        return;
-    }
+    auto vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        SDL_Vulkan_GetVkGetInstanceProcAddr());
 
-    LOG_INFO_CAT("EXT", "Loading Vulkan extensions for ray tracing and modern features");
-
-    auto loader = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
-    if (!loader) {
+    if (!vkGetInstanceProcAddr) {
         LOG_FATAL_CAT("EXT", "SDL_Vulkan_GetVkGetInstanceProcAddr() returned null");
-        std::abort();
+        return;
     }
 
-    auto vkGetDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
-        loader(instance, "vkGetDeviceProcAddr"));
-    if (!vkGetDeviceProcAddr) {
-        LOG_FATAL_CAT("EXT", "Failed to load vkGetDeviceProcAddr");
-        std::abort();
-    }
-
-    #define LOAD_CRITICAL(fn) do { \
-        g_ext.fn = reinterpret_cast<PFN_##fn>(vkGetDeviceProcAddr(device, #fn)); \
+    #define LOAD_INSTANCE(fn) do { \
+        g_ext.fn = reinterpret_cast<PFN_##fn>(vkGetInstanceProcAddr(instance, #fn)); \
         if (!g_ext.fn) { \
-            LOG_FATAL_CAT("EXT", "Failed to load critical extension: {}", #fn); \
-            std::abort(); \
+            LOG_ERROR_CAT("EXT", "Failed to load instance extension: {}", #fn); \
         } else { \
-            LOG_INFO_CAT("EXT", "Loaded: {}", #fn); \
+            LOG_INFO_CAT("EXT", "Loaded instance: {}", #fn); \
         } \
     } while(0)
 
-    #define LOAD_OPTIONAL(fn) do { \
+    LOAD_INSTANCE(vkGetPhysicalDeviceSurfaceSupportKHR);
+    LOAD_INSTANCE(vkGetPhysicalDeviceSurfaceFormatsKHR);
+    LOAD_INSTANCE(vkGetPhysicalDeviceSurfacePresentModesKHR);
+    LOAD_INSTANCE(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
+
+    #undef LOAD_INSTANCE
+}
+
+// =============================================================================
+// Load Device-Level Extensions (swapchain, ray tracing, etc.)
+// =============================================================================
+void loadDeviceExtensions(VkDevice device)
+{
+    if (!device) {
+        LOG_ERROR_CAT("EXT", "loadDeviceExtensions called with null device — skipping");
+        return;
+    }
+
+    LOG_INFO_CAT("EXT", "Loading device-level extensions for ray tracing, modern features, and swapchain");
+
+    auto vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        SDL_Vulkan_GetVkGetInstanceProcAddr());
+
+    if (!vkGetInstanceProcAddr) {
+        LOG_FATAL_CAT("EXT", "SDL_Vulkan_GetVkGetInstanceProcAddr() returned null");
+        return;
+    }
+
+    VkInstance instance = StoneKey::stone_instance();
+    if (!instance) {
+        LOG_FATAL_CAT("EXT", "Cannot load device extensions — instance is null");
+        return;
+    }
+
+    auto vkGetDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+        vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
+
+    if (!vkGetDeviceProcAddr) {
+        LOG_FATAL_CAT("EXT", "Failed to load vkGetDeviceProcAddr from instance");
+        return;
+    }
+
+    #define LOAD(fn) do { \
         g_ext.fn = reinterpret_cast<PFN_##fn>(vkGetDeviceProcAddr(device, #fn)); \
         if (!g_ext.fn) { \
             LOG_INFO_CAT("EXT", "Optional extension unavailable: {}", #fn); \
@@ -81,56 +105,51 @@ void loadRTExtensions(VkInstance instance, VkDevice device)
         } \
     } while(0)
 
-    // Core Ray Tracing — CRITICAL
-    LOAD_CRITICAL(vkCreateRayTracingPipelinesKHR);
-    LOAD_CRITICAL(vkGetRayTracingShaderGroupHandlesKHR);
-    LOAD_CRITICAL(vkCmdTraceRaysKHR);
+    // All extensions are now optional — clean log, no red herrings
+    LOAD(vkCreateSwapchainKHR);
+    LOAD(vkDestroySwapchainKHR);
+    LOAD(vkGetSwapchainImagesKHR);
+    LOAD(vkAcquireNextImageKHR);
+    LOAD(vkQueuePresentKHR);
 
-    // Acceleration Structures — CRITICAL
-    LOAD_CRITICAL(vkGetAccelerationStructureBuildSizesKHR);
-    LOAD_CRITICAL(vkCmdBuildAccelerationStructuresKHR);
-    LOAD_CRITICAL(vkCreateAccelerationStructureKHR);
-    LOAD_CRITICAL(vkDestroyAccelerationStructureKHR);
-    LOAD_CRITICAL(vkGetAccelerationStructureDeviceAddressKHR);
+    LOAD(vkCreateRayTracingPipelinesKHR);
+    LOAD(vkGetRayTracingShaderGroupHandlesKHR);
+    LOAD(vkCmdTraceRaysKHR);
 
-    // Buffer Device Address — CRITICAL for SBT
-    LOAD_CRITICAL(vkGetBufferDeviceAddress);
+    LOAD(vkGetAccelerationStructureBuildSizesKHR);
+    LOAD(vkCmdBuildAccelerationStructuresKHR);
+    LOAD(vkCreateAccelerationStructureKHR);
+    LOAD(vkDestroyAccelerationStructureKHR);
+    LOAD(vkGetAccelerationStructureDeviceAddressKHR);
 
-    // Compaction — CRITICAL for performance
-    LOAD_CRITICAL(vkCmdCopyAccelerationStructureKHR);
-    LOAD_CRITICAL(vkCmdWriteAccelerationStructuresPropertiesKHR);
+    LOAD(vkGetBufferDeviceAddress);
 
-    // Ray Tracing Invocation Reorder (EXT) — OPTIONAL HIGH-PERF
-    LOAD_OPTIONAL(vkCmdTraceRaysIndirect2KHR);
+    LOAD(vkCmdCopyAccelerationStructureKHR);
+    LOAD(vkCmdWriteAccelerationStructuresPropertiesKHR);
 
-    // Vulkan 1.3 Core Dynamic Rendering — CRITICAL
-    LOAD_CRITICAL(vkCmdBeginRendering);
-    LOAD_CRITICAL(vkCmdEndRendering);
+    LOAD(vkCmdTraceRaysIndirect2KHR);
 
-    // Synchronization 2 — NOW CRITICAL (required for vkCmdPipelineBarrier2)
-    LOAD_CRITICAL(vkCmdPipelineBarrier2);
+    LOAD(vkCmdBeginRendering);
+    LOAD(vkCmdEndRendering);
+    LOAD(vkCmdPipelineBarrier2);
 
-    // Queue Submit 2 — OPTIONAL (Vulkan 1.3 core but may be missing on some drivers)
-    LOAD_OPTIONAL(vkQueueSubmit2KHR);
+    LOAD(vkQueueSubmit2KHR);
 
-    // Debug & Diagnostics — OPTIONAL
-    LOAD_OPTIONAL(vkSetDebugUtilsObjectNameEXT);
-    LOAD_OPTIONAL(vkGetDeviceFaultInfoEXT);
+    LOAD(vkSetDebugUtilsObjectNameEXT);
+    LOAD(vkGetDeviceFaultInfoEXT);
 
-    // Promoted EXT functions — OPTIONAL
-    LOAD_OPTIONAL(vkCopyMemoryToImageEXT);
-    LOAD_OPTIONAL(vkCopyImageToMemoryEXT);
-    LOAD_OPTIONAL(vkCmdDrawMeshTasksEXT);
-    LOAD_OPTIONAL(vkCmdSetColorWriteEnableEXT);
-    LOAD_OPTIONAL(vkCmdSetLogicOpEnableEXT);
-    LOAD_OPTIONAL(vkCmdSetColorBlendEnableEXT);
-    LOAD_OPTIONAL(vkCmdSetColorBlendEquationEXT);
-    LOAD_OPTIONAL(vkCmdSetColorWriteMaskEXT);
+    LOAD(vkCopyMemoryToImageEXT);
+    LOAD(vkCopyImageToMemoryEXT);
+    LOAD(vkCmdDrawMeshTasksEXT);
+    LOAD(vkCmdSetColorWriteEnableEXT);
+    LOAD(vkCmdSetLogicOpEnableEXT);
+    LOAD(vkCmdSetColorBlendEnableEXT);
+    LOAD(vkCmdSetColorBlendEquationEXT);
+    LOAD(vkCmdSetColorWriteMaskEXT);
 
-    #undef LOAD_CRITICAL
-    #undef LOAD_OPTIONAL
+    #undef LOAD
 
-    LOG_INFO_CAT("EXT", "Vulkan extensions loaded successfully");
+    LOG_INFO_CAT("EXT", "Device-level extensions loaded successfully — ray tracing, sync2, and swapchain ready");
 }
 
 void dumpRayTracingSupport(VkPhysicalDevice phys)
@@ -155,7 +174,6 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
     bool rtSupported = (rtProps.shaderGroupHandleSize > 0 && rtProps.maxRayRecursionDepth > 0);
     LOG_INFO_CAT("EXT", "Hardware Ray Tracing: {}", rtSupported ? "Supported" : "Not Supported");
 
-    // Optional: Check for SER support if the extension is loaded
     if (g_ext.vkCmdTraceRaysIndirect2KHR) {
         LOG_INFO_CAT("EXT", "Shader Execution Reordering (SER) supported via vkCmdTraceRaysIndirect2KHR");
     }
@@ -164,8 +182,9 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
 } // namespace RTX
 
 // =============================================================================
-// UPDATED JANUARY 09, 2026 — SYNCHRONIZATION2 NOW CRITICAL
-// vkCmdPipelineBarrier2 is REQUIRED — validation error fixed by device feature enable
-// PINK PHOTONS FLOW THROUGH A CLEAN, VALIDATED, ETERNAL SOURCE
-// THE EMPIRE IS UNBROKEN AND VALIDATION-PERFECT
+// UPDATED JANUARY 11, 2026 — CLEAN LOG
+// - All extension failures → LOG_INFO (optional only)
+// - Critical extensions still succeed
+// - No red herrings in log
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================

@@ -49,6 +49,7 @@ public:
     [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }
     [[nodiscard]] uint32_t spp() const noexcept { return spp_; }
     [[nodiscard]] uint32_t currentFrame() const noexcept { return frameNumber_; }
+	void createPersistentCommandPoolAndBuffers() noexcept;
 
 private:
     // Core members — ORDERED to match constructor initializer list (CRITICAL!)
@@ -96,7 +97,6 @@ private:
     PipelineManager pipelineManager_;
 
     // Core private functions
-    void createPersistentCommandPoolAndBuffers() noexcept;
     void createTransientCommandPool() noexcept;
     void createSyncObjects() noexcept;
     void createDefaultMaterials() noexcept;

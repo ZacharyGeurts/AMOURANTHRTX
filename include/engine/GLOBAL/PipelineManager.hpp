@@ -1,15 +1,15 @@
 // include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.0
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.7 — JANUARY 11, 2026
 // PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX EDITION
 // PERSISTENT COMMAND BUFFERS COMPATIBLE | ETERNAL SBT | VALIDATION PERFECT
 // NO PER-FRAME ALLOCATIONS | MAX DRIVER FRIENDLINESS
 // =============================================================================
-// Changes for v30.0 (nuclear edition):
-// - traceRays takes VkCommandBuffer as first parameter
-//   → called directly from persistent cmd buffer in VulkanRenderer
-// - Added private declaration of createDummyTLAS() to fix constructor error
-// - All accessors, members and constants preserved
+// Changes for v30.7 (final button-up):
+// - Added Handle<VkDeviceMemory> sbtMemory_ for manual SBT cleanup
+// - Manual SBT buffer creation in createShaderBindingTable() (bypasses BufferManager issues)
+// - Destructor now cleans sbtMemory_
+// - All previous fixes preserved
 // PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -130,6 +130,8 @@ private:
     Handle<VkPipeline>            rtPipeline_;
 
     Handle<VkBuffer>              sbtBuffer_;
+    Handle<VkDeviceMemory>        sbtMemory_;  // Added for manual SBT cleanup
+
     VkDeviceSize                  sbtAddress_{0};
     VkDeviceSize                  sbtSize_{0};
 
@@ -162,9 +164,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — JANUARY 09, 2026
-// - Nuclear compatible: traceRays takes VkCommandBuffer
-// - createDummyTLAS() declared as private member (fixes constructor error)
+// FINAL HEADER — JANUARY 11, 2026
+// - Added sbtMemory_ Handle for manual SBT cleanup
+// - Manual SBT buffer creation in createShaderBindingTable() (bypasses BufferManager issues)
+// - Destructor now cleans sbtMemory_
 // - Direct call from persistent command buffer in VulkanRenderer
 // - Zero-cost RTX preserved — validation clean
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖

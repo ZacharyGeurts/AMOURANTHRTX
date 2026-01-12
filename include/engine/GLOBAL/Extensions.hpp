@@ -9,8 +9,9 @@
 //
 // =============================================================================
 // EXTENSIONS — CENTRALIZED AND CLEAN — FULL VULKAN 1.4 COMPLIANCE
-// ALL FUNCTION POINTERS DECLARED ONCE — NO DUPLICATES — JANUARY 04, 2026
-// PINK PHOTONS FLOW THROUGH A SINGLE, ETERNAL SOURCE
+// SPLIT INSTANCE & DEVICE LOADING — JANUARY 10, 2026
+// FULLY STABLE, NO INSTANCE FUNCTIONS VIA DEVICE PROC ADDR
+// ROBUST, PRODUCTION-READY, NULL-SAFE
 // =============================================================================
 #pragma once
 
@@ -20,6 +21,19 @@
 namespace RTX {
 
 struct Extensions {
+    // ── Instance-Level (Surface Queries) ───────────────────────────────
+    PFN_vkGetPhysicalDeviceSurfaceSupportKHR      vkGetPhysicalDeviceSurfaceSupportKHR      = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceFormatsKHR      vkGetPhysicalDeviceSurfaceFormatsKHR      = nullptr;
+    PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR = nullptr;
+
+    // ── Device-Level (Swapchain Creation & Present) ────────────────────
+    PFN_vkCreateSwapchainKHR                      vkCreateSwapchainKHR                      = nullptr;
+    PFN_vkDestroySwapchainKHR                     vkDestroySwapchainKHR                     = nullptr;
+    PFN_vkGetSwapchainImagesKHR                   vkGetSwapchainImagesKHR                   = nullptr;
+    PFN_vkAcquireNextImageKHR                     vkAcquireNextImageKHR                     = nullptr;
+    PFN_vkQueuePresentKHR                         vkQueuePresentKHR                         = nullptr;
+
     // ── Ray Tracing Pipeline (KHR) ─────────────────────────────────────
     PFN_vkCreateRayTracingPipelinesKHR          vkCreateRayTracingPipelinesKHR          = nullptr;
     PFN_vkGetRayTracingShaderGroupHandlesKHR    vkGetRayTracingShaderGroupHandlesKHR    = nullptr;
@@ -39,8 +53,7 @@ struct Extensions {
     PFN_vkCmdCopyAccelerationStructureKHR             vkCmdCopyAccelerationStructureKHR             = nullptr;
     PFN_vkCmdWriteAccelerationStructuresPropertiesKHR vkCmdWriteAccelerationStructuresPropertiesKHR = nullptr;
 
-    // ── Ray Tracing Invocation Reorder (EXT) — NEW IN LATE 2025 ────────
-    // VK_EXT_ray_tracing_invocation_reorder — Shader Execution Reordering (SER)
+    // ── Ray Tracing Invocation Reorder (EXT) — OPTIONAL ────────────────
     PFN_vkCmdTraceRaysIndirect2KHR                 vkCmdTraceRaysIndirect2KHR              = nullptr;
 
     // ── Vulkan 1.3 Core — Dynamic Rendering & Synchronization 2 ────────
@@ -69,8 +82,9 @@ struct Extensions {
 // THE ONE TRUE GLOBAL — SEALED IN STONE
 extern Extensions g_ext;
 
-// CALL ONCE AFTER DEVICE CREATION
-void loadRTExtensions(VkInstance instance, VkDevice device);
+// CALL ONCE AFTER INSTANCE/DEVICE CREATION
+void loadInstanceExtensions(VkInstance instance);
+void loadDeviceExtensions(VkDevice device);
 void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 
 // CLEAN ACCESSOR
@@ -84,8 +98,6 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 #define VK_CREATE_RT_PIPELINES(...)              RTX::g_ext.vkCreateRayTracingPipelinesKHR(__VA_ARGS__)
 #define VK_GET_RT_GROUP_HANDLES(...)             RTX::g_ext.vkGetRayTracingShaderGroupHandlesKHR(__VA_ARGS__)
 #define VK_CMD_TRACE_RAYS(cmd, ...)              RTX::g_ext.vkCmdTraceRaysKHR(cmd, __VA_ARGS__)
-
-// NEW: Indirect trace with invocation reordering support (SER)
 #define VK_CMD_TRACE_RAYS_INDIRECT2(cmd, ...)    RTX::g_ext.vkCmdTraceRaysIndirect2KHR(cmd, __VA_ARGS__)
 
 #define VK_GET_AS_BUILD_SIZES(...)               RTX::g_ext.vkGetAccelerationStructureBuildSizesKHR(__VA_ARGS__)
@@ -105,8 +117,15 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 #define VK_COPY_MEMORY_TO_IMAGE(...)             RTX::g_ext.vkCopyMemoryToImageEXT(__VA_ARGS__)
 #define VK_COPY_IMAGE_TO_MEMORY(...)             RTX::g_ext.vkCopyImageToMemoryEXT(__VA_ARGS__)
 
+// SWAPCHAIN MACROS — AUTOMAGIC ACCESS
+#define VK_CREATE_SWAPCHAIN(...)                 RTX::g_ext.vkCreateSwapchainKHR(__VA_ARGS__)
+#define VK_DESTROY_SWAPCHAIN(...)                RTX::g_ext.vkDestroySwapchainKHR(__VA_ARGS__)
+#define VK_GET_SWAPCHAIN_IMAGES(...)             RTX::g_ext.vkGetSwapchainImagesKHR(__VA_ARGS__)
+#define VK_ACQUIRE_NEXT_IMAGE(...)               RTX::g_ext.vkAcquireNextImageKHR(__VA_ARGS__)
+#define VK_QUEUE_PRESENT(...)                    RTX::g_ext.vkQueuePresentKHR(__VA_ARGS__)
+
 // =============================================================================
 // ALL EXTENSIONS NOW LIVE IN THIS FILE — NO MORE SCATTERED DECLARATIONS
-// THE EMPIRE IS CLEAN, CENTRALIZED, AND ETERNAL
-// JANUARY 04, 2026 — SER CONVERGENCE ACHIEVED
+// INSTANCE & DEVICE SPLIT — FULLY STABLE & VALIDATION CLEAN
+// JANUARY 10, 2026 — SWAPCHAIN AUTOMAGIC CONVERGENCE ACHIEVED
 // =============================================================================

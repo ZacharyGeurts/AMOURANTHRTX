@@ -1,17 +1,17 @@
 // src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.4 — JANUARY 10, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.5 — JANUARY 10, 2026
 // RTX HANDLER — GLOBAL VULKAN CONTEXT | FULL-FEATURED DEVICE & SURFACE
 // TIMELINE SEMAPHORE ENABLED | RTX FEATURES ACTIVATED | DESCRIPTOR INDEXING FIXED
 // FULLY VALIDATION CLEAN | ETERNAL EMPIRE READY | STABLE & SAFE POOL
 // =============================================================================
-// Fixes in v29.4:
-// - Reduced MAX_SETS to 200'000 — driver-safe & sufficient (fixes abort/OOM)
-// - Lowered pool sizes to realistic values
-// - Added null device check + better error logging
+// Fixes in v29.5:
+// - Seal VkInstance immediately after creation in createVulkanInstance (encapsulated)
+// - Reduced MAX_SETS to 200'000 — driver-safe
+// - Lowered pool sizes
+// - Null checks + better logging
 // - No main() — pure helpers
-// - Clean error paths
-// - Removed StoneKey::stone_seal_final() — avoid crash if called multiple times
+// - Removed stone_seal_final()
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -51,7 +51,6 @@ void createGlobalDescriptorPool() noexcept
 
     LOG_INFO_CAT("RTX", "Forging global descriptor pool — empire scale");
 
-    // Realistic & driver-safe (most drivers handle ~200k–500k total sets well)
     constexpr uint32_t MAX_SETS = 200'000;
 
     const std::array poolSizes = {
@@ -147,7 +146,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 }
 
 // =============================================================================
-// Vulkan Instance Creation
+// Vulkan Instance Creation — SEAL INSTANCE HERE
 // =============================================================================
 [[nodiscard]] VkInstance createVulkanInstance(bool enableValidation) noexcept
 {
@@ -189,7 +188,10 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         return VK_NULL_HANDLE;
     }
 
-    LOG_SUCCESS_CAT("RTX", "Vulkan instance created — {} extensions, validation {}", extensions.size(), enableValidation ? "ON" : "OFF");
+    // SEAL INSTANCE IMMEDIATELY — encapsulated, no double-sealing risk
+    StoneKey::stone_seal_instance(instance);
+
+    LOG_SUCCESS_CAT("RTX", "Vulkan instance created and sealed — {} extensions, validation {}", extensions.size(), enableValidation ? "ON" : "OFF");
     return instance;
 }
 
@@ -326,7 +328,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     g_ctx().transferFamily_ = bestIndices.transferFamily.value_or(bestIndices.graphicsFamily.value());
     g_ctx().computeFamily_  = bestIndices.graphicsFamily.value();
 
-    // Seal everything to StoneKey (only once here)
+    // Seal device and queues (instance already sealed in createVulkanInstance)
     StoneKey::stone_seal_device(device);
     StoneKey::stone_seal_physical(selected);
     StoneKey::stone_seal_graphics_family(g_ctx().graphicsFamily_);
@@ -337,9 +339,6 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     StoneKey::stone_seal_transfer_queue(g_ctx().transferQueue_);
     StoneKey::stone_seal_compute_family(g_ctx().computeFamily_);
     StoneKey::stone_seal_compute_queue(g_ctx().computeQueue_);
-
-    // Removed StoneKey::stone_seal_final() — prevents crash on double call
-    // It is not needed for normal operation and causes abort if called multiple times
 
     createGlobalDescriptorPool();
 
@@ -362,10 +361,10 @@ void Context::init() noexcept
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — JANUARY 10, 2026 — v29.4
-// - No main() — pure helpers
-// - Realistic descriptor pool sizes (200k max sets) — prevents abort/OOM
-// - Removed stone_seal_final() — avoids crash on double call
+// RTX CORE INITIALIZED — JANUARY 10, 2026 — v29.5
+// - Seal VkInstance inside createVulkanInstance (encapsulated)
+// - Realistic descriptor pool sizes (200k max sets)
+// - Removed stone_seal_final()
 // - All features enabled, clean error paths
 // - Centralized context + single StoneKey seal
 // THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN & VALIDATION CLEAN

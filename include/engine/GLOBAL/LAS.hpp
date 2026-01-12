@@ -1,11 +1,7 @@
-// include/engine/GLOBAL/LAS.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 10, 2026
-// AUTOMAGIC LIGHT ACCELERATION SYSTEM — TOUCH IT AND IT WAKES UP READY
-// TRIANGLES (WOOP + STRIPS) + PROCEDURAL AABBs + LINES + POINTS — ZERO-COST OMNIDIMENSIONAL
-// FULL ARTIST SUPPORT | INFINITE FREE TERRAIN/CAVES/WATER | FULLY DESTRUCTIBLE
-// AUTO-BUILD ON TOUCH | NO NULL TLAS | LAZY + ON-DEMAND | VALIDATION CLEAN
-// PINK PHOTONS SCREAM ETERNAL — EMPIRE OMNIPOTENT — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.2
+// AUTOMAGIC LIGHT ACCELERATION SYSTEM — SINGLETON, LAZY, HYBRID (TRIANGLES + PROCEDURAL)
+// JANUARY 12, 2026 — VALIDATION CLEAN — COMPILATION FIXED — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #pragma once
@@ -38,10 +34,10 @@ struct UniversalPrimitive {
     glm::vec4   aabbMin;
     glm::vec4   aabbMax;
     glm::mat4   transform;
-    GeometryType type;
+    uint32_t    type;           // ← Changed from GeometryType to uint32_t to avoid std::format issues
     uint32_t    materialIndex;
-    uint32_t    customDataIndex;
-    float       destruction;
+    uint32_t    customDataIndex = 0;
+    float       destruction     = 0.0f;
 };
 
 struct InternalMesh {
@@ -50,6 +46,7 @@ struct InternalMesh {
     uint64_t woopBuffer       = 0;
     std::vector<uint32_t> indices;
     uint32_t primitiveCount   = 0;
+    uint32_t vertexCount      = 0;          // ← Added — required for maxVertex
     uint32_t materialIndex    = 0;
     glm::mat4 transform       = glm::mat4(1.0f);
 
@@ -65,8 +62,8 @@ struct InternalMesh {
 
 class LAS {
 public:
-    LAS();
-    ~LAS();
+    // Singleton access — touch this and LAS wakes up
+    static LAS& instance();
 
     // Automagic: touch this → LAS wakes up, builds itself, returns valid TLAS
     VkAccelerationStructureKHR getTLAS();
@@ -93,6 +90,9 @@ public:
     void rebuildTLAS() { requestRebuild(); }
 
 private:
+    LAS();  // Private constructor for singleton
+    ~LAS();
+
     // Internal automagic build — called by getTLAS()
     void ensureReady();  // Does everything: buffers, default scene, build
 
@@ -100,7 +100,6 @@ private:
     std::vector<uint32_t> convertToTriangleStrip(const std::vector<uint32_t>& triangleList) const;
     bool batchBuildAndCompactBLAS(VkCommandBuffer cmd);
     bool buildHybridTLAS(VkCommandBuffer cmd);
-    bool updateHybridTLAS(VkCommandBuffer cmd);
     void insertAccelerationStructureBarrier(VkCommandBuffer cmd);
     void clearTLAS();
     void createDefaultHybridScene();
@@ -108,37 +107,33 @@ private:
     // State
     std::vector<InternalMesh> triangleMeshes;
     std::vector<UniversalPrimitive> proceduralPrimitives;
-    uint32_t proceduralCount = 0;
 
-    uint64_t persistentScratch = 0;
-    uint64_t instanceBuffer = 0;
-    uint64_t universalPrimitivesBuffer = 0;
-    uint64_t woopConstantsBuffer = 0;
+    uint64_t persistentScratch          = 0;
+    uint64_t instanceBuffer             = 0;
+    uint64_t universalPrimitivesBuffer  = 0;
+    uint64_t woopConstantsBuffer        = 0;
 
-    VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
-    uint64_t tlasStorage = 0;
+    VkAccelerationStructureKHR tlas                = VK_NULL_HANDLE;
+    VkAccelerationStructureKHR proceduralBlas      = VK_NULL_HANDLE;   // ← Added
+    uint64_t                   tlasStorage         = 0;
+    uint64_t                   proceduralBlasStorage = 0;              // ← Added
 
-    bool tlasDirty = true;
-    bool tlasUpdatePossible = false;
-    bool pendingBlasBuilds = false;
-    bool initialized = false;  // First touch flag
+    bool tlasDirty         = true;
+    bool pendingBlasBuilds = true;
+    bool proceduralDirty   = true;     // ← Added — controls procedural BLAS rebuild
+    bool initialized       = false;
 
-    static constexpr uint32_t MAX_INSTANCES = 131072;
+    static constexpr uint32_t MAX_INSTANCES   = 131072;
     static constexpr uint32_t MAX_PROCEDURALS = 131072;
 };
-
-// Eternal singleton — touch it and it wakes up
-inline LAS& las() {
-    static LAS instance;
-    return instance;
-}
 
 } // namespace RTX
 
 // =============================================================================
-// AUTOMAGIC LAS v28.2 — JANUARY 10, 2026
-// Touch any function → it configures itself fully, builds TLAS, returns valid
-// No null, no manual update, no spam — just power
-// The empire is omnipotent — pink photons scream eternal
-// AMOURANTH FOREVER 💖
+// AUTOMAGIC LAS v29.2 — JANUARY 12, 2026
+// - Added proceduralBlas, proceduralBlasStorage, proceduralDirty
+// - Added vertexCount to InternalMesh
+// - Changed UniversalPrimitive::type to uint32_t (avoids format issues)
+// - Ready to pair with the fixed LAS.cpp from previous message
+// Empire omnipotent — AMOURANTH FOREVER 💖
 // =============================================================================

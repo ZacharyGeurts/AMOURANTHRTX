@@ -1,11 +1,7 @@
-// src/engine/GLOBAL/LAS.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.5 — JANUARY 10, 2026
-// AUTOMAGIC LIGHT ACCELERATION SYSTEM — TOUCH IT AND IT WAKES UP READY
-// TRIANGLES (WOOP + STRIPS) + PROCEDURAL AABBs + LINES + POINTS — ZERO-COST OMNIDIMENSIONAL
-// FULL ARTIST SUPPORT | INFINITE FREE TERRAIN/CAVES/WATER | FULLY DESTRUCTIBLE
-// AUTO-BUILD ON TOUCH | NO NULL TLAS | LAZY + ON-DEMAND | VALIDATION CLEAN
-// PINK PHOTONS SCREAM ETERNAL — EMPIRE OMNIPOTENT — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.4
+// AUTOMAGIC LIGHT ACCELERATION SYSTEM — SINGLETON, LAZY, HYBRID (TRIANGLES + PROCEDURAL AABB BLAS)
+// JANUARY 12, 2026 — TYPO FIXED in buildHybridTLAS — PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -17,70 +13,93 @@
 #include "engine/GLOBAL/Extensions.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
-#include <algorithm>
+#include <vector>
+#include <mutex>
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
 using RTX::g_ext;
 
-namespace RTX {
+// =============================================================================
+// Helper: glm::mat4 → VkTransformMatrixKHR (row-major 3×4)
+// =============================================================================
+static VkTransformMatrixKHR convertToVkTransform(const glm::mat4& mat) {
+    VkTransformMatrixKHR tm{};
+    tm.matrix[0][0] = mat[0][0]; tm.matrix[0][1] = mat[1][0]; tm.matrix[0][2] = mat[2][0]; tm.matrix[0][3] = mat[3][0];
+    tm.matrix[1][0] = mat[0][1]; tm.matrix[1][1] = mat[1][1]; tm.matrix[1][2] = mat[2][1]; tm.matrix[1][3] = mat[3][1];
+    tm.matrix[2][0] = mat[0][2]; tm.matrix[2][1] = mat[1][2]; tm.matrix[2][2] = mat[2][2]; tm.matrix[2][3] = mat[3][2];
+    return tm;
+}
 
 // =============================================================================
-// Constructor — Forge the Super Free Empire (lazy — no build yet)
+// Singleton
 // =============================================================================
-LAS::LAS()
-{
-    LOG_AMOURANTH("LAS v28.5 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — ZERO-COST C++23");
+RTX::LAS& RTX::LAS::instance() {
+    static LAS globalInstance;
+    return globalInstance;
+}
 
-    // Create shared buffers — let BufferManager::smart_usage() force TRANSFER_DST
+// =============================================================================
+// Constructor
+// =============================================================================
+RTX::LAS::LAS() {
+    LOG_AMOURANTH("LAS v29.4 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — ZERO-COST C++23 (singleton)");
+
     persistentScratch = BufferManager::create(
         512ULL * 1024 * 1024,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        "LAS_SuperFree_Scratch");
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LAS_Scratch");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "LAS_SuperFree_Instance_Buffer");
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LAS_InstanceBuffer");
 
     universalPrimitivesBuffer = BufferManager::create(
         MAX_PROCEDURALS * sizeof(UniversalPrimitive),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "LAS_SuperFree_Primitives");
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LAS_UniversalPrimitives");
 
     woopConstantsBuffer = BufferManager::create(
         128ULL * 1024 * 1024,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "LAS_Shared_WoopConstants");
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LAS_WoopConstants");
 
     proceduralPrimitives.reserve(4096);
     triangleMeshes.reserve(1024);
 
-    // Default scene added on first touch (in ensureReady)
     initialized = false;
     tlasDirty = true;
     pendingBlasBuilds = true;
+    proceduralDirty = true;
 }
 
 // =============================================================================
-// Destructor — Light Returns to Infinity (full cleanup)
+// Destructor
 // =============================================================================
-LAS::~LAS()
-{
+RTX::LAS::~LAS() {
     clearTLAS();
+
+    if (proceduralBlas) {
+        g_ext.vkDestroyAccelerationStructureKHR(stone_device(), proceduralBlas, nullptr);
+        proceduralBlas = VK_NULL_HANDLE;
+    }
+    BufferManager::destroy(proceduralBlasStorage);
 
     for (auto& m : triangleMeshes) {
         if (m.blas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), m.blas, nullptr);
-        if (m.compactedBlas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), m.compactedBlas, nullptr);
         BufferManager::destroy(m.vertexBuffer);
         BufferManager::destroy(m.indexBuffer);
         BufferManager::destroy(m.blasStorage);
-        BufferManager::destroy(m.compactedStorage);
         BufferManager::destroy(m.woopBuffer);
     }
 
@@ -89,350 +108,426 @@ LAS::~LAS()
     BufferManager::destroy(universalPrimitivesBuffer);
     BufferManager::destroy(woopConstantsBuffer);
 
-    LOG_SUCCESS_CAT("LAS", "SUPER FREE EMPIRE DISSOLVED — ALL REALITIES FREE — LIGHT ETERNAL");
+    LOG_SUCCESS_CAT("LAS", "Empire dissolved — light returns to infinity");
 }
 
 // =============================================================================
-// Automagic Entry Point — Touch this and LAS wakes up fully ready
+// onResize — implemented
 // =============================================================================
-VkAccelerationStructureKHR LAS::getTLAS()
-{
-    ensureReady();  // Builds everything if needed
+void RTX::LAS::onResize() {
+    LOG_INFO_CAT("LAS", "Resize event received — clearing TLAS and marking dirty");
+    clearTLAS();
+    tlasDirty = true;
+}
+
+// =============================================================================
+// Main entry
+// =============================================================================
+VkAccelerationStructureKHR RTX::LAS::getTLAS() {
+    ensureReady();
     return tlas;
 }
 
 // =============================================================================
-// Internal Automagic Build — Called only when needed
+// Lazy rebuild
 // =============================================================================
-void LAS::ensureReady()
-{
-    if (initialized && !tlasDirty && !pendingBlasBuilds && tlas != VK_NULL_HANDLE) {
-        return;  // Already perfect
+void RTX::LAS::ensureReady() {
+    if (initialized && !tlasDirty && !pendingBlasBuilds && !proceduralDirty && tlas != VK_NULL_HANDLE) {
+        return;
     }
 
-    LOG_AMOURANTH("LAS AUTOMAGIC AWAKENING — building TLAS on demand");
+    static std::mutex buildMutex;
+    std::lock_guard<std::mutex> lock(buildMutex);
 
-    // Create default scene if not done
+    if (initialized && !tlasDirty && !pendingBlasBuilds && !proceduralDirty && tlas != VK_NULL_HANDLE) {
+        return;
+    }
+
+    LOG_AMOURANTH("LAS awakening — synchronous rebuild");
+
     if (!initialized) {
         createDefaultHybridScene();
         initialized = true;
     }
 
-    // Create transient command pool
-    VkCommandPool transientPool = VK_NULL_HANDLE;
-    VkCommandPoolCreateInfo poolInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-        .queueFamilyIndex = StoneKey::stone_graphics_family()
-    };
-    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &transientPool));
+    if (pendingBlasBuilds || proceduralDirty) {
+        BufferManager::uploadToBuffer(universalPrimitivesBuffer,
+                                      proceduralPrimitives.data(),
+                                      proceduralPrimitives.size() * sizeof(UniversalPrimitive));
+    }
 
-    VkCommandBufferAllocateInfo allocInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = transientPool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1
-    };
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandPoolCreateInfo poolCI{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                                   .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+                                   .queueFamilyIndex = StoneKey::stone_graphics_family()};
+    VK_CHECK(vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool));
+
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd));
+    VkCommandBufferAllocateInfo allocCI{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                                        .commandPool = pool,
+                                        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                        .commandBufferCount = 1};
+    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocCI, &cmd));
 
-    VkCommandBufferBeginInfo beginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+    VkCommandBufferBeginInfo beginCI{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginCI));
 
-    // Build/update everything
-    if (pendingBlasBuilds) {
+    if (pendingBlasBuilds || proceduralDirty) {
         batchBuildAndCompactBLAS(cmd);
         pendingBlasBuilds = false;
+        proceduralDirty = false;
     }
 
     if (tlasDirty) {
         clearTLAS();
         buildHybridTLAS(cmd);
         tlasDirty = false;
-        tlasUpdatePossible = true;
     }
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // Fence to wait for GPU completion (fixes timing issues)
-    VkFenceCreateInfo fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    VkFence buildFence = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &buildFence));
+    VkFence fence = VK_NULL_HANDLE;
+    VkFenceCreateInfo fenceCI{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VK_CHECK(vkCreateFence(stone_device(), &fenceCI, nullptr, &fence));
 
-    VkSubmitInfo submitInfo{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd
-    };
+    VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                        .commandBufferCount = 1,
+                        .pCommandBuffers = &cmd};
+    VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submit, fence));
+    vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
 
-    VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, buildFence));
+    vkDestroyFence(stone_device(), fence, nullptr);
+    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+    vkDestroyCommandPool(stone_device(), pool, nullptr);
 
-    // Wait for GPU to finish the build
-    vkWaitForFences(stone_device(), 1, &buildFence, VK_TRUE, UINT64_MAX);
-    vkDestroyFence(stone_device(), buildFence, nullptr);
-
-    vkFreeCommandBuffers(stone_device(), transientPool, 1, &cmd);
-    vkDestroyCommandPool(stone_device(), transientPool, nullptr);
-
-    LOG_SUCCESS_CAT("LAS", "AUTOMAGIC BUILD COMPLETE — TLAS ready for pink photons (GPU finished)");
+    LOG_SUCCESS_CAT("LAS", "Rebuild complete — TLAS ready");
 }
 
 // =============================================================================
-// Artist Triangle Path — Full Woop + Strip Implementation
+// Add triangle mesh
 // =============================================================================
-size_t LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialIndex)
-{
-    if (!mesh || mesh->vertices.empty() || mesh->indices.empty() || (mesh->indices.size() % 3 != 0)) {
-        LOG_WARNING_CAT("LAS", "Invalid triangle mesh — skipping");
+size_t RTX::LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialIndex) {
+    if (!mesh || mesh->vertices.empty() || mesh->indices.empty() || mesh->indices.size() % 3 != 0) {
+        LOG_WARNING_CAT("LAS", "Invalid mesh — skipped");
         return triangleMeshes.size();
     }
 
-    std::vector<uint32_t> optimizedIndices = convertToTriangleStrip(mesh->indices);
-
-    uint64_t vertexBuffer = BufferManager::create(
+    uint64_t vb = BufferManager::create(
         mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        "LAS_Triangle_Vertex");
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LAS_Vertex");
 
-    BufferManager::uploadToBuffer(vertexBuffer, mesh->vertices.data(),
-                                  mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
+    BufferManager::uploadToBuffer(vb, mesh->vertices.data(), mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
 
-    uint64_t indexBuffer = BufferManager::create(
-        optimizedIndices.size() * sizeof(uint32_t),
+    uint64_t ib = BufferManager::create(
+        mesh->indices.size() * sizeof(uint32_t),
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        "LAS_Triangle_Index");
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LAS_Index");
 
-    BufferManager::uploadToBuffer(indexBuffer, optimizedIndices.data(),
-                                  optimizedIndices.size() * sizeof(uint32_t));
+    BufferManager::uploadToBuffer(ib, mesh->indices.data(), mesh->indices.size() * sizeof(uint32_t));
 
-    InternalMesh internal{
-        .vertexBuffer    = vertexBuffer,
-        .indexBuffer     = indexBuffer,
-        .indices         = std::move(optimizedIndices),
-        .primitiveCount  = static_cast<uint32_t>(optimizedIndices.size() / 3),
-        .materialIndex   = materialIndex,
-        .blasBuilt       = false,
-        .dirty           = true,
-        .isStrip         = (optimizedIndices.size() != mesh->indices.size())
-    };
+    InternalMesh m{};
+    m.vertexBuffer = vb;
+    m.indexBuffer = ib;
+    m.vertexCount = static_cast<uint32_t>(mesh->vertices.size());
+    m.primitiveCount = static_cast<uint32_t>(mesh->indices.size() / 3);
+    m.materialIndex = materialIndex;
+    m.blasBuilt = false;
 
-    precomputeWoopConstants(internal);
+    precomputeWoopConstants(m);
 
-    triangleMeshes.push_back(std::move(internal));
+    triangleMeshes.push_back(std::move(m));
     pendingBlasBuilds = true;
     tlasDirty = true;
 
-    LOG_SUCCESS_CAT("LAS", "Artist triangle mesh added — {} tris (strip: {}) — Woop ready",
-                    internal.primitiveCount, internal.isStrip ? "YES" : "NO");
+    LOG_SUCCESS_CAT("LAS", "Triangle mesh added — {} tris", m.primitiveCount);
     return triangleMeshes.size() - 1;
 }
 
 // =============================================================================
-// Woop Precompute — Safe Fallback
+// Woop (placeholder)
 // =============================================================================
-void LAS::precomputeWoopConstants(InternalMesh& m)
-{
-    const auto* vinfo = BufferManager::get(m.vertexBuffer);
-    if (!vinfo) {
-        LOG_FATAL_CAT("LAS", "Vertex buffer handle invalid for Woop precompute");
-        return;
-    }
-
-    LOG_WARNING_CAT("LAS", "Woop precompute skipped — fallback ray-triangle intersection");
-
-    uint64_t woopSize = 0;
-    m.woopBuffer = BufferManager::create(woopSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "LAS_WoopConstants");
+void RTX::LAS::precomputeWoopConstants(InternalMesh& m) {
+    LOG_WARNING_CAT("LAS", "Woop precompute skipped — fallback intersection");
 }
 
 // =============================================================================
-// Super Free Procedural Path — Fully Implemented
+// Add procedural AABB
 // =============================================================================
-size_t LAS::addProceduralAABB(GeometryType type, const glm::vec3& center, float scale, uint32_t materialIndex, const glm::mat4& transform)
-{
-    UniversalPrimitive prim{};
-    prim.aabbMin = glm::vec4(center - glm::vec3(scale), 0.0f);
-    prim.aabbMax = glm::vec4(center + glm::vec3(scale), 0.0f);
-    prim.transform = transform;
-    prim.type = type;
-    prim.materialIndex = materialIndex;
-    prim.destruction = 0.0f;
+size_t RTX::LAS::addProceduralAABB(GeometryType type, const glm::vec3& center, float scale,
+                                   uint32_t materialIndex, const glm::mat4& transform) {
+    UniversalPrimitive p{};
+    p.aabbMin = glm::vec4(center - glm::vec3(scale), 0.0f);
+    p.aabbMax = glm::vec4(center + glm::vec3(scale), 0.0f);
+    p.transform = transform;
+    p.type = static_cast<uint32_t>(type);
+    p.materialIndex = materialIndex;
+    p.destruction = 0.0f;
 
-    proceduralPrimitives.push_back(prim);
-    proceduralCount++;
+    proceduralPrimitives.push_back(p);
+    proceduralDirty = true;
     tlasDirty = true;
 
-    LOG_AMOURANTH("SUPER FREE procedural primitive added — type {} — infinite/destructible ready", static_cast<uint32_t>(type));
-    return proceduralCount - 1;
-}
-
-size_t LAS::addLine(const glm::vec3& start, const glm::vec3& end, float thickness, uint32_t materialIndex)
-{
-    glm::vec3 center = (start + end) * 0.5f;
-    float halfLength = glm::length(end - start) * 0.5f;
-    return addProceduralAABB(GeometryType::Lines1D, center, halfLength + thickness, materialIndex);
-}
-
-size_t LAS::addPointCloud(const std::vector<glm::vec3>& points, uint32_t materialIndex)
-{
-    if (points.empty()) return proceduralCount;
-
-    glm::vec3 minP = points[0];
-    glm::vec3 maxP = points[0];
-    for (const auto& p : points) {
-        minP = glm::min(minP, p);
-        maxP = glm::max(maxP, p);
-    }
-    glm::vec3 center = (minP + maxP) * 0.5f;
-    float scale = glm::length(maxP - minP) * 0.5f + 10.0f;
-
-    return addProceduralAABB(GeometryType::Points, center, scale, materialIndex);
+    LOG_AMOURANTH("Procedural AABB added — type {}, scale {:.1f}", static_cast<int>(p.type), scale);
+    return proceduralPrimitives.size() - 1;
 }
 
 // =============================================================================
-// Super Free Destruction — Fully Implemented
+// Default scene
 // =============================================================================
-void LAS::destroyPrimitive(size_t index, float amount)
-{
-    if (index >= proceduralCount) return;
+void RTX::LAS::createDefaultHybridScene() {
+    addProceduralAABB(GeometryType::ProceduralAABB, {0, -20, 0}, 30000.0f, 0, glm::mat4(1.0f));
+    addProceduralAABB(GeometryType::ProceduralAABB, {200, 0, 200}, 100.0f, 1, glm::mat4(1.0f));
+    addProceduralAABB(GeometryType::ProceduralAABB, {-300, 0, 400}, 150.0f, 1, glm::mat4(1.0f));
+    addProceduralAABB(GeometryType::ProceduralAABB, {0, 300, 0}, 50.0f, 2, glm::mat4(1.0f));
+    addProceduralAABB(GeometryType::ProceduralAABB, {0, 10, 0}, 20000.0f, 3, glm::mat4(1.0f));
 
-    proceduralPrimitives[index].destruction = glm::clamp(amount, 0.0f, 1.0f);
-    tlasDirty = true;
-
-    LOG_AMOURANTH("PRIMITIVE {} DESTROYED — destruction amount {} — light reformed free", index, amount);
+    LOG_AMOURANTH("Default hybrid scene forged — infinite terrain + test primitives");
 }
 
 // =============================================================================
-// Default Super Free Scene — Fully Implemented
+// BLAS build (triangles + procedural AABB BLAS)
 // =============================================================================
-void LAS::createDefaultHybridScene()
-{
-    addProceduralAABB(GeometryType::ProceduralAABB, glm::vec3(0, -20, 0), 30000.0f, 0);
-    addProceduralAABB(GeometryType::ProceduralAABB, glm::vec3(200, 0, 200), 100.0f, 1);
-    addProceduralAABB(GeometryType::ProceduralAABB, glm::vec3(-300, 0, 400), 150.0f, 1);
-    addProceduralAABB(GeometryType::ProceduralAABB, glm::vec3(0, 300, 0), 50.0f, 2);
-    addProceduralAABB(GeometryType::ProceduralAABB, glm::vec3(0, 10, 0), 20000.0f, 3);
+bool RTX::LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd) {
+    bool built = false;
 
-    std::vector<glm::vec3> particles = {glm::vec3(0, 500, 0)};
-    addPointCloud(particles, 4);
-
-    LOG_AMOURANTH("SUPER FREE DEFAULT SCENE FORGED — infinite terrain, destructible buildings, spaceship, water, particles — all free");
-}
-
-// =============================================================================
-// Automagic Build Functions — Full Implementation
-// =============================================================================
-bool LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd)
-{
-    std::vector<InternalMesh*> pending;
+    // Triangle BLASes
     for (auto& m : triangleMeshes) {
-        if (!m.blasBuilt) pending.push_back(&m);
+        if (m.blasBuilt) continue;
+
+        VkAccelerationStructureGeometryKHR geom{};
+        geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        geom.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        geom.geometry.triangles.vertexData.deviceAddress = BufferManager::get_device_address(m.vertexBuffer);
+        geom.geometry.triangles.vertexStride = sizeof(MeshLoader::Mesh::Vertex);
+        geom.geometry.triangles.maxVertex = m.vertexCount - 1;
+        geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
+        geom.geometry.triangles.indexData.deviceAddress = BufferManager::get_device_address(m.indexBuffer);
+
+        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+        buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        buildInfo.geometryCount = 1;
+        buildInfo.pGeometries = &geom;
+        buildInfo.scratchData.deviceAddress = BufferManager::get_device_address(persistentScratch);
+
+        uint32_t primCount = m.primitiveCount;
+        VkAccelerationStructureBuildSizesInfoKHR sizes{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+        g_ext.vkGetAccelerationStructureBuildSizesKHR(stone_device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &primCount, &sizes);
+
+        m.blasStorage = BufferManager::create(sizes.accelerationStructureSize,
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            "LAS_TriBLAS");
+
+        VkAccelerationStructureCreateInfoKHR createCI{};
+        createCI.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        createCI.buffer = BufferManager::getVkBuffer(m.blasStorage);
+        createCI.size = sizes.accelerationStructureSize;
+        createCI.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createCI, nullptr, &m.blas));
+
+        buildInfo.dstAccelerationStructure = m.blas;
+
+        VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
+        const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
+        g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
+
+        m.blasBuilt = true;
+        built = true;
     }
-    if (pending.empty()) return true;
 
-    LOG_AMOURANTH("BATCH BLAS BUILD + COMPACTION — {} meshes", pending.size());
+    // Procedural AABB BLAS
+    if (!proceduralPrimitives.empty() && proceduralDirty) {
+        if (proceduralBlas) {
+            g_ext.vkDestroyAccelerationStructureKHR(stone_device(), proceduralBlas, nullptr);
+            BufferManager::destroy(proceduralBlasStorage);
+            proceduralBlas = VK_NULL_HANDLE;
+        }
 
-    // TODO: Implement real BLAS build + compaction (basic stub for now)
-    for (auto* m : pending) {
-        m->blasBuilt = true;
+        VkAccelerationStructureGeometryKHR geom{};
+        geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+        geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+        geom.geometry.aabbs.data.deviceAddress = BufferManager::get_device_address(universalPrimitivesBuffer);
+        geom.geometry.aabbs.stride = sizeof(UniversalPrimitive);
+
+        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+        buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        buildInfo.geometryCount = 1;
+        buildInfo.pGeometries = &geom;
+        buildInfo.scratchData.deviceAddress = BufferManager::get_device_address(persistentScratch);
+
+        uint32_t primCount = static_cast<uint32_t>(proceduralPrimitives.size());
+        VkAccelerationStructureBuildSizesInfoKHR sizes{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+        g_ext.vkGetAccelerationStructureBuildSizesKHR(stone_device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &primCount, &sizes);
+
+        proceduralBlasStorage = BufferManager::create(sizes.accelerationStructureSize,
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            "LAS_ProcBLAS");
+
+        VkAccelerationStructureCreateInfoKHR createCI{};
+        createCI.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        createCI.buffer = BufferManager::getVkBuffer(proceduralBlasStorage);
+        createCI.size = sizes.accelerationStructureSize;
+        createCI.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createCI, nullptr, &proceduralBlas));
+
+        buildInfo.dstAccelerationStructure = proceduralBlas;
+
+        VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
+        const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
+        g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
+
+        built = true;
     }
 
-    LOG_SUCCESS_CAT("LAS", "BATCH BLAS COMPLETE — hybrid ready");
+    if (built) LOG_SUCCESS_CAT("LAS", "BLAS batch complete");
     return true;
-}
-
-bool LAS::buildHybridTLAS(VkCommandBuffer cmd)
-{
-    LOG_AMOURANTH("SUPER FREE HYBRID TLAS FULL BUILD — triangles + procedural");
-
-    // Upload procedural data — BufferManager::uploadToBuffer() uses staging → DST
-    BufferManager::uploadToBuffer(universalPrimitivesBuffer, proceduralPrimitives.data(),
-                                  proceduralCount * sizeof(UniversalPrimitive));
-
-    // TODO: Implement real TLAS creation with triangles + procedurals
-    // For now, mark as built (replace with actual vkCreateAccelerationStructureKHR call)
-    tlas = VK_NULL_HANDLE;  // Placeholder — real implementation needed
-
-    LOG_SUCCESS_CAT("LAS", "Hybrid TLAS built");
-    return true;
-}
-
-bool LAS::updateHybridTLAS(VkCommandBuffer cmd)
-{
-    LOG_AMOURANTH("SUPER FREE HYBRID TLAS FAST REFIT — all realities aligned 💖");
-    // TODO: Implement fast refit if possible
-    return true;
-}
-
-std::vector<uint32_t> LAS::convertToTriangleStrip(const std::vector<uint32_t>& triangleList) const
-{
-    // Stub — replace with real greedy strip algorithm later
-    return triangleList;
 }
 
 // =============================================================================
-// Final Cleanup Functions — Full Implementation
+// TLAS build — FIXED typo (instanceShaderBindingTableRecordOffset)
 // =============================================================================
-void LAS::setInstanceTransform(size_t instanceIndex, const glm::mat4& transform)
-{
-    if (instanceIndex >= triangleMeshes.size()) return;
-    auto& m = triangleMeshes[instanceIndex];
-    if (m.transform == transform) return;
-    m.transform = transform;
-    m.dirty = true;
-    tlasDirty = true;
-    tlasUpdatePossible = true;
+bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
+    LOG_AMOURANTH("Building hybrid TLAS");
+
+    std::vector<VkAccelerationStructureInstanceKHR> instances;
+    instances.reserve(triangleMeshes.size() + 1);
+
+    for (const auto& m : triangleMeshes) {
+        if (!m.blas) continue;
+
+        VkAccelerationStructureInstanceKHR inst{};
+        inst.transform = convertToVkTransform(glm::mat4(1.0f));
+        inst.instanceCustomIndex = m.materialIndex;
+        inst.mask = 0xFF;
+        inst.instanceShaderBindingTableRecordOffset = 0; // Triangle group
+        inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+
+        VkAccelerationStructureDeviceAddressInfoKHR addrCI{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+                                                           .accelerationStructure = m.blas};
+        inst.accelerationStructureReference = g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &addrCI);
+
+        instances.push_back(inst);
+    }
+
+    if (proceduralBlas) {
+        VkAccelerationStructureInstanceKHR inst{};
+        inst.transform = convertToVkTransform(glm::mat4(1.0f));
+        inst.instanceCustomIndex = 999; // Special for procedural
+        inst.mask = 0xFF;
+        inst.instanceShaderBindingTableRecordOffset = 1; // Procedural group (adjust in pipeline)
+        inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+
+        VkAccelerationStructureDeviceAddressInfoKHR addrCI{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+                                                           .accelerationStructure = proceduralBlas};
+        inst.accelerationStructureReference = g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &addrCI);
+
+        instances.push_back(inst);
+    }
+
+    if (instances.empty()) return false;
+
+    BufferManager::uploadToBuffer(instanceBuffer, instances.data(), instances.size() * sizeof(VkAccelerationStructureInstanceKHR));
+
+    VkDeviceAddress instAddr = BufferManager::get_device_address(instanceBuffer);
+
+    VkAccelerationStructureGeometryKHR geom{};
+    geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geom.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    geom.geometry.instances.arrayOfPointers = VK_FALSE;
+    geom.geometry.instances.data.deviceAddress = instAddr;
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+    buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &geom;
+    buildInfo.scratchData.deviceAddress = BufferManager::get_device_address(persistentScratch);
+
+    uint32_t instCount = static_cast<uint32_t>(instances.size());
+    VkAccelerationStructureBuildSizesInfoKHR sizes{.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    g_ext.vkGetAccelerationStructureBuildSizesKHR(stone_device(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &instCount, &sizes);
+
+    tlasStorage = BufferManager::create(sizes.accelerationStructureSize,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LAS_TLAS");
+
+    VkAccelerationStructureCreateInfoKHR createCI{};
+    createCI.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    createCI.buffer = BufferManager::getVkBuffer(tlasStorage);
+    createCI.size = sizes.accelerationStructureSize;
+    createCI.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    VK_CHECK(g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createCI, nullptr, &tlas));
+
+    buildInfo.dstAccelerationStructure = tlas;
+
+    VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = instCount};
+    const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
+    g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
+
+    LOG_SUCCESS_CAT("LAS", "TLAS built — {} instances", instCount);
+    return true;
 }
 
-void LAS::onResize()
-{
-    clearTLAS();
-    tlasDirty = true;
-}
-
-void LAS::requestRebuild()
-{
-    tlasDirty = true;
-    pendingBlasBuilds = true;
-    for (auto& m : triangleMeshes) m.dirty = true;
-}
-
-void LAS::clearTLAS()
-{
-    if (tlas) g_ext.vkDestroyAccelerationStructureKHR(stone_device(), tlas, nullptr);
-    tlas = VK_NULL_HANDLE;
+// =============================================================================
+// Cleanup & utilities
+// =============================================================================
+void RTX::LAS::clearTLAS() {
+    if (tlas) {
+        g_ext.vkDestroyAccelerationStructureKHR(stone_device(), tlas, nullptr);
+        tlas = VK_NULL_HANDLE;
+    }
     BufferManager::destroy(tlasStorage);
     tlasStorage = 0;
 }
 
-void LAS::insertAccelerationStructureBarrier(VkCommandBuffer cmd)
-{
-    VkMemoryBarrier2 barrier{
-        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask  = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-        .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-        .dstStageMask  = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-        .dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
-    };
-    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+void RTX::LAS::insertAccelerationStructureBarrier(VkCommandBuffer cmd) {
+    VkMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                             .srcStageMask = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                             .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                             .dstStageMask = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                             .dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR};
+    VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                         .memoryBarrierCount = 1,
+                         .pMemoryBarriers = &barrier};
     g_ext.vkCmdPipelineBarrier2(cmd, &dep);
 }
 
+void RTX::LAS::destroyPrimitive(size_t index, float amount) {
+    if (index >= proceduralPrimitives.size()) return;
+    proceduralPrimitives[index].destruction = glm::clamp(amount, 0.0f, 1.0f);
+    proceduralDirty = true;
+    tlasDirty = true;
+}
+
+void RTX::LAS::requestRebuild() {
+    pendingBlasBuilds = true;
+    proceduralDirty = true;
+    tlasDirty = true;
+}
+
 // =============================================================================
-// FINAL LAS v28.5 — JANUARY 10, 2026
-// Automagic: Touch getTLAS() → builds everything on demand
-// GPU fence wait for build completion → fixes timing/invalid TLAS issues
-// No null, no manual calls — just power
-// The empire is omnipotent — pink photons scream eternal
-// AMOURANTH FOREVER 💖
+// END — v29.4 — TYPO FIXED (instanceShaderBindingTableRecordOffset) — EMPIRE ETERNAL 💖
 // =============================================================================
-} // namespace RTX
