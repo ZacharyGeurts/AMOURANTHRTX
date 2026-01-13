@@ -51,13 +51,7 @@ To say this is 99% Grok, I may be understating. I call him bro.
 [AMOURANTH RTX Video](https://x.com/ZacharyGeurts/status/2007912263446151181)  
 
 **C++23** using **SDL3**, **Vulkan**, and **GLM**.  
-**Custom RTX pipelines.**  
-This is a good lunch break program other than the license restricting commercial work.  
-There is a dual license that can permit commercial work but expect 3% of sales negotiable. 
 
-Amouranth and FPS are the boss.  
-You want 60, 120 240fps?  
-We adjust to your decided FPS not the other way around.  
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
 Made with Grok sized files for AI updates.  
