@@ -31,6 +31,7 @@ Why Amouranth RTX?
 We developed at zero computational cost to create the fastest RTX engine on the planet.  
 We implement compression and optimizations to make everything faster than what is currently available.  
 FPS and limitations are purely hardware related since we bring no overhead.  
+Everything is wrapped with unbreakable security.  
 By using Grok AI we are able to scour the planet for the fastest implementations, theoritical or not.  
 All files are open to developers who want to extend or enhance their development.  
 
