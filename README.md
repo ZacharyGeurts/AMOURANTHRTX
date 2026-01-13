@@ -1,5 +1,6 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
 Cross platform support with Ming to do Windows and probably ARM if you put it in there.  
+Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
 We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
 Welcome to the community.  
