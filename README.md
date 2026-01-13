@@ -66,16 +66,12 @@ Made with Grok sized files for AI updates.
 Errors and bad code will not be tolerated.
 <img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Untitled.png" />  
 
-- **Distribution**: gzac5314@gmail.com for AMOURANTH RTX engine license  
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 I would be taking a 1 to their 2 parts as far as distribution ratio.  
-The software is unrestricted and if you go commercial then set something up then.  
 If you make money it will probably be around 3 cents on the dollar or 3%. Not above.  
-I doubt anyone has time for lawyers, so be a sport if you make a few bucks.  
-Read that as: It's free until you think it should not be.  
 If they do not like my using their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH  
-If you need help with your project, it's Grok, not me.  
+I plan fireworks before 4th of July.  
 
 Current and archived content subject to license.  
 
