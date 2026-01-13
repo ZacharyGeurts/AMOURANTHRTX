@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.3 — JANUARY 12, 2026
-// BUFFERMANAGER — CLEAN & SAFE EDITION | NO SMART TRICKS | FORCES DST FOR EVERYTHING
-// ZERO-COST C++23 | VALIDATION CLEAN | NO VUID-00120 | ETERNAL
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.4 — JANUARY 12, 2026
+// BUFFERMANAGER — CLEAN & SAFE EDITION | BROAD CHUNK USAGE FOR RT COMPAT
+// ZERO-COST C++23 | VALIDATION CLEAN | NO VUID-03614/03673 | ETERNAL
 // =============================================================================
 
 #pragma once
@@ -30,6 +30,19 @@ inline constexpr VkDeviceSize STAGING_RING_SIZE  = 1ULL << 30;             // 1 
 inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 64ULL << 10;         // 64 KiB
 inline constexpr VkDeviceSize SBT_MINIMUM_SIZE       = 512;
 inline constexpr VkDeviceSize SBT_ALIGNMENT          = 256;
+
+// Broad usage flags for chunks to support all common & RT uses
+inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
+    VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+    VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+    VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+    VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
 
 // Total device-local VRAM
 inline VkDeviceSize g_total_device_local = 0;
@@ -153,10 +166,11 @@ inline void ensureStagingRing() noexcept {
         return nullptr;
     }
 
+    // Use broad usage flags for chunk to support RT and other uses
     VkBufferCreateInfo bci{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = chunkSize,
-        .usage = usage,
+        .usage = CHUNK_USAGE_FLAGS,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
 
@@ -214,8 +228,8 @@ inline void ensureStagingRing() noexcept {
     });
 
     g_total_allocated += req.size;
-    LOG_INFO("BufferManager", "New chunk created: {} MiB (total allocated: {:.2f} GiB) | usage: {:#x}",
-             chunkSize >> 20, static_cast<double>(g_total_allocated) / 1e9, static_cast<uint32_t>(usage));
+    LOG_INFO("BufferManager", "New chunk created: {} MiB (total allocated: {:.2f} GiB) | broad usage: {:#x}",
+             chunkSize >> 20, static_cast<double>(g_total_allocated) / 1e9, static_cast<uint32_t>(CHUNK_USAGE_FLAGS));
 
     return &g_mainChunks.back();
 }
@@ -482,10 +496,9 @@ inline void purge_all() noexcept {
 } // namespace BufferManager
 
 // =============================================================================
-// BUFFERMANAGER v29.3 — JANUARY 12, 2026 — FINAL FIX
-// - Staging ring now has TRANSFER_DST_BIT (standard practice, fully safe)
-// - uploadToBuffer skips copy entirely for buffers inside staging ring (small uniforms) + direct memcpy
+// BUFFERMANAGER v29.4 — JANUARY 12, 2026 — RT COMPAT FIX
+// - Chunks now created with broad usage flags including RT (AS storage + build input)
+// - Prevents VUID-03614/03673 when suballocating RT buffers in shared chunks
 // - No possible VUID-00120 ever again
-// - AS validation errors still require caller-side fixes (add proper flags in LAS/MeshLoader)
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// - PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
