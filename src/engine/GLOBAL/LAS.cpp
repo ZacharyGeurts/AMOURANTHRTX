@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.6
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.7
 // AUTOMAGIC LIGHT ACCELERATION SYSTEM — SINGLETON, LAZY, HYBRID (TRIANGLES + PROCEDURAL AABB BLAS)
-// JANUARY 12, 2026 — FIXED sType in BuildSizesInfo + RT flag compatibility with BufferManager suballocation
+// JANUARY 13, 2026 — ADDED vkQueueWaitIdle TO ENSURE CB COMPLETION + FIXED CLEANUP
 // PINK PHOTONS ETERNAL — EMPIRE REFORGED — VALIDATION VANQUISHED
 // =============================================================================
 
@@ -44,7 +44,7 @@ RTX::LAS& RTX::LAS::instance() {
 // Constructor — Added RT-specific flags to persistentScratch for safe suballocation
 // =============================================================================
 RTX::LAS::LAS() {
-    LOG_AMOURANTH("LAS v29.6 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — VALIDATION OBLITERATED");
+    LOG_AMOURANTH("LAS v29.7 — AUTOMAGIC SUPER FREE HYBRID EMPIRE — VALIDATION OBLITERATED");
 
     // Persistent scratch now carries both RT flags — safe for suballocation of AS storage / input buffers
     persistentScratch = BufferManager::create(
@@ -84,7 +84,7 @@ RTX::LAS::LAS() {
 }
 
 // =============================================================================
-// Destructor
+// Destructor — Ensure all buffers destroyed
 // =============================================================================
 RTX::LAS::~LAS() {
     clearTLAS();
@@ -201,6 +201,7 @@ void RTX::LAS::ensureReady() {
     };
     VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submit, fence));
     vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
+    VK_CHECK(vkQueueWaitIdle(stone_graphics_queue()));  // Ensure queue idle to resolve pending CB state
 
     vkDestroyFence(stone_device(), fence, nullptr);
     vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
@@ -352,6 +353,8 @@ bool RTX::LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd) {
         const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
         g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
 
+        insertAccelerationStructureBarrier(cmd);  // Ensure AS write visible
+
         m.blasBuilt = true;
         built = true;
     }
@@ -405,6 +408,8 @@ bool RTX::LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd) {
         VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = primCount};
         const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
         g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
+
+        insertAccelerationStructureBarrier(cmd);  // Ensure AS write visible
 
         built = true;
     }
@@ -507,6 +512,8 @@ bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
     const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
     g_ext.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
 
+    insertAccelerationStructureBarrier(cmd);  // Ensure AS write visible
+
     LOG_SUCCESS_CAT("LAS", "TLAS built — {} instances", instCount);
     return true;
 }
@@ -553,5 +560,5 @@ void RTX::LAS::requestRebuild() {
 }
 
 // =============================================================================
-// END — v29.6 — ALL VALIDATION ERRORS RESOLVED — EMPIRE ETERNAL 💖
+// END — v29.7 — ADDED QUEUE IDLE + BARRIERS — EMPIRE ETERNAL 💖
 // =============================================================================

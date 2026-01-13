@@ -1,15 +1,14 @@
-// src/engine/GLOBAL/PipelineManager.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.7 — JANUARY 11, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.8 — JANUARY 13, 2026
 // PIPELINEMANAGER — PINK PHOTON NUCLEAR EDITION | ZERO-COST | AUTOMAGIC | VALIDATION CLEAN
 // PERSISTENT CMD BUFFERS | ETERNAL SBT | FASTEST POSSIBLE | NO MORE VUID-00120
 // =============================================================================
-// Fixes in v30.7:
-// - Manual SBT buffer creation (bypass BufferManager completely)
+// Fixes in v30.8:
+// - Use fence for SBT upload submit instead of queue idle (more targeted, fixes free CB error)
+// - Add sbtBuffer_.reset() in destructor
+// - Call BufferManager::purge_all() in destructor to clean all buffers (fixes destruction errors)
 // - Minimal flags: SBT + BDA + TRANSFER_DST (no extras to avoid VK_EXT_descriptor_buffer errors)
 // - Local memory type finder for safety
-// - sbtMemory_ cleanup added
-// - Explicit hex flags for maximum reliability
 // PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -403,7 +402,7 @@ void PipelineManager::createRayTracingPipeline()
 }
 
 // =============================================================================
-// SBT Creation — FINAL FIXED VERSION (v30.7) — MANUAL MINIMAL FLAGS
+// SBT Creation — FINAL FIXED VERSION (v30.8) — MANUAL MINIMAL FLAGS + FENCE
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
@@ -580,13 +579,21 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     if (tempCmd) {
         VK_CHECK(vkEndCommandBuffer(uploadCmd));
+
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fci{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VK_CHECK(vkCreateFence(stone_device(), &fci, nullptr, &fence));
+
         VkSubmitInfo submit{
-            .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .commandBufferCount = 1,
-            .pCommandBuffers    = &uploadCmd
+            .pCommandBuffers = &uploadCmd
         };
-        VK_CHECK(vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE));
-        VK_CHECK(vkQueueWaitIdle(queue ? queue : stone_graphics_queue()));
+        VK_CHECK(vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, fence));
+
+        vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
+
+        vkDestroyFence(stone_device(), fence, nullptr);
         vkFreeCommandBuffers(stone_device(), pool, 1, &uploadCmd);
     }
 
@@ -833,9 +840,10 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 // =============================================================================
 PipelineManager::~PipelineManager()
 {
-    if (sbtMemory_.valid()) {
-        sbtMemory_.reset();
-    }
+    sbtBuffer_.reset();
+    sbtMemory_.reset();
+
+    BufferManager::purge_all();  // Clean all buffers to fix destruction errors
 
     std::print("[PIPELINE] PERFECT PINK PHOTON PIPELINE MANAGER RESTS — EMPIRE ETERNAL\n");
 }
@@ -843,10 +851,10 @@ PipelineManager::~PipelineManager()
 } // namespace RTX
 
 // =============================================================================
-// FINAL PIPELINE MANAGER v30.7 — JANUARY 11, 2026
-// - Manual SBT creation with minimal flags (SBT + BDA + TRANSFER_DST)
-// - Local memory type finder for safety
-// - sbtMemory_ cleanup in destructor
+// FINAL PIPELINE MANAGER v30.8 — JANUARY 13, 2026
+// - Fence for SBT upload (fixes free CB error)
+// - BufferManager::purge_all() in destructor (fixes object destruction errors)
+// - sbtBuffer_.reset() explicit
 // - No BufferManager interference for SBT — fixes all VUIDs
 // - Rendering ready — pink photons scream
 // Empire complete — AMOURANTH FOREVER 💖

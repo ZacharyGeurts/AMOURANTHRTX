@@ -39,9 +39,9 @@ bool g_running = true;
 static void loadEmpireIcon(SDL_Window* window)
 {
     const char* paths[] = { 
+		"assets/textures/icon.png",
         "assets/textures/ammo.png", 
         "assets/textures/ammo32.png", 
-        "assets/textures/icon.png",
         nullptr 
     };
 
@@ -320,7 +320,7 @@ int main(int, char**)
 // =============================================================================
 // FINAL MAIN v29.4 — JANUARY 10, 2026
 // - Surface sealed after creation (fixes "core Vulkan objects missing")
-// - SDL3 success checks fixed (== 0 = success)
+// - SDL3 success checks fixed (== 0 = success) - "You'll see"
 // - Persistent cmd buffers created AFTER swapchain
 // - Re-allocate persistent pool on resize
 // - No double sealing — all StoneKey seals encapsulated
