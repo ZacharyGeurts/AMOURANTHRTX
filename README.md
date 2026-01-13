@@ -62,8 +62,11 @@ Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)
 
 Made with Grok sized files for AI updates.  
 
+Spiderman is your GPU on AMOURANTHRTX. We are Venom.  
+<img width="1300" alt="LOLWeOfferLessBreathingRoom" src="hhttps://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/1861228-2007923825.jpg" />  
+
 270,000+ FPS on 4070ti full path tracer.  
-<img width="1300" alt="FPS" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-01-12%2023-11-03.png?raw=true" />  
+<img width="1300" alt="FPS" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-01-12%2023-11-03.png" />  
 
 Errors and bad code will not be tolerated.
 <img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Untitled.png" />  
