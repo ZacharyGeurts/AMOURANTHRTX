@@ -17,11 +17,7 @@ sudo apt update && sudo apt install gcc-14 g++-14
 
 Gets to the renderer but backend changes have it up and down.  
 Working prototype Christmas 2025. See branch Plastic Beach.  
-Please do not code farm. Swapchain goes with THIS project.  
-Expect code, a black window, and miles of logging.    
 Last visual Dec 9th commit (pink screen).  
-Updates are fast and furious at this stage and the renderer could be up or down any minute.  
-If you do not like where it crashes, come back tomorrow and I will show you a new one.  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
@@ -29,11 +25,13 @@ Commercial is subject to license.
 
 Why Amouranth RTX?  
 We developed at zero computational cost to create the fastest RTX engine on the planet.  
+Compute as well as Raytracing.  
 We implement compression and optimizations to make everything faster than what is currently available.  
 FPS and limitations are purely hardware related since we bring no overhead.  
 Everything is wrapped with unbreakable security.  
-By using Grok AI we are able to scour the planet for the fastest implementations, theoritical or not.  
+By using Grok AI we are able to scour the planet for the fastest implementations, theoretical or not.  
 All files are open to developers who want to extend or enhance their development.  
+Make some money, and then shoot me an email.  
 
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
 AMOURANTH RTX a next generation engine for raw performance.  
