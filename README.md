@@ -22,6 +22,8 @@ Feel free to open issues for anything. Questions, comments, assistance.
 @ZacharyGeurts on X.  
 Too good to be true? You can put a copy on your desktop and prove me wrong.  
 Welcome to the community.  
+Use the green code button above to download zip.  
+Or, use the preferred method with git.  
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
