@@ -7,6 +7,7 @@ This is not a SDK per se, but this is Vulkan SDK free RTX access and no middlema
 Living world at no computational cost.  
 Cross platform support with Ming to do Windows and probably ARM if you put it in there.  
 Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
+Or whereever you can get cmake working.  
 StoneKey.hpp is the everything of Vulkan made globals and hackerproof. Read as, this is an opera.  
 Each piece in and of itself smart and friendly.  
 Even grandma can copy and paste a file into @grok these days.  
