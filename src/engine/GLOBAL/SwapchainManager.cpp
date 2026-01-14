@@ -5,7 +5,6 @@
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
-#include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/LAS.hpp"          // LAS::instance()
