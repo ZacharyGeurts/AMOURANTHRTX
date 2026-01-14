@@ -3,6 +3,7 @@ Cross platform support with Ming to do Windows and probably ARM if you put it in
 Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
 We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
+@ZacharyGeurts on X.  
 Welcome to the community.  
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
