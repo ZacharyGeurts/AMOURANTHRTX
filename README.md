@@ -4,6 +4,8 @@ Multiplatfom Linux SDK sufficient for an industry reset.
 Cross platform support with Ming to do Windows and probably ARM if you put it in there.  
 Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
 StoneKey.hpp is the everything of Vulkan made globals and hackerproof. Read as, this is an opera.  
+Each piece in and of itself smart and friendly.  
+Even grandma can copy and paste a file into @grok these days.  
 You are allowed to look at it when it is allowed to be looked for through at whatever. Kinda crazy.  
 Compile time decides your friendlies, hold tight for cheese wheels.  
 We keep file sizes small for AI coding (~800 lines on the big one)  
