@@ -2,7 +2,7 @@ Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding
 BUILD YOUR OWN AND CATCH UP WITH ME AT LEAST!!! THIS IS Zero cost perfection.  
 Cross platform support with Ming to do Windows and probably ARM if you put it in there.  
 Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
-StoneKey.hpp is the everything of Vulkan and does not disconnect from files.  
+StoneKey.hpp is the everything of Vulkan made globals and does not disconnect from files.  
 We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
 @ZacharyGeurts on X.  
