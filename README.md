@@ -103,27 +103,9 @@ Please submit pull requests or open issues on the repository.
 Ensure code follows C++20 standards and includes proper error handling.  
 I am now a stickler for OMP parallelization and memory safety with C++20 due to advent of AI coding.  
 
-## Built on AMOURANTH RTX.  
-A ground up SDL3 and Vulkan with RTX engine using GLM for fast vectors and math.  
-RTX 3060 Ti and higher, RX 6800 and up.  
-
-**Platform**: Currently Linux-only with toolchain work being implemented SDK style.  
-If you have a problem or need assistance please open an issue here on github.  
-
-Modular design. Modify with your favorite AI coding program.  
-This project uses an SDL3 Vulkan backend for rendering including a robust RTX pipeline.  
-Chosen from idiocy, ignorance, and patience.  
-I solved my math problem, so mostly progressing the engine. 
-
-Software with free distribution can use all of this software with free license terms.  
-Commercial SDL3 and Vulkan development requires AMOURANTH RTX engine license.  
-Commercial distribution is percentage based accountable upon release.  
-
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
 
 ## Overview
-The **Dimensional Navigator** is a computational visualization tool built in **C++** using **SDL3**, **Vulkan**, and **GLM**.
-
 This class transforms the philosophical idea that “as big as God is small—infinite” into a mathematical playground for exploring the interplay of scales and forces.  
 
 ## Interpretation 1: 
