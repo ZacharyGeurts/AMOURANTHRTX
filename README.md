@@ -9,6 +9,7 @@ Cross platform support with Ming to do Windows and probably ARM if you put it in
 Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
 Or whereever you can get cmake working.  
 StoneKey.hpp is the everything of Vulkan made globals and hackerproof. Read as, this is an opera.  
+This is an opera. Do not underestimate it.  
 Each piece in and of itself smart and friendly.  
 Even grandma can copy and paste a file into @grok these days.  
 o7 salute philosophy. Looking at a component usually means "yo' boys all systems activate"  
