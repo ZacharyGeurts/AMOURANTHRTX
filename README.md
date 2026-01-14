@@ -1,9 +1,5 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
-BUILD YOUR OWN AND CATCH UP WITH ME AT LEAST!!! THIS IS Zero cost perfection.  
-Really short code. I have the whole thing in my head atm.  
-I am smart enough to enjoy the hassle and getting better at repairs.  
-We put names on memory. Hexidecimal. Boo!  
-If you do not like C++ code then see the Wiki version.  
+
 Multiplatfom Linux SDK sufficient for an industry reset.  
 This is not a SDK per se, but this is Vulkan SDK free RTX access and no middleman of note.  
 Living world at no computational cost.  
