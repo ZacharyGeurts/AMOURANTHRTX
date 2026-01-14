@@ -1,5 +1,6 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
 BUILD YOUR OWN AND CATCH UP WITH ME AT LEAST!!! THIS IS Zero cost perfection.  
+Really short code. I have the whole thing in my head atm.  
 Multiplatfom Linux SDK sufficient for an industry reset.  
 Cross platform support with Ming to do Windows and probably ARM if you put it in there.  
 Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
