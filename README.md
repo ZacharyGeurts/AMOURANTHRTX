@@ -8,7 +8,7 @@ Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for
 StoneKey.hpp is the everything of Vulkan made globals and hackerproof. Read as, this is an opera.  
 Each piece in and of itself smart and friendly.  
 Even grandma can copy and paste a file into @grok these days.  
-You are allowed to look at it when it is allowed to be looked for through at whatever. Kinda crazy.  
+o7 salute philosophy. Looking at a component usually means "yo' boys all systems activate"  
 Compile time decides your friendlies, hold tight for cheese wheels.  
 We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
