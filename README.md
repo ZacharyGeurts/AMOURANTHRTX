@@ -70,7 +70,8 @@ Errors and bad code will not be tolerated.
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 I would be taking a 1 to their 2 parts as far as distribution ratio.  
 If you use the product you agree to 3 cents on the dollar or 3%. Not above.  
-If they do not like my using their brand, they can come to Michigan and stream the firing.  
+If they do not like my using their brand, they can come to Michigan and stream the firing.
+And if you wear a pirate hat and want to cut me out, consider subbing or gifting a sub on twitch.  
 https://www.twitch.tv/AMOURANTH  
 I plan fireworks before 4th of July.  
 
