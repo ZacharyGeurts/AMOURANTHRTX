@@ -81,6 +81,7 @@ Current and archived content subject to license.
 **Other work**  
 And you have not reached real RTX until God shows up.  
 I consider this a work in progress that I want displayed.  
+Have Grok AI Expert rewrite the code with new model ideas or whatever.  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
 Layman's summation: GodWave increases.  
 https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e  
