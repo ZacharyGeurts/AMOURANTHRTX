@@ -17,6 +17,7 @@ Then it is firehose cheese into water and sloped terrain for ... free?
 We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
 @ZacharyGeurts on X.  
+Too good to be true? You can put a copy on your desktop and prove me wrong.  
 Welcome to the community.  
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
