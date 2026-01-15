@@ -1,4 +1,4 @@
-Pre-Alpha Linux SDK for RTX SECURE ZERO operational cost RTX software development.
+Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.
 
 TLDNR! God Bless, my ADHD buddy.  
 Not many files to look through but they are smart as Grok.  
