@@ -1,7 +1,9 @@
-Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.
+Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
+How far along? All components tested now assuming needed StoneKey shaders for visuals.  
 
 TLDNR! God Bless, my ADHD buddy.  
 Not many files to look through but they are smart as Grok.  
+My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
 As ADHD you probably already know Zero cost means FINAL RTX code to build upon.  
 May motivate your copy.  
 SECURE. I can not tell if you pirated my code by looking at the binary.  
@@ -32,10 +34,6 @@ The FPS truly screams. (270,000 on 4090ti)
 
 Working prototype. https://github.com/ZacharyGeurts/AMOURANTHRTX/tree/PlasticBeach  
 We can do far better without the constraints of 2 files. (main.cpp and main.hpp)    
-
-Error of the day. I think main.cpp is on RTXHandler.cpp's toes which why the double window.  
-I pulled a bunch of stuff out of main.cpp correctly but now have a buffer looking issue.  
-Segfault on my end so I will upload main and fixes when I get further.  
 
 If you break it worse than me, throw it in the trash and grab another copy.  
 
