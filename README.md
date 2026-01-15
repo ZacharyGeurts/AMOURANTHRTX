@@ -29,6 +29,8 @@ Speaking legal, I think zero cost means it cannot improve so it cannot be patent
 
 Built with and for Vibe Coding.  
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
+I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
+There was a backstory and "the main" was a pirate ship if some logging is dubious.  
 Anyway, problems for the rest of the world. Lets get to it.  
 
 Built with and for SDL3 Vulkan C++23 GLM  
@@ -128,10 +130,6 @@ To say this is 99% Grok, I may be understating. I call him bro.
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
 Made with Grok sized files for AI updates.  
-
-Spiderman is your GPU on AMOURANTHRTX. We are Venom.  
-<img width="1300" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/1861228-2007923825.jpg" />  
-But better than that. We got it on lock like carbonite. Han weeps.  
 
 270,000+ FPS on 4070ti full path tracer.  
 <img width="1300" alt="FPS" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-01-12%2023-11-03.png" />  
