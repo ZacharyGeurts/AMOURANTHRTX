@@ -1,5 +1,9 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
 
+Error of the day. I think main.cpp is on RTXHandler.cpp's toes which why the double window.  
+I pulled a bunch of stuff out of main.cpp correctly but now have a buffer looking issue.  
+Segfault on my end so I will upload main and fixes when I get further.  
+
 What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
 The end goal is nothing can be better code like a pink ball on a string and everyone gets the string to play with.  
