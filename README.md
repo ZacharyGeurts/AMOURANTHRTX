@@ -1,5 +1,7 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
 
+What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
+
 Multiplatfom Linux SDK sufficient for an industry reset.  
 This is not a SDK per se, but this is Vulkan SDK free RTX access and no middleman of note.  
 No operational cost to use RTX.  
