@@ -19,6 +19,8 @@ chmod +x linux.sh
 ./linux.sh --help
 ```
 
+Bless his little heart. Anyway, security comes before money and piracy concerns. I'm a computer scientist.  
+
 Built with and for Vibe Coding.  
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
 Anyway, problems for the rest of the world. Lets get to it.  
