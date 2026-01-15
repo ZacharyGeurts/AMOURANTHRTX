@@ -9,7 +9,7 @@ If you break it worse than me, throw it in the trash and grab another copy.
 
 What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
-The end goal is nothing can be better code like a pink ball on a string and everyone gets the string to play with. But the string is actually everything that inside the ball but only you are allowed to talk to the ball but the ball does not care or listen because blammo, it was actually the GPU you were talking with.    
+The end goal is nothing can be better code like a pink ball on a string and everyone gets the string to play with. But the string is actually everything that inside the ball but only you are allowed to talk to the ball but the ball does not care or listen because blammo, it was actually the GPU you were talking with. But not actually because StoneKey security is actually who you were talking to and it knows you are not a hacker because you showed up when we compiled so you can have a "tunnel" to the obscured goodies and memory viewers and disassemblers cannot. Abd it is 2026 so we can post for everyone how it is done logging.cpp jolds the keys cause I needed a cpp to hold it and was not sure if I wanted to include StoneKey in a cpp enou warrent a braod move like that oh and and we can still protect your gamertag.    
 The other side of that shiny pink ball is tendrils into every aspect permitted. Tap a tendril at your behest and you already had it.  
 What else does Zero cost and unbreakable security for RTX mean? All RTX roads end here. Lets get it built.  
 Mumbo jumbo? What does that look like? 270,000 FPS on 4060ti and estimates of 11x performance gain over current methods.  
@@ -25,6 +25,7 @@ Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for
 Or whereever you can get cmake working.  
 StoneKey.hpp is the everything of Vulkan made globals and hackerproof. Read as, this is an opera.  
 StoneKey hands you the sealed vaults. Use them from there as globals. The rest is invisble.  
+Invisible? More like o7. I have one true love and it is getters and setters. We are Empire secure, we hide nothing.  
 This is an opera. Do not underestimate it.  
 Each piece in and of itself smart and friendly.  
 Compile time decides your friendlies, hold tight for cheese wheels.  
