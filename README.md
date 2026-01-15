@@ -10,9 +10,11 @@ The end goal is nothing can be better code like a pink ball on a string and ever
 What else does Zero cost and unbreakable security for RTX mean? All RTX roads end here. Lets get it built.  
 Mumbo jumbo? What does that look like? 270,000 FPS on 4060ti and estimates of 11x performance gain over current methods.  
 Ummm.. Miliseconds are generally too big of a measurement to use anymore.  
+We can start with a free world. Green floor and blue sky and sun are free features, we just turn on.  
+OptionsMenu.hpp might be exciting to some.  
 
 Multiplatfom Linux SDK sufficient for an industry reset.  
-This is not a SDK per se, but this is Vulkan SDK free RTX access and no middleman of note.  
+This is an SDK in the manner that tries to assist with cross compilation.  
 No operational cost to use RTX.  
 Cross platform support with Ming to do Windows and probably ARM if you put it in there.  
 Zero overhead RTX, it is just "turned on". For whatever Linux wants to build for you.  
