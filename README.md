@@ -64,6 +64,7 @@ chmod +x linux.sh
 ```
 Cmake handles many of the dependancies.  
 You will likely need SDL3 and Vulkan 1.4+ SDK from LunarG  
+Open an issue and paste your apt install list and I will update this page.  
 ```
 sudo apt update && sudo apt install gcc-14 g++-14
 ```
