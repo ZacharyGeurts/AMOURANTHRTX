@@ -19,7 +19,7 @@ Segfault on my end so I will upload main and fixes when I get further.
 
 If you break it worse than me, throw it in the trash and grab another copy.  
 
-What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
+What does zero cost mean? We hang everything out as inline and constexp encrypted globals, so you do not ask for anything. You know everything.  
 Add StoneKey.hpp to your cpp file and you will be on the team and allowed to listen and talk to the system if you showed at compile time.  
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
 This is the last stop for RTX. Zero cost. Impregnable RTX engine.  
