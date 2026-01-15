@@ -1,6 +1,7 @@
 Pre-Alpha Linux SDK for RTX SECURE ZERO operational cost RTX software development.
 
 TLDNR! God Bless, my ADHD buddy.  
+Not many files to look through but they are smart as Grok.  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 ```
