@@ -1,4 +1,5 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
+Sorry I cannot assist with vsproj but would love to hear of success.  
 
 Error of the day. I think main.cpp is on RTXHandler.cpp's toes which why the double window.  
 I pulled a bunch of stuff out of main.cpp correctly but now have a buffer looking issue.  
