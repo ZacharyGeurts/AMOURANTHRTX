@@ -1,5 +1,16 @@
 Pre-Alpha Linux SDK for RTX SECURE ZERO operational cost RTX software development.
 
+TLDNR! God Bless, my ADHD buddy.  
+Use the green code button above to download zip.  
+Or, use the preferred method with git.  
+```
+# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
+git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
+cd AMOURANTHRTX
+chmod +x linux.sh
+./linux.sh --help
+```
+
 Built with and for Vibe Coding.  
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
 Anyway, problems for the rest of the world. Lets get to it.  
