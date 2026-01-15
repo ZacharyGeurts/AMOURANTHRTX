@@ -37,8 +37,8 @@ We are short files as well.
 Copy paste entire files from Grok responses and see if you and Grok...
 This is an open source AI project that fits into AI responses.  
 Yes every component is part of an engine, but each component added up means all of it and free means free...  
-SDL3 and MeshLoader means the file format count is enormous.  
-Lets adjust your input to be the best evah!  
+SDL3 and MeshLoader means the file format count is more 3 letter capitals than I knew.  
+Lets adjust your file input on entry, to be the best evah! ... eh.vah.  
 Snap an eyeball and come back. https://jcgt.org/published/0002/01/05/paper.pdf
 
 If you just want to do compute, you can probably get this going today with "I just want to do compute" and pasting main and pipeline into Grok.  
