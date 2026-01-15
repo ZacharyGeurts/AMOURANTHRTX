@@ -2,6 +2,8 @@ Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX sof
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
 
 TLDNR! God Bless, my ADHD buddy.  
+Pre Alpha.
+All components work or have worked but together is a problem. GLHF.  
 Not many files to look through but they are smart as Grok.  
 My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
 As ADHD you probably already know Zero cost means FINAL RTX code to build upon.  
