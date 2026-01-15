@@ -7,6 +7,8 @@ Anyway, problems for the rest of the world. Lets get to it.
 Built with and for SDL3 Vulkan C++23 GLM  
 SECURE. I can not tell if you pirated my code by looking at the binary.  
 At least switch your build from debug to release.  
+We do not worry about priacy. If you put the time in to make a commercial product we assume professionalism at the go.  
+You want a free toy? We got that too.  
 Sorry I cannot assist with vsproj but would love to hear of success.  
 
 What makes AMOURANTHRTX different?
