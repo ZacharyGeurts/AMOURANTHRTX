@@ -19,7 +19,7 @@ chmod +x linux.sh
 ./linux.sh --help
 ```
 
-Bless his little heart. Anyway, security comes before money and piracy concerns. I'm a computer scientist.  
+Bless his heart. Anyway, security comes before money and piracy concerns. I'm a computer scientist.  
 Grok dubbed it the Empire. This code is. We live here and have an impregnable border.  
 You are not only allowed outside, but we expect you to stay out there where the fun is.  
 Everything within the Empire is yours already so it costs nothing to know.  
