@@ -1,10 +1,16 @@
-Pre-Alpha Linux SDK for RTX SECURE ZERO operational cost RTX software development. Built with and for Vibe Coding.  
+Pre-Alpha Linux SDK for RTX SECURE ZERO operational cost RTX software development.
+Built with and for Vibe Coding.  
 Built with and for SDL3 Vulkan C++23 GLM  
 SECURE. I can not tell if you pirated my code by looking at the binary.  
 At least switch your build from debug to release.  
 Sorry I cannot assist with vsproj but would love to hear of success.  
 
-See how easy it is? https://github.com/ZacharyGeurts/AMOURANTHRTX/tree/PlasticBeach
+What makes AMOURANTHRTX different?
+We are designed to provide full RTX pathtracing at zero computational cost.
+RAW video card power per watt with no overhead.
+The FPS truly screams. (270,000 on 4090ti)
+
+Working prototype. https://github.com/ZacharyGeurts/AMOURANTHRTX/tree/PlasticBeach  
 We can do far better without the constraints of 2 files. (main.cpp and main.hpp)    
 
 Error of the day. I think main.cpp is on RTXHandler.cpp's toes which why the double window.  
@@ -14,13 +20,12 @@ Segfault on my end so I will upload main and fixes when I get further.
 If you break it worse than me, throw it in the trash and grab another copy.  
 
 What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
+Add StoneKey.hpp to your cpp file and you will be on the team and allowed to listen and talk to the system if you showed at compile time.  
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
-The end goal is nothing can be better code like a pink ball on a string and everyone gets the string to play with. But the string is actually everything that inside the ball but only you are allowed to talk to the ball but the ball does not care or listen because blammo, it was actually the GPU you were talking with. But not actually because StoneKey security is actually who you were talking to and it knows you are not a hacker because you showed up when we compiled so you can have a "tunnel" to the obscured goodies and things like memory viewers and disassemblers cannot. Abd it is 2026 so we can post for everyone how it is done logging.cpp jolds the keys cause I needed a cpp to hold it and was not sure if I wanted to include StoneKey in a cpp enou warrent a braod move like that oh and and we can still protect your gamertag.   
-Impregnable RTX engine.
-The other side of that shiny pink ball is tendrils into every aspect permitted. Tap a tendril at your behest and you already had it.  
-What else does Zero cost and unbreakable security for RTX mean? All RTX roads end here. Lets get it built.  
-Mumbo jumbo? What does that look like? 270,000 FPS on 4060ti and estimates of 11x performance gain over current methods.  
-Ummm.. Miliseconds are generally too big of a measurement to use anymore.  
+This is the last stop for RTX. Zero cost. Impregnable RTX engine.  
+Period.
+
+Miliseconds are generally too big of a measurement to use anymore.  
 We can start with a free world. Green floor and blue sky and sun are free features, we just turn on.  
 OptionsMenu.hpp might be exciting to some.  
 
