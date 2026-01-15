@@ -30,6 +30,8 @@ Nobody sees past our border wall and cannot move a brick.
 Since nobody but you speaks Empire we just make the whole thing available globally to talk with.  
 StoneKey.hpp is your gateway into the Empire.  
 Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask Grok.  
+And I mean it. Paste the entirety of stonekey.hpp and the entirety of buffermanager.hpp into Grok and you ask it.  
+We are short files as well.  
 
 Built with and for Vibe Coding.  
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
