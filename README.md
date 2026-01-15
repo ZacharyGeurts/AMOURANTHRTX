@@ -25,6 +25,7 @@ You are not only allowed outside, but we expect you to stay out there where the 
 Everything within the Empire is yours already so it costs nothing to know.  
 Nobody sees past our border wall and cannot move a brick.  
 We have more magic tricks in here than should be legal. You'll see.  
+Speaking legal, I think zero cost means it cannot improve so it cannot be patented. :P  
 
 Built with and for Vibe Coding.  
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
