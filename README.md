@@ -4,6 +4,8 @@ TLDNR! God Bless, my ADHD buddy.
 Not many files to look through but they are smart as Grok.  
 As ADHD you probably already know Zero cost means FINAL RTX code to build upon.  
 May motivate your copy.  
+SECURE. I can not tell if you pirated my code by looking at the binary.  
+At least switch your build from debug to release.  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 ```
@@ -19,8 +21,6 @@ People who do not like Vibe coding have not tried enough. I am constantly stuck 
 Anyway, problems for the rest of the world. Lets get to it.  
 
 Built with and for SDL3 Vulkan C++23 GLM  
-SECURE. I can not tell if you pirated my code by looking at the binary.  
-At least switch your build from debug to release.  
 We do not worry about priacy. If you put the time in to make a commercial product we assume professionalism at the go.  
 You want a free toy? We got that too.  
 Sorry I cannot assist with vsproj but would love to hear of success.  
