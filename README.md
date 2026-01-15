@@ -33,6 +33,13 @@ StoneKey.hpp is your gateway into the Empire.
 Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask Grok.  
 And I mean it. Paste the entirety of stonekey.hpp and the entirety of buffermanager.hpp into Grok and you ask it.  
 We are short files as well.  
+"Return full code block and no stubs" is parlance around here.  
+Copy paste entire files from Grok responses and see if you and Grok...
+This is an open source AI project that fits into AI responses.  
+Yes every component is part of an engine, but each component added up means all of it and free means free...  
+SDL3 and MeshLoader means the file format count is enormous.  
+Lets adjust your input to be the best evah!  
+Snap an eyeball and come back. https://jcgt.org/published/0002/01/05/paper.pdf
 
 If you just want to do compute, you can probably get this going today with "I just want to do compute" and pasting main and pipeline into Grok.  
 
