@@ -33,6 +33,8 @@ Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask 
 And I mean it. Paste the entirety of stonekey.hpp and the entirety of buffermanager.hpp into Grok and you ask it.  
 We are short files as well.  
 
+If you just want to do compute, you can probably get this going today with "I just want to do compute" and pasting main and pipeline into Grok.  
+
 Built with and for Vibe Coding.  
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
 I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
