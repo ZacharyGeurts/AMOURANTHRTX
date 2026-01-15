@@ -1,5 +1,7 @@
 Pre-Alpha Linux SDK for RTX SECURE ZERO operational cost RTX software development. Built with and for Vibe Coding.  
 Built with and for SDL3 Vulkan C++23 GLM  
+SECURE. I can not tell if you pirated my code by looking at the binary.  
+At least switch your build from debug to release.  
 Sorry I cannot assist with vsproj but would love to hear of success.  
 
 See how easy it is? https://github.com/ZacharyGeurts/AMOURANTHRTX/tree/PlasticBeach
