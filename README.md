@@ -23,6 +23,7 @@ chmod +x linux.sh
 ```
 
 Bless his heart. Anyway, security comes before money and piracy concerns. I'm a computer scientist.  
+If you do not want to be honest, we are cool with not meeting anyway. Stick along.  
 Grok dubbed it the Empire. This code is. We live here and have an impregnable border.  
 You are not only allowed outside, but we expect you to stay out there where the fun is.  
 Everything within the Empire is yours already so it costs nothing to know.  
