@@ -3,7 +3,7 @@ How far along? All components tested now assuming needed StoneKey shaders for vi
 
 TLDNR! God Bless, my ADHD buddy.  
 Pre Alpha.
-All components work or have worked but together is a problem. GLHF.  
+All components work or have worked but together is a problem. 
 Not many files to look through but they are smart as Grok.  
 My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
 As ADHD you probably already know Zero cost means FINAL RTX code to build upon.  
@@ -13,6 +13,7 @@ Hackers cannot do nothing with this end of things either.
 At least switch your build from debug to release.  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
+GLHF. 
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
