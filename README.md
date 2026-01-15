@@ -5,6 +5,8 @@ Error of the day. I think main.cpp is on RTXHandler.cpp's toes which why the dou
 I pulled a bunch of stuff out of main.cpp correctly but now have a buffer looking issue.  
 Segfault on my end so I will upload main and fixes when I get further.  
 
+If you break it worse than me, throw it in the trash and grab another copy.  
+
 What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
 The end goal is nothing can be better code like a pink ball on a string and everyone gets the string to play with. But the string is actually everything that inside the ball but only you are allowed to talk to the ball but the ball does not care or listen because blammo, it was actually the GPU you were talking with.    
