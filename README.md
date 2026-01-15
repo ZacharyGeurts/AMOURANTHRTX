@@ -1,6 +1,9 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
 Sorry I cannot assist with vsproj but would love to hear of success.  
 
+See how easy it is? https://github.com/ZacharyGeurts/AMOURANTHRTX/tree/PlasticBeach
+We can do far better without the constraints of 2 files. (main.cpp and main.hpp)    
+
 Error of the day. I think main.cpp is on RTXHandler.cpp's toes which why the double window.  
 I pulled a bunch of stuff out of main.cpp correctly but now have a buffer looking issue.  
 Segfault on my end so I will upload main and fixes when I get further.  
