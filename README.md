@@ -7,6 +7,7 @@ Segfault on my end so I will upload main and fixes when I get further.
 What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
 The end goal is nothing can be better code like a pink ball on a string and everyone gets the string to play with. But the string is actually everything that inside the ball but only you are allowed to talk to the ball but the ball does not care or listen because blammo, it was actually the GPU you were talking with.    
+The other side of that shiny pink ball is tendrils into every aspect permitted. Tap a tendril at your behest and you already had it.  
 What else does Zero cost and unbreakable security for RTX mean? All RTX roads end here. Lets get it built.  
 Mumbo jumbo? What does that look like? 270,000 FPS on 4060ti and estimates of 11x performance gain over current methods.  
 Ummm.. Miliseconds are generally too big of a measurement to use anymore.  
