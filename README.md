@@ -1,5 +1,9 @@
 Pre-Alpha Linux SDK for RTX SECURE ZERO operational cost RTX software development.
+
 Built with and for Vibe Coding.  
+People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful.  
+Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating.  
+
 Built with and for SDL3 Vulkan C++23 GLM  
 SECURE. I can not tell if you pirated my code by looking at the binary.  
 At least switch your build from debug to release.  
