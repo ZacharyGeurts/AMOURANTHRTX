@@ -1,6 +1,9 @@
 Pre-Alpha Linux SDK for RTX software development. Built with and for Vibe Coding.  
 
 What does zero cost mean? We hang everything out as encrypted globals, so you do not ask for anything. You know everything.  
+What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
+The end goal is nothing can be better code like a pink ball on a string and everyone gets the string to play with.  
+What else does Zero cost and unbreakable security for RTX mean? All RTX roads end here. Lets get it built.  
 
 Multiplatfom Linux SDK sufficient for an industry reset.  
 This is not a SDK per se, but this is Vulkan SDK free RTX access and no middleman of note.  
