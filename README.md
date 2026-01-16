@@ -20,11 +20,12 @@ My advice, start in the /src/engine/GLOBAL folder and see how few files. You can
 As ADHD you probably already know Zero cost means FINAL RTX code to build upon.  
 May motivate your copy.  
 SECURE. I can not tell if you pirated my code by looking at the binary.  
-Hackers cannot do nothing with this end of things either.  
+Hackers. Nothing inside here.  
 At least switch your build from debug to release.  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 GLHF. 
+Pre Alpha o/
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
