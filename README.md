@@ -1,6 +1,17 @@
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
 
+I build on Linux Mint which means no HDR. boo. Wayland is actually better than X11.  
+No HDR cry more. Yeah, but no Mailbox and 2 frames in flight. (true story?)    
+Digress.  
+I got SDL3 from github because SDL2 is great with Linux Mint.  
+Sorry OpenGL. I believe Vulkan has officialially killed you beyond pure nostalgia.  
+Vulkan SDK is at LunarG.
+GLM and build tools I was able to get with apt.  
+The cmake build system needs internet to function and tries to help. (mine went out one night)  
+Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
+I want you to at least understand that is how our license operates.  
+
 TLDNR! God Bless, my ADHD buddy.  
 Pre Alpha.
 All components work or have worked but together is a problem. 
@@ -42,7 +53,7 @@ Lets adjust your file input on entry, to be the best evah! ... eh.vah.
 Snap an eyeball and come back. https://jcgt.org/published/0002/01/05/paper.pdf
 Our (me and Grok's implementation) in LAS.hpp and LAS.cpp or please see wiki for LAS  
 Each file is part of the GPU and we are covering every aspect of it as we crawl out.  
-SDL3 turns on our window and also happens to have VR haptics and MP3s and stuff.  
+SDL3 turns on our window and also "happens" to have VR haptics and MP3s and stuff.  
 
 If you just want to do compute, you can probably get this going today with "I just want to do compute" and pasting main and pipeline into Grok.  
 Crawl into your RTX at zero cost per watt with me.  
