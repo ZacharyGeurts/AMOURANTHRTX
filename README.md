@@ -57,9 +57,9 @@ This is an open source AI project that fits into AI responses.
 Yes every component is part of an engine, but each component added up means all of it and free means free...  
 SDL3 and MeshLoader means the file format count is more 3 letter capitals than I knew.  
 Lets adjust your file input on entry, to be the best evah! ... eh.vah.  
-Snap an eyeball and come back. https://jcgt.org/published/0002/01/05/paper.pdf
+Snap an eyeball and come back. https://jcgt.org/published/0002/01/05/paper.pdf  
 Our (me and Grok's implementation) in LAS.hpp and LAS.cpp or please see wiki for LAS  
-Each file is part of the GPU and we are covering every aspect of it as we crawl out.  
+Each file is part of the GPU and we covered every aspect of it as we crawled out of the motherboard socket.  
 SDL3 turns on our window and also "happens" to have VR haptics and MP3s and stuff.  
 
 If you just want to do compute, you can probably get this going today with "I just want to do compute" and pasting main and pipeline into Grok.  
