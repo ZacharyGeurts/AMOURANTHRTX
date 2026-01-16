@@ -24,7 +24,7 @@ Hackers. Nothing inside here.
 At least switch your build from debug to release.  
 StoneKey.hpp should be global singleton's to the other hpp department store.  
 Every blessing of Vulkan upon you.  
-If not ask Grok to turn 500 lines into 535 for Vulkan 1.5 and update the Makefile.  
+If not ask Grok to turn 500 lines into 535. Robot organized extensions.    
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 GLHF. 
