@@ -5,7 +5,7 @@ Zero cost. Zero computational cost. Not using cycles in costs. Zero!
 
 I build on Linux Mint which means no HDR. boo. Wayland is actually better than X11.  
 No HDR cry more. Yeah, but no Mailbox and 2 frames in flight. (true story?)    
-Digress.  
+Digress. The swapchain picks always best for your platform.  
 I got SDL3 from github because SDL2 is great with Linux Mint.  
 Sorry OpenGL. I believe Vulkan has officialially killed you beyond pure nostalgia.  
 Vulkan SDK is at LunarG.
