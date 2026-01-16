@@ -22,6 +22,9 @@ May motivate your copy.
 SECURE. I can not tell if you pirated my code by looking at the binary.  
 Hackers. Nothing inside here.  
 At least switch your build from debug to release.  
+StoneKey.hpp should be global singleton's to the other hpp de[patment store.  
+Spoilers. It is the whole store.  
+If not ask Grok to turn 500 lines into 535.  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 GLHF. 
