@@ -1,4 +1,4 @@
-https://pbs.twimg.com/media/G-5O4NyWsAAHy78?format=jpg&name=4096x4096
+Current over head code view https://x.com/ZacharyGeurts/status/2012632846481998282  
 
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 The final code. Nobody can see implementations with binary. "Maybe another Zero computational cost that makes itself unreadable"  
