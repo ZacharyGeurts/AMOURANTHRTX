@@ -1,6 +1,7 @@
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
 Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
+You'll See.  
 
 This is your headstart. If you do not want to take it, you do not have to.  
 Honestly, you guys should rob me of it and stick a Consortium on it to give it an "it's done" sticker and I can download it from archive.org.  
