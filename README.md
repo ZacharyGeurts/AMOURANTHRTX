@@ -51,7 +51,6 @@ GLM and build tools I was able to get with apt.
 The cmake build system needs internet to function and tries to help. (mine went out one night)  
 uses stb and tinyobj and is really smart everywhere really. "the city of the future" but sorta crumbly right now.  
 Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
-I want you to at least understand that is how our license operates.  
 It may have been confusing to anyone unfamiliar with Open Source.  
 
 TLDNR! God Bless, my ADHD buddy.  
@@ -164,7 +163,7 @@ Each piece smart and friendly.
 Compile time decides your friendlies, hold tight for cheese wheels.  
 We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
-Complaints? Tell Grok to turn it into a Windows batch file or whatever or leave it.  
+Complaints? Tell Grok to turn it into a Windows powershell file or whatever or leave it.  
 @ZacharyGeurts on X.  
 Too good to be true? You can put a copy on your desktop and prove me wrong.  
 Welcome to the community.  
