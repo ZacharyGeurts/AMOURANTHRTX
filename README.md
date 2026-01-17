@@ -1,4 +1,6 @@
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
+The final code. Nobody can see implementations with binary. "Maybe another Zero computational cost that makes itself unreadable"  
+First?  
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
 Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
 The double window is still an issue between main and RTXHandler.  
