@@ -40,7 +40,7 @@ It no longer matters who finishes the code. The world wants it.
 Hackers. Nothing inside here.  
 At least switch your build from debug to release.  
 StoneKey.hpp should be global singleton's to the other hpp department store.  
-Every blessing of Vulkan upon you. 1.3 is dead to us.  
+Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+  
 If not ask Grok to turn 500 lines into 535. Robot organized extensions.    
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
