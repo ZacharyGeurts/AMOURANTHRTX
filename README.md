@@ -3,6 +3,8 @@ How far along? All components tested now assuming needed StoneKey shaders for vi
 Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
 You'll See.  
 
+Interesting enough, you can check a different file, everytime you poop.  
+
 This is your headstart. If you do not want to take it, you do not have to.  
 Honestly, you guys should rob me of it and stick a Consortium on it to give it an "it's done" sticker and I can download it from archive.org.  
 
