@@ -218,6 +218,7 @@ Current and archived content subject to license.
 
 **Other work**  
 And you have not reached real RTX until God shows up.  
+This is going to be pretty much, how close can I get and how many decimal points is it and why not model it in an RTX engine so lets put this part on hold until then, THE PROJECT.  
 I consider this a work in progress that I want displayed.  
 Have Grok AI Expert rewrite the code with new model ideas or whatever.  
 Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
