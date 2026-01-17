@@ -84,7 +84,7 @@ Each file is part of the GPU and we covered every aspect of it as we crawled out
 SDL3 turns on our window and also "happens" to have VR haptics and MP3s and stuff.  
 
 If you just want to do compute, you can probably get this going today with "I just want to do compute" and pasting main and pipeline into Grok.  
-Crawl into your RTX at zero cost per watt with me.  
+Have your RTX at zero cost per watt with me.  
 *flashing lights warning https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif
 
 Built with and for Vibe Coding.  
