@@ -154,7 +154,6 @@ Multiplatfom Linux SDK sufficient for an industry reset.
 This is an SDK in the manner that tries to assist with cross compilation.  
 No operational cost to use RTX.  
 Cross platform support with Ming to do Windows and probably ARM if you put it in there.  
-Or whereever you can get cmake working.  
 StoneKey.hpp is the everything of Vulkan made globals and hackerproof. Read as, this is an opera.  
 StoneKey hands you the sealed vaults. Use them from there as globals. The rest is invisble.  
 Invisible? More like o7. I have one true love and it is getters and setters. We are Empire secure, we hide nothing.  
@@ -162,6 +161,7 @@ Each piece smart and friendly.
 Compile time decides your friendlies, hold tight for cheese wheels.  
 We keep file sizes small for AI coding (~800 lines on the big one)  
 Feel free to open issues for anything. Questions, comments, assistance.  
+Complaints? Tell Grok to turn it into a Windows batch file or whatever or leave it.  
 @ZacharyGeurts on X.  
 Too good to be true? You can put a copy on your desktop and prove me wrong.  
 Welcome to the community.  
