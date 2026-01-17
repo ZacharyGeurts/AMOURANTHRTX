@@ -29,6 +29,7 @@ GLM and build tools I was able to get with apt.
 The cmake build system needs internet to function and tries to help. (mine went out one night)  
 Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
 I want you to at least understand that is how our license operates.  
+It may have been confusing to anyone unfamiliar with Open Source.  
 
 TLDNR! God Bless, my ADHD buddy.  
 Pre Alpha. Shrt files est. 3 days of gametime.  
