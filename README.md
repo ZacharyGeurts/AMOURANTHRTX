@@ -83,9 +83,8 @@ Our (me and Grok's implementation) in LAS.hpp and LAS.cpp or please see wiki for
 Each file is part of the GPU and we covered every aspect of it as we crawled out of the motherboard socket.  
 SDL3 turns on our window and also "happens" to have VR haptics and MP3s and stuff.  
 
-If you just want to do compute, you can probably get this going today with "I just want to do compute" and pasting main and pipeline into Grok.  
 Have your RTX at zero cost per watt with me.  
-*flashing lights warning https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif
+*flashing lights warning https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif  
 
 Built with and for Vibe Coding.  
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
