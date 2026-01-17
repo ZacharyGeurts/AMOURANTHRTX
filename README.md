@@ -61,7 +61,7 @@ SECURE. I can not tell if you pirated my code by looking at the binary. Built on
 Hackers. Nothing inside here.  
 Commercial, switch your build from debug to release.  
 StoneKey.hpp should be global singleton's to the other hpp department store.  
-Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+ and == 0
+Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+ and == 0  
 Keep running ```./linux.sh run``` until it starts purring.  
 Ask Grok "why it stoopid" like I do.  
 Use the green code button above to download zip.  
@@ -69,6 +69,7 @@ Or, use the preferred method with git.
 GLHF. 
 Pre Alpha o/ ... the commits are chunky and full commits brings back files that should stay dead. Ever forward.  
 Clean if adding a new file. We have incremental. Nice.  
+Logging can simply tell you the line that it logged at, simple debugging. *coughzerocost    
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
