@@ -5,6 +5,7 @@ The double window is still an issue between main and RTXHandler.
 You'll See.  
 
 Interesting enough, you can check a different file, everytime you poop.  
+You can use ming on a Mint VM to compile for your Windows probably.  
 
 This is your headstart. If you do not want to take it, you do not have to.  
 Honestly, you guys should rob me of it and stick a Consortium on it to give it an "it's done" sticker and I can download it from archive.org.  
