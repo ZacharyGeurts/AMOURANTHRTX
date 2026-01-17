@@ -2,6 +2,7 @@ Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX sof
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
 
 Zero cost. Zero computational cost. Not using cycles in costs. Zero!
+Old methods. New technology. We are friendly.  
 
 I build on Linux Mint which means no HDR. boo. Wayland is actually better than X11.  
 No HDR cry more. Yeah, but no Mailbox and 2 frames in flight. (true story?)    
