@@ -46,7 +46,7 @@ At least switch your build from debug to release.
 StoneKey.hpp should be global singleton's to the other hpp department store.  
 Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+  
 Keep running ```./linux.sh run``` until it starts purring.  
-If not ask Grok to turn 500 lines into 535. Robot organized extensions.    
+Ask Grok why it stoopid?  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 GLHF. 
