@@ -14,6 +14,8 @@ He is your expert. That is where I'm getting my news on what is being updated be
 Ask him about his code. (He preferred him).  
 Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this moron figured out anything new.  
 
+We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
+
 I got SDL3 from github because SDL2 is great with Linux Mint.  
 Sorry OpenGL. I believe Vulkan has officialially killed you beyond pure nostalgia.  
 Vulkan SDK is at LunarG.
