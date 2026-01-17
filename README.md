@@ -71,6 +71,7 @@ Built with and for Vibe Coding.
 People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
 I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
 There was a backstory and "the main" was a pirate ship if some logging is dubious.  
+See my profile picture on X @ZacharyGeurts for the real Grand Champion.  
 
 Git build
 https://x.com/ZacharyGeurts/status/2011437836994847224
