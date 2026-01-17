@@ -23,11 +23,11 @@ Boring. Kinda, but it is RTX so we can turn on the lights and let you infinitely
 I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
 AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
 
-I got SDL3 from github because SDL2 is great with Linux Mint.  
-Sorry OpenGL. I believe Vulkan has officialially killed you beyond pure nostalgia.  
+SDL3 from github.
 Vulkan SDK is at LunarG.
 GLM and build tools I was able to get with apt.  
 The cmake build system needs internet to function and tries to help. (mine went out one night)  
+uses stb and tinyobj and is really smart everywhere really. "the city of the future" but sorta crumbly right now.  
 Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
 I want you to at least understand that is how our license operates.  
 It may have been confusing to anyone unfamiliar with Open Source.  
