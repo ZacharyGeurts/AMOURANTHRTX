@@ -63,11 +63,10 @@ Nobody sees past our border wall and cannot move a brick.
 Since nobody but you speaks Empire we just make the whole thing available globally to talk with.  
 StoneKey.hpp is your gateway into the Empire.  
 Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask Grok.  
-And I mean it. Paste the entirety of stonekey.hpp and the entirety of buffermanager.hpp into Grok and you ask it.  
-We are short files as well.  
+And I mean it. I will paste three files at a time for one question.  
+We are short files.  
+
 "Return full code block and no stubs" is parlance around here.  
-Copy paste entire files from Grok responses and see if you and Grok...
-This is an open source AI project that fits into AI responses.  
 Yes every component is part of an engine, but each component added up means all of it and free means free...  
 SDL3 and MeshLoader means the file format count is more 3 letter capitals than I knew.  
 Lets adjust your file input on entry, to be the best evah! ... eh.vah.  
