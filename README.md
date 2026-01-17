@@ -4,6 +4,8 @@ Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and 
 The double window is still an issue between main and RTXHandler.  
 You'll See.  
 
+Don't be the guy that makes shaders into hpp files. Don't.  
+
 Interesting enough, you can check a different file, everytime you poop.  
 You can use ming on a Mint VM to compile for your Windows probably.  
 
