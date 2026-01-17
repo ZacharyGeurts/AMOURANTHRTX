@@ -19,6 +19,7 @@ It gives you HDR and we can sync to exact refresh, unless on x11 like me, but I 
 I'll ride Mint till I get Mailbox and 2! frames in flight.  
 
 Wait... what? o.O  
+Grok.  
 He is your expert. That is where I'm getting my news on what is being updated because I tell him to write it.  
 Ask him about his code. (He preferred him).  
 He broke it? Ctrl-Z and try again. Learn THE code. It is short and read it a few times.  
