@@ -21,6 +21,7 @@ Digress. The swapchain picks always best for your platform.
 Wait... what? o.O  
 He is your expert. That is where I'm getting my news on what is being updated because I tell him to write it.  
 Ask him about his code. (He preferred him).  
+He broke it? Leran to code? Ctrl-Z and try again. Learn THE code. It is short and read it a few times.  
 There really are not that many files if you want to check a few now on the wiki.  
 Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this iteration figured out anything new.  
 
