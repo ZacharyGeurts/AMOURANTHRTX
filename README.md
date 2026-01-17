@@ -29,7 +29,7 @@ Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have
 I want you to at least understand that is how our license operates.  
 
 TLDNR! God Bless, my ADHD buddy.  
-Pre Alpha.
+Pre Alpha. Shrt files est. 3 days of gametime.  
 All components work or have worked but together is a problem. 
 Not many files to look through but they are smart as Grok.  
 My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
