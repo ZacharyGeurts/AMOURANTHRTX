@@ -57,16 +57,13 @@ Pre Alpha. Short files est. 3 days of gametime. - Mug Branch.
 All components work or have worked but together is a problem. 
 Not many files to look through but they are smart as Grok.  
 My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
-As ADHD you probably already know Zero cost means FINAL RTX code to build upon.  
-May motivate your copy.  
-SECURE. I can not tell if you pirated my code by looking at the binary.  
-It no longer matters who finishes the code. The world wants it.  
+SECURE. I can not tell if you pirated my code by looking at the binary. Built on the backs of giants.  
 Hackers. Nothing inside here.  
-At least switch your build from debug to release.  
+Commercial, switch your build from debug to release.  
 StoneKey.hpp should be global singleton's to the other hpp department store.  
-Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+  
+Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+ and == 0
 Keep running ```./linux.sh run``` until it starts purring.  
-Ask Grok why it stoopid?  
+Ask Grok "why it stoopid" like I do.  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 GLHF. 
