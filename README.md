@@ -7,6 +7,10 @@ Old methods. New technology. We are friendly.
 I build on Linux Mint which means no HDR. boo. Wayland is actually better than X11.  
 No HDR cry more. Yeah, but no Mailbox and 2 frames in flight. (true story?)    
 Digress. The swapchain picks always best for your platform.  
+"Seriously?" Yeah. It's like 300 lines, so if you do not like it, Grok can write you a whole new one.  
+
+Wait... what? o.O  
+
 I got SDL3 from github because SDL2 is great with Linux Mint.  
 Sorry OpenGL. I believe Vulkan has officialially killed you beyond pure nostalgia.  
 Vulkan SDK is at LunarG.
