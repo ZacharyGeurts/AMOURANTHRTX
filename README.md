@@ -69,7 +69,7 @@ Or, use the preferred method with git.
 GLHF. 
 Pre Alpha o/ ... the commits are chunky and full commits brings back files that should stay dead. Ever forward.  
 Clean if adding a new file. We have incremental. Nice.  
-Logging can simply tell you the line that it logged at, simple debugging. *coughzerocost    
+Logging can simply tell you the filename and line number that it logged at, simple debugging. *coughzerocost    
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
