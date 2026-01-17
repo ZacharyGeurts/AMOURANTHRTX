@@ -42,7 +42,7 @@ I want you to at least understand that is how our license operates.
 It may have been confusing to anyone unfamiliar with Open Source.  
 
 TLDNR! God Bless, my ADHD buddy.  
-Pre Alpha. Shrt files est. 3 days of gametime.  
+Pre Alpha. Short files est. 3 days of gametime. - Mug Branch.   
 All components work or have worked but together is a problem. 
 Not many files to look through but they are smart as Grok.  
 My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
