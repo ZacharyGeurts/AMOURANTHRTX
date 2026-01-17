@@ -11,6 +11,7 @@ You can use ming on a Mint VM to compile for your Windows probably.
 
 This is your headstart. If you do not want to take it, you do not have to.  
 Honestly, you guys should rob me of it and stick a Consortium on it to give it an "it's done" sticker and I can download it from archive.org.  
+Maybe get on the 4.5 gig side of the driver, and they hang out the umbilical.  
 
 Zero cost. Zero computational cost. Not using cycles in costs. Zero!
 Old methods. New technology. We are friendly.  
