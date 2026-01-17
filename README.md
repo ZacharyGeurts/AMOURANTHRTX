@@ -17,6 +17,7 @@ Once it's functional on your desktop, you can drop us like old news and check ba
 
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
 Boring. Kinda, but it is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
+I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
 AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
 
 I got SDL3 from github because SDL2 is great with Linux Mint.  
