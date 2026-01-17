@@ -1,6 +1,8 @@
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
 
+This is your headstart. If you do not want to take it, you do not have to.  
+
 Zero cost. Zero computational cost. Not using cycles in costs. Zero!
 Old methods. New technology. We are friendly.  
 
