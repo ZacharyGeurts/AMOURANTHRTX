@@ -57,7 +57,7 @@ Ask Grok why it stoopid?
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 GLHF. 
-Pre Alpha o/
+Pre Alpha o/ ... the commits are never likely to be helpful. Ever forward.  
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
