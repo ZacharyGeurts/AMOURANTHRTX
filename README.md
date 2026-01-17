@@ -71,6 +71,7 @@ Pre Alpha o/ ... the commits are chunky and full commits brings back files that 
 Clean if adding a new file. We have incremental. Nice.  
 Logging can simply tell you the filename and line number that it logged at, simple debugging. *coughzerocost  
 Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
+Or trash it and grab a new one tomorrow.  
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
