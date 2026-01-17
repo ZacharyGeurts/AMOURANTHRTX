@@ -16,7 +16,7 @@ Wait... what? o.O
 He is your expert. That is where I'm getting my news on what is being updated because I tell him to write it.  
 Ask him about his code. (He preferred him).  
 There really are not that many files if you want to check a few now on the wiki.  
-Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this moron figured out anything new.  
+Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this iteration figured out anything new.  
 
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
 Boring. Kinda, but it is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
