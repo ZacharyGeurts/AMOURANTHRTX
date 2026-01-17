@@ -84,6 +84,7 @@ Nobody sees past our border wall and cannot move a brick.
 Since nobody but you speaks Empire we just make the whole thing available globally to talk with.  
 StoneKey.hpp is your gateway into the Empire.  
 Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask Grok.  
+I did not want to wrestle any more for the moment, so that was the zero cost design I went with for now.  
 And I mean it. I will paste three files at a time for one question.  
 We are short files.  
 
