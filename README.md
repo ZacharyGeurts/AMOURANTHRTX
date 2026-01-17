@@ -110,7 +110,7 @@ RAW video card power per watt with no overhead.
 The FPS truly screams. (270,000 on 4090ti)
 I want 31 ray bounces and 7 layers of skin and a working circulatory system on everyone in GTA.  
 The CPU is truly unbound, and yours.  
-Welcome to RTX, just make it in a compute shader instead. The CPU is yours o7.  
+Welcome to RTX, just make it in a compute shader instead. The CPU is yours and we are all of RTX on a plate o7.  
 
 Working prototype. https://github.com/ZacharyGeurts/AMOURANTHRTX/tree/PlasticBeach  
 We can do far better without the constraints of 2 files. (main.cpp and main.hpp)    
