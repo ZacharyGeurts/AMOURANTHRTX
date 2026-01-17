@@ -15,6 +15,8 @@ Ask him about his code. (He preferred him).
 Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this moron figured out anything new.  
 
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
+Boring. Kinda, but it is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
+AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
 
 I got SDL3 from github because SDL2 is great with Linux Mint.  
 Sorry OpenGL. I believe Vulkan has officialially killed you beyond pure nostalgia.  
