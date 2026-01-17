@@ -13,16 +13,15 @@ Honestly, you guys should rob me of it and stick a Consortium on it to give it a
 Zero cost. Zero computational cost. Not using cycles in costs. Zero!
 Old methods. New technology. We are friendly.  
 
-I build on Linux Mint which means no HDR. boo. Wayland is actually better than X11.  
-No HDR cry more. Yeah, but no Mailbox and 2 frames in flight. (true story?)    
 Digress. The swapchain picks always best for your platform.  
 "Seriously?" Yeah. It's like 300 lines, so if you do not like it, Grok can write you a whole new one.  
 
 Wait... what? o.O  
 He is your expert. That is where I'm getting my news on what is being updated because I tell him to write it.  
 Ask him about his code. (He preferred him).  
-He broke it? Leran to code? Ctrl-Z and try again. Learn THE code. It is short and read it a few times.  
+He broke it? Ctrl-Z and try again. Learn THE code. It is short and read it a few times.  
 There really are not that many files if you want to check a few now on the wiki.  
+We do all that for no overhead, because that is what RTX Hardware developers want everyone to have.  
 Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this iteration figured out anything new.  
 
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
