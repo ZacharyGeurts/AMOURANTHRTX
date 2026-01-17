@@ -23,7 +23,7 @@ Once it's functional on your desktop, you can drop us like old news and check ba
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
 Boring. Kinda, but it is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
 We can shrink and grow any color everywhere as light or materials or translucent objects, without sweating the GPU so we blast annoying high frame rates to prove a point.  
-The Zero cost Demo scence is about to become a reality bois.  
+The Zero cost Demo scene is about to become a reality bois.  
 I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
 AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
 
