@@ -33,6 +33,7 @@ We can shrink and grow any color everywhere as light or materials or translucent
 The Zero cost Demo scene is about to become a reality bois.  
 I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
 AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
+ALL high end game engines. Godot looks brilliant.  
 
 SDL3 from github.
 Vulkan SDK is at LunarG.
