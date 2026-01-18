@@ -148,6 +148,12 @@ The FPS truly screams. (270,000+ FPS on 4070ti)
 
 I want 31 ray bounces and 7 layers of skin with light bouncing between them and an undersuface, on a stadium full of people.  
 Why? Because the card I purchased can do 31 bounces...duh.  
+The human skin is the outer covering of the body and is the largest organ of the integumentary system. The skin has up to seven layers of ectodermal tissue guarding muscles, bones, ligaments and internal organs. Human skin is similar to most of the other mammals' skin, and it is very similar to pig skin. Though nearly all human skin is covered with hair follicles, it can appear hairless.  
+How we approach skin here.  
+This is an anal OCD project. We do not simulate star twinkle, we add atmospheric layers.  
+Temperature, day, night, humidity, wind, we will have it all for you, to use or to stick a rectangle over and make Hollow Knight 2.  
+This code has one requirement and should be portable where SDL3 and Vulkan and GLM go. RTX.  
+SDL3 can do everything you could want. Smart enough you can prototype new input methods or just play a sound effect.  
 
 The CPU is truly unbound.  
 More AI availability for Thomas the Tank Engine Models.  
@@ -159,7 +165,7 @@ We can do far better without the constraints of 2 files. (main.cpp and main.hpp)
 If you break it worse than me, throw it in the trash and grab another copy.  
 
 What does zero cost mean? We hang everything out as inline and constexp encrypted globals, so you do not ask for anything. You know everything.  
-Hackers see garbage and tamper protection prevents modifications.  
+Hackers see garbage because they are not compiled with us, and tamper protection prevents any modification.  
 Smart software handles everything so you can focus on world building.  
 Add StoneKey.hpp to your cpp file and you will be on the team and allowed to listen and talk to the system if you showed at compile time.  
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
@@ -208,7 +214,7 @@ Last visual Dec 9th commit (pink screen) using fallback TLAS, so I turned it off
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
-Commercial is subject to license.  
+Commercial is subject to 3% license.  
 
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
 AMOURANTH RTX a next generation engine for raw performance.  
