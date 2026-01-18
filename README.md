@@ -35,10 +35,13 @@ Unless it is your own project, but never admit it.
 
 If you are here for a while, slow your scroll. The files are short.  
 You can use ming on a Mint VM to compile for your Windows probably.  
+My script is mostly there and I had success with Windows builds over on the Plastic Beach branch.  
+My advice is stay away from the scripts folder. That is mine for now.  
 I have anxiety about people compiling on with other compilers. I wish I could help more.  
 You can copy and paste the whole codebase into Grok long before you run out of questions.  
 Also, welcome to 2026.  
 Really you will want to be using linux.sh and cmake. The shader compiling that is built in is a large part of the headache.  
+Everywhere I look is another afternoon to improve accessibility, you have an afternoon?  
 
 This is your headstart into RTX development. If you do not want to take it, you do not have to.  
 
@@ -142,6 +145,7 @@ I have a Lian-Li and the TUF Series 4070ti has been staring at me.
 It probably just boils down to 1 + 1 - 1 = 1, but I wanted the whole card.  
 There was a backstory and "the main" was a pirate ship if some logging is dubious.  
 See my profile picture on X @ZacharyGeurts for the real Grand Champion.  
+Grok does not build from a vacuum, and I even brought Alan Turing in for this one.  
 
 Git build
 https://x.com/ZacharyGeurts/status/2011437836994847224
