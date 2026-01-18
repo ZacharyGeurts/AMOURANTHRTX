@@ -31,6 +31,7 @@ The double window is still an issue between main and RTXHandler.
 You'll See.  
 
 Don't be the guy that makes shaders into hpp files. Don't.  
+Unless it is your own project, but never admit it.  
 
 If you are here for a while, slow your scroll. The files are short.  
 You can use ming on a Mint VM to compile for your Windows probably.  
