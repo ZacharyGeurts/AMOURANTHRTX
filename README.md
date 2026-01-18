@@ -120,8 +120,6 @@ SDL3 turns on our window and also "happens" to have VR haptics and MP3s and stuf
 Have your RTX at zero cost per watt with me.  
 *flashing lights warning https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif  
 
-Built with and for Vibe Coding.  
-People who do not like Vibe coding have not tried enough. I am constantly stuck on one line and a discussion about it is truly helpful. Expressing my confusion about a topic is more relevant than trying to boil it into a search term and then navigating. I can see Cloudflare's point. When I ask a question and 18 pages get pulled when I might make it 2 or 3.  
 I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
 There was a backstory and "the main" was a pirate ship if some logging is dubious.  
 See my profile picture on X @ZacharyGeurts for the real Grand Champion.  
@@ -131,17 +129,16 @@ https://x.com/ZacharyGeurts/status/2011437836994847224
 
 Anyway, problems for the rest of the world. Lets get to it.  
 
-Built with and for SDL3 Vulkan C++23  
-And we are bringing in GLM on a Fortnight glider.  
+Built with and for SDL3 Vulkan 1.4+ C++23  
+And we are bringing in GLM on a Fortnight glider. https://github.com/g-truc/glm  
 
 What makes AMOURANTHRTX different?
 We unlock the RTX. Compute, Path tracing. Securely. No interference with what you want to show.  
 A nerd Mario Paint that lets us make Mario Paint for the less nerdy.  
-We are designed to provide full RTX pathtracing at zero computational cost.
 RAW video card power per watt with no overhead.
-The FPS truly screams. (270,000 on 4090ti)
+The FPS truly screams. (270,000+ FPS on 4070ti)
 I want 31 ray bounces and 7 layers of skin with light bouncing between them and an undersuface, on a stadium full of people.  
-The CPU is truly unbound, and yours.  
+The CPU is truly unbound.  
 More AI availability for Thomas the Tank Engine Models.  
 Welcome to RTX, just make it in a compute shader instead. The CPU is yours and we are all of RTX on a plate o7.  
 
