@@ -202,36 +202,17 @@ AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com
 Free work is licensed under GPL v3.0 or higher.  
 Commercial is subject to license.  
 
-Why Amouranth RTX?  
-We developed at zero computational cost to create the fastest RTX engine on the planet.  
-Compute as well as Raytracing.  
-We implement compression and optimizations to make everything faster than what is currently available.  
-FPS and limitations are purely hardware related since we bring no overhead.  
-Everything is wrapped with unbreakable security.  
-By using Grok AI we are able to scour the planet for the fastest implementations, theoretical or not.  
-All files are open to developers who want to extend or enhance their development.  
-Make some money, and then shoot me an email.  
-
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
 AMOURANTH RTX a next generation engine for raw performance.  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
 
-The whole engine is secured with StoneKey and is supposed to be unbreakable when done correctly.  
-My hopes is that it is not a major frame destroyer. (12,000+ on 4070ti to work with)  
-OLD NEWS!!! We are over 270,000 FPS on 4070ti. Hopes were shattered.  
-This is the limit that the swapchain operates and the rest is zero cost access.  
-The goal is a fast as pink photons HDR SDL3 RTX Vulkan engine that is ready for you, the developer.  
-If it does not get you paid, we do not get paid.  
-To say this is 99% Grok, I may be understating. I call him bro.  
 
 [AMOURANTH RTX Video](https://x.com/ZacharyGeurts/status/2007912263446151181)  
 
 **C++23** using **SDL3**, **Vulkan**, and **GLM**.  
 
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
-
-Made with Grok sized files for AI updates.  
 
 270,000+ FPS on 4070ti full path tracer.  
 <img width="1300" alt="FPS" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-01-12%2023-11-03.png" />  
