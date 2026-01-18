@@ -18,6 +18,8 @@ If you use the security method, I cannot prove you used mine.
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
 She steps on RTX and dominates it now.  
 
+I tried to keep the wiki smart enough that even a high school freshman can dream big.  
+
 Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
 The double window is still an issue between main and RTXHandler.  
 You'll See.  
