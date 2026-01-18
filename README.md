@@ -3,6 +3,7 @@ Current over head code view https://x.com/ZacharyGeurts/status/20126328464819982
 We bring you Zero cost secure RTX GPU operation by using current conventions.  
 Editor: I made this this thing so good that nobody on the planet gets screwed by it but me.  
 Secure at compile time so nobody knows where you got it.  
+C++23 but Grok can probably make it C# in a day.  
 
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 "Maybe another Zero computational cost that makes itself unreadable" First?  
