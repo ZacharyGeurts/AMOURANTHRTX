@@ -1,13 +1,18 @@
 Current over head code view https://x.com/ZacharyGeurts/status/2012632846481998282  
 
-We bring you Zero cost secure operation by using current conventions.  
+We bring you Zero cost secure RTX GPU operation by using current conventions.  
 Port it to your favorite programming language and version.  
 Editor: I made this this thing so good that nobody on the planet gets screwed by it but me.  
 
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
-The final code. Nobody can see implementations with binary. "Maybe another Zero computational cost that makes itself unreadable"  
-First?  
+The final code methods. Nobody can see implementations with binary.  
+"Maybe another Zero computational cost that makes itself unreadable" First?  
+
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
+If you just want to update a component of your engine, take a look and see if you can adapt.  
+
+I can eat and I play Minecraft and I have RTX. I want developers to have another RTX resource.  
+
 Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
 The double window is still an issue between main and RTXHandler.  
 You'll See.  
