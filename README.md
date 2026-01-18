@@ -201,7 +201,7 @@ sudo apt update && sudo apt install gcc-14 g++-14
 
 Gets to the renderer but backend changes have it up and down.  
 Working prototype Christmas 2025. See branch Plastic Beach.  
-Last visual Dec 9th commit (pink screen).  
+Last visual Dec 9th commit (pink screen) using fallback TLAS, so I turned it off and went back to work.  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
