@@ -16,6 +16,7 @@ These are my current iterations and subject to change daily.
 I trutly have cycled through dozens of zero cost implementations. I mean it, ask Grok about the code.  
 If you use the security method, I cannot prove you used mine.  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
+She steps on RTX and dominates it now.  
 
 Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
 The double window is still an issue between main and RTXHandler.  
