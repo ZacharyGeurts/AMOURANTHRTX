@@ -7,6 +7,7 @@ Editor: I made this this thing so good that nobody on the planet gets screwed by
 Secure at compile time so nobody knows where you got it.  
 "We use a custom algorithim that is also unbreakable."  
 Nobody cares, just use this one because there is no fingerprint to look at.  
+Which one? StoneKey.hpp. Have Grok 4.1 beta or whatever change to your hearts content.  
 C++23 but Grok can probably make it C# in a day.  
 
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
