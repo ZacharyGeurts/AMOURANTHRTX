@@ -14,6 +14,8 @@ If you just want to update a component of your engine, take a look and see if yo
 I can eat and I play Minecraft and I have RTX. I want developers to have another RTX resource.  
 These are my current iterations and subject to change daily.  
 I trutly have cycled through dozens of zero cost implementations. I mean it, ask Grok about the code.  
+If you use the security method, I cannot prove you used mine.  
+If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
 
 Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
 The double window is still an issue between main and RTXHandler.  
