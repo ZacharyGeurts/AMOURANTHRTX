@@ -1,5 +1,8 @@
 Current over head code view https://x.com/ZacharyGeurts/status/2012632846481998282  
 
+We bring you Zero cost secure operation buy using current conventions.  
+Port it to your favorite programming language and version.  
+
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 The final code. Nobody can see implementations with binary. "Maybe another Zero computational cost that makes itself unreadable"  
 First?  
