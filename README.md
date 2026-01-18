@@ -158,6 +158,7 @@ And we are bringing in GLM on a Fortnight glider. https://github.com/g-truc/glm
 What makes AMOURANTHRTX different?
 We unlock the RTX. Compute, Path tracing. Securely. No interference with what you want to show.  
 A nerd Mario Paint that lets us make Mario Paint or Minecraft or whatever, for the less nerdy.  
+Also for some, there are trillions of dollars in that industry.  
 RAW video card power per watt with no overhead.  
 The FPS truly screams. (270,000+ FPS on 4070ti)  
 
