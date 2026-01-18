@@ -1,5 +1,7 @@
 Current over head code view https://x.com/ZacharyGeurts/status/2012632846481998282  
 
+We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
+
 We bring you Zero cost secure RTX GPU operation by using current conventions.  
 Editor: I made this this thing so good that nobody on the planet gets screwed by it but me.  
 Secure at compile time so nobody knows where you got it.  
