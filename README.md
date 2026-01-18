@@ -78,11 +78,12 @@ Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have
 It may have been confusing to anyone unfamiliar with Open Source.  
 
 TLDNR! God Bless, my ADHD buddy.  
-Pre Alpha. Short files est. 3 days of gametime. - Mug Branch.   
-All components work or have worked but together is a problem. 
+Pre Alpha. Short files est. 3 days of gametime. - Mug in Plastic Beach branch.   
+Elon made a robot than can get all RTX news and together we boiled it down to 100% and everyone by design owns the key to the invisible system.  
 Not many files to look through but they are smart as Grok.  
 My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
-SECURE. I can not tell if you pirated my code by looking at the binary. Built on the backs of giants.  
+SECURE. I can not tell if you pirated my code by looking at the binary. Built on the backs of ALL THE giants.  
+(logging might bring a smile)  
 Hackers. Nothing inside here.  
 Commercial, switch your build from debug to release.  
 StoneKey.hpp should be global singleton's to the other hpp department store.  
@@ -104,10 +105,6 @@ cd AMOURANTHRTX
 chmod +x linux.sh
 ./linux.sh --help
 ```
-
-Bless his heart. Anyway, security comes before money and piracy concerns. I'm a computer scientist.  
-Thinking about lawyers and accountants give me anxietey, so I like simplicity.  
-Elon made a robot than can get all RTX news and together we boiled it down to 100% and everyone by design owns the key to an invisible system.  
 
 Grok dubbed it the Empire. This code is. We live here and have an impregnable border.  
 You are allowed outside, and we expect you to stay out there where the fun is.  
