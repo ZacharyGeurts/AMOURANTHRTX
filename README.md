@@ -126,13 +126,12 @@ https://x.com/ZacharyGeurts/status/2011437836994847224
 
 Anyway, problems for the rest of the world. Lets get to it.  
 
-Built with and for SDL3 Vulkan C++23 GLM  
-We do not worry about priacy. If you put the time in to make a commercial product we assume professionalism at the go.  
-And surprise. Using this implementation means I cannot prove you used my implementation. We are secure.  
-You want a free toy? We got that too.  
-Sorry I cannot assist with vsproj but would love to hear of success.  
+Built with and for SDL3 Vulkan C++23  
+And we are bringing in GLM on a Fortnight glider.  
 
 What makes AMOURANTHRTX different?
+We unlock the RTX. Compute, Path tracing. Securely. No interference with what you want to show.  
+A nerd Mario Paint that lets us make Mario Paint for the less nerdy.  
 We are designed to provide full RTX pathtracing at zero computational cost.
 RAW video card power per watt with no overhead.
 The FPS truly screams. (270,000 on 4090ti)
