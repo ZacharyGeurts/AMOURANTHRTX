@@ -142,10 +142,13 @@ And we are bringing in GLM on a Fortnight glider. https://github.com/g-truc/glm
 
 What makes AMOURANTHRTX different?
 We unlock the RTX. Compute, Path tracing. Securely. No interference with what you want to show.  
-A nerd Mario Paint that lets us make Mario Paint for the less nerdy.  
-RAW video card power per watt with no overhead.
-The FPS truly screams. (270,000+ FPS on 4070ti)
+A nerd Mario Paint that lets us make Mario Paint or Minecraft or whatever, for the less nerdy.  
+RAW video card power per watt with no overhead.  
+The FPS truly screams. (270,000+ FPS on 4070ti)  
+
 I want 31 ray bounces and 7 layers of skin with light bouncing between them and an undersuface, on a stadium full of people.  
+Why? Because the card I purchased can do 31 bounces...duh.  
+
 The CPU is truly unbound.  
 More AI availability for Thomas the Tank Engine Models.  
 Welcome to RTX, just make it in a compute shader instead. The CPU is yours and we are all of RTX on a plate o7.  
