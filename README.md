@@ -44,8 +44,13 @@ There really are not that many files if you want to check a few now on the wiki.
 We do all that for no overhead, because that is what RTX Hardware developers want everyone to have.  
 Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this iteration figured out anything new.  
 
+To most people? Not much. Developers will either have their own zero cost implmentation to unlock 100% of RTX potential or use the same one.  
+If it is uncheckable, same thing to eyeballs.  
+It just means there is a new RTX foundational layer that anyone can take advantage of when implemented.  
+Smaller downloads? Maybe I'm not selling this right.  
+
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
-Boring. Kinda, but it is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
+Boring. Nope. It is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
 We can shrink and grow any color everywhere as light or materials or translucent objects, without sweating the GPU so we blast annoying high frame rates to prove a point.  
 The Zero cost RTX Demo scene is about to become a reality for everyone, bois.  
 I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
