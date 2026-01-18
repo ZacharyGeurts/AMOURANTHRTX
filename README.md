@@ -245,7 +245,8 @@ I would be taking a 1 to their 2 parts as far as distribution ratio.
 If you use the product you agree to 3 cents on the dollar or 3%. Not above.  
 If they do not like my using their brand, they can come to Michigan and stream the firing.
 And if you wear a pirate hat and want to cut me out, consider subbing or gifting a sub on twitch.
-Cut me in? Make money first. There is currently no way to send me money. Show up at my door with a suitcase?  
+Cut me in? Make money first. There is currently no way to send me money. Show up at my door with a suitcase?
+The bed is clean and I usually fall asleep on the couch. Expect Asmongold but more social issues.  
 https://www.twitch.tv/AMOURANTH  
 I plan fireworks before 4th of July.  
 
