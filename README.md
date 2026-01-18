@@ -32,7 +32,8 @@ I went through top 50 forum wishlists for every component and design is modular 
 Digress. The swapchain picks always best for your platform.  
 "Seriously?" Yeah. It's like 300 lines, so if you do not like it, Grok can write you a whole new one.  
 It gives you HDR and we can sync to exact refresh, unless on x11 like me, but I will never match Wayland.  
-I'll ride Mint till I get Mailbox and 2! frames in flight.  
+Maybe... Inital results with Plastic Beach were not great at preventing tearing.  
+Grok and I ride Mint till I topple Mailbox and 2! frames in flight.  
 
 Wait... what? o.O  
 Grok.  
