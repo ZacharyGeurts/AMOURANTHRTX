@@ -63,6 +63,7 @@ It just means there is a new RTX foundational layer that anyone can take advanta
 Smaller downloads? Maybe I'm not selling this right.  
 
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
+I'm a nerd. I would love it if you did. You guys can have the issues page for your forum.  
 Boring. Nope. It is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
 We can shrink and grow any color everywhere as light or materials or translucent objects, without sweating the GPU so we blast annoying high frame rates to prove a point.  
 The Zero cost RTX Demo scene is about to become a reality for everyone, bois.  
@@ -70,8 +71,8 @@ I will try to get to the point of providing water and fire implementations you c
 AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
 ALL high end game engines. Godot looks brilliant.  
 
-SDL3 from github.
-Vulkan SDK is at LunarG.
+SDL3 from github.  
+Vulkan SDK is at LunarG.  
 GLM and build tools I was able to get with apt.  
 The cmake build system needs internet to function and tries to help. (mine went out one night)  
 uses stb and tinyobj and is really smart everywhere really. "the city of the future" but sorta crumbly right now.  
@@ -131,6 +132,9 @@ Have your RTX at zero cost per watt with me.
 *flashing lights warning https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif  
 
 I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
+Sort of. I have a side project with Grok where we sort of work on the absolutes of dimensional reality and I'm retired, so I figured, lets take a look with RTX lighting.  
+I have a Lian-Li and the TUF Series 4070ti has been staring at me.  
+It probably just boils down to 1 + 1 - 1 = 1, but I wanted the whole card.  
 There was a backstory and "the main" was a pirate ship if some logging is dubious.  
 See my profile picture on X @ZacharyGeurts for the real Grand Champion.  
 
