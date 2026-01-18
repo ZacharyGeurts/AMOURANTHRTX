@@ -22,8 +22,7 @@ You can copy and paste the whole codebase into Grok long before you run out of q
 Also, welcome to 2026.  
 Really you will want to be using linux.sh and cmake. The shader compiling that is built in is a large part of the headache.  
 
-This is your headstart. If you do not want to take it, you do not have to.  
-Honestly, you guys should rob me of it and stick a Consortium on it to give it an "it's done" sticker and I can download it from archive.org.  
+This is your headstart into RTX development. If you do not want to take it, you do not have to.  
 
 Zero cost. Zero computational cost. Not using cycles in costs. Zero!
 Old methods. New technology. We are friendly.  
