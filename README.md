@@ -14,10 +14,12 @@ You'll See.
 
 Don't be the guy that makes shaders into hpp files. Don't.  
 
-Interesting enough, you can check a different file, everytime you poop.  
+Interesting enough to read a different file, everytime you poop.  
 If you are there for a while, slow your scroll. The files are short.  
 You can use ming on a Mint VM to compile for your Windows probably.  
 I have anxiety about people compiling on with other compilers. I wish I could help more.  
+You can copy and paste the whole codebase into Grok long before you run out of questions.  
+Also, welcome to 2026.  
 Really you will want to be using linux.sh and cmake. The shader compiling that is built in is a large part of the headache.  
 
 This is your headstart. If you do not want to take it, you do not have to.  
