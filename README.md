@@ -5,7 +5,6 @@ Editor: I made this this thing so good that nobody on the planet gets screwed by
 Secure at compile time so nobody knows where you got it.  
 
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
-The final code methods. Nobody can see implementations with binary.  
 "Maybe another Zero computational cost that makes itself unreadable" First?  
 
 How far along? All components tested now assuming needed StoneKey shaders for visuals.  
