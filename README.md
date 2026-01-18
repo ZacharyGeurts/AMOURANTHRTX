@@ -24,10 +24,11 @@ Really you will want to be using linux.sh and cmake. The shader compiling that i
 
 This is your headstart. If you do not want to take it, you do not have to.  
 Honestly, you guys should rob me of it and stick a Consortium on it to give it an "it's done" sticker and I can download it from archive.org.  
-Maybe get on the 4.5 gig side of the driver, and they hang out the umbilical.  
 
 Zero cost. Zero computational cost. Not using cycles in costs. Zero!
 Old methods. New technology. We are friendly.  
+We also strip and optimize geometry, and really, we really do have RTX in a bottle.  
+I went through top 50 forum wishlists for every component and design is modular as well as interwoven.  
 
 Digress. The swapchain picks always best for your platform.  
 "Seriously?" Yeah. It's like 300 lines, so if you do not like it, Grok can write you a whole new one.  
