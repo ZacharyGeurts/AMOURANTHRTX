@@ -2,7 +2,7 @@ Current over head code view https://x.com/ZacharyGeurts/status/20126328464819982
 
 We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
 Make a trip through [include/engine/GLOBALS/logging.hpp](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/include/engine/GLOBAL/logging.hpp) now. We will not disappoint.  
-Include StoneKey.hpp for all of RTX interoperations.  
+Include StoneKey.hpp and logging.hpp for all of RTX interoperations.  
 I'm still trying to get output again from main and recently messed up or fixed RTXHandler but it gives a nice error more in the direction I'm headed. Ever forward.  
 You are encouraged to work with code here. Welcome to github.  
 The best advice I have for you is to make some money with it first.  
