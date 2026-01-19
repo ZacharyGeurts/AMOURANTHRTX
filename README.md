@@ -1,6 +1,8 @@
 Current over head code view https://x.com/ZacharyGeurts/status/2012632846481998282  
 
 We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
+Include StoneKey.hpp for all of RTX interoperations.  
+I'm still trying to get output again from main and recently messed up or fixed RTXHandler but it gives a nice error more in the direction I'm headed. Ever forward.  
 You are encouraged to work with code here. Welcome to github.  
 The best advice I have for you is to make some money with it first.  
 Cut all operational costs securely and to zero.  
