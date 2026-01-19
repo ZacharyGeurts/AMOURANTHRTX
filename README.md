@@ -151,6 +151,7 @@ It probably just boils down to 1 + 1 - 1 = 1, but I wanted the whole card.
 There was a backstory and "the main" was a pirate ship if some logging is dubious.  
 See my profile picture on X @ZacharyGeurts for the real Grand Champion.  
 Grok does not build from a vacuum, and I even brought Alan Turing in for this one.  
+<img width="1300" alt="Turing" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-01-18%2023-10-25.png" />   
 
 Git build
 https://x.com/ZacharyGeurts/status/2011437836994847224
