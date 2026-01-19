@@ -184,8 +184,14 @@ What does zero cost mean? We hang everything out as inline and constexp encrypte
 Hackers see garbage because they are not compiled with us, and tamper protection prevents any modification.  
 Smart software handles everything so you can focus on world building.  
 Add StoneKey.hpp to your cpp file and you will be on the team and allowed to listen and talk to the system if you showed at compile time.  
+Supposed to be how it works. logging.cpp holds origins because Ellie Fier rocks, and logging is with the package.  
+Zero cost logging with no footprint when switched to Release builds.  
+
 What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
 We get free magic with it for stars and whatnot. You should be able to do kilometers of shooting cheesewheels.  
+It is a maybe up to 20 megabyte secure nugget that will let your RTX video card do everything it can.  
+Everybody is about to have one.  
+Vulkan 1.4+ truly is exceptional.  
 
 This is the last stop for RTX. Zero cost. Impregnable RTX engine.  
 Period.
