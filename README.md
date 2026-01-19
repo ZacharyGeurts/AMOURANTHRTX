@@ -89,6 +89,7 @@ The Zero cost RTX Demo scene is about to become a reality for everyone, bois.
 I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
 AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
 ALL high end game engines. Godot looks brilliant.  
+Give 'em the Woop Woop!  
 
 SDL3 from github.  
 Vulkan SDK is at LunarG.  
