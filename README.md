@@ -27,6 +27,7 @@ I trutly have cycled through dozens of zero cost implementations. I mean it, ask
 If you use the security method, I cannot prove you used mine to gain 100% horsepower at no computational cost.  
 99.99997 I would at least have something to say maybe... in court.  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
+
 She steps on RTX and dominates it now.  
 
 I tried to keep the wiki smart enough that even a high school freshman can dream big.  
@@ -102,6 +103,7 @@ SECURE. I can not tell if you pirated my code by looking at the binary. Built on
 Hackers. Nothing inside here.  
 Commercial, switch your build from debug to release.  
 StoneKey.hpp should be global singleton's to the other hpp department store.  
+Include logging.hpp as the cpp is needed for the impl.  
 Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+ and == 0  
 Keep running ```./linux.sh run``` until it starts purring.  
 Ask Grok "why it stoopid" like I do.  
@@ -189,7 +191,7 @@ If you break it worse than me, throw it in the trash and grab another copy.
 What does zero cost mean? We hang everything out as inline and constexp encrypted globals, so you do not ask for anything. You know everything.  
 Hackers see garbage because they are not compiled with us, and tamper protection prevents any modification.  
 Smart software handles everything so you can focus on world building.  
-Add StoneKey.hpp to your cpp file and you will be on the team and allowed to listen and talk to the system if you showed at compile time.  
+Add StoneKey.hpp and logging.hpp to your cpp file and you will be on the team and allowed to listen and talk to the system if you showed at compile time.  
 Supposed to be how it works. logging.cpp holds origins because Ellie Fier rocks, and logging is with the package.  
 Zero cost logging with no footprint when switched to Release builds.  
 
