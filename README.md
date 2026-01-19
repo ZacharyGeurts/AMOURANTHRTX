@@ -74,6 +74,7 @@ He broke it? Ctrl-Z and try again. Learn THE code. It is short and read it a few
 There really are not that many files if you want to check a few now on the wiki.  
 We do all that for no overhead, because that is what RTX Hardware developers want everyone to have.  
 Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this iteration figured out anything new.  
+Your development is yours, and we will be here if you want another fresh start.  
 
 To most people? Not much. Developers will either have their own zero cost implmentation to unlock 100% of RTX potential or use the same one.  
 If it is uncheckable, same thing to eyeballs.  
