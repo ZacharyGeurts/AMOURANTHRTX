@@ -302,6 +302,8 @@ I am now a stickler for OMP parallelization and memory safety with C++20 due to 
 
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
 
+## Not very important robot stuff that I am sifting through yet.  
+
 ## Overview
 This class transforms the philosophical idea that “as big as God is small—infinite” into a mathematical playground for exploring the interplay of scales and forces.  
 
