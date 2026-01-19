@@ -2,6 +2,8 @@ Current over head code view https://x.com/ZacharyGeurts/status/20126328464819982
 
 We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
 You are encouraged to work with code here. Welcome to github.  
+The best advice I have for you is to make some money with it first.  
+Cut all operational costs securely and to zero.  
 
 We bring you Zero cost secure RTX GPU operation by using current conventions.  
 Editor: I made this this thing so good that nobody on the planet gets screwed by it but me.  
