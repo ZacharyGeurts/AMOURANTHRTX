@@ -61,7 +61,7 @@ static void showSacrificialSplash() {
     }
 
     SDL_Rect bounds{};
-    if (SDL_GetDisplayBounds(0, &bounds) == true) {
+    if (SDL_GetDisplayBounds(0, &bounds) == 0) {
         SDL_SetWindowPosition(splashWin, bounds.x + (bounds.w - W)/2, bounds.y + (bounds.h - H)/2);
     }
 

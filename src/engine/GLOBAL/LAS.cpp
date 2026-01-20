@@ -53,13 +53,13 @@ RTX::LAS& RTX::LAS::instance() {
 RTX::LAS::LAS() {
     LOG_INFO_CAT("LAS", "v30.7 initialized — hybrid acceleration system ready");
 
-    persistentScratch = BufferManager::create(
-        512ULL * 1024 * 1024,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-        "LAS_Scratch");
+persistentScratch = BufferManager::create(
+    2048ULL * 1024 * 1024,  // 2 GiB — safe for 80k tris + procedurals
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+    "LAS_Scratch");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
@@ -183,7 +183,7 @@ void RTX::LAS::ensureReady() {
         return;
     }
 
-    LOG_INFO_CAT("LAS", "Rebuild triggered — single-submit mode");
+    LOG_INFO_CAT("LAS", "Rebuild triggered — split-submit mode (anti-TDR + validation safe)");
 
     if (!initialized) {
         createDefaultHybridScene();
@@ -191,90 +191,116 @@ void RTX::LAS::ensureReady() {
     }
 
     VkCommandPool pool = VK_NULL_HANDLE;
-    {
-        VkCommandPoolCreateInfo poolCI{};
-        poolCI.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolCI.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-        poolCI.queueFamilyIndex = StoneKey::stone_graphics_family();
-        VK_CHECK(vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool));
-    }
+    VkCommandPoolCreateInfo poolCI{};
+    poolCI.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolCI.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolCI.queueFamilyIndex = StoneKey::stone_graphics_family();
+    VK_CHECK(vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool));
 
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    {
+    auto createAndBeginCmd = [&]() -> VkCommandBuffer {
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkCommandBufferAllocateInfo allocCI{};
         allocCI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocCI.commandPool = pool;
         allocCI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocCI.commandBufferCount = 1;
         VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocCI, &cmd));
-    }
 
-    {
         VkCommandBufferBeginInfo beginCI{};
         beginCI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginCI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         VK_CHECK(vkBeginCommandBuffer(cmd, &beginCI));
-    }
 
-    bool didAnyBuild = false;
+        return cmd;
+    };
 
+    auto submitAndWait = [&](VkCommandBuffer cmd, const char* phase) -> bool {
+        if (!cmd) return false;
+
+        VkResult endRes = vkEndCommandBuffer(cmd);
+        if (endRes != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "{} vkEndCommandBuffer failed: {}", phase, string_VkResult(endRes));
+            return false;
+        }
+
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceCI{};
+        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VK_CHECK(vkCreateFence(stone_device(), &fenceCI, nullptr, &fence));
+
+        VkSubmitInfo submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &cmd;
+
+        VkResult submitRes = vkQueueSubmit(stone_graphics_queue(), 1, &submit, fence);
+        if (submitRes != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "{} submit failed: {}", phase, string_VkResult(submitRes));
+            vkDestroyFence(stone_device(), fence, nullptr);
+            return false;
+        }
+
+        VkResult waitRes = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, 30'000'000'000ULL);
+        if (waitRes == VK_ERROR_DEVICE_LOST) {
+            LOG_FATAL_CAT("LAS", "GPU DEVICE LOST during {} phase", phase);
+            LOG_FATAL_CAT("LAS", "Likely TDR or invalid AS input — check triangle count, scratch size");
+            vkDestroyFence(stone_device(), fence, nullptr);
+            return false;
+        } else if (waitRes != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "{} fence wait failed: {}", phase, string_VkResult(waitRes));
+            vkDestroyFence(stone_device(), fence, nullptr);
+            return false;
+        }
+
+        vkDestroyFence(stone_device(), fence, nullptr);
+        return true;
+    };
+
+    bool success = true;
+
+    // ── BLAS phase ───────────────────────────────────────────────────────────────
     if (pendingBlasBuilds || proceduralDirty) {
+        VkCommandBuffer blasCmd = createAndBeginCmd();
+
         BufferManager::uploadToBuffer(universalPrimitivesBuffer,
                                       proceduralPrimitives.data(),
                                       proceduralPrimitives.size() * sizeof(UniversalPrimitive));
 
-        batchBuildAndCompactBLAS(cmd);
-        didAnyBuild = true;
+        batchBuildAndCompactBLAS(blasCmd);
+
+        insertASBuildToTraceBarrier(blasCmd);
+
+        success &= submitAndWait(blasCmd, "BLAS");
+
+        vkFreeCommandBuffers(stone_device(), pool, 1, &blasCmd);
 
         pendingBlasBuilds = false;
         proceduralDirty = false;
     }
 
-    if (tlasDirty) {
-        if (didAnyBuild) {
-            insertASBuildToBuildBarrier(cmd);
-        }
+    // ── TLAS phase ───────────────────────────────────────────────────────────────
+    if (success && tlasDirty) {
+        VkCommandBuffer tlasCmd = createAndBeginCmd();
 
         clearTLAS();
-        buildHybridTLAS(cmd);
-        didAnyBuild = true;
+        buildHybridTLAS(tlasCmd);
+
+        insertASBuildToTraceBarrier(tlasCmd);
+
+        success &= submitAndWait(tlasCmd, "TLAS");
+
+        vkFreeCommandBuffers(stone_device(), pool, 1, &tlasCmd);
 
         tlasDirty = false;
     }
 
-    if (didAnyBuild) {
-        insertASBuildToTraceBarrier(cmd);
-    }
-
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    VkFence fence = VK_NULL_HANDLE;
-    {
-        VkFenceCreateInfo fenceCI{};
-        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        VK_CHECK(vkCreateFence(stone_device(), &fenceCI, nullptr, &fence));
-    }
-
-    VkSubmitInfo submit{};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
-
-    VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submit, fence));
-
-    VkResult waitRes = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, 10'000'000'000ULL); // 10s timeout
-    if (waitRes == VK_ERROR_DEVICE_LOST) {
-        LOG_FATAL_CAT("LAS", "GPU DEVICE LOST during acceleration structure build");
-        // Optional: Add recovery (recreate device) or exit gracefully
-    } else if (waitRes != VK_SUCCESS) {
-        LOG_FATAL_CAT("LAS", "Fence wait failed: {}", string_VkResult(waitRes));
-    }
-
-    vkDestroyFence(stone_device(), fence, nullptr);
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
     vkDestroyCommandPool(stone_device(), pool, nullptr);
 
-    LOG_SUCCESS_CAT("LAS", "Rebuild complete — TLAS ready");
+    if (success) {
+        LOG_SUCCESS_CAT("LAS", "Rebuild complete — TLAS ready");
+    } else {
+        LOG_FATAL_CAT("LAS", "Rebuild failed — TLAS may be invalid");
+    }
 }
 
 // =============================================================================
