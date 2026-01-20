@@ -1,18 +1,12 @@
-// src/engine/GLOBAL/RTXHandler.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.5 — JANUARY 10, 2026
-// RTX HANDLER — GLOBAL VULKAN CONTEXT | FULL-FEATURED DEVICE & SURFACE
-// TIMELINE SEMAPHORE ENABLED | RTX FEATURES ACTIVATED | DESCRIPTOR INDEXING FIXED
-// FULLY VALIDATION CLEAN | ETERNAL EMPIRE READY | STABLE & SAFE POOL
-// =============================================================================
-// Fixes in v29.5:
-// - Seal VkInstance immediately after creation in createVulkanInstance (encapsulated)
-// - Reduced MAX_SETS to 200'000 — driver-safe
-// - Lowered pool sizes
-// - Null checks + better logging
-// - No main() — pure helpers
-// - Removed stone_seal_final()
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine - RTX Handler
+// Global Vulkan context, instance, device, and queue management
+// Full RTX feature enablement (ray tracing, acceleration structures, timeline semaphores)
+// Descriptor indexing and safe pool configuration
+// Version 30.0 — January 20, 2026
+// Production ready: Descriptor pool creation delayed (called externally after initial AS build)
+// All sealing centralized externally for stability
+// Validation clean, driver-safe
 // =============================================================================
 
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -34,7 +28,7 @@ namespace RTX {
 Context g_context_instance{};
 
 // =============================================================================
-// Global Descriptor Pool — Realistic & Driver-Safe (200k sets max)
+// Global Descriptor Pool — Driver-safe configuration
 // =============================================================================
 void createGlobalDescriptorPool() noexcept
 {
@@ -49,7 +43,7 @@ void createGlobalDescriptorPool() noexcept
         return;
     }
 
-    LOG_INFO_CAT("RTX", "Forging global descriptor pool — empire scale");
+    LOG_INFO_CAT("RTX", "Creating global descriptor pool");
 
     constexpr uint32_t MAX_SETS = 200'000;
 
@@ -65,14 +59,13 @@ void createGlobalDescriptorPool() noexcept
         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,      10'000}
     };
 
-    VkDescriptorPoolCreateInfo info{
-        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
-                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT,
-        .maxSets       = MAX_SETS,
-        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-        .pPoolSizes    = poolSizes.data()
-    };
+    VkDescriptorPoolCreateInfo info{};
+    info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
+                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT;
+    info.maxSets       = MAX_SETS;
+    info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    info.pPoolSizes    = poolSizes.data();
 
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VkResult result = vkCreateDescriptorPool(dev, &info, nullptr, &pool);
@@ -89,7 +82,7 @@ void createGlobalDescriptorPool() noexcept
         }
     );
 
-    LOG_SUCCESS_CAT("RTX", "Global descriptor pool forged — capacity: {} sets", MAX_SETS);
+    LOG_SUCCESS_CAT("RTX", "Global descriptor pool created — capacity: {} sets", MAX_SETS);
 }
 
 // =============================================================================
@@ -146,18 +139,17 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 }
 
 // =============================================================================
-// Vulkan Instance Creation — SEAL INSTANCE HERE
+// Vulkan Instance Creation
 // =============================================================================
 [[nodiscard]] VkInstance createVulkanInstance(bool enableValidation) noexcept
 {
-    VkApplicationInfo appInfo{
-        .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName   = "AMOURANTH RTX Engine vTURBO",
-        .applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0),
-        .pEngineName        = "AMOURANTH RTX",
-        .engineVersion      = VK_MAKE_API_VERSION(0, 29, 0, 0),
-        .apiVersion         = VK_API_VERSION_1_3
-    };
+    VkApplicationInfo appInfo{};
+    appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName   = "AMOURANTH RTX Engine vTURBO";
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
+    appInfo.pEngineName        = "AMOURANTH RTX";
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 30, 0, 0);
+    appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlExtCount = 0;
     const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
@@ -172,14 +164,13 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         layers.push_back("VK_LAYER_KHRONOS_validation");
     }
 
-    VkInstanceCreateInfo createInfo{
-        .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pApplicationInfo        = &appInfo,
-        .enabledLayerCount       = static_cast<uint32_t>(layers.size()),
-        .ppEnabledLayerNames     = layers.data(),
-        .enabledExtensionCount   = static_cast<uint32_t>(extensions.size()),
-        .ppEnabledExtensionNames = extensions.data()
-    };
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo        = &appInfo;
+    createInfo.enabledLayerCount       = static_cast<uint32_t>(layers.size());
+    createInfo.ppEnabledLayerNames     = layers.data();
+    createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
+    createInfo.ppEnabledExtensionNames = extensions.data();
 
     VkInstance instance = VK_NULL_HANDLE;
     VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
@@ -188,15 +179,12 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         return VK_NULL_HANDLE;
     }
 
-    // SEAL INSTANCE IMMEDIATELY — encapsulated, no double-sealing risk
-    StoneKey::stone_seal_instance(instance);
-
-    LOG_SUCCESS_CAT("RTX", "Vulkan instance created and sealed — {} extensions, validation {}", extensions.size(), enableValidation ? "ON" : "OFF");
+    LOG_SUCCESS_CAT("RTX", "Vulkan instance created — {} extensions, validation {}", extensions.size(), enableValidation ? "ON" : "OFF");
     return instance;
 }
 
 // =============================================================================
-// Logical Device & GPU Selection — Full RTX + Timeline Semaphore + Descriptor Indexing
+// Logical Device & GPU Selection — Full RTX features
 // =============================================================================
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
 {
@@ -264,7 +252,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(selected, &props);
-    LOG_AMOURANTH("GPU SELECTED: {} — Full RTX Support", props.deviceName);
+    LOG_INFO_CAT("RTX", "Selected GPU: {}", props.deviceName);
 
     g_ctx().setPhysicalDevice(selected);
 
@@ -282,7 +270,6 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
         });
     }
 
-    // Enable timelineSemaphore + descriptorIndexing + all ray tracing features
     VkPhysicalDeviceVulkan12Features vk12Features{};
     vk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     vk12Features.timelineSemaphore = VK_TRUE;
@@ -299,15 +286,13 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     rayTracing.pNext = &accelStruct;
     rayTracing.rayTracingPipeline = VK_TRUE;
 
-    VkDeviceCreateInfo deviceInfo{
-        .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext                   = &rayTracing,
-        .queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size()),
-        .pQueueCreateInfos       = queueCreateInfos.data(),
-        .enabledExtensionCount   = static_cast<uint32_t>(requiredExtensions.size()),
-        .ppEnabledExtensionNames = requiredExtensions.data(),
-        .pEnabledFeatures        = nullptr
-    };
+    VkDeviceCreateInfo deviceInfo{};
+    deviceInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    deviceInfo.pNext                   = &rayTracing;
+    deviceInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size());
+    deviceInfo.pQueueCreateInfos       = queueCreateInfos.data();
+    deviceInfo.enabledExtensionCount   = static_cast<uint32_t>(requiredExtensions.size());
+    deviceInfo.ppEnabledExtensionNames = requiredExtensions.data();
 
     VkDevice device = VK_NULL_HANDLE;
     VkResult result = vkCreateDevice(selected, &deviceInfo, nullptr, &device);
@@ -328,21 +313,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
     g_ctx().transferFamily_ = bestIndices.transferFamily.value_or(bestIndices.graphicsFamily.value());
     g_ctx().computeFamily_  = bestIndices.graphicsFamily.value();
 
-    // Seal device and queues (instance already sealed in createVulkanInstance)
-    StoneKey::stone_seal_device(device);
-    StoneKey::stone_seal_physical(selected);
-    StoneKey::stone_seal_graphics_family(g_ctx().graphicsFamily_);
-    StoneKey::stone_seal_graphics_queue(g_ctx().graphicsQueue_);
-    StoneKey::stone_seal_present_family(g_ctx().presentFamily_);
-    StoneKey::stone_seal_present_queue(g_ctx().presentQueue_);
-    StoneKey::stone_seal_transfer_family(g_ctx().transferFamily_);
-    StoneKey::stone_seal_transfer_queue(g_ctx().transferQueue_);
-    StoneKey::stone_seal_compute_family(g_ctx().computeFamily_);
-    StoneKey::stone_seal_compute_queue(g_ctx().computeQueue_);
-
-    createGlobalDescriptorPool();
-
-    LOG_SUCCESS_CAT("RTX", "Logical device created — timeline semaphores + descriptor indexing enabled — RTX full power");
+    LOG_SUCCESS_CAT("RTX", "Logical device created — full RTX features enabled");
 
     return device;
 }
@@ -355,18 +326,14 @@ void Context::init() noexcept
     valid_ = true;
     ready_.store(true, std::memory_order_release);
 
-    LOG_AMOURANTH("RTX context fully initialized — empire armed");
+    LOG_INFO_CAT("RTX", "RTX context initialized");
 }
 
 } // namespace RTX
 
 // =============================================================================
-// RTX CORE INITIALIZED — JANUARY 10, 2026 — v29.5
-// - Seal VkInstance inside createVulkanInstance (encapsulated)
-// - Realistic descriptor pool sizes (200k max sets)
-// - Removed stone_seal_final()
-// - All features enabled, clean error paths
-// - Centralized context + single StoneKey seal
-// THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN & VALIDATION CLEAN
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// RTX Handler v30.0 — January 20, 2026
+// - Descriptor pool creation is now external (call RTX::createGlobalDescriptorPool() after first LAS build)
+// - All StoneKey sealing removed from this file (centralized externally)
+// - Clean, focused, production-stable
 // =============================================================================
