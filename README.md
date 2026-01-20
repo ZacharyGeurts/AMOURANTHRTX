@@ -7,6 +7,7 @@ I'm still trying to get output again from main and recently messed up or fixed R
 You are encouraged to work with code here. Welcome to github.  
 The best advice I have for you is to make some money with it first.  
 Cut all operational costs securely and to zero.  
+If you already know you want zero cost and what else you want to do, grab a copy and make it do it with Grok is my advice.  
 
 We bring you Zero cost secure RTX GPU operation by using current conventions.  
 Editor: I made this this thing so good that nobody on the planet gets screwed by it but me.  
