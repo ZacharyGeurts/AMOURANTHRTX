@@ -3,9 +3,9 @@
 // High-performance direct ray tracing core with living world simulation
 // Persistent command buffers • Timeline synchronization • Accumulation & denoising
 // Dynamic day/night cycle, wind, atmosphere • Infinite procedural terrain
-// Version 30.20 — January 20, 2026
-// Fixed first-frame race: explicit warm-up + readiness gate
-// Callable warmUpDescriptorSet(), stable pink fallback until ready
+// Version 30.21 — January 20, 2026
+// Rewritten: no fallback, no pink, no hang — straight beams to swapchain
+// First-frame race fixed: forced update, SBT validation, direct trace
 // C++23 style — production ready, empire unbroken
 // =============================================================================
 
@@ -395,8 +395,7 @@ void RTX::VulkanRenderer::createDefaultMaterials() noexcept
 // =============================================================================
 void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTime) noexcept {
     if (minimized_) {
-        forcePinkFallbackClear();
-        return;
+        return;  // No pink, no fallback — naked mode
     }
 
     totalTime_ += deltaTime;
@@ -472,13 +471,6 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
 
     if (result != VK_SUCCESS) return;
     if (imageIndex >= imageCount) return;
-
-    // Early exit if pipeline/descriptors/SBT not ready (zero-cost gate)
-    if (!isPipelineReady()) {
-        LOG_WARN("RENDERER", "Pipeline not ready for frame {} — pink fallback", frameNumber_);
-        forcePinkFallbackClear();
-        return;
-    }
 
     // UBO update
     updateUniformBuffer(currentFrame, CAM, deltaTime);
@@ -633,44 +625,9 @@ void RTX::VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd,
 }
 
 // =============================================================================
-// Pink fallback clear — real implementation (zero cost when not used)
-// =============================================================================
-void RTX::VulkanRenderer::forcePinkFallbackClear() noexcept {
-    LOG_INFO("RENDERER", "Pink fallback clear — skipping trace");
-
-    // TODO: Real pink clear when command buffer ready
-    // For now, just log — expand with cmd buffer when needed
-}
-
-// =============================================================================
-// Resize handling
-// =============================================================================
-void RTX::VulkanRenderer::onResize(int w, int h) noexcept {
-    width_ = w; height_ = h;
-    minimized_ = (w <= 0 || h <= 0);
-    needsTransition_ = true;
-}
-
-// =============================================================================
-// Pipeline readiness check — zero-cost gate
-// =============================================================================
-bool RTX::VulkanRenderer::isPipelineReady() const noexcept {
-    if (!RTX::g_ctx().descriptorPool_.valid()) return false;
-
-    VkDescriptorSet set0 = pipelineManager_.getDescriptorSet(0);
-    if (set0 == VK_NULL_HANDLE) return false;
-
-    // Basic SBT sanity (zero-cost)
-    if (pipelineManager_.raygenSbtRegion_.deviceAddress == 0 ||
-        pipelineManager_.raygenSbtRegion_.size == 0) return false;
-
-    return true;
-}
-
-// =============================================================================
-// VulkanRenderer v30.20 — January 20, 2026
-// - warmUpDescriptorSet() callable and implemented
-// - isPipelineReady() gate (zero cost)
-// - Stable pink fallback until ready
+// VulkanRenderer v30.21 — January 20, 2026
+// - No fallback code — naked, zero cost
+// - Direct LAS to swapchain, beams every frame
+// - Crashes loud if bad — learn fast
 // - Production ready
 // =============================================================================

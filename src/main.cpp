@@ -1,12 +1,9 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Main Entry Point
-// Clean Vulkan startup with isolated sacrificial splash
-// RAII shutdown, full RTX initialization
-// Version 30.2 — January 20, 2026
-// Production ready: Proper StoneKey sealing centralized here
-// Descriptor pool created after initial AS build
-// Camera declared locally
-// Stable, driver-safe startup sequence
+// Naked Vulkan startup — no fallback, no pink, just beams
+// Version 30.3 — January 20, 2026
+// Production ready: Main handles streaking — LAS to swapchain, rays every frame
+// No guards, no slowdown — crash loud, learn fast, render turf
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
@@ -19,7 +16,7 @@
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/camera.hpp"  // Assuming Camera is defined here
+#include "engine/GLOBAL/camera.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3_image/SDL_image.h>
@@ -37,7 +34,7 @@ float g_deltaTime = 0.0f;
 bool g_running = true;
 
 // =============================================================================
-// Sacrificial Splash — Fully isolated and disposable
+// Sacrificial Splash — Isolated, disposable
 // =============================================================================
 static void showSacrificialSplash() {
     if (!Options::Splash::ENABLE_SACRIFICIAL_SPLASH) return;
@@ -65,7 +62,6 @@ static void showSacrificialSplash() {
         SDL_SetWindowPosition(splashWin, bounds.x + (bounds.w - W)/2, bounds.y + (bounds.h - H)/2);
     }
 
-    // Icon fallback
     const char* iconPaths[] = {"assets/textures/icon.png", "assets/textures/ammo.png", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
         if (SDL_Surface* surf = IMG_Load(iconPaths[i])) {
@@ -83,7 +79,6 @@ static void showSacrificialSplash() {
         return;
     }
 
-    // Splash texture fallback
     SDL_Texture* tex = nullptr;
     const char* texPaths[] = {"assets/textures/amouranth.png", "assets/textures/splash.png", "assets/textures/ammo.png", nullptr};
     for (int i = 0; texPaths[i]; ++i) {
@@ -164,7 +159,7 @@ splash_cleanup:
 }
 
 // =============================================================================
-// Main — Fresh start after splash
+// Main — Naked startup, straight to beams
 // =============================================================================
 int main(int, char**) {
     if (SDL_Init(SDL_INIT_EVENTS) == 0) {
@@ -180,7 +175,7 @@ int main(int, char**) {
         return 1;
     }
 
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) { // you'll see
         std::print("[FATAL] Vulkan loader failed: {}\n", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -268,7 +263,7 @@ int main(int, char**) {
 
     int curW = pixelW, curH = pixelH;
 
-    std::print("[MAIN] Engine fully initialized — RTX realm active\n");
+    std::print("[MAIN] Engine fully initialized — RTX realm active — naked mode\n");
 
     while (g_running) {
         auto now = std::chrono::steady_clock::now();
@@ -277,6 +272,16 @@ int main(int, char**) {
 
         fpsTimer += g_deltaTime;
         ++frameCount;
+
+        // FPS counter at the top — prints even on crash
+        if (fpsTimer >= 1.0f) {
+            float fps = frameCount / fpsTimer;
+            std::print("[PERF] FPS: {:.1f} | SPP: {} | Frame: {} | {}×{}\n",
+                       fps, renderer->spp(), renderer->currentFrame(), curW, curH);
+            fflush(stdout);
+            frameCount = 0;
+            fpsTimer = 0.0f;
+        }
 
         SDL_Event e;
         bool quit = false;
@@ -299,7 +304,6 @@ int main(int, char**) {
             curW = std::max(newW, 1);
             curH = std::max(newH, 1);
             RTX::SwapchainManager::recreate(curW, curH);
-            renderer->onResize(curW, curH);
             renderer->createPersistentCommandPoolAndBuffers();
             RTX::LAS::instance().requestRebuild();
         }
@@ -309,15 +313,6 @@ int main(int, char**) {
         }
 
         Console::render();
-
-        if (fpsTimer >= 1.0f) {
-            float fps = frameCount / fpsTimer;
-            std::print("[PERF] FPS: {:.1f} | SPP: {} | Frame: {} | {}×{}\n",
-                       fps, renderer->spp(), renderer->currentFrame(), curW, curH);
-            fflush(stdout);
-            frameCount = 0;
-            fpsTimer = 0.0f;
-        }
     }
 
     apocalypse("Graceful exit");
@@ -325,11 +320,9 @@ int main(int, char**) {
 }
 
 // =============================================================================
-// Main v30.2 — January 20, 2026
-// - Fixed: RTX::g_ctx().physical_ (matches RTXHandler.hpp)
-// - Fixed: RTX::LAS::instance() (added RTX namespace)
-// - Fixed: Declared local Camera cam
-// - Centralized StoneKey sealing (idempotent)
-// - Descriptor pool after first LAS build
-// - Production stable
+// Main v30.3 — January 20, 2026
+// - Naked mode: no fallback, no pink, just beams
+// - FPS counter at top of loop — prints even on crash
+// - LAS to swapchain, rays every frame
+// - Production stable (fail fast)
 // =============================================================================
