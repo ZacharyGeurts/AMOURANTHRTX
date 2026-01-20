@@ -1,7 +1,11 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.2
-// AUTOMAGIC LIGHT ACCELERATION SYSTEM — SINGLETON, LAZY, HYBRID (TRIANGLES + PROCEDURAL)
-// JANUARY 12, 2026 — VALIDATION CLEAN — COMPILATION FIXED — PINK PHOTONS ETERNAL
+// AMOURANTH RTX Engine - Light Acceleration System (LAS)
+// Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
+// Singleton with lazy, synchronous rebuilds
+// Supports triangle meshes and procedural AABBs
+// Version 30.5 — January 20, 2026
+// Production ready: Proper AS build synchronization (build-to-build + build-to-trace)
+// Stable initial build, no device lost
 // =============================================================================
 
 #pragma once
@@ -34,7 +38,7 @@ struct UniversalPrimitive {
     glm::vec4   aabbMin;
     glm::vec4   aabbMax;
     glm::mat4   transform;
-    uint32_t    type;           // ← Changed from GeometryType to uint32_t to avoid std::format issues
+    uint32_t    type;           // GeometryType cast to uint32_t
     uint32_t    materialIndex;
     uint32_t    customDataIndex = 0;
     float       destruction     = 0.0f;
@@ -44,9 +48,8 @@ struct InternalMesh {
     uint64_t vertexBuffer     = 0;
     uint64_t indexBuffer      = 0;
     uint64_t woopBuffer       = 0;
-    std::vector<uint32_t> indices;
     uint32_t primitiveCount   = 0;
-    uint32_t vertexCount      = 0;          // ← Added — required for maxVertex
+    uint32_t vertexCount      = 0;
     uint32_t materialIndex    = 0;
     glm::mat4 transform       = glm::mat4(1.0f);
 
@@ -62,47 +65,44 @@ struct InternalMesh {
 
 class LAS {
 public:
-    // Singleton access — touch this and LAS wakes up
     static LAS& instance();
 
-    // Automagic: touch this → LAS wakes up, builds itself, returns valid TLAS
     VkAccelerationStructureKHR getTLAS();
 
-    // Artist triangle path
     size_t addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materialIndex = 0);
 
-    // Super free procedural path
     size_t addProceduralAABB(GeometryType type, const glm::vec3& center, float scale,
                              uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    // Future extensions (not yet implemented)
     size_t addLine(const glm::vec3& start, const glm::vec3& end, float thickness = 1.0f, uint32_t materialIndex = 0);
     size_t addPointCloud(const std::vector<glm::vec3>& points, uint32_t materialIndex = 0);
 
-    // Control
     void setInstanceTransform(size_t instanceIndex, const glm::mat4& transform);
     void destroyPrimitive(size_t index, float amount = 1.0f);
 
-    // Events (auto-dirty + lazy rebuild)
     void onResize();
-    void requestRebuild();  // Optional — getTLAS() will rebuild anyway
+    void requestRebuild();
 
-    // Legacy compatibility
+    // Legacy aliases
     void notifyResize() { onResize(); }
     void rebuildTLAS() { requestRebuild(); }
 
 private:
-    LAS();  // Private constructor for singleton
+    LAS();
     ~LAS();
 
-    // Internal automagic build — called by getTLAS()
-    void ensureReady();  // Does everything: buffers, default scene, build
+    void ensureReady();
 
     void precomputeWoopConstants(InternalMesh& m);
-    std::vector<uint32_t> convertToTriangleStrip(const std::vector<uint32_t>& triangleList) const;
     bool batchBuildAndCompactBLAS(VkCommandBuffer cmd);
     bool buildHybridTLAS(VkCommandBuffer cmd);
-    void insertAccelerationStructureBarrier(VkCommandBuffer cmd);
     void clearTLAS();
     void createDefaultHybridScene();
+
+    // Synchronization barriers
+    void insertASBuildToTraceBarrier(VkCommandBuffer cmd);
+    void insertASBuildToBuildBarrier(VkCommandBuffer cmd);
 
     // State
     std::vector<InternalMesh> triangleMeshes;
@@ -114,13 +114,13 @@ private:
     uint64_t woopConstantsBuffer        = 0;
 
     VkAccelerationStructureKHR tlas                = VK_NULL_HANDLE;
-    VkAccelerationStructureKHR proceduralBlas      = VK_NULL_HANDLE;   // ← Added
+    VkAccelerationStructureKHR proceduralBlas      = VK_NULL_HANDLE;
     uint64_t                   tlasStorage         = 0;
-    uint64_t                   proceduralBlasStorage = 0;              // ← Added
+    uint64_t                   proceduralBlasStorage = 0;
 
     bool tlasDirty         = true;
     bool pendingBlasBuilds = true;
-    bool proceduralDirty   = true;     // ← Added — controls procedural BLAS rebuild
+    bool proceduralDirty   = true;
     bool initialized       = false;
 
     static constexpr uint32_t MAX_INSTANCES   = 131072;
@@ -130,10 +130,8 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// AUTOMAGIC LAS v29.2 — JANUARY 12, 2026
-// - Added proceduralBlas, proceduralBlasStorage, proceduralDirty
-// - Added vertexCount to InternalMesh
-// - Changed UniversalPrimitive::type to uint32_t (avoids format issues)
-// - Ready to pair with the fixed LAS.cpp from previous message
-// Empire omnipotent — AMOURANTH FOREVER 💖
+// LAS header v30.5 — synchronized with production-ready LAS.cpp
+// Cleaned: removed excessive commentary, focused on clarity
+// Added declarations for new barrier functions
+// Ready for clean compilation
 // =============================================================================
