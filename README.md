@@ -176,10 +176,6 @@ Also for some, there are trillions of dollars in that industry.
 RAW video card power per watt with no overhead.  
 The FPS truly screams. (270,000+ FPS on 4070ti)  
 
-I want 31 ray bounces and 7 layers of skin with light bouncing between them and an undersuface, on a stadium full of people.  
-Why? Because the card I purchased can do 31 bounces...duh.  
-The human skin is the outer covering of the body and is the largest organ of the integumentary system. The skin has up to seven layers of ectodermal tissue guarding muscles, bones, ligaments and internal organs. Human skin is similar to most of the other mammals' skin, and it is very similar to pig skin. Though nearly all human skin is covered with hair follicles, it can appear hairless.  
-How we approach skin here.  
 This is an anal OCD project. We do not simulate star twinkle, we add atmospheric layers.  
 Temperature, day, night, humidity, wind, we will have it all for you, to use or to stick a rectangle over and make Hollow Knight 2.  
 This code has one requirement and should be portable where SDL3 and Vulkan and GLM go. RTX.  
