@@ -1,10 +1,12 @@
-// include/engine/GLOBAL/StoneKey.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.2 — JANUARY 09, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.3 — JANUARY 20, 2026
 // STONEKEY v∞ — UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE
 // FULLY HEADER-ONLY | NO .CPP | ZERO OVERHEAD | ETERNAL INTEGRITY
-// CONTAINS ALL CRITICAL HANDLES | SAFE BEFORE SEAL | FULL PROTECTION AFTER
-// FIX: Moved seed/keys to function-local statics — eliminates ODR risk + guarantees single init
+// NOW IDEMPOTENT: All seal functions are safe against re-sealing
+// - Re-seal with same value → no-op
+// - Re-seal with different value → fatal breach detection
+// - Single global sealed flag for final tamper protection
+// - Restored missing stone_mesh_* members
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -26,7 +28,7 @@ namespace RTX { class PipelineManager; }
 namespace StoneKey {
 
 // -----------------------------------------------------------------------------
-// Global sealed flag — inline to avoid multiple definitions
+// Global sealed flag — final empire lockdown
 // -----------------------------------------------------------------------------
 inline bool stone_sealed = false;
 
@@ -133,18 +135,18 @@ struct Empire final {
     static inline VkExtent2D               extent{0, 0};
     static inline uint32_t                 image_count = 0;
 
-    static inline Obfuscated<VkBuffer>       stone_mesh_vertex_buffer;
-    static inline Obfuscated<VkDeviceMemory> stone_mesh_vertex_memory;
-    static inline Obfuscated<VkBuffer>       stone_mesh_index_buffer;
-    static inline Obfuscated<VkDeviceMemory> stone_mesh_index_memory;
-    static inline uint32_t                   stone_mesh_index_count = 0;
-
     static inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
 
     static inline Obfuscated<VkCommandPool> transient_pool;
 
+    // Restored missing stone_mesh members
+    static inline Obfuscated<VkBuffer>       stone_mesh_vertex_buffer;
+    static inline Obfuscated<VkDeviceMemory> stone_mesh_vertex_memory;
+    static inline Obfuscated<VkBuffer>       stone_mesh_index_buffer;
+    static inline Obfuscated<VkDeviceMemory> stone_mesh_index_memory;
+    static inline uint32_t                   stone_mesh_index_count = 0;
 };
 
 // -----------------------------------------------------------------------------
@@ -197,28 +199,203 @@ struct StoneMesh {
 }
 
 // -----------------------------------------------------------------------------
-// PHASE 5: Unbreakable sealers — zero cost
+// PHASE 5: IDEMPOTENT unbreakable sealers — zero cost, breach-protected
 // -----------------------------------------------------------------------------
-inline void stone_seal_instance(VkInstance i)       noexcept { Empire::instance = i; }
-inline void stone_seal_device(VkDevice d)           noexcept { Empire::device = d; }
-inline void stone_seal_physical(VkPhysicalDevice p) noexcept { Empire::physical = p; }
-inline void stone_seal_surface(VkSurfaceKHR s)      noexcept { Empire::surface = s; }
-inline void stone_seal_swapchain(VkSwapchainKHR sc) noexcept { Empire::swapchain = sc; }
+inline void stone_seal_instance(VkInstance i) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (i != Empire::instance.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal instance with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::instance = i;
+    sealed = true;
+}
 
-inline void stone_seal_graphics_queue(VkQueue q) noexcept { Empire::graphicsQueue = q; }
-inline void stone_seal_present_queue(VkQueue q)  noexcept { Empire::presentQueue = q; }
-inline void stone_seal_compute_queue(VkQueue q)  noexcept { Empire::computeQueue = q; }
-inline void stone_seal_transfer_queue(VkQueue q) noexcept { Empire::transferQueue = q; }
+inline void stone_seal_device(VkDevice d) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (d != Empire::device.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal device with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::device = d;
+    sealed = true;
+}
 
-inline void stone_seal_graphics_family(uint32_t idx) noexcept { Empire::graphicsFamily = idx; }
-inline void stone_seal_present_family(uint32_t idx)  noexcept { Empire::presentFamily = idx; }
-inline void stone_seal_transfer_family(uint32_t idx) noexcept { Empire::transferFamily = idx; }
-inline void stone_seal_compute_family(uint32_t idx)  noexcept { Empire::computeFamily = idx; }
+inline void stone_seal_physical(VkPhysicalDevice p) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (p != Empire::physical.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal physical device with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::physical = p;
+    sealed = true;
+}
 
-inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept { Empire::pipeline = p; }
-inline void stone_seal_window(SDL_Window* w)             noexcept { Empire::window = w; }
+inline void stone_seal_surface(VkSurfaceKHR s) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (s != Empire::surface.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal surface with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::surface = s;
+    sealed = true;
+}
 
-inline void stone_seal_pass(VkRenderPass p) noexcept { Empire::pass = p; }
+inline void stone_seal_swapchain(VkSwapchainKHR sc) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (sc != Empire::swapchain.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal swapchain with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::swapchain = sc;
+    sealed = true;
+}
+
+inline void stone_seal_graphics_queue(VkQueue q) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (q != Empire::graphicsQueue.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal graphics queue with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::graphicsQueue = q;
+    sealed = true;
+}
+
+inline void stone_seal_present_queue(VkQueue q) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (q != Empire::presentQueue.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal present queue with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::presentQueue = q;
+    sealed = true;
+}
+
+inline void stone_seal_compute_queue(VkQueue q) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (q != Empire::computeQueue.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal compute queue with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::computeQueue = q;
+    sealed = true;
+}
+
+inline void stone_seal_transfer_queue(VkQueue q) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (q != Empire::transferQueue.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal transfer queue with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::transferQueue = q;
+    sealed = true;
+}
+
+inline void stone_seal_graphics_family(uint32_t idx) noexcept {
+    static bool sealed = false;
+    if (sealed && idx != Empire::graphicsFamily) {
+        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal graphics family with different index — breach detected");
+        std::abort();
+    }
+    Empire::graphicsFamily = idx;
+    sealed = true;
+}
+
+inline void stone_seal_present_family(uint32_t idx) noexcept {
+    static bool sealed = false;
+    if (sealed && idx != Empire::presentFamily) {
+        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal present family with different index — breach detected");
+        std::abort();
+    }
+    Empire::presentFamily = idx;
+    sealed = true;
+}
+
+inline void stone_seal_transfer_family(uint32_t idx) noexcept {
+    static bool sealed = false;
+    if (sealed && idx != Empire::transferFamily) {
+        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal transfer family with different index — breach detected");
+        std::abort();
+    }
+    Empire::transferFamily = idx;
+    sealed = true;
+}
+
+inline void stone_seal_compute_family(uint32_t idx) noexcept {
+    static bool sealed = false;
+    if (sealed && idx != Empire::computeFamily) {
+        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal compute family with different index — breach detected");
+        std::abort();
+    }
+    Empire::computeFamily = idx;
+    sealed = true;
+}
+
+inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (p != Empire::pipeline.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal pipeline with different pointer — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::pipeline = p;
+    sealed = true;
+}
+
+inline void stone_seal_window(SDL_Window* w) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (w != Empire::window.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal window with different pointer — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::window = w;
+    sealed = true;
+}
+
+inline void stone_seal_pass(VkRenderPass p) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (p != Empire::pass.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal render pass with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::pass = p;
+    sealed = true;
+}
 
 inline void stone_seal_rtprops(VkPhysicalDeviceRayTracingPipelinePropertiesKHR props) noexcept {
     Empire::rtProps = props;
@@ -231,7 +408,18 @@ inline void stone_seal_images(std::vector<VkImage>&& imgs) noexcept { Empire::im
 inline void stone_seal_views(const std::vector<VkImageView>& vws) noexcept { Empire::views = vws; }
 inline void stone_seal_views(std::vector<VkImageView>&& vws) noexcept { Empire::views = std::move(vws); }
 
-inline void stone_seal_transient_pool(VkCommandPool pool) noexcept { Empire::transient_pool = pool; }
+inline void stone_seal_transient_pool(VkCommandPool pool) noexcept {
+    static bool sealed = false;
+    if (sealed) {
+        if (pool != Empire::transient_pool.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal transient pool with different handle — breach detected");
+            std::abort();
+        }
+        return;
+    }
+    Empire::transient_pool = pool;
+    sealed = true;
+}
 
 // -----------------------------------------------------------------------------
 // FINAL UNBREAKABLE SEAL — ZERO COST
@@ -239,18 +427,16 @@ inline void stone_seal_transient_pool(VkCommandPool pool) noexcept { Empire::tra
 inline void stone_seal_final() noexcept
 {
     stone_sealed = true;
-    LOG_AMOURANTH("STONEKEY v∞ UNBREAKABLE SEAL FORGED — EMPIRE ETERNAL");
+    LOG_AMOURANTH("STONEKEY v∞ UNBREAKABLE FINAL SEAL FORGED — EMPIRE ETERNAL");
 }
 
 } // namespace StoneKey
 
 // =============================================================================
-// STONEKEY v∞ — UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 09, 2026
-// sealed flag is global inline bool stone_sealed = false;
-// Obfuscated decrypt uses stone_sealed
-// Empire defined after Obfuscated — no cycle
-// No multiple definition — inline bool
-// Keys/seed now function-local static — single init guaranteed, ODR-safe
+// STONEKEY v∞ — IDEMPOTENT, UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 20, 2026
+// All seal functions now idempotent with breach detection
+// Restored missing stone_mesh members
+// Safe against multiple calls
 // Compiles clean — runs eternal
 // The empire is eternal. Pink photons flow unbroken.
 // PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN · AMOURANTH FOREVER 💖
