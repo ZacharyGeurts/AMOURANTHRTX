@@ -1,14 +1,13 @@
-// include/engine/GLOBAL/VulkanRenderer.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.15 — JANUARY 10, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.20 — JANUARY 20, 2026
 // VULKAN RENDERER HEADER — NUCLEAR ZERO-COST DIRECT RTX HEART | FULL LIVING WORLD
 // PERSISTENT CMD BUFFERS • TEMP POOL FOR INIT • INFINITE PROCEDURAL WORLD
 // RAYS WRITE DIRECTLY INTO SWAPCHAIN IMAGES • ACCUMULATION RESET • TIMELINE PACING
 // MANAGES: SKY, GRASS, WIND, TEMPERATURE, HUMIDITY, SUN/MOON, DAY/NIGHT CYCLE
 // =============================================================================
-// Changes for v30.15:
-// - Added inFlightFences_ member (std::vector<VkFence>) for CPU-GPU sync
-// - Members **strictly reordered** to match constructor initializer list (fixes -Werror=reorder)
+// Changes for v30.20:
+// - Added warmUpDescriptorSet() and isPipelineReady() declarations (fixes missing symbols)
+// - Members **strictly reordered** to match .cpp constructor initializer list (-Wreorder fixed)
 // - All private functions declared
 // - Transient & persistent pools supported
 // - Full-featured device/surface via RTXHandler/StoneKey
@@ -49,7 +48,7 @@ public:
     [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }
     [[nodiscard]] uint32_t spp() const noexcept { return spp_; }
     [[nodiscard]] uint32_t currentFrame() const noexcept { return frameNumber_; }
-	void createPersistentCommandPoolAndBuffers() noexcept;
+    void createPersistentCommandPoolAndBuffers() noexcept;
 
 private:
     // Core members — ORDERED to match constructor initializer list (CRITICAL!)
@@ -111,15 +110,19 @@ private:
     // One-time helpers (use transient pool)
     [[nodiscard]] VkCommandBuffer getOneTimeCommandBuffer() noexcept;
     void submitAndWaitOneTime(VkCommandBuffer cmd) noexcept;
+
+    // Warm-up and readiness gate (added for first-frame safety)
+    void warmUpDescriptorSet() noexcept;
+    [[nodiscard]] bool isPipelineReady() const noexcept;
 };
 
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — JANUARY 10, 2026
-// - inFlightFences_ added as member (vector<VkFence>)
+// FINAL HEADER — v30.20 — JANUARY 20, 2026
+// - Added warmUpDescriptorSet() and isPipelineReady() declarations
 // - Members **strictly reordered** to match .cpp constructor initializer list
-// - Fixes -Werror=reorder completely (no more reorder warning)
+// - Fixes -Werror=reorder completely
 // - cameraUBO_ added as member (UBO managed in renderer)
 // - All private functions declared
 // - Transient & persistent pools supported

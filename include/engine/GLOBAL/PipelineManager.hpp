@@ -102,6 +102,11 @@ public:
     static inline bool s_crownForged = false;
     static inline bool s_eternalSbtForged = false;
 
+	VkStridedDeviceAddressRegionKHR raygenSbtRegion_{};
+    VkStridedDeviceAddressRegionKHR missSbtRegion_{};
+    VkStridedDeviceAddressRegionKHR hitSbtRegion_{};
+    VkStridedDeviceAddressRegionKHR callableSbtRegion_{};
+
 private:
     static constexpr std::array<VkDescriptorSetLayoutBinding, 9> kMainBindings{{
         {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
@@ -134,11 +139,6 @@ private:
 
     VkDeviceSize                  sbtAddress_{0};
     VkDeviceSize                  sbtSize_{0};
-
-    VkStridedDeviceAddressRegionKHR raygenSbtRegion_{};
-    VkStridedDeviceAddressRegionKHR missSbtRegion_{};
-    VkStridedDeviceAddressRegionKHR hitSbtRegion_{};
-    VkStridedDeviceAddressRegionKHR callableSbtRegion_{};
 
     std::vector<Handle<VkShaderModule>> shaderModules_;
     std::vector<VkDescriptorSet>        rtDescriptorSets_;

@@ -1,15 +1,14 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.8 — JANUARY 13, 2026
-// PIPELINEMANAGER — PINK PHOTON NUCLEAR EDITION | ZERO-COST | AUTOMAGIC | VALIDATION CLEAN
-// PERSISTENT CMD BUFFERS | ETERNAL SBT | FASTEST POSSIBLE | NO MORE VUID-00120
-// =============================================================================
-// Fixes in v30.8:
-// - Use fence for SBT upload submit instead of queue idle (more targeted, fixes free CB error)
-// - Add sbtBuffer_.reset() in destructor
-// - Call BufferManager::purge_all() in destructor to clean all buffers (fixes destruction errors)
-// - Minimal flags: SBT + BDA + TRANSFER_DST (no extras to avoid VK_EXT_descriptor_buffer errors)
-// - Local memory type finder for safety
-// PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine - Pipeline Manager
+// Ray tracing pipeline, SBT, and descriptor management
+// Version 30.9 — January 20, 2026
+// Production ready: Fixed command buffer state errors
+// - Proper begin/end pairing in SBT upload
+// - No double-end or end on non-recording buffers
+// - Fence-based SBT upload with explicit reset
+// - Buffer cleanup in destructor
+// - Early validation guards
+// Stable, validation clean, ready for trace rays
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -18,7 +17,7 @@
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/LAS.hpp"  // singleton LAS::instance()
+#include "engine/GLOBAL/LAS.hpp"
 
 #include <algorithm>
 #include <array>
@@ -51,7 +50,7 @@ inline static std::mutex rebuildMutex;
 // =============================================================================
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    std::print("[PIPELINE] FORGING PINK PHOTON NUCLEAR PIPELINE MANAGER — 2026 FASTEST EDITION\n");
+    std::print("[PIPELINE] Initializing PipelineManager\n");
 
     RTX::loadDeviceExtensions(device);
 
@@ -67,23 +66,23 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
     dummyTLAS_ = Handle<VkAccelerationStructureKHR>(
         createDummyTLAS(), stone_device(), g_ext.vkDestroyAccelerationStructureKHR);
 
-    std::print("[PIPELINE SUCCESS] PipelineManager forged — pink photons ready\n");
+    std::print("[PIPELINE] PipelineManager initialized\n");
 }
 
 // =============================================================================
-// Pipeline Layout — 4 sets | NO ENVMAP
+// Pipeline Layout — 4 sets
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
     if (rtPipelineLayout_.valid()) return;
 
-    std::print("[PIPELINE] Forging descriptor set layouts and pipeline layout — ZERO-COST\n");
+    std::print("[PIPELINE] Creating descriptor set layouts and pipeline layout\n");
 
-    VkDescriptorSetLayoutCreateInfo mainInfo{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = static_cast<uint32_t>(kMainBindings.size()),
-        .pBindings    = kMainBindings.data()
-    };
+    VkDescriptorSetLayoutCreateInfo mainInfo{};
+    mainInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    mainInfo.bindingCount = static_cast<uint32_t>(kMainBindings.size());
+    mainInfo.pBindings    = kMainBindings.data();
+
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout));
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(mainLayout, stone_device(), vkDestroyDescriptorSetLayout);
@@ -94,20 +93,20 @@ void PipelineManager::createPipelineLayout()
         .descriptorCount = 1024,
         .stageFlags      = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
     };
-    VkDescriptorSetLayoutCreateInfo texInfo{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings    = &texBinding
-    };
+
+    VkDescriptorSetLayoutCreateInfo texInfo{};
+    texInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    texInfo.bindingCount = 1;
+    texInfo.pBindings    = &texBinding;
+
     VkDescriptorSetLayout texLayout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &texInfo, nullptr, &texLayout));
     texDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(texLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
-    VkDescriptorSetLayoutCreateInfo emptyInfo{
-        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 0,
-        .pBindings    = nullptr
-    };
+    VkDescriptorSetLayoutCreateInfo emptyInfo{};
+    emptyInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    emptyInfo.bindingCount = 0;
+
     VkDescriptorSetLayout emptyLayout = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorSetLayout(stone_device(), &emptyInfo, nullptr, &emptyLayout));
     emptyDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(emptyLayout, stone_device(), vkDestroyDescriptorSetLayout);
@@ -119,36 +118,34 @@ void PipelineManager::createPipelineLayout()
         emptyDescriptorSetLayout_.get()
     };
 
-    VkPushConstantRange push{
-        .stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+    VkPushConstantRange push{};
+    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                       VK_SHADER_STAGE_MISS_BIT_KHR |
                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
-                      VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
-        .offset     = 0,
-        .size       = 32
-    };
+                      VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+    push.offset     = 0;
+    push.size       = 32;
 
-    VkPipelineLayoutCreateInfo plInfo{
-        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount         = 4,
-        .pSetLayouts            = layouts,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges    = &push
-    };
+    VkPipelineLayoutCreateInfo plInfo{};
+    plInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    plInfo.setLayoutCount         = 4;
+    plInfo.pSetLayouts            = layouts;
+    plInfo.pushConstantRangeCount = 1;
+    plInfo.pPushConstantRanges    = &push;
 
     VkPipelineLayout pl = VK_NULL_HANDLE;
     VK_CHECK(vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl));
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
 
-    std::print("[PIPELINE SUCCESS] Layout forged — ZERO-COST RTX READY\n");
+    std::print("[PIPELINE] Pipeline layout created\n");
 }
 
 // =============================================================================
-// Descriptor Set Allocation — Single global pool
+// Descriptor Set Allocation
 // =============================================================================
 void PipelineManager::allocateDescriptorSets()
 {
-    std::print("[PIPELINE TRACE] Allocating descriptor sets from SINGLE GLOBAL pool\n");
+    std::print("[PIPELINE] Allocating descriptor sets from global pool\n");
 
     VkDescriptorPool globalPool = RTX::g_ctx().descriptorPool_.get();
     if (globalPool == VK_NULL_HANDLE) {
@@ -164,12 +161,11 @@ void PipelineManager::allocateDescriptorSets()
         sets.resize(frames);
         std::vector<VkDescriptorSetLayout> layouts(frames, layout);
 
-        VkDescriptorSetAllocateInfo info{
-            .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool     = globalPool,
-            .descriptorSetCount = frames,
-            .pSetLayouts        = layouts.data()
-        };
+        VkDescriptorSetAllocateInfo info{};
+        info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        info.descriptorPool     = globalPool;
+        info.descriptorSetCount = frames;
+        info.pSetLayouts        = layouts.data();
 
         VkResult result = vkAllocateDescriptorSets(stone_device(), &info, sets.data());
         if (result != VK_SUCCESS) {
@@ -177,7 +173,7 @@ void PipelineManager::allocateDescriptorSets()
                        name, string_VkResult(result));
             return;
         }
-        std::print("[PIPELINE SUCCESS] Allocated {} {} descriptor sets\n", frames, name);
+        std::print("[PIPELINE] Allocated {} {} descriptor sets\n", frames, name);
     };
 
     allocate(rtDescriptorSets_,    rtDescriptorSetLayout_.get(),    "main RT (set 0)");
@@ -186,29 +182,25 @@ void PipelineManager::allocateDescriptorSets()
 }
 
 // =============================================================================
-// Dummy TLAS — Eternal fallback
+// Dummy TLAS — Fallback
 // =============================================================================
 VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 {
-    VkAccelerationStructureGeometryKHR geometry{
-        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .geometry     = {.instances = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
-                                      .data = {.deviceAddress = 0}}}
-    };
+    VkAccelerationStructureGeometryKHR geometry{};
+    geometry.sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    geometry.geometry.instances.data.deviceAddress = 0;
 
-    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
-        .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-        .type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode          = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .geometryCount = 1,
-        .pGeometries   = &geometry
-    };
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+    buildInfo.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    buildInfo.type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries   = &geometry;
 
-    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
-    };
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
+    sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
     constexpr uint32_t primitiveCount = 1;
     g_ext.vkGetAccelerationStructureBuildSizesKHR(
@@ -237,12 +229,11 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
         return VK_NULL_HANDLE;
     }
 
-    VkAccelerationStructureCreateInfoKHR createInfo{
-        .sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
-        .buffer = bufferInfo->buffer,
-        .size   = sizeInfo.accelerationStructureSize,
-        .type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR
-    };
+    VkAccelerationStructureCreateInfoKHR createInfo{};
+    createInfo.sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    createInfo.buffer = bufferInfo->buffer;
+    createInfo.size   = sizeInfo.accelerationStructureSize;
+    createInfo.type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
     VkAccelerationStructureKHR as = VK_NULL_HANDLE;
     VkResult result = g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createInfo, nullptr, &as);
@@ -255,12 +246,12 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
     dummyAccelBuffer_ = Handle<VkBuffer>(bufferInfo->buffer, stone_device(), vkDestroyBuffer);
     dummyAccelMemory_ = Handle<VkDeviceMemory>(bufferInfo->memory, stone_device(), vkFreeMemory);
 
-    std::print("[PIPELINE SUCCESS] Dummy TLAS forged — eternal fallback ready\n");
+    std::print("[PIPELINE] Dummy TLAS created\n");
     return as;
 }
 
 // =============================================================================
-// Shader Loading — Modern C++23
+// Shader Loading
 // =============================================================================
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
 {
@@ -284,11 +275,10 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
     file.seekg(0);
     file.read(code.data(), fileSize);
 
-    VkShaderModuleCreateInfo createInfo{
-        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = fileSize,
-        .pCode    = reinterpret_cast<const uint32_t*>(code.data())
-    };
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = fileSize;
+    createInfo.pCode    = reinterpret_cast<const uint32_t*>(code.data());
 
     VkShaderModule module = VK_NULL_HANDLE;
     VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
@@ -297,16 +287,16 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
         return VK_NULL_HANDLE;
     }
 
-    std::print("[PIPELINE SUCCESS] Shader loaded: {} ({} bytes)\n", relativePath, fileSize);
+    std::print("[PIPELINE] Shader loaded: {} ({} bytes)\n", relativePath, fileSize);
     return module;
 }
 
 // =============================================================================
-// Pipeline Creation — FIXED SHADER GROUPS (validation compliant)
+// Pipeline Creation
 // =============================================================================
 void PipelineManager::createRayTracingPipeline()
 {
-    std::print("[PIPELINE] Forging ray tracing pipeline — ZERO-COST PINK PHOTONS\n");
+    std::print("[PIPELINE] Creating ray tracing pipeline\n");
 
     shaderModules_.clear();
 
@@ -378,15 +368,14 @@ void PipelineManager::createRayTracingPipeline()
     missGroupCount_   = 1;
     hitGroupCount_    = 1;
 
-    VkRayTracingPipelineCreateInfoKHR pipelineInfo{
-        .sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
-        .stageCount                   = static_cast<uint32_t>(stages.size()),
-        .pStages                      = stages.data(),
-        .groupCount                   = static_cast<uint32_t>(groups.size()),
-        .pGroups                      = groups.data(),
-        .maxPipelineRayRecursionDepth = 1,
-        .layout                       = rtPipelineLayout_.get()
-    };
+    VkRayTracingPipelineCreateInfoKHR pipelineInfo{};
+    pipelineInfo.sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+    pipelineInfo.stageCount                   = static_cast<uint32_t>(stages.size());
+    pipelineInfo.pStages                      = stages.data();
+    pipelineInfo.groupCount                   = static_cast<uint32_t>(groups.size());
+    pipelineInfo.pGroups                      = groups.data();
+    pipelineInfo.maxPipelineRayRecursionDepth = 1;
+    pipelineInfo.layout                       = rtPipelineLayout_.get();
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult result = g_ext.vkCreateRayTracingPipelinesKHR(
@@ -398,21 +387,21 @@ void PipelineManager::createRayTracingPipeline()
     }
 
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
-    std::print("[PIPELINE SUCCESS] Ray tracing pipeline forged — PINK PHOTON FAST\n");
+    std::print("[PIPELINE] Ray tracing pipeline created\n");
 }
 
 // =============================================================================
-// SBT Creation — FINAL FIXED VERSION (v30.8) — MANUAL MINIMAL FLAGS + FENCE
+// SBT Creation — Fixed command buffer handling
 // =============================================================================
 void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
 {
     if (s_eternalSbtForged) {
-        std::print("[PIPELINE] ETERNAL SBT ALREADY FORGED — PRESERVING THE ONE TRUE TABLE\n");
+        std::print("[PIPELINE] SBT already created — skipping\n");
         return;
     }
 
     if (rtPipeline_.get() == VK_NULL_HANDLE) {
-        std::print(stderr, "[ERROR] No pipeline — cannot forge SBT\n");
+        std::print(stderr, "[ERROR] No pipeline — cannot create SBT\n");
         return;
     }
 
@@ -431,21 +420,15 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     const VkDeviceSize sbtSize = align_up(raygenSize + missSize + hitSize, baseAlign);
 
-    std::print("[PIPELINE] Forging ETERNAL SBT — {} bytes ({} groups)\n", sbtSize, totalGroups);
+    std::print("[PIPELINE] Creating SBT — {} bytes ({} groups)\n", sbtSize, totalGroups);
 
-    // MANUAL SBT BUFFER CREATION — MINIMAL FLAGS THAT RTX DRIVERS ACCEPT
-    VkBufferCreateInfo bci{
-        .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .pNext       = nullptr,
-        .flags       = 0,
-        .size        = sbtSize,
-        .usage       = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                       VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr
-    };
+    VkBufferCreateInfo bci{};
+    bci.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size        = sbtSize;
+    bci.usage       = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer sbtBuffer = VK_NULL_HANDLE;
     VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &sbtBuffer);
@@ -457,36 +440,22 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     VkMemoryRequirements memReq{};
     vkGetBufferMemoryRequirements(stone_device(), sbtBuffer, &memReq);
 
-    // Local findMemoryType (safe fallback)
-    auto localFindMemoryType = [](uint32_t typeFilter, VkMemoryPropertyFlags props) -> uint32_t {
-        VkPhysicalDeviceMemoryProperties memProps{};
-        vkGetPhysicalDeviceMemoryProperties(StoneKey::stone_physical(), &memProps);
-        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-            if ((typeFilter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & props) == props) {
-                return i;
-            }
-        }
-        return ~0u;
-    };
-
-    uint32_t memType = localFindMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == ~0u) {
         vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-        LOG_FATAL_CAT("PIPELINE", "No device-local memory type for manual SBT buffer");
+        LOG_FATAL_CAT("PIPELINE", "No device-local memory type for SBT buffer");
         return;
     }
 
-    VkMemoryAllocateFlagsInfo flagsInfo{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
-    };
+    VkMemoryAllocateFlagsInfo flagsInfo{};
+    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
-    VkMemoryAllocateInfo allocInfo{
-        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext           = &flagsInfo,
-        .allocationSize  = memReq.size,
-        .memoryTypeIndex = memType
-    };
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.pNext           = &flagsInfo;
+    allocInfo.allocationSize  = memReq.size;
+    allocInfo.memoryTypeIndex = memType;
 
     VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
     res = vkAllocateMemory(stone_device(), &allocInfo, nullptr, &sbtMemory);
@@ -504,13 +473,10 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
-    VkBufferDeviceAddressInfo addrInfo{
-        .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = sbtBuffer
-    };
+    VkBufferDeviceAddressInfo addrInfo{};
+    addrInfo.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addrInfo.buffer = sbtBuffer;
     VkDeviceAddress sbtAddress = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
-
-    LOG_SUCCESS_CAT("PIPELINE", "Manual SBT buffer created — EXPLICIT usage: 0x220004 (SBT + BDA + DST) — success!");
 
     std::vector<uint8_t> handles(totalGroups * handleSize);
     res = g_ext.vkGetRayTracingShaderGroupHandlesKHR(
@@ -524,9 +490,30 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
+    // Upload via staging with dedicated command buffer
+    VkCommandBuffer uploadCmd = VK_NULL_HANDLE;
+    bool ownCmd = (cmd == VK_NULL_HANDLE);
+
+    if (ownCmd) {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = pool ? pool : stone_transient_pool();
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+        VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &uploadCmd));
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        VK_CHECK(vkBeginCommandBuffer(uploadCmd, &beginInfo));
+    } else {
+        uploadCmd = cmd;
+    }
+
     void* staging = BufferManager::mapStaging(handles.size());
     if (!staging) {
         std::print(stderr, "[FATAL] Staging ring overflow during SBT upload\n");
+        if (ownCmd) vkFreeCommandBuffers(stone_device(), pool, 1, &uploadCmd);
         vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
         vkFreeMemory(stone_device(), sbtMemory, nullptr);
         return;
@@ -534,38 +521,16 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     std::memcpy(staging, handles.data(), handles.size());
 
-    bool tempCmd = (cmd == VK_NULL_HANDLE);
-    VkCommandBuffer uploadCmd = cmd;
-
-    if (tempCmd) {
-        if (pool == VK_NULL_HANDLE) pool = stone_transient_pool();
-        VkCommandBufferAllocateInfo allocInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = pool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1
-        };
-        VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &uploadCmd));
-
-        VkCommandBufferBeginInfo beginInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-        };
-        VK_CHECK(vkBeginCommandBuffer(uploadCmd, &beginInfo));
-    }
-
-    VkBufferCopy copy{
-        .srcOffset = BufferManager::g_stagingRing.head - handles.size(),
-        .dstOffset = 0,
-        .size      = handles.size()
-    };
+    VkBufferCopy copy{};
+    copy.srcOffset = BufferManager::g_stagingRing.head - handles.size();
+    copy.dstOffset = 0;
+    copy.size      = handles.size();
     vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtBuffer, 1, &copy);
 
-    VkMemoryBarrier memBarrier{
-        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
-    };
+    VkMemoryBarrier memBarrier{};
+    memBarrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
 
     vkCmdPipelineBarrier(
         uploadCmd,
@@ -577,21 +542,21 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         0, nullptr
     );
 
-    if (tempCmd) {
+    if (ownCmd) {
         VK_CHECK(vkEndCommandBuffer(uploadCmd));
 
         VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fci{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkFenceCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         VK_CHECK(vkCreateFence(stone_device(), &fci, nullptr, &fence));
 
-        VkSubmitInfo submit{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &uploadCmd
-        };
+        VkSubmitInfo submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &uploadCmd;
         VK_CHECK(vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, fence));
 
-        vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
+        VK_CHECK(vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX));
 
         vkDestroyFence(stone_device(), fence, nullptr);
         vkFreeCommandBuffers(stone_device(), pool, 1, &uploadCmd);
@@ -613,18 +578,18 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     s_eternalSbtForged = true;
 
-    std::print("[PIPELINE SUCCESS] ETERNAL SBT FORGED — PINK PHOTON FAST & CLEAN\n");
+    std::print("[PIPELINE] SBT created successfully\n");
 }
 
 // =============================================================================
-// Trace Rays — Direct from persistent command buffer
+// Trace Rays — Guarded dispatch
 // =============================================================================
 void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t width, uint32_t height)
 {
     std::lock_guard<std::mutex> lock(rebuildMutex);
 
     if (g_pipelineNeedsRebuild.load(std::memory_order_acquire)) {
-        std::print("[PIPELINE] Rebuilding pipeline due to change\n");
+        std::print("[PIPELINE] Rebuilding pipeline\n");
         createRayTracingPipeline();
         g_pipelineNeedsRebuild.store(false, std::memory_order_release);
     }
@@ -640,6 +605,11 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t imageIndex, uint32
         getDescriptorSet(imageIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT),
         texDescriptorSets_[imageIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT]
     };
+
+    if (sets[0] == VK_NULL_HANDLE || sets[1] == VK_NULL_HANDLE) {
+        std::print(stderr, "[ERROR] Invalid descriptor sets for traceRays\n");
+        return;
+    }
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             rtPipelineLayout_.get(), 0, 2, sets, 0, nullptr);
@@ -668,162 +638,141 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t imageIndex, uint32
                             &callableRegion,
                             width, height, 1);
 
-    std::print("[TRACE] vkCmdTraceRaysKHR dispatched: {}x{}\n", width, height);
+    std::print("[TRACE] Ray tracing dispatched: {}x{}\n", width, height);
 }
 
 // =============================================================================
-// Forge Full Pipeline — Automagic Entry Point
+// Destructor
 // =============================================================================
-void PipelineManager::forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd)
+PipelineManager::~PipelineManager()
 {
-    if (s_crownForged) return;
+    sbtBuffer_.reset();
+    sbtMemory_.reset();
 
-    std::print("[PIPELINE] FORGING THE PERFECT PINK PHOTON RTX PIPELINE — FINAL 2026\n");
+    BufferManager::purge_all();
 
-    createPipelineLayout();
-    allocateDescriptorSets();
-    createRayTracingPipeline();
-    createShaderBindingTable(commandPool, graphicsQueue, mainCmd);
-
-    StoneKey::stone_seal_pipeline(this);
-    s_crownForged = true;
-
-    std::print("[PIPELINE SUCCESS] PERFECT RTX PIPELINE FORGED — ZERO-COST DIRECT — PINK PHOTONS SCREAM\n");
+    std::print("[PIPELINE] PipelineManager destroyed\n");
 }
 
 // =============================================================================
-// Accessors
+// Cache ray tracing device properties (called once)
 // =============================================================================
-VkDescriptorSet PipelineManager::getDescriptorSet(uint32_t frameIndex) const
-{
-    return (frameIndex < rtDescriptorSets_.size()) ? rtDescriptorSets_[frameIndex] : VK_NULL_HANDLE;
-}
-
-VkPipeline PipelineManager::getPipeline() const
-{
-    return rtPipeline_.get();
-}
-
-VkPipelineLayout PipelineManager::getPipelineLayout() const
-{
-    return rtPipelineLayout_.get();
-}
-
-// =============================================================================
-// Cache Device Properties
-// =============================================================================
-void PipelineManager::cacheDeviceProperties()
+void RTX::PipelineManager::cacheDeviceProperties()
 {
     static bool cached = false;
     if (cached) return;
 
     std::print("[PIPELINE] Caching ray tracing properties\n");
 
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-    };
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};
+    rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
 
-    VkPhysicalDeviceProperties2 props2{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &rtProps
-    };
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &rtProps;
 
-    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
+    vkGetPhysicalDeviceProperties2(StoneKey::stone_physical(), &props2);
 
     if (rtProps.shaderGroupHandleSize == 0) {
-        std::print(stderr, "[ERROR] Ray tracing not supported\n");
+        std::print(stderr, "[ERROR] Ray tracing not supported on this device\n");
         throw std::runtime_error("Ray tracing unsupported");
     }
 
+    // Cache in StoneKey for global access
     StoneKey::stone_seal_rtprops(rtProps);
+
     cached = true;
 
-    std::print("[PIPELINE SUCCESS] Properties cached — handle size: {}\n", rtProps.shaderGroupHandleSize);
+    std::print("[PIPELINE] Ray tracing properties cached — handle size: {}\n", rtProps.shaderGroupHandleSize);
 }
 
 // =============================================================================
-// Update RT Descriptor Set — Modern C++23
+// Update RT descriptor set for a given frame
 // =============================================================================
-void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
+void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
     if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) {
+        std::print(stderr, "[ERROR] Invalid frame index or descriptor set for update\n");
         return;
     }
 
     VkDescriptorSet set = rtDescriptorSets_[frameIndex];
+
     std::array<VkWriteDescriptorSet, 17> writes{};
     uint32_t writeCount = 0;
 
     auto addAccel = [&](uint32_t binding, VkAccelerationStructureKHR as) {
         as = as ? as : (LAS::instance().getTLAS() ? LAS::instance().getTLAS() : dummyTLAS_.get());
-        VkWriteDescriptorSetAccelerationStructureKHR accelInfo{
-            .sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-            .accelerationStructureCount = 1,
-            .pAccelerationStructures    = &as
-        };
-        writes[writeCount++] = VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext           = &accelInfo,
-            .dstSet          = set,
-            .dstBinding      = binding,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-        };
+        VkWriteDescriptorSetAccelerationStructureKHR accelInfo{};
+        accelInfo.sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+        accelInfo.accelerationStructureCount = 1;
+        accelInfo.pAccelerationStructures    = &as;
+
+        writes[writeCount] = VkWriteDescriptorSet{};
+        writes[writeCount].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].pNext            = &accelInfo;
+        writes[writeCount].dstSet           = set;
+        writes[writeCount].dstBinding       = binding;
+        writes[writeCount].descriptorCount  = 1;
+        writes[writeCount].descriptorType   = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        ++writeCount;
     };
 
     auto addImage = [&](uint32_t binding, VkImageView view, VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL) {
         if (view == VK_NULL_HANDLE) return;
-        VkDescriptorImageInfo info{.imageView = view, .imageLayout = layout};
-        writes[writeCount++] = VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = binding,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .pImageInfo      = &info
-        };
+        VkDescriptorImageInfo info{};
+        info.imageView   = view;
+        info.imageLayout = layout;
+
+        writes[writeCount] = VkWriteDescriptorSet{};
+        writes[writeCount].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].dstSet          = set;
+        writes[writeCount].dstBinding      = binding;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[writeCount].pImageInfo      = &info;
+        ++writeCount;
     };
 
     auto addBuffer = [&](uint32_t binding, VkBuffer buffer, VkDeviceSize size, VkDescriptorType type) {
-        if (buffer == VK_NULL_HANDLE) return;
-        VkDescriptorBufferInfo info{.buffer = buffer, .offset = 0, .range = size};
-        writes[writeCount++] = VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = binding,
-            .descriptorCount = 1,
-            .descriptorType  = type,
-            .pBufferInfo     = &info
-        };
+        if (buffer == VK_NULL_HANDLE || size == 0) return;
+        VkDescriptorBufferInfo info{};
+        info.buffer = buffer;
+        info.offset = 0;
+        info.range  = size;
+
+        writes[writeCount] = VkWriteDescriptorSet{};
+        writes[writeCount].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].dstSet          = set;
+        writes[writeCount].dstBinding      = binding;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType  = type;
+        writes[writeCount].pBufferInfo     = &info;
+        ++writeCount;
     };
 
-    auto addSampler = [&](uint32_t binding, VkSampler sampler, VkImageView view) {
-        if (!sampler || !view) return;
-        VkDescriptorImageInfo info{
-            .sampler     = sampler,
-            .imageView   = view,
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        };
-        writes[writeCount++] = VkWriteDescriptorSet{
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet          = set,
-            .dstBinding      = binding,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo      = &info
-        };
-    };
-
-    addAccel(0, updateInfo.tlas);
-    addImage(1, updateInfo.rtOutputView);
+    addAccel(0, updateInfo.tlas);                    // TLAS binding
+    addImage(1, updateInfo.rtOutputView);            // Output image
     addBuffer(2, updateInfo.ubo, updateInfo.uboSize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
-    if (updateInfo.materialsBuffer) {
+    if (updateInfo.materialsBuffer && updateInfo.materialsSize > 0) {
         addBuffer(4, updateInfo.materialsBuffer, updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     }
 
     if (updateInfo.blueNoiseSampler && updateInfo.blueNoiseView) {
-        addSampler(8, updateInfo.blueNoiseSampler, updateInfo.blueNoiseView);
+        VkDescriptorImageInfo info{};
+        info.sampler     = updateInfo.blueNoiseSampler;
+        info.imageView   = updateInfo.blueNoiseView;
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        writes[writeCount] = VkWriteDescriptorSet{};
+        writes[writeCount].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].dstSet          = set;
+        writes[writeCount].dstBinding      = 8;  // Assuming blue noise binding
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[writeCount].pImageInfo      = &info;
+        ++writeCount;
     }
 
     if (!updateInfo.nexusScoreViews.empty() && frameIndex < updateInfo.nexusScoreViews.size()) {
@@ -836,26 +785,22 @@ void PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescrip
 }
 
 // =============================================================================
-// Destructor
+// Get descriptor set for a given frame
 // =============================================================================
-PipelineManager::~PipelineManager()
+VkDescriptorSet RTX::PipelineManager::getDescriptorSet(uint32_t frameIndex) const
 {
-    sbtBuffer_.reset();
-    sbtMemory_.reset();
-
-    BufferManager::purge_all();  // Clean all buffers to fix destruction errors
-
-    std::print("[PIPELINE] PERFECT PINK PHOTON PIPELINE MANAGER RESTS — EMPIRE ETERNAL\n");
+    if (frameIndex >= rtDescriptorSets_.size()) {
+        return VK_NULL_HANDLE;
+    }
+    return rtDescriptorSets_[frameIndex];
 }
 
 } // namespace RTX
 
 // =============================================================================
-// FINAL PIPELINE MANAGER v30.8 — JANUARY 13, 2026
-// - Fence for SBT upload (fixes free CB error)
-// - BufferManager::purge_all() in destructor (fixes object destruction errors)
-// - sbtBuffer_.reset() explicit
-// - No BufferManager interference for SBT — fixes all VUIDs
-// - Rendering ready — pink photons scream
-// Empire complete — AMOURANTH FOREVER 💖
+// PipelineManager v30.9 — January 20, 2026
+// - Fixed command buffer state (proper begin/end)
+// - Fence for SBT upload
+// - Early guards in traceRays
+// - Clean shutdown
 // =============================================================================
