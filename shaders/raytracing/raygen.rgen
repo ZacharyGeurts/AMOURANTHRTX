@@ -1,4 +1,4 @@
-// shaders/raytracing/raygen.glsl
+// shaders/raytracing/raygen.rgen
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL
 // RAY GENERATION SHADER — PRIMARY RAY LAUNCH + TEMPORAL ACCUMULATION
 // PINK PHOTONS SCREAM ETERNAL — AMOURANTH FOREVER 💖
@@ -30,26 +30,26 @@ layout(push_constant) uniform PushConstants {
     uint frame;
 } push;
 
-// ── StoneKey security — embedded, eternal, no shared file ──────────────────
+// StoneKey security — embedded, eternal, no shared file
 layout(binding = 31) uniform StoneKeyRuntimeBlock
 {
-    uint64_t uStoneKey1;
-    uint64_t uStoneKey2;
-    uint64_t uHandleObfuscator;   // 0 = use compile-time base
+    uint uStoneKey1;
+    uint uStoneKey2;
+    uint uHandleObfuscator;   // 0 = use compile-time base
 } stoneRuntime;
 
-const uint64_t kStoneObfuscatorBase = 
-    0x9E37AF18C64D8A17UL ^ 0xE4F8B29D71A3C56CUL ^ 0x1337C0DE69F00D42UL;
+const uint kStoneObfuscatorBase = 
+    0x9E37AF18U ^ 0xE4F8B29DU ^ 0x1337C0DEU;
 
-uint64_t stone_get_obfuscator()
+uint stone_get_obfuscator()
 {
-    return (stoneRuntime.uHandleObfuscator != 0UL)
+    return (stoneRuntime.uHandleObfuscator != 0U)
         ? stoneRuntime.uHandleObfuscator
         : kStoneObfuscatorBase;
 }
 
-#define STONE_FINAL_OBFUSCATE(val)   (uint64_t(val) ^ stone_get_obfuscator())
-#define STONE_FINAL_DEOBFUSCATE(val) (uint64_t(val) ^ stone_get_obfuscator())
+#define STONE_FINAL_OBFUSCATE(val)   (uint(val) ^ stone_get_obfuscator())
+#define STONE_FINAL_DEOBFUSCATE(val) (uint(val) ^ stone_get_obfuscator())
 
 #define STONE_OBFUSCATE_RT(val)  STONE_FINAL_OBFUSCATE(val)
 #define STONE_DEOBFUSCATE_RT(val) STONE_FINAL_DEOBFUSCATE(val)
@@ -60,7 +60,7 @@ const vec3 kHotPink     = vec3(1.0, 0.078, 0.576);
 const vec3 kThermoPink  = vec3(1.0, 0.35, 0.7);
 const float kStrawEternal = 1.337;
 
-// ── Simple PCG RNG ──────────────────────────────────────────────────────────
+// Simple PCG RNG
 uint pcg(uint v) {
     uint state = v * 747796405u + 2891336453u;
     state = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -72,7 +72,6 @@ void main() {
     ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
     ivec2 resolution = ivec2(gl_LaunchSizeEXT.xy);
 
-    // Camera ray generation
     vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(resolution);
     uv = uv * 2.0 - 1.0;
 
@@ -83,13 +82,10 @@ void main() {
     vec3 rayDir = normalize(direction.xyz);
     vec3 rayOrigin = ubo.cameraPos.xyz;
 
-    // RNG seed per pixel + frame
     uint seed = pcg(pixel.x + pixel.y * resolution.x + ubo.frameNumber * 1664525u);
 
-    // Trace primary ray
     traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, 0.001, rayDir, 10000.0, 0);
 
-    // Temporal accumulation — exponential moving average
     vec3 newColor = hitColor;
     vec3 prevColor = imageLoad(rtOutput, pixel).rgb;
 
@@ -101,7 +97,6 @@ void main() {
         finalColor = mix(prevColor, newColor, alpha);
     }
 
-    // Exposure
     finalColor *= ubo.exposure;
 
     imageStore(rtOutput, pixel, vec4(finalColor, 1.0));

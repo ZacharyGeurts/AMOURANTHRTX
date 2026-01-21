@@ -275,9 +275,6 @@ set(SHADER_DEBUG_FLAGS -g -O0)
 file(GLOB_RECURSE POTENTIAL_SHADERS
     shaders/raytracing/*
     shaders/compute/*
-    shaders/graphics/*
-    shaders/rasterization/*
-    shaders/tonemaps/*
 )
 
 set(SPV_OUTPUTS "")
@@ -290,10 +287,6 @@ foreach(SRC ${POTENTIAL_SHADERS})
     get_filename_component(BASE ${SRC} NAME_WE)
     get_filename_component(DIR ${SRC} DIRECTORY)
     get_filename_component(REL_DIR ${DIR} NAME)
-
-    if(REL_DIR STREQUAL "tonemaps")
-        set(REL_DIR "graphics")
-    endif()
 
     set(OUT_DIR "${BIN_DIR}/assets/shaders/${REL_DIR}")
     set(STAGE "")
@@ -339,7 +332,7 @@ foreach(SRC ${POTENTIAL_SHADERS})
 
     set(VALIDATION_ENV vulkan1.4)
     if(REL_DIR STREQUAL "raytracing")
-        set(VALIDATION_ENV vulkan1.3)
+        set(VALIDATION_ENV vulkan1.4)
     endif()
 
     add_custom_command(
@@ -362,13 +355,13 @@ add_dependencies(amouranth_engine shaders)
 # ASSET COPY
 # =============================================================================
 set(ASSET_MAP
-    "fonts:*.ttf,*.otf,*.font,*.bdf,*.fnt"
-    "textures:*.png,*.jpg,*.ktx2,*.dds,*.hdr,*.ico,*.bmp,*.gif,*.tga,*.webp,*.jp2,*.svg"
-    "models:*.obj,*.gltf,*.glb,*.fbx,*.stl,*.blend"
-    "materials:*.json,*.mtl"
-    "scenes:*.json,*.xml,*.yaml"
-    "audio:*.wav,*.ogg,*.mp3,*.flac,*.aac,*.m4a,*.wma"
-    "scripts:*.lua,*.py,*.js,*.glsl"
+    "fonts:*.ttf,*.otf,*.ttc,*.woff,*.woff2,*.eot"
+    "textures:*.png,*.jpg,*.jpeg,*.jpe,*.jfif,*.exr,*.hdr,*.dds,*.ktx,*.ktx2,*.tga,*.bmp,*.gif,*.webp,*.jp2,*.svg,*.ico"
+    "models:*.obj,*.gltf,*.glb,*.fbx,*.dae,*.stl,*.ply,*.blend,*.3ds,*.abc"
+    "materials:*.json,*.mtl,*.xml,*.yaml,*.yml"
+    "scenes:*.json,*.xml,*.yaml,*.yml,*.scene,*.scn"
+    "audio:*.wav,*.ogg,*.mp3,*.flac,*.aac,*.m4a,*.wma,*.opus"
+    "scripts:*.lua,*.py,*.js,*.ts,*.glsl,*.hlsl,*.cs,*.gd"
 )
 foreach(MAP ${ASSET_MAP})
     string(REPLACE ":" ";" PAIR ${MAP})
