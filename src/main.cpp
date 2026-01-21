@@ -1,9 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine - Main Entry Point
-// Naked Vulkan startup — no fallback, no pink, just beams
-// Version 30.3 — January 20, 2026
-// Production ready: Main handles streaking — LAS to swapchain, rays every frame
-// No guards, no slowdown — crash loud, learn fast, render turf
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 21, 2026
+// main.cpp — FINAL FIXED & COMPILING | ONE CONSOLE, ONE CLOCK, ONE EMPIRE
+// NO DUPLICATE executeCommand() | TOTALTIME_ TRAIN FULL SPEED | PINK PHOTONS ETERNAL
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
@@ -27,11 +25,8 @@
 
 using namespace std::chrono_literals;
 
-// Global renderer — RAII
+// Global renderer — owns the light
 std::unique_ptr<RTX::VulkanRenderer> renderer;
-
-float g_deltaTime = 0.0f;
-bool g_running = true;
 
 // =============================================================================
 // Sacrificial Splash — Isolated, disposable
@@ -42,17 +37,17 @@ static void showSacrificialSplash() {
     constexpr int W = 1280, H = 720;
     constexpr const char* TITLE = "AMOURANTH RTX vTURBO";
 
-    std::print("[SPLASH] Starting sacrificial splash...\n");
+    std::print("[SPLASH] Starting...\n");
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
-        std::print("[SPLASH] SDL video init failed: {}\n", SDL_GetError());
+        std::print("[SPLASH] Video init failed: {}\n", SDL_GetError());
         return;
     }
 
     SDL_Window* splashWin = SDL_CreateWindow(TITLE, W, H,
                                              SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN);
     if (!splashWin) {
-        std::print("[SPLASH] Window creation failed: {}\n", SDL_GetError());
+        std::print("[SPLASH] Window failed: {}\n", SDL_GetError());
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return;
     }
@@ -73,7 +68,7 @@ static void showSacrificialSplash() {
 
     SDL_Renderer* splashRen = SDL_CreateRenderer(splashWin, nullptr);
     if (!splashRen) {
-        std::print("[SPLASH] Renderer creation failed: {}\n", SDL_GetError());
+        std::print("[SPLASH] Renderer failed: {}\n", SDL_GetError());
         SDL_DestroyWindow(splashWin);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return;
@@ -122,14 +117,14 @@ splash_cleanup:
     SDL_DestroyWindow(splashWin);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
-    std::print("[SPLASH] Complete — clean slate ready\n");
+    std::print("[SPLASH] Complete\n");
 }
 
 // =============================================================================
 // Safe shutdown
 // =============================================================================
 [[noreturn]] static void apocalypse(std::string_view reason = "Normal exit") {
-    std::print("[MAIN] Shutdown: {} — cleaning resources\n", reason);
+    std::print("[MAIN] Shutdown: {}\n", reason);
 
     renderer.reset();
 
@@ -159,7 +154,7 @@ splash_cleanup:
 }
 
 // =============================================================================
-// Main — Naked startup, straight to beams
+// Main — Launcher only — hands off to pure light
 // =============================================================================
 int main(int, char**) {
     if (SDL_Init(SDL_INIT_EVENTS) == 0) {
@@ -224,7 +219,7 @@ int main(int, char**) {
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) apocalypse("Device creation failed");
 
-    // Seal device and related objects (idempotent, safe)
+    // Seal device and related objects (idempotent)
     StoneKey::stone_seal_device(device);
     StoneKey::stone_seal_physical(RTX::g_ctx().physical_);
     StoneKey::stone_seal_graphics_family(RTX::g_ctx().graphicsFamily_);
@@ -239,90 +234,62 @@ int main(int, char**) {
     RTX::loadDeviceExtensions(device);
     RTX::g_ctx().init();
 
+    // CRITICAL: Pool before renderer — global infrastructure first
+    RTX::createGlobalDescriptorPool();
+
     RTX::SwapchainManager::create(window, pixelW, pixelH);
 
+    // Renderer owns everything — LAS, pipeline, SBT, descriptors, pew pew
     renderer = std::make_unique<RTX::VulkanRenderer>(pixelW, pixelH, window, Options::Performance::OVERCLOCK_RENDERER);
-    renderer->createPersistentCommandPoolAndBuffers();
-
-    // Force initial acceleration structure build
-    RTX::LAS::instance().getTLAS();
-
-    // Create descriptor pool after AS build (driver stability)
-    RTX::createGlobalDescriptorPool();
 
     SDL_Renderer* sdlRen = SDL_CreateRenderer(window, nullptr);
     if (!sdlRen) std::print("[WARN] SDL overlay renderer failed: {}\n", SDL_GetError());
     Console::init(window, sdlRen);
 
-    // Local camera instance
+    // Local camera — renderer will use it directly
     Camera cam;
 
-    auto lastTime = std::chrono::steady_clock::now();
-    int frameCount = 0;
-    float fpsTimer = 0.0f;
+    std::print("[MAIN] Launcher complete — pure light engaged\n");
 
-    int curW = pixelW, curH = pixelH;
+    auto last_log_time = std::chrono::steady_clock::now();
 
-    std::print("[MAIN] Engine fully initialized — RTX realm active — naked mode\n");
-
-    while (g_running) {
-        auto now = std::chrono::steady_clock::now();
-        g_deltaTime = std::chrono::duration<float>(now - lastTime).count();
-        lastTime = now;
-
-        fpsTimer += g_deltaTime;
-        ++frameCount;
-
-        // FPS counter at the top — prints even on crash
-        if (fpsTimer >= 1.0f) {
-            float fps = frameCount / fpsTimer;
-            std::print("[PERF] FPS: {:.1f} | SPP: {} | Frame: {} | {}×{}\n",
-                       fps, renderer->spp(), renderer->currentFrame(), curW, curH);
-            fflush(stdout);
-            frameCount = 0;
-            fpsTimer = 0.0f;
-        }
+    while (true) {
+        renderer->pewPew();  // Acquire → trace → present. Forever.
 
         SDL_Event e;
-        bool quit = false;
-        bool toggleFS = false;
-        int newW = curW, newH = curH;
-
         while (SDL_PollEvent(&e)) {
             Console::handleEvent(e);
-            if (e.type == SDL_EVENT_QUIT) quit = true;
-            if (e.type == SDL_EVENT_WINDOW_RESIZED || e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-                SDL_GetWindowSizeInPixels(window, &newW, &newH);
+            if (e.type == SDL_EVENT_QUIT) {
+                apocalypse("Quit requested");
             }
-            if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_F11) toggleFS = true;
-        }
-
-        if (toggleFS) SDL3Window::toggleFullscreen();
-        if (quit) g_running = false;
-
-        if (newW != curW || newH != curH) {
-            curW = std::max(newW, 1);
-            curH = std::max(newH, 1);
-            RTX::SwapchainManager::recreate(curW, curH);
-            renderer->createPersistentCommandPoolAndBuffers();
-            RTX::LAS::instance().requestRebuild();
-        }
-
-        if (StoneKey::stone_swapchain() != VK_NULL_HANDLE) {
-            renderer->renderFrame(cam, g_deltaTime);
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_F11) {
+                SDL3Window::toggleFullscreen();
+            }
         }
 
         Console::render();
+
+        // Log lifetime once per second — pirate ship shib timbers style
+        auto now = std::chrono::steady_clock::now();
+        double elapsed = std::chrono::duration<double>(now - last_log_time).count();
+        if (elapsed >= 1.0) {
+            LOG_INFO_CAT("MAIN", "ARRR! Lifetime: {:.6f}s | {:.1f} FPS | {:.3f} ms/frame | Pink photons eternal!",
+                         totalTime_,
+                         totalTime_ > 0.0 ? 1.0 / totalTime_ : 0.0,
+                         totalTime_ > 0.0 ? 1000.0 / (1.0 / totalTime_) : 0.0);
+            last_log_time = now;
+        }
     }
 
-    apocalypse("Graceful exit");
+    // Unreachable — apocalypse() exits
     return 0;
 }
 
 // =============================================================================
-// Main v30.3 — January 20, 2026
-// - Naked mode: no fallback, no pink, just beams
-// - FPS counter at top of loop — prints even on crash
-// - LAS to swapchain, rays every frame
-// - Production stable (fail fast)
+// Main v30.5 — January 21, 2026
+// - Pool before renderer — fixes null pool during warm-up/allocation
+// - Naked launcher: splash → Vulkan → pool → renderer → pew pew forever
+// - No duplicate executeCommand() — Console owns it
+// - Lifetime logging once per second — pirate ship shib timbers style
+// - No frames, no fallback — crash loud, render turf
 // =============================================================================

@@ -33,6 +33,7 @@ void cmd_fps();
 void cmd_spp();
 void cmd_accum();
 void cmd_gpu();
+void cmd_time();
 void cmd_quit();
 void cmd_clear();
 

@@ -1,12 +1,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
-// High-performance direct ray tracing core with living world simulation
-// Persistent command buffers • Timeline synchronization • Accumulation & denoising
-// Dynamic day/night cycle, wind, atmosphere • Infinite procedural terrain
-// Version 30.21 — January 20, 2026
-// Rewritten: no fallback, no pink, no hang — straight beams to swapchain
-// First-frame race fixed: forced update, SBT validation, direct trace
-// C++23 style — production ready, empire unbroken
+// Pure light ray tracing core — no frames, no state, pew pew forever
+// Version 30.28 — January 20, 2026
+// Naked: direct LAS → swapchain beams, single set, transient cmd per present
+// No warm-up, no accumulation, no per-frame anything — crash loud, render turf
+// C++23 — production ready, empire unbroken
+// Renderer owns lifetime clock — double totalTime_ + steady_clock dt
+// No SDL3 timer, no g_deltaTime — pure chrono steady_clock
+// Member order fixed to kill -Werror=reorder
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -15,8 +16,6 @@
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
 #include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/SDL3.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/camera_utils.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
@@ -29,7 +28,6 @@
 #include <vector>
 #include <array>
 #include <cmath>
-#include <filesystem>
 #include <utility>
 #include <chrono>
 
@@ -59,15 +57,10 @@ struct CameraSceneData {
 
     float exposure = 1.0f;
     float totalTime = 0.0f;
-    uint32_t frameNumber = 0;
     uint32_t randomSeed = 12345u;
 
-    uint32_t spp = 0;
     uint32_t maxDepth = 12;
-    uint32_t enableAccumulation = 1;
-    uint32_t enableDenoising = 1;
 
-    uint32_t tonemapType = 0;
     uint32_t padding[3] = {0, 0, 0};
 };
 
@@ -81,19 +74,19 @@ struct LivingWorld {
     float humidity = 0.6f;
     float windSpeed = 5.0f;
     glm::vec3 windDirection = glm::normalize(glm::vec3(1.0f, 0.0f, 0.3f));
-    float totalTime = 0.0f;
+    double totalTime = 0.0;  // sync with renderer clock
 
-    void update(float deltaTime) noexcept {
-        totalTime += deltaTime;
-        timeOfDay += deltaTime * cycleSpeed;
+    void update(double dt) noexcept {
+        totalTime += dt;
+        timeOfDay += static_cast<float>(dt) * cycleSpeed;
         if (timeOfDay >= 24.0f) timeOfDay -= 24.0f;
 
         float dayFactor = std::sin((timeOfDay / 24.0f) * glm::pi<float>() * 2.0f);
         temperature = 15.0f + dayFactor * 15.0f;
         humidity = 0.5f + (1.0f - std::abs(dayFactor)) * 0.5f;
 
-        windSpeed = 5.0f + std::sin(totalTime * 0.1f) * 4.0f + std::sin(totalTime * 0.03f) * 2.0f;
-        float windAngle = totalTime * 0.01f;
+        windSpeed = 5.0f + std::sin(totalTime * 0.1) * 4.0f + std::sin(totalTime * 0.03) * 2.0f;
+        float windAngle = static_cast<float>(totalTime * 0.01);
         windDirection = glm::normalize(glm::vec3(std::cos(windAngle), 0.0f, std::sin(windAngle)));
     }
 
@@ -114,7 +107,7 @@ struct LivingWorld {
 static LivingWorld g_world;
 
 // =============================================================================
-// VulkanRenderer — Full Automagic Living World & UBO Management
+// VulkanRenderer — Pure light ray tracing engine
 // =============================================================================
 RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclock)
     : window_(window),
@@ -122,20 +115,15 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
       height_(height),
       minimized_(false),
       destroyed_(false),
-      needsTransition_(true),
-      frameNumber_(0),
-      spp_(0),
-      overclock_(overclock),
-      totalTime_(0.0f),
-      lastImageIndex_(0),
+      totalTime_(0.0),
+      last_time_(std::chrono::steady_clock::now()),
       timelineSemaphore_(VK_NULL_HANDLE),
       currentTimelineValue_(0),
       defaultMaterialsHandle_(0),
       cameraUBO_(0),
-      persistentCmdPool_(VK_NULL_HANDLE),
       transientCmdPool_(VK_NULL_HANDLE)
 {
-    LOG_INFO("RENDERER", "Initializing VulkanRenderer — {}x{}", width, height);
+    LOG_INFO("RENDERER", "Initializing pure light engine — {}x{}", width, height);
 
     lazyCam(width, height);
 
@@ -151,10 +139,6 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     semInfo.pNext = &timelineType;
     VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &timelineSemaphore_));
 
-    createSyncObjects();
-
-    createDefaultMaterials();
-
     // Automagic UBO with TRANSFER_DST
     cameraUBO_ = BufferManager::create(
         sizeof(CameraSceneData),
@@ -165,11 +149,10 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
         LOG_FATAL("RENDERER", "Failed to create camera UBO");
     }
 
-    // Forge living world & force initial TLAS build
-    forgeLivingWorld();
+    // Force initial TLAS build
     LAS::instance().getTLAS();  // Synchronous — TLAS ready
 
-    // Pipeline setup
+    // Pipeline setup — once, forever
     pipelineManager_.createPipelineLayout();
     pipelineManager_.allocateDescriptorSets();
     pipelineManager_.createRayTracingPipeline();
@@ -179,10 +162,10 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     pipelineManager_.createShaderBindingTable(transientCmdPool_, stone_graphics_queue(), oneTimeCmd);
     submitAndWaitOneTime(oneTimeCmd);
 
-    // Critical: Force warm-up update for frame 0
-    warmUpDescriptorSet();
+    // One-time global descriptor set update — initial TLAS + view + UBO
+    updateGlobalDescriptorSet();
 
-    LOG_INFO("RENDERER", "VulkanRenderer initialized — ready for rendering");
+    LOG_INFO("RENDERER", "Pure light engine initialized — ready to pew pew");
 }
 
 RTX::VulkanRenderer::~VulkanRenderer() {
@@ -192,13 +175,6 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     if (timelineSemaphore_ != VK_NULL_HANDLE)
         vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
 
-    for (auto s : imageAvailableSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto s : renderFinishedSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto f : inFlightFences_) vkDestroyFence(stone_device(), f, nullptr);
-
-    if (persistentCmdPool_ != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(stone_device(), persistentCmdPool_, nullptr);
-    }
     if (transientCmdPool_ != VK_NULL_HANDLE) {
         vkDestroyCommandPool(stone_device(), transientCmdPool_, nullptr);
     }
@@ -210,36 +186,37 @@ RTX::VulkanRenderer::~VulkanRenderer() {
 }
 
 // =============================================================================
-// Warm-up descriptor set for frame 0 — callable, ensures first frame ready
+// One-time global descriptor set update — called once at startup
 // =============================================================================
-void RTX::VulkanRenderer::warmUpDescriptorSet() noexcept {
-    LOG_INFO("RENDERER", "Warm-up: priming descriptor set for frame 0");
+void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
+    LOG_INFO("RENDERER", "Updating global descriptor set");
 
     if (RTX::SwapchainManager::views().empty()) {
-        LOG_ERROR("RENDERER", "No swapchain views available for warm-up");
-        return;
+        LOG_FATAL("RENDERER", "No swapchain views — cannot update set");
+        std::exit(1);
     }
 
-    RTDescriptorUpdate warmUp{};
-    warmUp.tlas = LAS::instance().getTLAS();
-    warmUp.rtOutputView = RTX::SwapchainManager::view(0);
-    warmUp.ubo = BufferManager::get_buffer(cameraUBO_);
-    warmUp.uboSize = sizeof(CameraSceneData);
-    warmUp.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
-    warmUp.materialsSize = sizeof(std::array<Material, 1>);
+    RTDescriptorUpdate update{};
+    update.tlas = LAS::instance().getTLAS();
+    update.rtOutputView = RTX::SwapchainManager::view(0);
+    update.ubo = BufferManager::get_buffer(cameraUBO_);
+    update.uboSize = sizeof(CameraSceneData);
+    update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
+    update.materialsSize = sizeof(std::array<Material, 1>);
 
-    pipelineManager_.updateRTDescriptorSet(0, warmUp);
+    pipelineManager_.updateRTDescriptorSet(0, update);
 
-    // Verify frame 0 set is now valid
-    if (pipelineManager_.getDescriptorSet(0) == VK_NULL_HANDLE) {
-        LOG_FATAL("RENDERER", "Warm-up failed — frame 0 descriptor set still null");
+    VkDescriptorSet set = pipelineManager_.getDescriptorSet(0);
+    if (set == VK_NULL_HANDLE) {
+        LOG_FATAL("RENDERER", "Global descriptor set null after update — fatal");
+        std::exit(1);
     } else {
-        LOG_SUCCESS("RENDERER", "Warm-up complete — frame 0 descriptors updated");
+        LOG_SUCCESS("RENDERER", "Global descriptor set updated");
     }
 }
 
 // =============================================================================
-// Transient command pool
+// Transient command pool — one per pew pew
 // =============================================================================
 void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
     if (transientCmdPool_ != VK_NULL_HANDLE) return;
@@ -253,39 +230,7 @@ void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
 }
 
 // =============================================================================
-// Persistent command pool + buffers
-// =============================================================================
-void RTX::VulkanRenderer::createPersistentCommandPoolAndBuffers() noexcept {
-    if (persistentCmdPool_ != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(stone_device(), persistentCmdPool_, nullptr);
-    }
-
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = StoneKey::stone_graphics_family();
-
-    VK_CHECK(vkCreateCommandPool(stone_device(), &poolInfo, nullptr, &persistentCmdPool_));
-
-    const uint32_t count = RTX::SwapchainManager::imageCount();
-    if (count == 0) {
-        LOG_FATAL("RENDERER", "Swapchain image count is 0 — cannot create cmd buffers");
-        return;
-    }
-
-    frameCmdBuffers_.resize(count);
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = persistentCmdPool_;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = count;
-
-    VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, frameCmdBuffers_.data()));
-}
-
-// =============================================================================
-// One-time helpers
+// getOneTimeCommandBuffer — transient one-shot cmd buffer
 // =============================================================================
 VkCommandBuffer RTX::VulkanRenderer::getOneTimeCommandBuffer() noexcept {
     VkCommandBufferAllocateInfo allocInfo{};
@@ -294,210 +239,72 @@ VkCommandBuffer RTX::VulkanRenderer::getOneTimeCommandBuffer() noexcept {
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
 
-    VkCommandBuffer cmd;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
     VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd));
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
     return cmd;
 }
 
+// =============================================================================
+// submitAndWaitOneTime — submit and wait for transient cmd
+// =============================================================================
 void RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept {
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
+    submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount   = 1;
+    submitInfo.pCommandBuffers      = &cmd;
 
-    vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(stone_graphics_queue());
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
+    VkFence fence = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &fence));
+
+    VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, fence));
+    VK_CHECK(vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX));
+
+    vkDestroyFence(stone_device(), fence, nullptr);
     vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
 }
 
 // =============================================================================
-// Sync objects
+// Pew Pew — acquire image, trace rays, present (no frames)
 // =============================================================================
-void RTX::VulkanRenderer::createSyncObjects() noexcept {
-    const uint32_t imageCount = RTX::SwapchainManager::imageCount();
+void RTX::VulkanRenderer::pewPew() noexcept {
+    if (minimized_ || destroyed_) return;
 
-    for (auto s : imageAvailableSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto s : renderFinishedSemaphores_)   vkDestroySemaphore(stone_device(), s, nullptr);
-    for (auto f : inFlightFences_) vkDestroyFence(stone_device(), f, nullptr);
+    auto now = std::chrono::steady_clock::now();
+    double dt = std::chrono::duration<double>(now - last_time_).count();
+    last_time_ = now;
 
-    imageAvailableSemaphores_.clear();
-    renderFinishedSemaphores_.clear();
-    inFlightFences_.clear();
+    totalTime_ += dt;
+    g_world.update(dt);
 
-    imageAvailableSemaphores_.resize(imageCount);
-    renderFinishedSemaphores_.resize(imageCount);
-    inFlightFences_.resize(imageCount);
-
-    VkSemaphoreCreateInfo semInfo{};
-    semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-    for (uint32_t i = 0; i < imageCount; ++i) {
-        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &imageAvailableSemaphores_[i]));
-        VK_CHECK(vkCreateSemaphore(stone_device(), &semInfo, nullptr, &renderFinishedSemaphores_[i]));
-        VK_CHECK(vkCreateFence(stone_device(), &fenceInfo, nullptr, &inFlightFences_[i]));
-    }
-}
-
-// =============================================================================
-// Forge living world
-// =============================================================================
-void RTX::VulkanRenderer::forgeLivingWorld() noexcept {
-    LOG_INFO("RENDERER", "Forging living world");
-
-    auto floor = MeshLoader::createPlane(10000.0f, 10000.0f, 200, 200);
-    LAS::instance().addMesh(std::move(floor), 0);
-
-    LAS::instance().requestRebuild();
-
-    LOG_SUCCESS("RENDERER", "Living world ready — procedural terrain, sky, wind & atmosphere");
-}
-
-// =============================================================================
-// Default materials
-// =============================================================================
-void RTX::VulkanRenderer::createDefaultMaterials() noexcept
-{
-    if (defaultMaterialsHandle_ != 0) return;
-
-    std::array<Material, 1> materials{};
-    materials[0].albedo   = glm::vec4(0.1f, 0.4f, 0.1f, 1.0f);
-    materials[0].emissive = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    defaultMaterialsHandle_ = BufferManager::create(
-        sizeof(materials),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        "DefaultMaterialsBuffer"
-    );
-
-    if (defaultMaterialsHandle_ == 0) {
-        LOG_FATAL("RENDERER", "Failed to create default materials buffer");
-        return;
-    }
-
-    BufferManager::uploadToBuffer(defaultMaterialsHandle_, materials.data(), sizeof(materials));
-}
-
-// =============================================================================
-// Render Frame — Stable loop with first-frame safety gate
-// =============================================================================
-void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTime) noexcept {
-    if (minimized_) {
-        return;  // No pink, no fallback — naked mode
-    }
-
-    totalTime_ += deltaTime;
-    g_world.update(deltaTime);
-
-    const uint32_t imageCount = RTX::SwapchainManager::imageCount();
-    uint32_t currentFrame = frameNumber_ % imageCount;
-
-    // Wait for previous frame work
-    vkWaitForFences(stone_device(), 1, &inFlightFences_[currentFrame], VK_TRUE, UINT64_MAX);
-    vkResetFences(stone_device(), 1, &inFlightFences_[currentFrame]);
-
-    // Camera change detection
-    static glm::vec3 lastCamPos = CAM.pos();
-    static glm::vec3 lastCamFront = CAM.front();
-    static float lastFov = CAM.fov();
-
-    bool cameraMoved = 
-        glm::distance(CAM.pos(), lastCamPos) > 0.005f ||
-        glm::distance(CAM.front(), lastCamFront) > 0.001f ||
-        std::abs(CAM.fov() - lastFov) > 0.1f;
-
-    if (cameraMoved || frameNumber_ == 0) {
-        spp_ = 0;
-        lastCamPos = CAM.pos();
-        lastCamFront = CAM.front();
-        lastFov = CAM.fov();
-    }
-
-    constexpr uint32_t MAX_SPP = 512;
-    if (spp_ > MAX_SPP) spp_ = MAX_SPP;
-
-    // Timeline pacing
-    uint64_t waitValue = currentTimelineValue_;
-    VkSemaphoreWaitInfo waitInfo{};
-    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-    waitInfo.semaphoreCount = 1;
-    waitInfo.pSemaphores = &timelineSemaphore_;
-    waitInfo.pValues = &waitValue;
-
-    VkResult waitRes = vkWaitSemaphores(stone_device(), &waitInfo, 500'000'000ULL);
-    if (waitRes == VK_TIMEOUT || waitRes == VK_ERROR_DEVICE_LOST) {
-        return;
-    }
-    if (waitRes != VK_SUCCESS) return;
-
-    // Acquire image
+    // Acquire next image
     uint32_t imageIndex = UINT32_MAX;
-    VkResult result;
+    VkResult result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX,
+                                            VK_NULL_HANDLE, VK_NULL_HANDLE, &imageIndex);
 
-    for (int retry = 0; retry < 5; ++retry) {
-        result = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), 0,
-                                       imageAvailableSemaphores_[currentFrame],
-                                       VK_NULL_HANDLE, &imageIndex);
-
-        if (result == VK_SUCCESS) break;
-
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-            RTX::SwapchainManager::recreate(width_, height_);
-            createSyncObjects();
-            createPersistentCommandPoolAndBuffers();
-            return;
-        }
-
-        if (result == VK_NOT_READY || result == VK_TIMEOUT) {
-            SDL_Delay(1);
-            continue;
-        }
-
-        LOG_FATAL("RENDERER", "Acquire failed: {}", string_VkResult(result));
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_SURFACE_LOST_KHR) {
+        RTX::SwapchainManager::recreate(width_, height_);
         return;
     }
 
-    if (result != VK_SUCCESS) return;
-    if (imageIndex >= imageCount) return;
+    if (result != VK_SUCCESS) {
+        LOG_ERROR("RENDERER", "Acquire failed: {}", string_VkResult(result));
+        return;
+    }
 
-    // UBO update
-    updateUniformBuffer(currentFrame, CAM, deltaTime);
-
-    // TLAS
-    VkAccelerationStructureKHR tlas = LAS::instance().getTLAS();
-
-    // Descriptor update
-    RTDescriptorUpdate update{};
-    update.tlas = tlas;
-    update.rtOutputView = RTX::SwapchainManager::view(imageIndex);
-    update.ubo = BufferManager::get_buffer(cameraUBO_);
-    update.uboSize = sizeof(CameraSceneData);
-    update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
-    update.materialsSize = sizeof(std::array<Material, 1>);
-
-    pipelineManager_.updateRTDescriptorSet(currentFrame, update);
-
-    // Command buffer recording
-    VkCommandBuffer cmd = frameCmdBuffers_[imageIndex];
-
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+    // Transient cmd buffer per pew pew
+    VkCommandBuffer cmd = getOneTimeCommandBuffer();
 
     transitionImageLayout(cmd, RTX::SwapchainManager::image(imageIndex),
                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
@@ -507,84 +314,37 @@ void RTX::VulkanRenderer::renderFrame(const ::Camera& /*camera*/, float deltaTim
     transitionImageLayout(cmd, RTX::SwapchainManager::image(imageIndex),
                           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    // Submit
-    static const VkPipelineStageFlags waitStages[] = {
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-    };
-
-    auto signalSemaphores = std::to_array<VkSemaphore>({
-        timelineSemaphore_,
-        renderFinishedSemaphores_[currentFrame]
-    });
-
-    uint64_t nextTimelineValue = currentTimelineValue_ + 1;
-    uint64_t signalValues[2] = {nextTimelineValue, 0};
-
-    VkTimelineSemaphoreSubmitInfo timelineSubmit{};
-    timelineSubmit.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineSubmit.signalSemaphoreValueCount = 2;
-    timelineSubmit.pSignalSemaphoreValues = signalValues;
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = &timelineSubmit;
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &imageAvailableSemaphores_[currentFrame];
-    submitInfo.pWaitDstStageMask = waitStages;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    submitInfo.signalSemaphoreCount = static_cast<uint32_t>(signalSemaphores.size());
-    submitInfo.pSignalSemaphores = signalSemaphores.data();
-
-    result = vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, inFlightFences_[currentFrame]);
-    if (result != VK_SUCCESS) {
-        LOG_FATAL("RENDERER", "Submit failed: {}", string_VkResult(result));
-        return;
-    }
-
-    currentTimelineValue_ = nextTimelineValue;
+    submitAndWaitOneTime(cmd);
 
     // Present
-    VkSwapchainKHR currentSwapchain = stone_swapchain();
-
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &renderFinishedSemaphores_[currentFrame];
     presentInfo.swapchainCount = 1;
+    VkSwapchainKHR currentSwapchain = stone_swapchain();
     presentInfo.pSwapchains = &currentSwapchain;
     presentInfo.pImageIndices = &imageIndex;
 
     vkQueuePresentKHR(stone_graphics_queue(), &presentInfo);
-
-    frameNumber_++;
-    spp_++;
 }
 
 // =============================================================================
-// UBO Update
+// UBO Update — called only on change (startup, camera move, time change)
 // =============================================================================
-void RTX::VulkanRenderer::updateUniformBuffer(uint32_t slot, const ::Camera& /*unused*/, float deltaTime) noexcept {
+void RTX::VulkanRenderer::updateUniformBuffer(const ::Camera& cam) noexcept {
     CameraSceneData data{};
-    data.viewInverse = glm::inverse(CAM.view());
-    data.projInverse = glm::inverse(CAM.proj(width_ / static_cast<float>(height_)));
-    data.view = CAM.view();
-    data.proj = CAM.proj(width_ / static_cast<float>(height_));
+    data.viewInverse = glm::inverse(cam.view());
+    data.projInverse = glm::inverse(cam.proj(width_ / static_cast<float>(height_)));
+    data.view = cam.view();
+    data.proj = cam.proj(width_ / static_cast<float>(height_));
 
-    data.cameraPos = glm::vec4(CAM.pos(), 1.0f);
-    data.prevCameraPos = glm::vec4(CAM.pos(), 1.0f);
+    data.cameraPos = glm::vec4(cam.pos(), 1.0f);
+    data.prevCameraPos = glm::vec4(cam.pos(), 1.0f);
 
     data.exposure = 1.0f;
-    data.totalTime = totalTime_;
-    data.frameNumber = frameNumber_;
-    data.randomSeed = frameNumber_ * 1664525u + spp_;
+    data.totalTime = static_cast<float>(totalTime_);
+    data.randomSeed = static_cast<uint32_t>(totalTime_ * 1664525u);
 
-    data.spp = spp_;
     data.maxDepth = 12;
-    data.enableAccumulation = 1;
-    data.enableDenoising = 1;
 
     BufferManager::uploadToBuffer(cameraUBO_, &data, sizeof(data));
 }
@@ -625,9 +385,13 @@ void RTX::VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd,
 }
 
 // =============================================================================
-// VulkanRenderer v30.21 — January 20, 2026
-// - No fallback code — naked, zero cost
-// - Direct LAS to swapchain, beams every frame
-// - Crashes loud if bad — learn fast
+// VulkanRenderer v30.28 — January 20, 2026
+// - No warm-up race — set updated once at startup
+// - No frame state — pew pew forever
+// - Direct LAS to swapchain, beams every present
+// - totalTime_ owned by renderer — double-precision lifetime clock
+// - No SDL3 timer, no g_deltaTime — pure chrono steady_clock
+// - Member order fixed to kill -Werror=reorder
+// - Zero cost — crash loud if bad
 // - Production ready
 // =============================================================================

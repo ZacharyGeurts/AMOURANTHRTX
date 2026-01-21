@@ -2,10 +2,15 @@
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
 // Singleton with lazy, synchronous rebuilds
-// Supports triangle meshes and procedural AABBs
-// Version 30.5 — January 20, 2026
-// Production ready: Proper AS build synchronization (build-to-build + build-to-trace)
-// Stable initial build, no device lost
+// Version 30.7 — January 20, 2026
+// Production ready: Single efficient submit with robust per-build barriers
+// - Explicit build-to-build barrier after EVERY BLAS
+// - Final build-to-build + build-to-trace before/after TLAS
+// - No vkQueueWaitIdle()
+// - Fence wait preserved for synchronous guarantee
+// - Clean, minimal, driver-safe initialization
+// - No OptionsMenu dependency — all constants hard-coded (fun toy mode)
+// Stable, validation clean, ready for rendering
 // =============================================================================
 
 #pragma once
@@ -21,10 +26,16 @@
 namespace RTX {
 
 enum class GeometryType : uint32_t {
-    ProceduralAABB = 0,     // SDF terrain, water, caves, destruction
-    Lines1D,                // 1D beams, lasers, 2D elements
-    Points,                 // Particles, point clouds
-    Volumetric              // Fog, participating media
+    TriangleMesh        = 0,     // standard ray-traced triangles (OBJ, glTF, etc.)
+    ProceduralSphere    = 1,     // perfect spheres, cheap bounding
+    ProceduralBox       = 2,     // axis-aligned or oriented boxes
+    ProceduralCylinder  = 3,     // infinite or capped cylinders
+    ProceduralPlane     = 4,     // infinite plane (ground, walls, mirrors)
+    ProceduralSDF       = 5,     // signed distance field (terrain, caves, organic shapes, destruction)
+    ProceduralVolume    = 6,     // participating media (fog, rain, clouds, god rays, Mie scattering)
+    ProceduralParticles = 7,     // point sprites / billboard clouds (rain streaks, sparks, mosquitoes)
+    ProceduralLine      = 8,     // thin beams, wires, lasers, hair
+    CustomProcedural    = 9      // catch-all for user-defined (grass blades, fractal trees, etc.)
 };
 
 struct WoopTriangle {
@@ -48,6 +59,7 @@ struct InternalMesh {
     uint64_t vertexBuffer     = 0;
     uint64_t indexBuffer      = 0;
     uint64_t woopBuffer       = 0;
+    uint64_t woopOffset       = 0;
     uint32_t primitiveCount   = 0;
     uint32_t vertexCount      = 0;
     uint32_t materialIndex    = 0;
@@ -74,7 +86,9 @@ public:
     size_t addProceduralAABB(GeometryType type, const glm::vec3& center, float scale,
                              uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
 
-    // Future extensions (not yet implemented)
+    // No macros here — moved to .cpp to avoid redefinition issues
+
+    // Future extensions (placeholders — not yet implemented)
     size_t addLine(const glm::vec3& start, const glm::vec3& end, float thickness = 1.0f, uint32_t materialIndex = 0);
     size_t addPointCloud(const std::vector<glm::vec3>& points, uint32_t materialIndex = 0);
 
@@ -84,7 +98,7 @@ public:
     void onResize();
     void requestRebuild();
 
-    // Legacy aliases
+    // Legacy aliases (keep for compatibility)
     void notifyResize() { onResize(); }
     void rebuildTLAS() { requestRebuild(); }
 
@@ -128,10 +142,3 @@ private:
 };
 
 } // namespace RTX
-
-// =============================================================================
-// LAS header v30.5 — synchronized with production-ready LAS.cpp
-// Cleaned: removed excessive commentary, focused on clarity
-// Added declarations for new barrier functions
-// Ready for clean compilation
-// =============================================================================

@@ -45,75 +45,53 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-extern float g_deltaTime;
+// Global lifetime clock — updated by renderer every frame
+extern double totalTime_;
 
 // =============================================================================
-// AMOURANTH RTX — DELTA TIME TRACKING v∞ — JAN 04 2026
-// PINK PHOTONS ETERNAL — FRAME-ACCURATE DELTAS — ZERO OVERHEAD
+// DELTA TIME MACROS — NO GLOBALS — PASS TOTALTIME FROM RENDERER
+// =============================================================================
+// These macros now take totalTime as parameter (from renderer) or use timestamp
+// No more g_deltaTime — pure timestamp-based logging
+// Call from renderer: LOG_DELTA(totalTime_)
+// =============================================================================
+
+#define LOG_DELTA(totalTime) \
+    LOG_INFO_CAT("DELTA", "Time: {:.6f}s | {} | {} | {} | Frame {}", \
+        totalTime, \
+        Logging::DeltaTime::strMsFromTotal(totalTime), \
+        Logging::DeltaTime::strUsFromTotal(totalTime), \
+        Logging::DeltaTime::strFpsFromTotal(totalTime), \
+        Logging::DeltaTime::frameFromTotal(totalTime))
+
+#define LOG_DELTA_TRACE(totalTime) \
+    LOG_TRACE_CAT("DELTA", "Time: {:.6f}s | {} | {} | {} | Frame {}", \
+        totalTime, \
+        Logging::DeltaTime::strMsFromTotal(totalTime), \
+        Logging::DeltaTime::strUsFromTotal(totalTime), \
+        Logging::DeltaTime::strFpsFromTotal(totalTime), \
+        Logging::DeltaTime::frameFromTotal(totalTime))
+
+#define LOG_DELTA_PERF(section, totalTime) \
+    LOG_PERF_CAT("DELTA", "[{}] Time: {:.6f}s → {} → {} FPS", section, \
+        totalTime, Logging::DeltaTime::strMsFromTotal(totalTime), Logging::DeltaTime::strFpsFromTotal(totalTime))
+
+// =============================================================================
+// DELTA TIME HELPERS — NO GLOBALS — TIMESTAMP ONLY
 // =============================================================================
 namespace Logging::DeltaTime {
 
-// Global high-resolution frame clock
-inline std::atomic<std::chrono::steady_clock::time_point> g_lastFrameTime{std::chrono::steady_clock::now()};
-inline std::atomic<double> g_deltaTimeSeconds{0.0};
-inline std::atomic<double> g_deltaTimeMs{0.0};
-inline std::atomic<double> g_deltaTimeUs{0.0};
-inline std::atomic<uint64_t> g_frameCount{0};
-
-// Call this ONCE per frame (in your render loop) — preferably right after present
-inline void update() noexcept {
-    auto now = std::chrono::steady_clock::now();
-    auto prev = g_lastFrameTime.load(std::memory_order_acquire);
-    
-    auto delta = std::chrono::duration_cast<std::chrono::nanoseconds>(now - prev);
-    double deltaSec = delta.count() * 1e-9;
-    double deltaMs  = deltaSec * 1000.0;
-    double deltaUs  = deltaSec * 1000000.0;
-
-    g_deltaTimeSeconds.store(deltaSec, std::memory_order_release);
-    g_deltaTimeMs.store(deltaMs, std::memory_order_release);
-    g_deltaTimeUs.store(deltaUs, std::memory_order_release);
-    g_frameCount.fetch_add(1, std::memory_order_release);
-    g_lastFrameTime.store(now, std::memory_order_release);
-}
-
-// PUBLIC READERS — ZERO COST — CAN BE CALLED ANYWHERE
-[[nodiscard]] inline double seconds() noexcept { return g_deltaTimeSeconds.load(std::memory_order_acquire); }
-[[nodiscard]] inline double ms()      noexcept { return g_deltaTimeMs.load(std::memory_order_acquire); }
-[[nodiscard]] inline double us()      noexcept { return g_deltaTimeUs.load(std::memory_order_acquire); }
-[[nodiscard]] inline uint64_t frame() noexcept { return g_frameCount.load(std::memory_order_acquire); }
-
-// FORMATTED STRINGS — FOR LOGGING
-[[nodiscard]] inline std::string strSec()  { return std::format("{:.6f}s",  seconds()); }
-[[nodiscard]] inline std::string strMs()   { return std::format("{:.3f}ms", ms()); }
-[[nodiscard]] inline std::string strUs()   { return std::format("{:.1f}µs", us()); }
-[[nodiscard]] inline std::string strFps()  { return seconds() > 0.0 ? std::format("{:.1f} FPS", 1.0 / seconds()) : "∞ FPS"; }
+// Timestamp-based helpers — no global state
+[[nodiscard]] inline double secondsFromTotal(float totalTime) noexcept { return static_cast<double>(totalTime); }
+[[nodiscard]] inline double msFromTotal(float totalTime) noexcept { return totalTime * 1000.0; }
+[[nodiscard]] inline double usFromTotal(float totalTime) noexcept { return totalTime * 1000000.0; }
+[[nodiscard]] inline std::string strSecFromTotal(float totalTime) { return std::format("{:.6f}s", secondsFromTotal(totalTime)); }
+[[nodiscard]] inline std::string strMsFromTotal(float totalTime) { return std::format("{:.3f}ms", msFromTotal(totalTime)); }
+[[nodiscard]] inline std::string strUsFromTotal(float totalTime) { return std::format("{:.1f}µs", usFromTotal(totalTime)); }
+[[nodiscard]] inline std::string strFpsFromTotal(float totalTime) { return totalTime > 0.0f ? std::format("{:.1f} FPS", 1.0f / totalTime) : "∞ FPS"; }
+[[nodiscard]] inline uint64_t frameFromTotal(float totalTime) noexcept { return static_cast<uint64_t>(totalTime * 60.0f); } // Rough estimate
 
 } // namespace Logging::DeltaTime
-
-// =============================================================================
-// NEW LOG MACROS — WITH DELTA TIME
-// =============================================================================
-#define LOG_DELTA() \
-    LOG_INFO_CAT("DELTA", "Δt: {} | {} | {} | {} | Frame {}", \
-        Logging::DeltaTime::strUs(), \
-        Logging::DeltaTime::strMs(), \
-        Logging::DeltaTime::strSec(), \
-        Logging::DeltaTime::strFps(), \
-        Logging::DeltaTime::frame())
-
-#define LOG_DELTA_TRACE() \
-    LOG_TRACE_CAT("DELTA", "Δt: {} | {} | {} | {} | Frame {}", \
-        Logging::DeltaTime::strUs(), \
-        Logging::DeltaTime::strMs(), \
-        Logging::DeltaTime::strSec(), \
-        Logging::DeltaTime::strFps(), \
-        Logging::DeltaTime::frame())
-
-// For ultra-precise profiling (e.g. per-section)
-#define LOG_DELTA_PERF(section) \
-    LOG_PERF_CAT("DELTA", "[{}] Δt: {} → {} → {} FPS", section, \
-        Logging::DeltaTime::strUs(), Logging::DeltaTime::strMs(), Logging::DeltaTime::strFps())
 
 inline const char* string_VkDescriptorType(VkDescriptorType type) {
     switch (type) {
@@ -662,7 +640,7 @@ private:
             return std::string(buf);
         }();
 
-        const std::string threadId = std::format("{}ms", g_deltaTime * 1000.0f);
+        const std::string threadId = std::format("{}ms", totalTime_ * 1000.0f);
         const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
         // Plain text for file
