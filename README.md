@@ -2,6 +2,7 @@ Current over head code view https://x.com/ZacharyGeurts/status/20126328464819982
 
 I tout Grok as king due to how much code length it can process, but for codebase navigation questions I recommend the copilot assistant on github.
 <img width="132" alt="Copilot" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/copilot.png />  
+Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
 
 We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
 Make a trip through [include/engine/GLOBALS/logging.hpp](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/include/engine/GLOBAL/logging.hpp) now. We will not disappoint.  
