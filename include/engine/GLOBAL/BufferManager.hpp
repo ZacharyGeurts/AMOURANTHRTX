@@ -95,11 +95,11 @@ struct VRAMReality {
                    ? reality.total - reality.driver_footprint - reality.safety_margin
                    : 0;
 
-    LOG_AMOURANTH("BufferManager", "GPU reality measured:");
-    LOG_AMOURANTH("BufferManager", "  Total VRAM:         {:.2f} GiB", static_cast<double>(reality.total) / 1e9);
-    LOG_AMOURANTH("BufferManager", "  Driver footprint:   {:.2f} GiB (live measured)", static_cast<double>(reality.driver_footprint) / 1e9);
-    LOG_AMOURANTH("BufferManager", "  Safety margin:      {:.2f} GiB (Minecraft + YouTube friendly)", static_cast<double>(reality.safety_margin) / 1e9);
-    LOG_AMOURANTH("BufferManager", "  Usable for empire:  {:.2f} GiB", static_cast<double>(reality.usable) / 1e9);
+    LOG_INFO_CAT("BufferManager", "GPU reality measured:");
+    LOG_INFO_CAT("BufferManager", "  Total VRAM:         {:.2f} GiB", static_cast<double>(reality.total) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Driver footprint:   {:.2f} GiB (live measured)", static_cast<double>(reality.driver_footprint) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Safety margin:      {:.2f} GiB (Minecraft + YouTube friendly)", static_cast<double>(reality.safety_margin) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Usable for empire:  {:.2f} GiB", static_cast<double>(reality.usable) / 1e9);
 
     return reality;
 }
@@ -294,10 +294,10 @@ inline void ensureStagingRing() noexcept {
 
     g_total_allocated += req.size;
 
-    LOG_AMOURANTH("BufferManager", "Devoured chunk: {} MiB", chunkSize >> 20);
-    LOG_AMOURANTH("BufferManager", "  Total devoured: {:.2f} GiB", static_cast<double>(g_total_allocated) / 1e9);
-    LOG_AMOURANTH("BufferManager", "  Driver footprint: {:.2f} GiB", static_cast<double>(reality.driver_footprint) / 1e9);
-    LOG_AMOURANTH("BufferManager", "  Usable remaining: {:.2f} GiB", static_cast<double>(reality.usable - g_total_allocated) / 1e9);
+    LOG_INFO_CAT("BufferManager", "Devoured chunk: {} MiB", chunkSize >> 20);
+    LOG_INFO_CAT("BufferManager", "  Total devoured: {:.2f} GiB", static_cast<double>(g_total_allocated) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Driver footprint: {:.2f} GiB", static_cast<double>(reality.driver_footprint) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Usable remaining: {:.2f} GiB", static_cast<double>(reality.usable - g_total_allocated) / 1e9);
 
     return &g_mainChunks.back();
 }
