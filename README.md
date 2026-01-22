@@ -1,5 +1,7 @@
 Current over head code view https://x.com/ZacharyGeurts/status/2012632846481998282  
 
+We are THE zero cost RTX develpment reseach page, unless someone beat Amouranth to it.  
+
 Development and memes https://x.com/ZacharyGeurts
 Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
 Me too <img width="132" height="86" alt="copilot" src="https://github.com/user-attachments/assets/1dd58348-dcf7-424e-8461-692f15281fd5" />
