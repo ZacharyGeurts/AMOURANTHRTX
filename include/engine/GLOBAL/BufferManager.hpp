@@ -1,17 +1,16 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.4
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.5
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
-// REWRITTEN: New philosophy — driver gets what it needs, we take the rest
-//             Live VRAM measurement (VK_EXT_memory_budget preferred)
-//             Zero pre-reserve — 100% domination of free VRAM
-//             Yield instantly to desktop user / other instances
-//             JANUARY 21, 2026 — TDR-PROOF, GPU-OWNED, PRINT-READY
+// PHILOSOPHY: Datacenter domination + desktop coexistence
+//             Live measurement, zero pre-reserve, take 100% free VRAM
+//             Instant relinquish on explicit command (no auto-purge)
+//             Tiny safety margin for YouTube PiP / browser tabs
+//             JANUARY 21, 2026 — TDR-PROOF, POWER-FIRST, USER-FRIENDLY
 // =============================================================================
 
 #pragma once
 
-// Manual fallback for KHR usage bit if header refuses
 #ifndef VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR
 constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR = 0x00080000;
 #endif
@@ -25,14 +24,14 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 #include <print>
 
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/Extensions.hpp"  // RTX::g_ext
+#include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/logging.hpp"
 
 namespace BufferManager {
 
 // ── CONFIGURATION ──────────────────────────────────────────────────────────
-inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE     = 256ULL << 20;       // 256 MiB — driver sweet spot
-inline constexpr VkDeviceSize MIN_SAFETY_MARGIN      = 256ULL << 20;       // 256 MiB — absolute minimum headroom (tiny)
+inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE     = 256ULL << 20;       // 256 MiB — sweet spot
+inline constexpr VkDeviceSize TINY_SAFETY_MARGIN     = 256ULL << 20;       // 256 MiB — enough for YouTube PiP / browser tabs
 inline constexpr VkDeviceSize STAGING_RING_SIZE      = 1ULL << 30;         // 1 GiB staging ring
 
 inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 64ULL << 10;         // 64 KiB
@@ -52,12 +51,12 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
     VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
 
-// ── VRAM MEASUREMENT — live, driver-footprint-aware
+// ── VRAM REALITY — live, driver-footprint-aware
 // =============================================================================
 struct VRAMReality {
     VkDeviceSize total          = 0;
     VkDeviceSize driver_footprint = 0;  // live measured (budget extension or estimate)
-    VkDeviceSize safety_margin   = MIN_SAFETY_MARGIN;
+    VkDeviceSize safety_margin   = TINY_SAFETY_MARGIN;
     VkDeviceSize usable         = 0;    // total - driver - safety
 };
 
@@ -96,11 +95,11 @@ struct VRAMReality {
                    ? reality.total - reality.driver_footprint - reality.safety_margin
                    : 0;
 
-    LOG_INFO_CAT("BufferManager", "GPU reality measured:");
-    LOG_INFO_CAT("BufferManager", "  Total VRAM:         {:.2f} GiB", static_cast<double>(reality.total) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Driver footprint:   {:.2f} GiB (live measured)", static_cast<double>(reality.driver_footprint) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Safety margin:      {:.2f} GiB (minimal headroom)", static_cast<double>(reality.safety_margin) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Usable for empire:  {:.2f} GiB", static_cast<double>(reality.usable) / 1e9);
+    LOG_AMOURANTH("BufferManager", "GPU reality measured:");
+    LOG_AMOURANTH("BufferManager", "  Total VRAM:         {:.2f} GiB", static_cast<double>(reality.total) / 1e9);
+    LOG_AMOURANTH("BufferManager", "  Driver footprint:   {:.2f} GiB (live measured)", static_cast<double>(reality.driver_footprint) / 1e9);
+    LOG_AMOURANTH("BufferManager", "  Safety margin:      {:.2f} GiB (Minecraft + YouTube friendly)", static_cast<double>(reality.safety_margin) / 1e9);
+    LOG_AMOURANTH("BufferManager", "  Usable for empire:  {:.2f} GiB", static_cast<double>(reality.usable) / 1e9);
 
     return reality;
 }
@@ -180,8 +179,7 @@ inline VkDeviceSize                             g_total_allocated = 0;
     return it->second.deviceAddress + it->second.offset;
 }
 
-// ── STAGING RING — still 1 GiB, host-visible
-// =============================================================================
+// ── STAGING RING ───────────────────────────────────────────────────────────
 inline void ensureStagingRing() noexcept {
     if (g_stagingRing.ready) return;
 
@@ -496,13 +494,13 @@ inline void destroy(uint64_t handle) noexcept {
     g_buffers.erase(handle);
 }
 
-// ── PURGE ALL — instant yield to desktop / other instances
+// ── PURGE ALL — only on shutdown or explicit command (no auto-yield)
 // =============================================================================
 inline void purge_all() noexcept {
     VkDevice dev = StoneKey::stone_device();
     if (dev == VK_NULL_HANDLE) return;
 
-    LOG_AMOURANTH("BUFFER PURGE — FEEDING THE GPU BACK TO THE WORLD");
+    LOG_AMOURANTH("BUFFER PURGE — EXPLICIT COMMAND / SHUTDOWN");
 
     vkDeviceWaitIdle(dev);
 
@@ -522,7 +520,7 @@ inline void purge_all() noexcept {
     }
     g_stagingRing = {};
 
-    LOG_SUCCESS("BufferManager", "All buffers purged — VRAM returned to the world");
+    LOG_SUCCESS("BufferManager", "All buffers purged — VRAM relinquished on command");
 }
 
 // ── MACROS — PRINT-FRIENDLY
