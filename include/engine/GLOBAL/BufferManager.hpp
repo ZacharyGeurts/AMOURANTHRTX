@@ -1,12 +1,12 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.5
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.6
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
 // PHILOSOPHY: Datacenter domination + desktop coexistence
 //             Live measurement, zero pre-reserve, take 100% free VRAM
 //             Instant relinquish on explicit command (no auto-purge)
 //             Tiny safety margin for YouTube PiP / browser tabs
-//             JANUARY 21, 2026 — TDR-PROOF, POWER-FIRST, USER-FRIENDLY
+//             JANUARY 22, 2026 — BIT-LEVEL LOGGING, UNIVERSAL SCALE
 // =============================================================================
 
 #pragma once
@@ -22,6 +22,7 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 #include <vector>
 #include <format>
 #include <print>
+#include <cmath>
 
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
@@ -31,7 +32,7 @@ namespace BufferManager {
 
 // ── CONFIGURATION ──────────────────────────────────────────────────────────
 inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE     = 256ULL << 20;       // 256 MiB — sweet spot
-inline constexpr VkDeviceSize TINY_SAFETY_MARGIN     = 256ULL << 20;       // 256 MiB — enough for YouTube PiP / browser tabs
+inline constexpr VkDeviceSize TINY_SAFETY_MARGIN     = 256ULL << 20;       // 256 MiB — YouTube PiP / browser tabs
 inline constexpr VkDeviceSize STAGING_RING_SIZE      = 1ULL << 30;         // 1 GiB staging ring
 
 inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 64ULL << 10;         // 64 KiB
@@ -50,6 +51,38 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
     VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+
+// ── UNIVERSAL SCALE PRINT HELPER ───────────────────────────────────────────
+inline std::string formatBytes(VkDeviceSize bytes) noexcept {
+    if (bytes == 0) return "0 B";
+
+    const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"};
+    int unit = 0;
+    double val = static_cast<double>(bytes);
+
+    while (val >= 1024.0 && unit < 8) {
+        val /= 1024.0;
+        ++unit;
+    }
+
+    return std::format("{:.3f} {}", val, units[unit]);
+}
+
+inline std::string formatBits(VkDeviceSize bytes) noexcept {
+    VkDeviceSize bits = bytes * 8;
+    if (bits == 0) return "0 bits";
+
+    const char* units[] = {"bits", "Kibit", "Mibit", "Gibit", "Tibit", "Pibit", "Eibit", "Zibit", "Yibit"};
+    int unit = 0;
+    double val = static_cast<double>(bits);
+
+    while (val >= 1024.0 && unit < 8) {
+        val /= 1024.0;
+        ++unit;
+    }
+
+    return std::format("{:.0f} {}", std::round(val), units[unit]);
+}
 
 // ── VRAM REALITY — live, driver-footprint-aware
 // =============================================================================
@@ -96,10 +129,10 @@ struct VRAMReality {
                    : 0;
 
     LOG_INFO_CAT("BufferManager", "GPU reality measured:");
-    LOG_INFO_CAT("BufferManager", "  Total VRAM:         {:.2f} GiB", static_cast<double>(reality.total) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Driver footprint:   {:.2f} GiB (live measured)", static_cast<double>(reality.driver_footprint) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Safety margin:      {:.2f} GiB (Minecraft + YouTube friendly)", static_cast<double>(reality.safety_margin) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Usable for empire:  {:.2f} GiB", static_cast<double>(reality.usable) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Total VRAM:         {} ({})", formatBytes(reality.total), formatBits(reality.total));
+    LOG_INFO_CAT("BufferManager", "  Driver footprint:   {} ({})", formatBytes(reality.driver_footprint), formatBits(reality.driver_footprint));
+    LOG_INFO_CAT("BufferManager", "  Safety margin:      {} ({})", formatBytes(reality.safety_margin), formatBits(reality.safety_margin));
+    LOG_INFO_CAT("BufferManager", "  Usable for empire:  {} ({})", formatBytes(reality.usable), formatBits(reality.usable));
 
     return reality;
 }
@@ -216,7 +249,7 @@ inline void ensureStagingRing() noexcept {
     VK_CHECK(vkMapMemory(StoneKey::stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
 
     g_stagingRing.ready = true;
-    LOG_SUCCESS("BufferManager", "Staging ring created and mapped");
+    LOG_SUCCESS("BufferManager", "Staging ring created and mapped — {} ({})", formatBytes(STAGING_RING_SIZE), formatBits(STAGING_RING_SIZE));
 }
 
 // ── MAP STAGING ────────────────────────────────────────────────────────────
@@ -241,10 +274,10 @@ inline void ensureStagingRing() noexcept {
 
     // Dominate: only fail if not enough left after driver + tiny margin
     if (reality.usable < chunkSize) {
-        LOG_FATAL("BufferManager", "GPU reality denies — driver footprint {:.2f} GiB, usable left {:.2f} GiB, need {:.2f} GiB",
-                  static_cast<double>(reality.driver_footprint) / 1e9,
-                  static_cast<double>(reality.usable) / 1e9,
-                  static_cast<double>(chunkSize) / 1e9);
+        LOG_FATAL("BufferManager", "GPU reality denies — driver footprint {} ({}), usable left {} ({}), need {} ({})",
+                  formatBytes(reality.driver_footprint), formatBits(reality.driver_footprint),
+                  formatBytes(reality.usable), formatBits(reality.usable),
+                  formatBytes(chunkSize), formatBits(chunkSize));
         return nullptr;
     }
 
@@ -290,14 +323,14 @@ inline void ensureStagingRing() noexcept {
     VkDeviceAddress baseAddr = RTX::g_ext.vkGetBufferDeviceAddress(StoneKey::stone_device(), &addrInfo);
 
     g_mainChunks.push_back({buffer, memory, chunkSize, baseAddr, 0,
-                            std::format("Chunk_{}_{}MiB", g_mainChunks.size(), chunkSize >> 20)});
+                            std::format("Chunk_{}_{}", g_mainChunks.size(), formatBytes(chunkSize))});
 
     g_total_allocated += req.size;
 
-    LOG_INFO_CAT("BufferManager", "Devoured chunk: {} MiB", chunkSize >> 20);
-    LOG_INFO_CAT("BufferManager", "  Total devoured: {:.2f} GiB", static_cast<double>(g_total_allocated) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Driver footprint: {:.2f} GiB", static_cast<double>(reality.driver_footprint) / 1e9);
-    LOG_INFO_CAT("BufferManager", "  Usable remaining: {:.2f} GiB", static_cast<double>(reality.usable - g_total_allocated) / 1e9);
+    LOG_INFO_CAT("BufferManager", "Devoured chunk: {}", formatBytes(chunkSize));
+    LOG_INFO_CAT("BufferManager", "  Total devoured: {}", formatBytes(g_total_allocated));
+    LOG_INFO_CAT("BufferManager", "  Driver footprint: {}", formatBytes(reality.driver_footprint));
+    LOG_INFO_CAT("BufferManager", "  Usable remaining: {}", formatBytes(reality.usable - g_total_allocated));
 
     return &g_mainChunks.back();
 }
@@ -363,7 +396,7 @@ inline void ensureStagingRing() noexcept {
         VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, remaining);
         Chunk* chunk = createChunk(chunkSize, fixedUsage);
         if (!chunk) {
-            LOG_FATAL("BufferManager", "Failed to create chunk for size {}", size);
+            LOG_FATAL("BufferManager", "Failed to create chunk for size {}", formatBytes(size));
             return 0;
         }
 
@@ -407,7 +440,7 @@ inline void ensureStagingRing() noexcept {
         total += chunkSize;
     }
 
-    LOG_INFO("BufferManager", "Allocated {} MiB scratch ({} chunks)", total >> 20, (total + DEFAULT_CHUNK_SIZE - 1) / DEFAULT_CHUNK_SIZE);
+    LOG_INFO("BufferManager", "Allocated scratch: {} ({} chunks)", formatBytes(total), (total + DEFAULT_CHUNK_SIZE - 1) / DEFAULT_CHUNK_SIZE);
     return baseAddr;
 }
 
@@ -417,7 +450,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
                            VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end() || size > it->second.size) {
-        LOG_ERROR("BufferManager", "Invalid upload: handle {} or size too large", handle);
+        LOG_ERROR("BufferManager", "Invalid upload: handle {} or size too large ({})", handle, formatBytes(size));
         return;
     }
 
@@ -446,6 +479,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     if (cmd != VK_NULL_HANDLE) {
         vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
     } else {
+        // One-time submit fallback
         VkCommandPool pool;
         VkCommandPoolCreateInfo pci{
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -523,7 +557,7 @@ inline void purge_all() noexcept {
     LOG_SUCCESS("BufferManager", "All buffers purged — VRAM relinquished on command");
 }
 
-// ── MACROS — PRINT-FRIENDLY
+// ── MACROS — ZERO-COST, PRINT-FRIENDLY
 // =============================================================================
 #define BM_CREATE(h, s, u, ...)             h = BufferManager::create(s, u, ##__VA_ARGS__)
 #define BM_DESTROY(h)                       BufferManager::destroy(h)
