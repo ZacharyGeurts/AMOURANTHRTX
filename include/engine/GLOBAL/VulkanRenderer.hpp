@@ -1,14 +1,15 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.28 — JANUARY 21, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.30 — JANUARY 21, 2026
 // VULKAN RENDERER HEADER — PURE LIGHT | NO FRAMES | PEW PEW FOREVER
 // DIRECT BEAMS TO SWAPCHAIN • SINGLE SET • TRANSIENT CMD PER PRESENT
-// OWNS: LAS TLAS QUERY • PIPELINE • SBT • DESCRIPTOR UPDATE • UBO • SUNLIGHT
+// OWNS: LAS TLAS QUERY • PIPELINE • SBT • DESCRIPTOR UPDATE • UBO • HDR STORAGE • SUNLIGHT
 // =============================================================================
-// v30.28 changes:
-// - Member order EXACTLY matches constructor initializer list (fix -Werror=reorder)
-// - Removed duplicate declarations of getOneTimeCommandBuffer() and submitAndWaitOneTime()
-// - updateUniformBuffer signature cleaned: no unused float param
+// v30.30 changes:
+// - Added hdrOutputImage_ and hdrOutputView_ members (fixes field errors)
+// - Added HDR creation/copy helpers
+// - Member order EXACTLY matches constructor initializer list (-Werror=reorder fixed)
 // - Renderer owns lifetime clock (double totalTime_ + steady_clock)
+// - Transient cmd per present — zero persistent state
 // Empire complete — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -65,13 +66,19 @@ private:
     uint64_t cameraUBO_ = 0;
 
     // Transient command pool — allocate per pew pew
-    VkCommandPool transientCmdPool_ {VK_NULL_HANDLE};
+    VkCommandPool transientCmdPool_ = VK_NULL_HANDLE;
+
+    // HDR storage image for rtOutput (fixes format mismatch)
+    VkImage     hdrOutputImage_ = VK_NULL_HANDLE;
+    VkImageView hdrOutputView_ = VK_NULL_HANDLE;
 
     PipelineManager pipelineManager_;
 
     // Core private functions
     void createTransientCommandPool() noexcept;
     void createDefaultMaterials() noexcept;
+    void createHDRStorageImage() noexcept;
+    void copyHDRToSwapchain(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
     void forgeLivingWorld() noexcept;
     void updateUniformBuffer(const ::Camera& camera) noexcept;
     void transitionImageLayout(VkCommandBuffer cmd,
@@ -79,7 +86,7 @@ private:
                                VkImageLayout oldLayout,
                                VkImageLayout newLayout) noexcept;
 
-	// One-time command buffer helpers for SBT creation
+    // One-time command buffer helpers for SBT creation
     [[nodiscard]] VkCommandBuffer getOneTimeCommandBuffer() noexcept;
     void submitAndWaitOneTime(VkCommandBuffer cmd) noexcept;
 
@@ -90,11 +97,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — v30.28 — JANUARY 21, 2026
-// - Fixed -Werror=reorder by matching member order
-// - Removed duplicate function declarations
-// - updateUniformBuffer: no unused float param
-// - Added getLifetimeSeconds() getter for logging/console
+// FINAL HEADER — v30.30 — JANUARY 21, 2026
+// - Added HDR members and helpers
+// - Fixed field declaration errors
+// - Member order matches constructor initializer list
 // - Transient cmd per present — zero persistent state
 // - Pure light — pew pew forever
 // Empire complete — AMOURANTH FOREVER 💖

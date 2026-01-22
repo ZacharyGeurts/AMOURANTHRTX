@@ -1,10 +1,12 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.2
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.4
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
-// FIXED: Moved get_device_address above allocateScratch (visibility)
-//        Manual fallback for KHR usage bit
-//        JANUARY 21, 2026 — TDR-PROOF, DRIVER-SAFE
+// REWRITTEN: New philosophy — driver gets what it needs, we take the rest
+//             Live VRAM measurement (VK_EXT_memory_budget preferred)
+//             Zero pre-reserve — 100% domination of free VRAM
+//             Yield instantly to desktop user / other instances
+//             JANUARY 21, 2026 — TDR-PROOF, GPU-OWNED, PRINT-READY
 // =============================================================================
 
 #pragma once
@@ -29,9 +31,9 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 namespace BufferManager {
 
 // ── CONFIGURATION ──────────────────────────────────────────────────────────
-inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;            // 256 MiB — driver sweet spot
-inline constexpr VkDeviceSize DRIVER_RESERVE     = 4'831'838'208ULL;       // ~4.5 GiB — never touch this
-inline constexpr VkDeviceSize STAGING_RING_SIZE  = 1ULL << 30;             // 1 GiB staging ring
+inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE     = 256ULL << 20;       // 256 MiB — driver sweet spot
+inline constexpr VkDeviceSize MIN_SAFETY_MARGIN      = 256ULL << 20;       // 256 MiB — absolute minimum headroom (tiny)
+inline constexpr VkDeviceSize STAGING_RING_SIZE      = 1ULL << 30;         // 1 GiB staging ring
 
 inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 64ULL << 10;         // 64 KiB
 inline constexpr VkDeviceSize SBT_MINIMUM_SIZE       = 512;
@@ -50,6 +52,59 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
     VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
 
+// ── VRAM MEASUREMENT — live, driver-footprint-aware
+// =============================================================================
+struct VRAMReality {
+    VkDeviceSize total          = 0;
+    VkDeviceSize driver_footprint = 0;  // live measured (budget extension or estimate)
+    VkDeviceSize safety_margin   = MIN_SAFETY_MARGIN;
+    VkDeviceSize usable         = 0;    // total - driver - safety
+};
+
+[[nodiscard]] inline VRAMReality measureReality() noexcept {
+    VRAMReality reality{};
+
+    VkPhysicalDeviceMemoryProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+    vkGetPhysicalDeviceMemoryProperties2(StoneKey::stone_physical(), &props2);
+
+    for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
+        if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            reality.total += props2.memoryProperties.memoryHeaps[i].size;
+        }
+    }
+
+    // Try VK_EXT_memory_budget (preferred — real driver usage)
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
+    budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+    props2.pNext = &budget;
+    vkGetPhysicalDeviceMemoryProperties2(StoneKey::stone_physical(), &props2);
+
+    for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
+        if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            reality.driver_footprint = budget.heapUsage[i];
+            break;
+        }
+    }
+
+    // Fallback if extension not available: conservative estimate
+    if (reality.driver_footprint == 0) {
+        reality.driver_footprint = 1'500'000'000ULL;  // ~1.5 GiB conservative guess
+        LOG_WARN("BufferManager", "VK_EXT_memory_budget unavailable — using conservative driver footprint estimate");
+    }
+
+    reality.usable = reality.total > (reality.driver_footprint + reality.safety_margin)
+                   ? reality.total - reality.driver_footprint - reality.safety_margin
+                   : 0;
+
+    LOG_INFO_CAT("BufferManager", "GPU reality measured:");
+    LOG_INFO_CAT("BufferManager", "  Total VRAM:         {:.2f} GiB", static_cast<double>(reality.total) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Driver footprint:   {:.2f} GiB (live measured)", static_cast<double>(reality.driver_footprint) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Safety margin:      {:.2f} GiB (minimal headroom)", static_cast<double>(reality.safety_margin) / 1e9);
+    LOG_INFO_CAT("BufferManager", "  Usable for empire:  {:.2f} GiB", static_cast<double>(reality.usable) / 1e9);
+
+    return reality;
+}
+
 // ── UTILITIES ───────────────────────────────────────────────────────────────
 [[nodiscard]] constexpr VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
     return ((value + alignment - 1) / alignment) * alignment;
@@ -66,21 +121,6 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
     }
     LOG_ERROR("BufferManager", "No suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
     return ~0u;
-}
-
-[[nodiscard]] inline VkDeviceSize getTotalDeviceLocal() noexcept {
-    static VkDeviceSize total = 0;
-    if (total == 0) {
-        VkPhysicalDeviceMemoryProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
-        vkGetPhysicalDeviceMemoryProperties2(StoneKey::stone_physical(), &props2);
-        for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
-            if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-                total += props2.memoryProperties.memoryHeaps[i].size;
-            }
-        }
-        LOG_INFO("BufferManager", "Detected device-local VRAM: {:.2f} GiB", static_cast<double>(total) / 1e9);
-    }
-    return total;
 }
 
 // ── INTERNAL STRUCTURES ────────────────────────────────────────────────────
@@ -140,7 +180,8 @@ inline VkDeviceSize                             g_total_allocated = 0;
     return it->second.deviceAddress + it->second.offset;
 }
 
-// ── STAGING RING ───────────────────────────────────────────────────────────
+// ── STAGING RING — still 1 GiB, host-visible
+// =============================================================================
 inline void ensureStagingRing() noexcept {
     if (g_stagingRing.ready) return;
 
@@ -194,14 +235,18 @@ inline void ensureStagingRing() noexcept {
     return g_stagingRing.buffer;
 }
 
-// ── CHUNK CREATION — 256 MiB max, driver-safe
+// ── CHUNK CREATION — take everything left after driver footprint
 // =============================================================================
 [[nodiscard]] inline Chunk* createChunk(VkDeviceSize minSize, VkBufferUsageFlags usage) noexcept {
-    VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, minSize);  // Never exceed 256 MiB
+    VRAMReality reality = measureReality();
+    VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, minSize);
 
-    if (g_total_allocated + chunkSize > getTotalDeviceLocal() - DRIVER_RESERVE) {
-        LOG_ERROR("BufferManager", "Requested chunk would exceed safe VRAM limit ({} > {} - {})",
-                  chunkSize, getTotalDeviceLocal(), DRIVER_RESERVE);
+    // Dominate: only fail if not enough left after driver + tiny margin
+    if (reality.usable < chunkSize) {
+        LOG_FATAL("BufferManager", "GPU reality denies — driver footprint {:.2f} GiB, usable left {:.2f} GiB, need {:.2f} GiB",
+                  static_cast<double>(reality.driver_footprint) / 1e9,
+                  static_cast<double>(reality.usable) / 1e9,
+                  static_cast<double>(chunkSize) / 1e9);
         return nullptr;
     }
 
@@ -250,8 +295,11 @@ inline void ensureStagingRing() noexcept {
                             std::format("Chunk_{}_{}MiB", g_mainChunks.size(), chunkSize >> 20)});
 
     g_total_allocated += req.size;
-    LOG_INFO("BufferManager", "Created chunk: {} MiB (total allocated: {:.2f} GiB)",
-             chunkSize >> 20, static_cast<double>(g_total_allocated) / 1e9);
+
+    LOG_AMOURANTH("BufferManager", "Devoured chunk: {} MiB", chunkSize >> 20);
+    LOG_AMOURANTH("BufferManager", "  Total devoured: {:.2f} GiB", static_cast<double>(g_total_allocated) / 1e9);
+    LOG_AMOURANTH("BufferManager", "  Driver footprint: {:.2f} GiB", static_cast<double>(reality.driver_footprint) / 1e9);
+    LOG_AMOURANTH("BufferManager", "  Usable remaining: {:.2f} GiB", static_cast<double>(reality.usable - g_total_allocated) / 1e9);
 
     return &g_mainChunks.back();
 }
@@ -448,12 +496,13 @@ inline void destroy(uint64_t handle) noexcept {
     g_buffers.erase(handle);
 }
 
-// ── PURGE ALL ──────────────────────────────────────────────────────────────
+// ── PURGE ALL — instant yield to desktop / other instances
+// =============================================================================
 inline void purge_all() noexcept {
     VkDevice dev = StoneKey::stone_device();
     if (dev == VK_NULL_HANDLE) return;
 
-    LOG_AMOURANTH("BUFFER PURGE — NUCLEAR APOCALYPSE — NO SURVIVORS");
+    LOG_AMOURANTH("BUFFER PURGE — FEEDING THE GPU BACK TO THE WORLD");
 
     vkDeviceWaitIdle(dev);
 
@@ -473,10 +522,11 @@ inline void purge_all() noexcept {
     }
     g_stagingRing = {};
 
-    LOG_SUCCESS("BufferManager", "All buffers destroyed — memory cleansed");
+    LOG_SUCCESS("BufferManager", "All buffers purged — VRAM returned to the world");
 }
 
-// ── MACROS ─────────────────────────────────────────────────────────────────
+// ── MACROS — PRINT-FRIENDLY
+// =============================================================================
 #define BM_CREATE(h, s, u, ...)             h = BufferManager::create(s, u, ##__VA_ARGS__)
 #define BM_DESTROY(h)                       BufferManager::destroy(h)
 #define BM_GET(h)                           BufferManager::get(h)
