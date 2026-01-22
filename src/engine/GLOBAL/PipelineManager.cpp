@@ -1,11 +1,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Pipeline Manager
 // Ray tracing pipeline, SBT, and descriptor management
-// Version 30.11 — January 21, 2026
-// - ALL logging now uses LOG_*_CAT("PIPELINE", ...) — Empire style unified
-// - Removed all std::print / stderr prints
-// - Added trace logging in critical paths (SBT regions, descriptor updates)
-// - Minor robustness: early returns on failures, better error context
+// Version 30.12 — January 21, 2026
+// - Preconfigured exactly 8 safe bindings for set 0 (guaranteed by Vulkan spec)
+//   → TLAS (0), Output Image (1), Camera UBO (2), Materials (3), Instance Data (4),
+//     Blue Noise (5), Prev Frame (6), Debug/Constants (7)
+// - Removed high-risk binding 31 — no StoneKey uniform in RT shaders
+// - Unified logging with LOG_*_CAT("PIPELINE", ...)
 // - Hardware-adaptive SBT alignment preserved
 // =============================================================================
 
@@ -42,6 +43,18 @@ namespace RTX {
 
 inline static std::mutex rebuildMutex;
 
+// Fixed 8 bindings for set 0 — safe & guaranteed
+static constexpr std::array<VkDescriptorSetLayoutBinding, 8> kMainBindings = {{
+    {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+    {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+    {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // instance data/custom index
+    {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR},
+    {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR}, // prev frame accumulation
+    {7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR} // debug/constants
+}};
+
 // =============================================================================
 // Constructor — Minimal early setup
 // =============================================================================
@@ -68,7 +81,7 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 }
 
 // =============================================================================
-// Pipeline Layout — 4 sets
+// Pipeline Layout — 4 sets with fixed 8 bindings on set 0
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -76,6 +89,7 @@ void PipelineManager::createPipelineLayout()
 
     LOG_INFO_CAT("PIPELINE", "Creating descriptor set layouts and pipeline layout");
 
+    // Main RT set — exactly 8 fixed bindings
     VkDescriptorSetLayoutCreateInfo mainInfo{};
     mainInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     mainInfo.bindingCount = static_cast<uint32_t>(kMainBindings.size());
@@ -83,11 +97,12 @@ void PipelineManager::createPipelineLayout()
 
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
     if (vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout) != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create main descriptor set layout");
+        LOG_FATAL_CAT("PIPELINE", "Failed to create main descriptor set layout (8 fixed bindings)");
         return;
     }
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(mainLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
+    // Texture array set (set 2)
     VkDescriptorSetLayoutBinding texBinding{
         .binding         = 0,
         .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -107,6 +122,7 @@ void PipelineManager::createPipelineLayout()
     }
     texDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(texLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
+    // Empty sets 1 & 3
     VkDescriptorSetLayoutCreateInfo emptyInfo{};
     emptyInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     emptyInfo.bindingCount = 0;
@@ -119,10 +135,10 @@ void PipelineManager::createPipelineLayout()
     emptyDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(emptyLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
     const VkDescriptorSetLayout layouts[4] = {
-        rtDescriptorSetLayout_.get(),
-        emptyDescriptorSetLayout_.get(),
-        texDescriptorSetLayout_.get(),
-        emptyDescriptorSetLayout_.get()
+        rtDescriptorSetLayout_.get(),     // set 0: main RT (8 bindings)
+        emptyDescriptorSetLayout_.get(),  // set 1: empty
+        texDescriptorSetLayout_.get(),    // set 2: textures
+        emptyDescriptorSetLayout_.get()   // set 3: empty
     };
 
     VkPushConstantRange push{};
@@ -131,7 +147,7 @@ void PipelineManager::createPipelineLayout()
                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
                       VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
     push.offset     = 0;
-    push.size       = 32;
+    push.size       = 32;  // enough for time/frame + optional StoneKey key
 
     VkPipelineLayoutCreateInfo plInfo{};
     plInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -147,7 +163,7 @@ void PipelineManager::createPipelineLayout()
     }
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
 
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created — 4 sets + push constants");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created — 4 sets (set 0 has 8 fixed safe bindings) + push constants");
 }
 
 // =============================================================================
@@ -185,7 +201,7 @@ void PipelineManager::allocateDescriptorSets()
         LOG_SUCCESS_CAT("PIPELINE", "Allocated {} {} descriptor sets", frames, name);
     };
 
-    allocate(rtDescriptorSets_,    rtDescriptorSetLayout_.get(),    "main RT (set 0)");
+    allocate(rtDescriptorSets_,    rtDescriptorSetLayout_.get(),    "main RT (set 0 — 8 bindings)");
     allocate(texDescriptorSets_,   texDescriptorSetLayout_.get(),   "texture array (set 2)");
     allocate(emptyDescriptorSets_, emptyDescriptorSetLayout_.get(), "empty (sets 1 & 3)");
 }
@@ -741,7 +757,7 @@ void RTX::PipelineManager::cacheDeviceProperties()
 }
 
 // =============================================================================
-// Update RT descriptor set for a given frame
+// Update RT descriptor set for a given frame — matches 8 fixed bindings
 // =============================================================================
 void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
 {
@@ -805,12 +821,13 @@ void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDe
         ++writeCount;
     };
 
-    addAccel(0, updateInfo.tlas);
-    addImage(1, updateInfo.rtOutputView);
-    addBuffer(2, updateInfo.ubo, updateInfo.uboSize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    // Fixed bindings — match kMainBindings
+    addAccel(0, updateInfo.tlas);                    // 0: TLAS
+    addImage(1, updateInfo.rtOutputView);            // 1: Output image
+    addBuffer(2, updateInfo.ubo, updateInfo.uboSize, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER); // 2: Camera UBO
 
     if (updateInfo.materialsBuffer && updateInfo.materialsSize > 0) {
-        addBuffer(4, updateInfo.materialsBuffer, updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        addBuffer(3, updateInfo.materialsBuffer, updateInfo.materialsSize, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER); // 3: Materials
     }
 
     if (updateInfo.blueNoiseSampler && updateInfo.blueNoiseView) {
@@ -822,7 +839,7 @@ void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDe
         writes[writeCount] = VkWriteDescriptorSet{};
         writes[writeCount].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[writeCount].dstSet          = set;
-        writes[writeCount].dstBinding      = 8;
+        writes[writeCount].dstBinding      = 5;  // 5: Blue noise
         writes[writeCount].descriptorCount = 1;
         writes[writeCount].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[writeCount].pImageInfo      = &info;
@@ -830,12 +847,12 @@ void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDe
     }
 
     if (!updateInfo.nexusScoreViews.empty() && frameIndex < updateInfo.nexusScoreViews.size()) {
-        addImage(6, updateInfo.nexusScoreViews[frameIndex]);
+        addImage(6, updateInfo.nexusScoreViews[frameIndex]); // 6: Prev frame / nexus
     }
 
     if (writeCount > 0) {
         vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
-        LOG_TRACE_CAT("PIPELINE", "Updated RT descriptor set for frame {} — {} writes", frameIndex, writeCount);
+        LOG_TRACE_CAT("PIPELINE", "Updated RT descriptor set for frame {} — {} writes (8 fixed bindings)", frameIndex, writeCount);
     }
 }
 
@@ -854,8 +871,9 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet(uint32_t frameIndex) cons
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.11 — January 21, 2026
+// PipelineManager v30.12 — January 21, 2026
+// - Preconfigured 8 safe bindings for set 0 — no binding 31
 // - Unified logging with LOG_*_CAT("PIPELINE", ...)
 // - Empire style consistent across codebase
-// - Ready to debug DEVICE_LOST — paste SBT trace logs after run
+// - Ready for stable trace rays — pink photons incoming
 // =============================================================================
