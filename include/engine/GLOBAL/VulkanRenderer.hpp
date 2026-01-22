@@ -59,7 +59,8 @@ private:
 
     // Timeline semaphore — pacing if queue backs up
     VkSemaphore timelineSemaphore_ = VK_NULL_HANDLE;
-    uint64_t    currentTimelineValue_ = 0;
+    VkSemaphore acquireSemaphore_ = VK_NULL_HANDLE;
+	uint64_t    currentTimelineValue_ = 0;
 
     // Materials & UBO — single, updated only on change
     uint64_t defaultMaterialsHandle_ = 0;

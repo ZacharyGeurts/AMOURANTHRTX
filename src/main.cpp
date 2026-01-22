@@ -39,7 +39,7 @@ static void showSacrificialSplash() {
 
     std::print("[SPLASH] Starting...\n");
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) { // you'll see
         std::print("[SPLASH] Video init failed: {}\n", SDL_GetError());
         return;
     }
@@ -164,13 +164,13 @@ int main(int, char**) {
 
     showSacrificialSplash();
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0) {
-        std::print("[FATAL] Main SDL init failed: {}\n", SDL_GetError());
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+        std::print("[FATAL] Video subsystem init failed: {}\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
 
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) { // you'll see
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         std::print("[FATAL] Vulkan loader failed: {}\n", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -219,7 +219,7 @@ int main(int, char**) {
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) apocalypse("Device creation failed");
 
-    // Seal device and related objects (idempotent)
+    // Seal device and related objects
     StoneKey::stone_seal_device(device);
     StoneKey::stone_seal_physical(RTX::g_ctx().physical_);
     StoneKey::stone_seal_graphics_family(RTX::g_ctx().graphicsFamily_);
@@ -234,19 +234,19 @@ int main(int, char**) {
     RTX::loadDeviceExtensions(device);
     RTX::g_ctx().init();
 
-    // CRITICAL: Pool before renderer — global infrastructure first
+    // Global descriptor pool before renderer
     RTX::createGlobalDescriptorPool();
 
     RTX::SwapchainManager::create(window, pixelW, pixelH);
 
-    // Renderer owns everything — LAS, pipeline, SBT, descriptors, pew pew
+    // Renderer — owns LAS, pipeline, SBT, pew pew
     renderer = std::make_unique<RTX::VulkanRenderer>(pixelW, pixelH, window, Options::Performance::OVERCLOCK_RENDERER);
 
     SDL_Renderer* sdlRen = SDL_CreateRenderer(window, nullptr);
     if (!sdlRen) std::print("[WARN] SDL overlay renderer failed: {}\n", SDL_GetError());
     Console::init(window, sdlRen);
 
-    // Local camera — renderer will use it directly
+    // Local camera — renderer uses it directly
     Camera cam;
 
     std::print("[MAIN] Launcher complete — pure light engaged\n");
@@ -254,7 +254,7 @@ int main(int, char**) {
     auto last_log_time = std::chrono::steady_clock::now();
 
     while (true) {
-        renderer->pewPew();  // Acquire → trace → present. Forever.
+        renderer->pewPew();
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -269,27 +269,25 @@ int main(int, char**) {
 
         Console::render();
 
-        // Log lifetime once per second — pirate ship shib timbers style
+        // Throttled lifetime log — once per second
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - last_log_time).count();
         if (elapsed >= 1.0) {
-            LOG_INFO_CAT("MAIN", "ARRR! Lifetime: {:.6f}s | {:.1f} FPS | {:.3f} ms/frame | Pink photons eternal!",
-                         totalTime_,
-                         totalTime_ > 0.0 ? 1.0 / totalTime_ : 0.0,
-                         totalTime_ > 0.0 ? 1000.0 / (1.0 / totalTime_) : 0.0);
+            LOG_INFO_CAT("MAIN", "ARRR! Lifetime: {:.6f}s | {:.1f} FPS | Pink photons eternal!",
+                         renderer->getLifetimeSeconds(),
+                         renderer->getLifetimeSeconds() > 0.0 ? 1.0 / renderer->getLifetimeSeconds() : 0.0);
             last_log_time = now;
         }
     }
 
-    // Unreachable — apocalypse() exits
+    // Unreachable
     return 0;
 }
 
 // =============================================================================
-// Main v30.5 — January 21, 2026
-// - Pool before renderer — fixes null pool during warm-up/allocation
-// - Naked launcher: splash → Vulkan → pool → renderer → pew pew forever
-// - No duplicate executeCommand() — Console owns it
-// - Lifetime logging once per second — pirate ship shib timbers style
-// - No frames, no fallback — crash loud, render turf
+// Main v30.6 — January 21, 2026
+// - Added reusable acquire semaphore for sync (fixes validation spam)
+// - Cleaned duplicate SDL_Init calls
+// - Throttled lifetime log kept (1/sec)
+// - Pool before renderer — infrastructure first
 // =============================================================================

@@ -111,6 +111,20 @@ inline const char* string_VkDescriptorType(VkDescriptorType type) {
     }
 }
 
+// Simple helper for logging image layouts (startup/error only)
+inline const char* string_VkImageLayout(VkImageLayout layout)
+{
+    switch (layout)
+    {
+        case VK_IMAGE_LAYOUT_UNDEFINED:                    return "UNDEFINED";
+        case VK_IMAGE_LAYOUT_GENERAL:                      return "GENERAL";
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:         return "TRANSFER_SRC_OPTIMAL";
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:         return "TRANSFER_DST_OPTIMAL";
+        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:              return "PRESENT_SRC_KHR";
+        default:                                           return "UNKNOWN";
+    }
+}
+
 // =============================================================================
 // std::formatter<VkResult, char> — FULLY EXPANDED + DEFAULT
 // =============================================================================

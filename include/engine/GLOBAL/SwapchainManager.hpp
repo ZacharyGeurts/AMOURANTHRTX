@@ -98,6 +98,9 @@ public:
 
     inline static bool minimized_ = false;
 
+	void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
+                               VkImageLayout oldLayout, VkImageLayout newLayout) noexcept;
+
 private:
     // Private helpers
     static void cleanupImageViews() noexcept;
