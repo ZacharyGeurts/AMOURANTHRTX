@@ -33,6 +33,7 @@
 #include <thread>
 #include <tuple>
 #include <vector>
+#include <cinttypes>
 
 // For backtrace & signals
 #include <csignal>
@@ -111,17 +112,54 @@ inline const char* string_VkDescriptorType(VkDescriptorType type) {
     }
 }
 
-// Simple helper for logging image layouts (startup/error only)
-inline const char* string_VkImageLayout(VkImageLayout layout)
+// Permanent helper for logging VkImageLayout (startup, error, and debug)
+// Handles all core Vulkan values + common extensions + garbage detection
+inline const char* string_VkImageLayout(VkImageLayout layout) noexcept
 {
     switch (layout)
     {
-        case VK_IMAGE_LAYOUT_UNDEFINED:                    return "UNDEFINED";
-        case VK_IMAGE_LAYOUT_GENERAL:                      return "GENERAL";
-        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:         return "TRANSFER_SRC_OPTIMAL";
-        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:         return "TRANSFER_DST_OPTIMAL";
-        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:              return "PRESENT_SRC_KHR";
-        default:                                           return "UNKNOWN";
+        // Core Vulkan 1.0–1.3 layouts
+        case VK_IMAGE_LAYOUT_UNDEFINED:                                return "UNDEFINED (0)";
+        case VK_IMAGE_LAYOUT_GENERAL:                                  return "GENERAL (1)";
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:                 return "COLOR_ATTACHMENT_OPTIMAL (2)";
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:         return "DEPTH_STENCIL_ATTACHMENT_OPTIMAL (3)";
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:          return "DEPTH_STENCIL_READ_ONLY_OPTIMAL (4)";
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:                 return "SHADER_READ_ONLY_OPTIMAL (5)";
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:                     return "TRANSFER_SRC_OPTIMAL (6)";
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:                     return "TRANSFER_DST_OPTIMAL (7)";
+        case VK_IMAGE_LAYOUT_PREINITIALIZED:                           return "PREINITIALIZED (8)";
+        case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL: return "DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL (9)";
+        case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL: return "DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL (10)";
+        case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:               return "STENCIL_ATTACHMENT_OPTIMAL (1000241000)"; // dynamic
+        case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:                return "STENCIL_READ_ONLY_OPTIMAL (1000241001)";
+
+        // KHR extensions (common in RTX/swapchain)
+        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:                          return "PRESENT_SRC_KHR (1000001002)";
+        case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR:                     return "VIDEO_DECODE_DST_KHR (1000024000)";
+        case VK_IMAGE_LAYOUT_VIDEO_DECODE_SRC_KHR:                     return "VIDEO_DECODE_SRC_KHR (1000024001)";
+        case VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR:                     return "VIDEO_DECODE_DPB_KHR (1000024002)";
+        case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DST_KHR:                     return "VIDEO_ENCODE_DST_KHR (1000299000)";
+        case VK_IMAGE_LAYOUT_VIDEO_ENCODE_SRC_KHR:                     return "VIDEO_ENCODE_SRC_KHR (1000299001)";
+        case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DPB_KHR:                     return "VIDEO_ENCODE_DPB_KHR (1000299002)";
+
+        // Dynamic rendering / render pass layouts (Vulkan 1.3+)
+        case VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR:                 return "RENDERING_LOCAL_READ_KHR (1000232000)";
+        case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR:                   return "ATTACHMENT_OPTIMAL_KHR (1000241000)";
+        case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR:                    return "READ_ONLY_OPTIMAL_KHR (1000241001)";
+
+        // Catch garbage values (common uninitialized/stack garbage patterns)
+        default:
+        {
+            // Quick garbage detector — large values or weird patterns
+            if (layout > 0x100000000LL || layout < 0 || (layout & 0xFFFF0000) == 0xCCCC0000) {
+                return "GARBAGE/UNINITIALIZED";
+            }
+
+            // Fallback with hex + decimal for unknown but plausible values
+            static char buf[64];
+            snprintf(buf, sizeof(buf), "UNKNOWN(%" PRIi64 " = 0x%" PRIx64 ")", (int64_t)layout, (uint64_t)layout);
+            return buf;
+        }
     }
 }
 
