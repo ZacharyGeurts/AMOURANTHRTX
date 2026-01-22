@@ -94,26 +94,6 @@ uses stb and tinyobj and is really smart everywhere really. "the city of the fut
 Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
 It may have been confusing to anyone unfamiliar with Open Source.  
 
-TLDNR! God Bless, my ADHD buddy.  
-Pre Alpha. Short files est. 3 days of gametime. - Mug in Plastic Beach branch.   
-Elon made a robot than can get all RTX news and together we boiled it down to 100% and everyone by design owns the key to the invisible system.  
-Not many files to look through but they are smart as Grok.  
-My advice, start in the /src/engine/GLOBAL folder and see how few files. You can ask Grok about them.  
-SECURE. I can not tell if you pirated my code by looking at the binary. Built on the backs of ALL THE giants.  
-(logging might bring a smile)  
-Hackers. Nothing inside here.  
-Commercial, switch your build from debug to release.  
-StoneKey.hpp should be global singleton's to the other hpp department store.  
-Include logging.hpp as the cpp is needed for the impl.  
-Every blessing of Vulkan upon you. 1.3 is dead to us. 1.4+ and == 0  
-Keep running ```./linux.sh run``` until it starts purring.  
-Ask Grok "why it stoopid" like I do.  
-Use the green code button above to download zip.  
-Or, use the preferred method with git.  
-GLHF. 
-Pre Alpha o/ ... the commits are chunky and full commits brings back files that should stay dead. Ever forward.  
-Clean if adding a new file. We have incremental. Nice.  
-Logging can simply tell you the filename and line number that it logged at, simple debugging. *coughzerocost  
 Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
 Or trash it and grab a new one tomorrow.  
 ```
