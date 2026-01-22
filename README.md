@@ -6,7 +6,6 @@ Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the
 We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
 Make a trip through [include/engine/GLOBALS/logging.hpp](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/include/engine/GLOBAL/logging.hpp) now. We will not disappoint.  
 Include StoneKey.hpp and logging.hpp for all of RTX interoperations.  
-I'm still trying to get output again from main and recently messed up or fixed RTXHandler but it gives a nice error more in the direction I'm headed. Ever forward.  
 You are encouraged to work with code here. Welcome to github.  
 The best advice I have for you is to make some money with it first.  
 Cut all operational costs securely and to zero.  
@@ -36,14 +35,6 @@ If you enjoyed anything from here, send Amouranth a swag bag if you have it, and
 She steps on RTX and dominates it now.  
 
 I tried to keep the wiki smart enough that even a high school freshman can dream big.  
-
-Yo ho, I believe we also have an issue or few in the main.cpp. Weigh anchor and we sail The Main again...  
-The double window is still an issue between main and RTXHandler.  
-You'll See.  
-
-Don't be the guy that makes shaders into hpp files. Don't.  
-Unless it is your own project, but never admit it.  
-**nobody will be able to feed the dang thing back into AI so it goes on the trash heap later.  
 Everyone gets the tab on their browser now, up and comers would be foolish not to use it.  
 
 If you are here for a while, slow your scroll. The files are short.  
