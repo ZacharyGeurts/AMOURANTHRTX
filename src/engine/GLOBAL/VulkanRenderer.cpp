@@ -390,7 +390,7 @@ void RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept {
 
     VkResult submitRes = vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, fence);
     if (submitRes != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", string_VkResult(submitRes));
+        // LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", string_VkResult(submitRes));
         vkDestroyFence(stone_device(), fence, nullptr);
         vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
         return;
