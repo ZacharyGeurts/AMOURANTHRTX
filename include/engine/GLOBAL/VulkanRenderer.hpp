@@ -64,6 +64,8 @@ private:
     // Materials & UBO — single, updated only on change
     uint64_t defaultMaterialsHandle_ = 0;
     uint64_t cameraUBO_ = 0;
+	VkBuffer       cameraUBOBuffer_  = VK_NULL_HANDLE;  // Manual UBO buffer
+    VkDeviceMemory cameraUBOMemory_  = VK_NULL_HANDLE;  // Manual UBO memory
 
     // Transient command pool — allocate per pew pew
     VkCommandPool transientCmdPool_ = VK_NULL_HANDLE;

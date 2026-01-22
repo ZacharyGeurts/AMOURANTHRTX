@@ -1,11 +1,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew pew forever
-// Version 30.31 — January 21, 2026
-// - Switched ALL logging to LOG_*_CAT("RENDERER", ...) macros
-// - Consistent Empire-themed style matching logging.hpp
-// - Robust error paths: early returns + resource cleanup on failure
-// - Added category-specific trace/info/success/error/fatal logs
+// Version 30.32 — January 21, 2026
+// - Camera UBO created MANUALLY (bypasses BufferManager) to guarantee correct flags
+// - Fixed initializer order to match header declaration (no -Werror=reorder)
+// - Removed invalid cameraUBO_ = cameraUBOBuffer_ assignment (type mismatch)
+// - Added inline string_VkImageLayout helper
+// - Logging unified with LOG_*_CAT("RENDERER", ...)
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -32,6 +33,20 @@
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_swapchain;
+
+// Simple helper for logging image layouts (can be moved to utils later)
+inline const char* string_VkImageLayout(VkImageLayout layout)
+{
+    switch (layout)
+    {
+        case VK_IMAGE_LAYOUT_UNDEFINED:                    return "UNDEFINED";
+        case VK_IMAGE_LAYOUT_GENERAL:                      return "GENERAL";
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:         return "TRANSFER_SRC_OPTIMAL";
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:         return "TRANSFER_DST_OPTIMAL";
+        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:              return "PRESENT_SRC_KHR";
+        default:                                           return "UNKNOWN";
+    }
+}
 
 // =============================================================================
 // Material struct — file scope
@@ -118,7 +133,9 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
       timelineSemaphore_(VK_NULL_HANDLE),
       currentTimelineValue_(0),
       defaultMaterialsHandle_(0),
-      cameraUBO_(0),
+      cameraUBO_(0),                // Keep for compatibility if needed
+      cameraUBOBuffer_(VK_NULL_HANDLE),
+      cameraUBOMemory_(VK_NULL_HANDLE),
       transientCmdPool_(VK_NULL_HANDLE),
       hdrOutputImage_(VK_NULL_HANDLE),
       hdrOutputView_(VK_NULL_HANDLE)
@@ -143,18 +160,50 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
         return;
     }
 
-    // Camera UBO
-    cameraUBO_ = BufferManager::create(
-        sizeof(CameraSceneData),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        "CameraUBO"
-    );
-    if (cameraUBO_ == 0) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create camera UBO — initialization aborted");
+    // Camera UBO — MANUAL creation to guarantee correct usage flags
+    VkBufferCreateInfo uboCI{};
+    uboCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    uboCI.size        = sizeof(CameraSceneData);
+    uboCI.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    uboCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(stone_device(), &uboCI, nullptr, &cameraUBOBuffer_) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkCreateBuffer failed for camera UBO");
         return;
     }
 
-    // Default materials (single white diffuse placeholder)
+    VkMemoryRequirements memReqs;
+    vkGetBufferMemoryRequirements(stone_device(), cameraUBOBuffer_, &memReqs);
+
+    uint32_t memType = BufferManager::findMemoryType(memReqs.memoryTypeBits,
+                                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    if (memType == UINT32_MAX) {
+        LOG_FATAL_CAT("RENDERER", "No suitable memory type for camera UBO");
+        vkDestroyBuffer(stone_device(), cameraUBOBuffer_, nullptr);
+        return;
+    }
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize  = memReqs.size;
+    allocInfo.memoryTypeIndex = memType;
+
+    if (vkAllocateMemory(stone_device(), &allocInfo, nullptr, &cameraUBOMemory_) != VK_SUCCESS ||
+        vkBindBufferMemory(stone_device(), cameraUBOBuffer_, cameraUBOMemory_, 0) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to allocate/bind camera UBO memory");
+        vkDestroyBuffer(stone_device(), cameraUBOBuffer_, nullptr);
+        return;
+    }
+
+    // If you still need cameraUBO_ for BufferManager compatibility, you could set it to some index/handle,
+    // but since we're manual now, leave it 0 or remove usage if possible
+    cameraUBO_ = 0;  // or remove this line if not needed anymore
+
+    LOG_SUCCESS_CAT("RENDERER", "Camera UBO created manually — flags guaranteed");
+
+    // Default materials (still using BufferManager)
     std::array<Material, 1> defaultMats{};
     defaultMats[0].albedo = glm::vec4(1.0f);
     defaultMats[0].emissive = glm::vec4(0.0f);
@@ -189,13 +238,11 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
         return;
     }
 
-    VkMemoryRequirements memReqs;
     vkGetImageMemoryRequirements(stone_device(), hdrOutputImage_, &memReqs);
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    allocInfo.allocationSize  = memReqs.size;
+    allocInfo.memoryTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits,
+                                                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkDeviceMemory hdrMem = VK_NULL_HANDLE;
     if (vkAllocateMemory(stone_device(), &allocInfo, nullptr, &hdrMem) != VK_SUCCESS ||
@@ -256,8 +303,13 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     if (hdrOutputImage_ != VK_NULL_HANDLE)
         vkDestroyImage(stone_device(), hdrOutputImage_, nullptr);
 
+    if (cameraUBOBuffer_ != VK_NULL_HANDLE)
+        vkDestroyBuffer(stone_device(), cameraUBOBuffer_, nullptr);
+
+    if (cameraUBOMemory_ != VK_NULL_HANDLE)
+        vkFreeMemory(stone_device(), cameraUBOMemory_, nullptr);
+
     BufferManager::destroy(defaultMaterialsHandle_);
-    BufferManager::destroy(cameraUBO_);
 
     LOG_INFO_CAT("RENDERER", "Renderer destroyed — empire rests in silence");
 }
@@ -409,6 +461,7 @@ void RTX::VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd,
     barrier.dstAccessMask = dstAccess;
 
     vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    LOG_TRACE_CAT("RENDERER", "Image transitioned: {} → {}", string_VkImageLayout(oldLayout), string_VkImageLayout(newLayout));
 }
 
 // =============================================================================
@@ -428,8 +481,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
         return;
     }
 
-    VkBuffer uboBuffer = BufferManager::get_buffer(cameraUBO_);
-    if (uboBuffer == VK_NULL_HANDLE) {
+    if (cameraUBOBuffer_ == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "Camera UBO buffer is null");
         return;
     }
@@ -472,7 +524,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
     writes[1].pImageInfo = &imageInfo;
 
     VkDescriptorBufferInfo uboInfo{};
-    uboInfo.buffer = uboBuffer;
+    uboInfo.buffer = cameraUBOBuffer_;  // Use the manual buffer
     uboInfo.offset = 0;
     uboInfo.range = sizeof(CameraSceneData);
 
@@ -568,8 +620,9 @@ void RTX::VulkanRenderer::pewPew() noexcept {
 }
 
 // =============================================================================
-// VulkanRenderer v30.31 — January 21, 2026
-// - All logging now uses LOG_*_CAT("RENDERER", ...) — Empire style unified
-// - Robust failure handling with early returns
-// - Pink photons eternal — ready when traversal is fixed
+// VulkanRenderer v30.32 — January 21, 2026
+// - Camera UBO manual creation — fixes usage flag validation error
+// - Fixed initializer order to match header
+// - Empire logging consistent
+// - Ready for pink test → re-enable traceRayEXT after
 // =============================================================================
