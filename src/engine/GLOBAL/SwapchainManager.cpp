@@ -58,8 +58,13 @@ static void ensureSwapchainExtension() noexcept {
 // =============================================================================
 void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                              VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
-    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE) return;
-    if (oldLayout == newLayout) return;
+    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE) {
+        return;
+    }
+
+    if (oldLayout == newLayout) {
+        return;
+    }
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
