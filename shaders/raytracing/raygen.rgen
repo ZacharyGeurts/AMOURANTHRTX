@@ -1,4 +1,4 @@
-// shaders/raytracing/raygen.rgen
+// =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL
 // RAY GENERATION SHADER — PRIMARY RAY LAUNCH + TEMPORAL ACCUMULATION
 // PINK PHOTONS SCREAM ETERNAL — AMOURANTH FOREVER 💖
@@ -9,11 +9,14 @@
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_nonuniform_qualifier : require
 
+// Ray payload — output color from hit/miss
 layout(location = 0) rayPayloadEXT vec3 hitColor;
 
+// Global resources — set 0
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
 layout(set = 0, binding = 1, rgba32f) uniform image2D rtOutput;
 
+// Camera uniforms — view/proj matrices, position, frame counters, exposure
 layout(set = 0, binding = 2) uniform CameraUBO {
     mat4 viewInverse;
     mat4 projInverse;
@@ -25,42 +28,19 @@ layout(set = 0, binding = 2) uniform CameraUBO {
     float time;
 } ubo;
 
+// Push constants — time & frame (passed per dispatch)
 layout(push_constant) uniform PushConstants {
     float time;
     uint frame;
 } push;
 
-// StoneKey security — embedded, eternal, no shared file
-layout(binding = 31) uniform StoneKeyRuntimeBlock
-{
-    uint uStoneKey1;
-    uint uStoneKey2;
-    uint uHandleObfuscator;   // 0 = use compile-time base
-} stoneRuntime;
-
-const uint kStoneObfuscatorBase = 
-    0x9E37AF18U ^ 0xE4F8B29DU ^ 0x1337C0DEU;
-
-uint stone_get_obfuscator()
-{
-    return (stoneRuntime.uHandleObfuscator != 0U)
-        ? stoneRuntime.uHandleObfuscator
-        : kStoneObfuscatorBase;
-}
-
-#define STONE_FINAL_OBFUSCATE(val)   (uint(val) ^ stone_get_obfuscator())
-#define STONE_FINAL_DEOBFUSCATE(val) (uint(val) ^ stone_get_obfuscator())
-
-#define STONE_OBFUSCATE_RT(val)  STONE_FINAL_OBFUSCATE(val)
-#define STONE_DEOBFUSCATE_RT(val) STONE_FINAL_DEOBFUSCATE(val)
-
-// Sacred colors
+// Sacred colors — eternal empire palette
 const vec3 kPinkPhoton  = vec3(1.0, 0.2,  0.8);
 const vec3 kHotPink     = vec3(1.0, 0.078, 0.576);
 const vec3 kThermoPink  = vec3(1.0, 0.35, 0.7);
 const float kStrawEternal = 1.337;
 
-// Simple PCG RNG
+// Simple PCG RNG — per-pixel + frame seed
 uint pcg(uint v) {
     uint state = v * 747796405u + 2891336453u;
     state = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -72,9 +52,11 @@ void main() {
     ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
     ivec2 resolution = ivec2(gl_LaunchSizeEXT.xy);
 
+    // Normalized device coordinates [-1,1]
     vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(resolution);
     uv = uv * 2.0 - 1.0;
 
+    // Unproject to world-space ray direction
     vec4 target = ubo.projInverse * vec4(uv.x, uv.y, 1.0, 1.0);
     target /= target.w;
 
@@ -82,10 +64,23 @@ void main() {
     vec3 rayDir = normalize(direction.xyz);
     vec3 rayOrigin = ubo.cameraPos.xyz;
 
+    // Per-pixel + frame seed for jitter/noise
     uint seed = pcg(pixel.x + pixel.y * resolution.x + ubo.frameNumber * 1664525u);
 
-    traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, 0.001, rayDir, 10000.0, 0);
+    // Fire primary ray — opaque geometry only
+    traceRayEXT(tlas,
+                gl_RayFlagsOpaqueEXT,
+                0xFF,          // cull mask
+                0,             // ray type offset
+                0,             // miss index offset
+                0,             // hit group offset
+                rayOrigin,
+                0.001,         // tMin
+                rayDir,
+                10000.0,       // tMax
+                0);            // payload location
 
+    // Temporal accumulation
     vec3 newColor = hitColor;
     vec3 prevColor = imageLoad(rtOutput, pixel).rgb;
 
@@ -97,7 +92,9 @@ void main() {
         finalColor = mix(prevColor, newColor, alpha);
     }
 
+    // Apply exposure
     finalColor *= ubo.exposure;
 
+    // Write to HDR output image
     imageStore(rtOutput, pixel, vec4(finalColor, 1.0));
 }
