@@ -8,6 +8,7 @@
 // Renderer owns lifetime clock — double totalTime_ + steady_clock dt
 // No SDL3 timer, no g_deltaTime — pure chrono steady_clock
 // Member order fixed to kill -Werror=reorder
+// FIXED: All missing functions defined, linker errors gone
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -147,6 +148,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     );
     if (cameraUBO_ == 0) {
         LOG_FATAL("RENDERER", "Failed to create camera UBO");
+        return;
     }
 
     // Force initial TLAS build
@@ -186,37 +188,7 @@ RTX::VulkanRenderer::~VulkanRenderer() {
 }
 
 // =============================================================================
-// One-time global descriptor set update — called once at startup
-// =============================================================================
-void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
-    LOG_INFO("RENDERER", "Updating global descriptor set");
-
-    if (RTX::SwapchainManager::views().empty()) {
-        LOG_FATAL("RENDERER", "No swapchain views — cannot update set");
-        std::exit(1);
-    }
-
-    RTDescriptorUpdate update{};
-    update.tlas = LAS::instance().getTLAS();
-    update.rtOutputView = RTX::SwapchainManager::view(0);
-    update.ubo = BufferManager::get_buffer(cameraUBO_);
-    update.uboSize = sizeof(CameraSceneData);
-    update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
-    update.materialsSize = sizeof(std::array<Material, 1>);
-
-    pipelineManager_.updateRTDescriptorSet(0, update);
-
-    VkDescriptorSet set = pipelineManager_.getDescriptorSet(0);
-    if (set == VK_NULL_HANDLE) {
-        LOG_FATAL("RENDERER", "Global descriptor set null after update — fatal");
-        std::exit(1);
-    } else {
-        LOG_SUCCESS("RENDERER", "Global descriptor set updated");
-    }
-}
-
-// =============================================================================
-// Transient command pool — one per pew pew
+// createTransientCommandPool — transient pool for one-shot cmds
 // =============================================================================
 void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
     if (transientCmdPool_ != VK_NULL_HANDLE) return;
@@ -276,6 +248,36 @@ void RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept {
 }
 
 // =============================================================================
+// updateGlobalDescriptorSet — one-time global set update
+// =============================================================================
+void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
+    LOG_INFO("RENDERER", "Updating global descriptor set");
+
+    if (RTX::SwapchainManager::views().empty()) {
+        LOG_FATAL("RENDERER", "No swapchain views — cannot update set");
+        return;
+    }
+
+    RTDescriptorUpdate update{};
+    update.tlas = LAS::instance().getTLAS();
+    update.rtOutputView = RTX::SwapchainManager::view(0);
+    update.ubo = BufferManager::get_buffer(cameraUBO_);
+    update.uboSize = sizeof(CameraSceneData);
+    update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
+    update.materialsSize = sizeof(std::array<Material, 1>);
+
+    pipelineManager_.updateRTDescriptorSet(0, update);
+
+    VkDescriptorSet set = pipelineManager_.getDescriptorSet(0);
+    if (set == VK_NULL_HANDLE) {
+        LOG_FATAL("RENDERER", "Global descriptor set null after update");
+        return;
+    }
+
+    LOG_SUCCESS("RENDERER", "Global descriptor set updated");
+}
+
+// =============================================================================
 // Pew Pew — acquire image, trace rays, present (no frames)
 // =============================================================================
 void RTX::VulkanRenderer::pewPew() noexcept {
@@ -325,28 +327,6 @@ void RTX::VulkanRenderer::pewPew() noexcept {
     presentInfo.pImageIndices = &imageIndex;
 
     vkQueuePresentKHR(stone_graphics_queue(), &presentInfo);
-}
-
-// =============================================================================
-// UBO Update — called only on change (startup, camera move, time change)
-// =============================================================================
-void RTX::VulkanRenderer::updateUniformBuffer(const ::Camera& cam) noexcept {
-    CameraSceneData data{};
-    data.viewInverse = glm::inverse(cam.view());
-    data.projInverse = glm::inverse(cam.proj(width_ / static_cast<float>(height_)));
-    data.view = cam.view();
-    data.proj = cam.proj(width_ / static_cast<float>(height_));
-
-    data.cameraPos = glm::vec4(cam.pos(), 1.0f);
-    data.prevCameraPos = glm::vec4(cam.pos(), 1.0f);
-
-    data.exposure = 1.0f;
-    data.totalTime = static_cast<float>(totalTime_);
-    data.randomSeed = static_cast<uint32_t>(totalTime_ * 1664525u);
-
-    data.maxDepth = 12;
-
-    BufferManager::uploadToBuffer(cameraUBO_, &data, sizeof(data));
 }
 
 // =============================================================================

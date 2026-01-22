@@ -1,4 +1,3 @@
-// include/engine/GLOBAL/Extensions.hpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -14,6 +13,13 @@
 // ROBUST, PRODUCTION-READY, NULL-SAFE
 // =============================================================================
 #pragma once
+
+// Enable required KHR extensions for compile-time constants & structs
+// Must be BEFORE any vulkan.h include in the entire project
+#define VK_KHR_acceleration_structure 1
+#define VK_KHR_ray_tracing_pipeline 1
+#define VK_KHR_deferred_host_operations 1
+#define VK_KHR_buffer_device_address 1
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>

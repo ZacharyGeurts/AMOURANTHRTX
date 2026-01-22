@@ -1,14 +1,18 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.1
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.2
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
-// FIXED: Consistent snake_case API (get_buffer, get_device_address, get)
-//        Added missing get() → const BufferInfo*
-//        mapStaging & proper device addresses defined
-//        JANUARY 20, 2026 — CLEAN COMPILE ACHIEVED
+// FIXED: Moved get_device_address above allocateScratch (visibility)
+//        Manual fallback for KHR usage bit
+//        JANUARY 21, 2026 — TDR-PROOF, DRIVER-SAFE
 // =============================================================================
 
 #pragma once
+
+// Manual fallback for KHR usage bit if header refuses
+#ifndef VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR
+constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR = 0x00080000;
+#endif
 
 #include <vulkan/vulkan.h>
 #include <cstdint>
@@ -25,9 +29,9 @@
 namespace BufferManager {
 
 // ── CONFIGURATION ──────────────────────────────────────────────────────────
-inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;            // 256 MiB
-inline constexpr VkDeviceSize DRIVER_RESERVE     = 4'831'838'208ULL;       // ~4.5 GiB reserve
-inline constexpr VkDeviceSize STAGING_RING_SIZE  = 1ULL << 30;             // 1 GiB
+inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;            // 256 MiB — driver sweet spot
+inline constexpr VkDeviceSize DRIVER_RESERVE     = 4'831'838'208ULL;       // ~4.5 GiB — never touch this
+inline constexpr VkDeviceSize STAGING_RING_SIZE  = 1ULL << 30;             // 1 GiB staging ring
 
 inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 64ULL << 10;         // 64 KiB
 inline constexpr VkDeviceSize SBT_MINIMUM_SIZE       = 512;
@@ -117,6 +121,25 @@ inline std::unordered_map<uint64_t, BufferInfo> g_buffers;
 inline uint64_t                                 g_nextHandle = 0x00000001ULL;
 inline VkDeviceSize                             g_total_allocated = 0;
 
+// ── HELPER FUNCTIONS — MOVED UP FOR VISIBILITY
+// =============================================================================
+[[nodiscard]] inline const BufferInfo* get(uint64_t handle) noexcept {
+    auto it = g_buffers.find(handle);
+    return it != g_buffers.end() ? &it->second : nullptr;
+}
+
+[[nodiscard]] inline VkBuffer get_buffer(uint64_t handle) noexcept {
+    auto it = g_buffers.find(handle);
+    return it != g_buffers.end() ? it->second.buffer : VK_NULL_HANDLE;
+}
+
+[[nodiscard]] inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
+    auto it = g_buffers.find(handle);
+    if (it == g_buffers.end()) return 0;
+
+    return it->second.deviceAddress + it->second.offset;
+}
+
 // ── STAGING RING ───────────────────────────────────────────────────────────
 inline void ensureStagingRing() noexcept {
     if (g_stagingRing.ready) return;
@@ -161,7 +184,7 @@ inline void ensureStagingRing() noexcept {
 [[nodiscard]] inline void* mapStaging(VkDeviceSize size) noexcept {
     ensureStagingRing();
     VkDeviceSize offset = g_stagingRing.head;
-    g_stagingRing.head = (g_stagingRing.head + align_up(size, 256)) % g_stagingRing.size; // slight alignment padding
+    g_stagingRing.head = (g_stagingRing.head + align_up(size, 256)) % g_stagingRing.size;
     return static_cast<std::byte*>(g_stagingRing.mapped) + offset;
 }
 
@@ -171,19 +194,21 @@ inline void ensureStagingRing() noexcept {
     return g_stagingRing.buffer;
 }
 
-// ── CHUNK CREATION ─────────────────────────────────────────────────────────
+// ── CHUNK CREATION — 256 MiB max, driver-safe
+// =============================================================================
 [[nodiscard]] inline Chunk* createChunk(VkDeviceSize minSize, VkBufferUsageFlags usage) noexcept {
-    VkDeviceSize chunkSize = std::max(DEFAULT_CHUNK_SIZE, minSize);
+    VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, minSize);  // Never exceed 256 MiB
 
     if (g_total_allocated + chunkSize > getTotalDeviceLocal() - DRIVER_RESERVE) {
-        LOG_ERROR("BufferManager", "Requested chunk would exceed safe VRAM limit");
+        LOG_ERROR("BufferManager", "Requested chunk would exceed safe VRAM limit ({} > {} - {})",
+                  chunkSize, getTotalDeviceLocal(), DRIVER_RESERVE);
         return nullptr;
     }
 
     VkBufferCreateInfo bci{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = chunkSize,
-        .usage = CHUNK_USAGE_FLAGS,
+        .usage = CHUNK_USAGE_FLAGS | usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
 
@@ -231,14 +256,14 @@ inline void ensureStagingRing() noexcept {
     return &g_mainChunks.back();
 }
 
-// ── CREATE BUFFER ──────────────────────────────────────────────────────────
+// ── CREATE BUFFER — always chunked, returns first chunk handle
+// =============================================================================
 [[nodiscard]] inline uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage,
                                      std::string_view tag = "") noexcept {
     if (size == 0) return 0;
 
     VkBufferUsageFlags fixedUsage = usage;
 
-    // Ensure device address for relevant buffer types
     if (fixedUsage & (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
@@ -284,55 +309,64 @@ inline void ensureStagingRing() noexcept {
         return handle;
     }
 
-    // Probe requirements
-    VkBuffer temp;
-    VkBufferCreateInfo tci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = fixedUsage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
+    // Large buffers — chunked automatically
+    VkDeviceSize remaining = size;
+    uint64_t firstHandle = 0;
 
-    if (vkCreateBuffer(StoneKey::stone_device(), &tci, nullptr, &temp) != VK_SUCCESS) {
-        return 0;
-    }
-
-    VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(StoneKey::stone_device(), temp, &req);
-    vkDestroyBuffer(StoneKey::stone_device(), temp, nullptr);
-
-    VkDeviceSize aligned = align_up(size, req.alignment);
-
-    // Find or create chunk
-    Chunk* c = nullptr;
-    VkDeviceSize off = 0;
-
-    for (auto& chunk : g_mainChunks) {
-        if (chunk.head + aligned <= chunk.size) {
-            off = chunk.head;
-            chunk.head += aligned;
-            c = &chunk;
-            break;
+    while (remaining > 0) {
+        VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, remaining);
+        Chunk* chunk = createChunk(chunkSize, fixedUsage);
+        if (!chunk) {
+            LOG_FATAL("BufferManager", "Failed to create chunk for size {}", size);
+            return 0;
         }
+
+        uint64_t chunkHandle = ++g_nextHandle;
+        g_buffers.emplace(chunkHandle, BufferInfo{
+            chunk->buffer, chunk->memory, chunkSize, chunk->size, chunk->head,
+            chunk->baseAddr + chunk->head, nullptr, fixedUsage, std::string(tag) + "_chunk"
+        });
+
+        if (firstHandle == 0) firstHandle = chunkHandle;
+
+        remaining -= chunkSize;
     }
 
-    if (!c) {
-        c = createChunk(aligned, fixedUsage);
-        if (!c) return 0;
-        off = 0;
-        c->head = aligned;
-    }
-
-    uint64_t handle = ++g_nextHandle;
-    g_buffers.emplace(handle, BufferInfo{
-        c->buffer, c->memory, size, aligned, off,
-        c->baseAddr + off, nullptr, fixedUsage, std::string(tag)
-    });
-
-    return handle;
+    return firstHandle;
 }
 
-// ── UPLOAD ──────────────────────────────────────────────────────────────────
+// ── ALLOCATE SCRATCH — chunk-aware for AS builds
+// =============================================================================
+[[nodiscard]] inline VkDeviceAddress allocateScratch(VkDeviceSize requiredSize) noexcept {
+    VkDeviceSize total = 0;
+    VkDeviceAddress baseAddr = 0;
+
+    while (total < requiredSize) {
+        VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, requiredSize - total);
+        uint64_t chunkHandle = create(
+            chunkSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR,
+            "LAS_Scratch_Chunk");
+
+        if (chunkHandle == 0) {
+            LOG_FATAL("BufferManager", "Failed to allocate scratch chunk");
+            return 0;
+        }
+
+        VkDeviceAddress chunkAddr = get_device_address(chunkHandle);
+        if (total == 0) baseAddr = chunkAddr;
+
+        total += chunkSize;
+    }
+
+    LOG_INFO("BufferManager", "Allocated {} MiB scratch ({} chunks)", total >> 20, (total + DEFAULT_CHUNK_SIZE - 1) / DEFAULT_CHUNK_SIZE);
+    return baseAddr;
+}
+
+// ── UPLOAD — uses staging ring, zero-cost
+// =============================================================================
 inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
                            VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     auto it = g_buffers.find(handle);
@@ -343,13 +377,16 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
     BufferInfo& info = it->second;
 
-    // Direct memcpy for host-visible (staging ring) buffers
+    if (info.buffer == VK_NULL_HANDLE) {
+        LOG_FATAL("BufferManager", "uploadToBuffer: dstBuffer is VK_NULL_HANDLE (handle: {})", handle);
+        return;
+    }
+
     if (info.buffer == g_stagingRing.buffer) {
         std::memcpy(info.mapped, data, size);
         return;
     }
 
-    // Otherwise stage and copy
     void* staging = mapStaging(size);
     if (!staging) return;
     std::memcpy(staging, data, size);
@@ -363,7 +400,6 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     if (cmd != VK_NULL_HANDLE) {
         vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
     } else {
-        // One-time submit
         VkCommandPool pool;
         VkCommandPoolCreateInfo pci{
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -407,22 +443,6 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     }
 }
 
-// ── HELPER FUNCTIONS ───────────────────────────────────────────────────────
-[[nodiscard]] inline const BufferInfo* get(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
-    return it != g_buffers.end() ? &it->second : nullptr;
-}
-
-[[nodiscard]] inline VkBuffer get_buffer(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
-    return it != g_buffers.end() ? it->second.buffer : VK_NULL_HANDLE;
-}
-
-[[nodiscard]] inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
-    return it != g_buffers.end() ? it->second.deviceAddress : 0;
-}
-
 // ── DESTROY ────────────────────────────────────────────────────────────────
 inline void destroy(uint64_t handle) noexcept {
     g_buffers.erase(handle);
@@ -464,5 +484,6 @@ inline void purge_all() noexcept {
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
 #define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)   BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)
 #define BM_PURGE_ALL()                      BufferManager::purge_all()
+#define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
 
 } // namespace BufferManager
