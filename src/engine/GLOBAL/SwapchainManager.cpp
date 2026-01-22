@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.1
-// SWAPCHAIN MANAGER — PURE LIGHT | AUTO HDR | NO TEARING | SELF-HEALING
-// JANUARY 21, 2026 — FIXED LAYOUT TRANSITIONS + SEMAPHORE SYNC — PINK PHOTONS ETERNAL
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.2
+// SWAPCHAIN MANAGER — PURE LIGHT | HDR | NO TEARING | SELF-HEALING
+// JANUARY 22, 2026 — FIXED COMPILATION + FINAL TRANSITION — PINK PHOTONS FLOW
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -29,7 +29,9 @@ using StoneKey::stone_height;
 
 namespace RTX {
 
-// Ensure extension is loaded
+// =============================================================================
+// ensureSwapchainExtension — load proc addresses
+// =============================================================================
 static void ensureSwapchainExtension() noexcept {
     if (!g_ext.vkCreateSwapchainKHR) {
         g_ext.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
@@ -38,33 +40,22 @@ static void ensureSwapchainExtension() noexcept {
             LOG_FATAL("SWAPCHAIN", "Failed to load vkCreateSwapchainKHR");
         }
     }
-}
-
-// Check if format supports required usage
-[[nodiscard]] static bool supportsRequiredUsage(VkPhysicalDevice phys, VkFormat fmt) noexcept {
-    VkFormatProperties props{};
-    vkGetPhysicalDeviceFormatProperties(phys, fmt, &props);
-
-    VkFormatFeatureFlags req = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
-                               VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
-                               VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
-                               VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-
-    return (props.optimalTilingFeatures & req) == req;
+    if (!g_ext.vkDestroySwapchainKHR) {
+        g_ext.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
+            vkGetDeviceProcAddr(stone_device(), "vkDestroySwapchainKHR"));
+    }
+    if (!g_ext.vkGetSwapchainImagesKHR) {
+        g_ext.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
+            vkGetDeviceProcAddr(stone_device(), "vkGetSwapchainImagesKHR"));
+    }
 }
 
 // =============================================================================
-// transitionImageLayout — helper for swapchain images (used by caller)
+// transitionImageLayout — now used everywhere
 // =============================================================================
 void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                              VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
-    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE) {
-        return;
-    }
-
-    if (oldLayout == newLayout) {
-        return;
-    }
+    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE || oldLayout == newLayout) return;
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -116,7 +107,9 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
-// Core create/recreate — auto HDR preference
+// =============================================================================
+// createOrRecreateSwapchain — auto HDR + simple pacing
+// =============================================================================
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason) noexcept {
     ensureSwapchainExtension();
 
@@ -141,18 +134,14 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     if (isRecreate) {
         cleanupImageViews();
         cleanupSwapchain();
-
         LAS::instance().onResize();
-        LOG_SUCCESS("SWAPCHAIN", "Swapchain recreation triggered: {}", reason.empty() ? "unknown" : reason);
+        LOG_SUCCESS("SWAPCHAIN", "Recreation: {}", reason.empty() ? "unknown" : reason);
     }
 
     minimized_ = false;
 
     VkSurfaceCapabilitiesKHR caps{};
-    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps) != VK_SUCCESS) {
-        minimized_ = true;
-        return;
-    }
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps);
 
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == UINT32_MAX) {
@@ -162,7 +151,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     if (extent.width == 0 || extent.height == 0) {
         minimized_ = true;
-        LOG_INFO("SWAPCHAIN", "Zero extent — window minimized");
+        LOG_INFO("SWAPCHAIN", "Zero extent — minimized");
         return;
     }
 
@@ -170,20 +159,6 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(fmtCount);
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, formats.data());
-
-    uint32_t modeCount = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &modeCount, nullptr);
-    std::vector<VkPresentModeKHR> modes(modeCount);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &modeCount, modes.data());
-
-    VkPresentModeKHR pmode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
-    if (std::find(modes.begin(), modes.end(), pmode) == modes.end()) {
-        pmode = VK_PRESENT_MODE_FIFO_KHR;
-        LOG_INFO("SWAPCHAIN", "FIFO_RELAXED not supported — using FIFO");
-    }
-
-    uint32_t imgCount = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
 
     VkSurfaceFormatKHR chosen = formats[0];
     const VkSurfaceFormatKHR hdrPrefs[] = {
@@ -195,12 +170,14 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     for (const auto& cand : hdrPrefs) {
         auto it = std::find_if(formats.begin(), formats.end(),
             [&](const auto& f){ return f.format == cand.format && f.colorSpace == cand.colorSpace; });
-        if (it != formats.end() && supportsRequiredUsage(phys, cand.format)) {
+        if (it != formats.end()) {
             chosen = *it;
-            LOG_SUCCESS("SWAPCHAIN", "Auto HDR selected — {}", string_VkFormat(cand.format));
+            LOG_SUCCESS("SWAPCHAIN", "Selected format: {}", string_VkFormat(cand.format));
             break;
         }
     }
+
+    uint32_t imgCount = std::min(caps.minImageCount + 1, caps.maxImageCount ? caps.maxImageCount : 8u);
 
     VkSwapchainCreateInfoKHR ci{};
     ci.sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -211,13 +188,12 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     ci.imageExtent     = extent;
     ci.imageArrayLayers= 1;
     ci.imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT    |
                          VK_IMAGE_USAGE_TRANSFER_DST_BIT    |
                          VK_IMAGE_USAGE_STORAGE_BIT;
     ci.imageSharingMode= VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform    = caps.currentTransform;
     ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    ci.presentMode     = pmode;
+    ci.presentMode     = VK_PRESENT_MODE_FIFO_KHR;
     ci.clipped         = VK_TRUE;
     ci.oldSwapchain    = swapchain_.valid() ? swapchain_.get() : VK_NULL_HANDLE;
 
@@ -229,10 +205,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     }
 
     swapchain_ = Handle<VkSwapchainKHR>(newSwap, dev, vkDestroySwapchainKHR);
-
     swapchainExtent_ = extent;
     swapchainFormat_ = chosen.format;
-    currentPresentMode_ = pmode;
 
     uint32_t count = 0;
     vkGetSwapchainImagesKHR(dev, newSwap, &count, nullptr);
@@ -261,28 +235,73 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    LOG_SUCCESS("SWAPCHAIN", "Swapchain ready — {} images | {}×{} | {} | {}",
-                count, extent.width, extent.height,
-                string_VkFormat(chosen.format), string_VkPresentModeKHR(pmode));
+    LOG_SUCCESS("SWAPCHAIN", "Swapchain ready — {} images | {}×{} | {} ",
+                count, extent.width, extent.height, string_VkFormat(chosen.format));
 }
 
-// Create (initial)
-void SwapchainManager::create(SDL_Window*, uint32_t w, uint32_t h) noexcept {
-    createOrRecreateSwapchain(w, h, false, "initial");
+// =============================================================================
+// acquireNextImage
+// =============================================================================
+VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
+                                            VkSemaphore semaphore,
+                                            VkFence fence) noexcept {
+    if (minimized_ || !swapchain_.valid()) return VK_NOT_READY;
+
+    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(),
+                                         UINT64_MAX, semaphore, fence, pImageIndex);
+
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
+        recreate(stone_width(), stone_height(), "acquire invalid");
+        return VK_NOT_READY;
+    }
+
+    return res;
 }
 
-// Recreate
-void SwapchainManager::recreate(uint32_t w, uint32_t h, std::string_view reason) noexcept {
-    createOrRecreateSwapchain(w, h, true, reason);
+// =============================================================================
+// presentImage — assumes transition already done
+// =============================================================================
+void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
+    if (minimized_ || !swapchain_.valid()) return;
+
+    VkSwapchainKHR currentSwap = swapchain_.get();  // copy to local lvalue
+
+    VkPresentInfoKHR pi{};
+    pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.waitSemaphoreCount = waitSem ? 1 : 0;
+    pi.pWaitSemaphores    = waitSem ? &waitSem : nullptr;
+    pi.swapchainCount     = 1;
+    pi.pSwapchains        = &currentSwap;
+    pi.pImageIndices      = &imageIndex;
+
+    VkResult res = vkQueuePresentKHR(queue, &pi);
+
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
+        recreate(stone_width(), stone_height(), "present invalid");
+    }
 }
 
-// Full cleanup
+// =============================================================================
+// Recreate the swapchain on invalid/out-of-date/suboptimal/surface-lost
+// =============================================================================
+void SwapchainManager::recreate(uint32_t width, uint32_t height, std::string_view reason) noexcept {
+    createOrRecreateSwapchain(width, height, true, reason);
+}
+
+// =============================================================================
+// Initial creation — calls the core function with isRecreate = false
+// =============================================================================
+void SwapchainManager::create(SDL_Window* window, uint32_t width, uint32_t height) noexcept {
+    createOrRecreateSwapchain(width, height, false, "initial create");
+}
+
+// =============================================================================
+// cleanup
+// =============================================================================
 void SwapchainManager::cleanup() noexcept {
     if (!stone_device()) return;
     vkDeviceWaitIdle(stone_device());
-
     LAS::instance().onResize();
-
     cleanupImageViews();
     cleanupSwapchain();
 }
@@ -293,54 +312,8 @@ void SwapchainManager::cleanupSwapchain() noexcept {
 }
 
 void SwapchainManager::cleanupImageViews() noexcept {
-    for (auto v : swapchainImageViews_) {
-        if (v) vkDestroyImageView(stone_device(), v, nullptr);
-    }
+    for (auto v : swapchainImageViews_) vkDestroyImageView(stone_device(), v, nullptr);
     swapchainImageViews_.clear();
 }
 
-// Acquire with semaphore
-VkResult SwapchainManager::acquireNextImage(uint32_t* idx, VkSemaphore sem, VkFence fence) noexcept {
-    if (minimized_ || !swapchain_.valid()) return VK_NOT_READY;
-
-    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(), UINT64_MAX, sem, fence, idx);
-
-    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
-        recreate(stone_width(), stone_height(), "acquire invalid");
-        return VK_NOT_READY;
-    }
-
-    return res;
-}
-
-// Present with semaphore
-void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
-    if (minimized_ || !swapchain_.valid()) return;
-
-    VkSwapchainKHR current = swapchain_.get();
-
-    VkPresentInfoKHR pi{};
-    pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.waitSemaphoreCount = waitSem ? 1u : 0u;
-    pi.pWaitSemaphores    = waitSem ? &waitSem : nullptr;
-    pi.swapchainCount     = 1;
-    pi.pSwapchains        = &current;
-    pi.pImageIndices      = &imageIndex;
-
-    VkResult res = vkQueuePresentKHR(queue, &pi);
-
-    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
-        recreate(stone_width(), stone_height(), "present invalid");
-    }
-}
-
 } // namespace RTX
-
-// =============================================================================
-// FINAL v30.1 — JANUARY 21, 2026
-// - Added missing layout transitions (UNDEFINED → TRANSFER_DST, PRESENT → TRANSFER_DST)
-// - Semaphore support in acquire/present (sync chain)
-// - Minimal logging — startup + fatal/error only
-// - Auto HDR preserved
-// Pink photons flowing smoothly — AMOURANTH FOREVER 💖
-// =============================================================================
