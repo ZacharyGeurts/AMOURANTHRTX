@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing pipeline, SBT, and descriptor management
-// Version 30.19 — January 23, 2026
+// Version 30.20 — January 23, 2026
 // - Single eternal descriptor set — no frames, no MAX_FRAMES_IN_FLIGHT
 // - UPDATE_AFTER_BIND enabled on pool/layout — safe updates every frame
 // - traceRays & updateRTDescriptorSet take no frame/image index
@@ -10,6 +10,7 @@
 // - Descriptor writes safe — skip invalid, offset 0, range full
 // - Materials write still commented (binding 3 = STORAGE_IMAGE)
 // - Empire stable — no garbage, no lost device
+// - CLEANED: Removed vestigial push constant 'frame' (dead code)
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -144,7 +145,7 @@ void PipelineManager::createPipelineLayout()
                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
                       VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
     push.offset     = 0;
-    push.size       = 32;
+    push.size       = sizeof(float);  // only 'time' remains
 
     VkPipelineLayoutCreateInfo plInfo{};
     plInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -645,17 +646,12 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             rtPipelineLayout_.get(), 0, 1, sets, 0, nullptr);
 
-    struct PushConstants {
-        float time;
-        uint32_t frame;
-    } push{};
-    push.time = 0.0f;
-    push.frame = 0;  // meaningless now — can remove later
+    float time = 0.0f;  // can be passed or computed from engine clock later
 
     vkCmdPushConstants(cmd, rtPipelineLayout_.get(),
                        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
-                       0, sizeof(push), &push);
+                       0, sizeof(float), &time);
 
     VkStridedDeviceAddressRegionKHR raygenRegion   = raygenSbtRegion_;
     VkStridedDeviceAddressRegionKHR missRegion     = missSbtRegion_;
@@ -843,5 +839,5 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.19 — January 23, 2026
+// PipelineManager v30.20 — January 23, 2026
 // =============================================================================
