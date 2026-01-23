@@ -1,8 +1,9 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing pipeline, SBT, and descriptor management
-// Version 30.18 — January 23, 2026
+// Version 30.19 — January 23, 2026
 // - Single eternal descriptor set — no frames, no MAX_FRAMES_IN_FLIGHT
+// - UPDATE_AFTER_BIND enabled on pool/layout — safe updates every frame
 // - traceRays & updateRTDescriptorSet take no frame/image index
 // - allocateDescriptorSets creates 1 of each type
 // - getDescriptorSet() returns the single set
@@ -37,7 +38,7 @@ using BufferManager::align_up;
 // Static atomic members
 std::atomic<bool> RTX::PipelineManager::g_pipelineNeedsRebuild{false};
 
-// Fixed 8 safe bindings for set 0 — Vulkan guaranteed
+// Fixed 8 safe bindings for set 0 — Vulkan guaranteed (no flags here — handled on layout/pool)
 static constexpr std::array<VkDescriptorSetLayoutBinding, 8> kMainBindings = {{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
@@ -79,7 +80,7 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 }
 
 // =============================================================================
-// Pipeline Layout
+// Pipeline Layout — UPDATE_AFTER_BIND on pool
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -103,7 +104,8 @@ void PipelineManager::createPipelineLayout()
         .binding         = 0,
         .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1024,
-        .stageFlags      = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
+        .stageFlags      = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+        .pImmutableSamplers = nullptr
     };
 
     VkDescriptorSetLayoutCreateInfo texInfo{};
@@ -584,36 +586,19 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
             return;
         }
 
-        VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fci{};
-        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        if (vkCreateFence(stone_device(), &fci, nullptr, &fence) != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "Failed to create fence for SBT upload");
-            vkFreeCommandBuffers(stone_device(), pool ? pool : stone_transient_pool(), 1, &uploadCmd);
-            vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-            vkFreeMemory(stone_device(), sbtMemory, nullptr);
-            return;
-        }
-
         VkSubmitInfo submit{};
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount = 1;
         submit.pCommandBuffers = &uploadCmd;
-        if (vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, fence) != VK_SUCCESS) {
+        if (vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
             LOG_FATAL_CAT("PIPELINE", "vkQueueSubmit failed during SBT upload");
-            vkDestroyFence(stone_device(), fence, nullptr);
             vkFreeCommandBuffers(stone_device(), pool ? pool : stone_transient_pool(), 1, &uploadCmd);
             vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
             vkFreeMemory(stone_device(), sbtMemory, nullptr);
             return;
         }
 
-        if (vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "vkWaitForFences failed during SBT upload");
-        }
-
-        vkDestroyFence(stone_device(), fence, nullptr);
-        vkFreeCommandBuffers(stone_device(), pool ? pool : stone_transient_pool(), 1, &uploadCmd);
+        vkQueueWaitIdle(queue ? queue : stone_graphics_queue());  // Wait for upload to finish
     }
 
     VkDeviceAddress raygenAddr = align_up(sbtAddress, baseAlign);
@@ -858,8 +843,9 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.18 — January 23, 2026
+// PipelineManager v30.19 — January 23, 2026
 // - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
+// - UPDATE_AFTER_BIND enabled on pool/layout — safe updates every frame
 // - updateRTDescriptorSet & traceRays simplified — no frameIndex/imageIndex
 // - Descriptor writes safe — skip invalid, offset 0, no mismatch
 // - Materials write commented (resolve STORAGE_BUFFER vs STORAGE_IMAGE)

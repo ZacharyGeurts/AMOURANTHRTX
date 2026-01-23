@@ -259,8 +259,8 @@ int main(int, char**) {
     auto last_log_time = std::chrono::steady_clock::now();
 
     while (true) {
-        renderer->pewPew();
-
+        renderer->pew(); // flip the lightswitch by the door and remove blindfold.
+// then why was I blindfolded?
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             Console::handleEvent(e);

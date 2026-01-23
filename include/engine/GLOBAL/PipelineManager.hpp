@@ -1,9 +1,9 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.7 — JANUARY 22, 2026
-// PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX EDITION
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.20 — JANUARY 23, 2026
+// PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX EDITION (VULKAN 1.4 COMPAT)
 // SINGLE ETERNAL DESCRIPTOR SET | NO FRAMES | FRAME-FREE TRACE & UPDATE
-// PERSISTENT COMMAND BUFFERS COMPATIBLE | ETERNAL SBT | VALIDATION PERFECT
-// NO PER-FRAME ALLOCATIONS | MAX DRIVER FRIENDLINESS
+// UPDATE_AFTER_BIND ENABLED | PERSISTENT COMMAND BUFFERS COMPATIBLE | ETERNAL SBT
+// NO PER-FRAME ALLOCATIONS | MAX DRIVER FRIENDLINESS | VALIDATION CLEAN
 // =============================================================================
 
 #pragma once
@@ -156,8 +156,9 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — JANUARY 22, 2026
+// FINAL HEADER — JANUARY 23, 2026
 // - Frame-free: single descriptor set, no frameIndex, no MAX_FRAMES_IN_FLIGHT
+// - UPDATE_AFTER_BIND enabled — safe to update every frame
 // - traceRays, updateRTDescriptorSet, getDescriptorSet simplified
 // - Manual SBT cleanup with sbtMemory_ Handle
 // - Direct call from persistent command buffer in VulkanRenderer

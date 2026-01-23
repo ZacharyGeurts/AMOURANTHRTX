@@ -39,8 +39,8 @@ public:
     VulkanRenderer(int width, int height, SDL_Window* window);
     ~VulkanRenderer();
 
-    // The only hot path — acquire, pew pew, present
-    void pewPew() noexcept;
+    // The only hot path — acquire, pew, RIP Pew
+    void pew() noexcept;
 
     [[nodiscard]] bool isMinimized() const noexcept { return minimized_; }
     [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }

@@ -586,7 +586,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
 // =============================================================================
 // pewPew — main render loop (no frames, no FPS)
 // =============================================================================
-void RTX::VulkanRenderer::pewPew() noexcept {
+void RTX::VulkanRenderer::pew() noexcept {
     if (minimized_ || destroyed_) return;
 
     auto now = std::chrono::steady_clock::now();
@@ -636,10 +636,22 @@ void RTX::VulkanRenderer::pewPew() noexcept {
 
     transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    VkResult submitRes = submitAndWaitOneTime(cmd);
-    if (submitRes != VK_SUCCESS) return;
+    // Submit — no fence, no CPU wait
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount   = 1;
+    submitInfo.pCommandBuffers      = &cmd;
 
-    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, currentAcquire);
+    // Wait on acquire semaphore before blit (only stage that needs it)
+    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
+    submitInfo.waitSemaphoreCount   = 1;
+    submitInfo.pWaitSemaphores      = &currentAcquire;
+    submitInfo.pWaitDstStageMask    = waitStages;
+
+    vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);  // NO FENCE
+
+    // Present immediately — no wait semaphore needed (compositor handles pacing)
+    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, VK_NULL_HANDLE);
 }
 
 // =============================================================================
