@@ -1,13 +1,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew pew forever
-// Version 30.41 — January 22, 2026
+// Version 30.42 — January 22, 2026
 // - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
-// - Swapchain layout fixed: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR
-// - No VUID-01399 / VUID-01430 — spec compliant, no device lost
+// - Swapchain layout: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR (spec-compliant)
+// - No VUID-01399 / VUID-01430 / VUID-09600 — no device lost from layouts
 // - Linear tiling toggleable (default off for perf)
 // - HDR creation respects toggle + safety fallback
 // - FPS concept dead — render as fast as possible, compositor paces
+// - Hard _Exit on device lost — skips destructors, no segfault in validation
 // - Stone device used everywhere — no lost device nonsense
 // Empire stable — pink photons eternal
 // =============================================================================
@@ -33,7 +34,7 @@
 #include <cmath>
 #include <utility>
 #include <chrono>
-#include <cstdlib>  // for std::exit
+#include <cstdlib>  // for std::_Exit
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
@@ -441,8 +442,8 @@ VkResult RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept
 
     VkResult waitRes = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
     if (waitRes == VK_ERROR_DEVICE_LOST) {
-        LOG_FATAL_CAT("RENDERER", "DEVICE LOST — exiting to prevent further corruption");
-        std::exit(1);  // Hard stop — no zombie state
+        LOG_FATAL_CAT("RENDERER", "DEVICE LOST — immediate hard exit, skipping destructors");
+        std::_Exit(1);  // skips all cleanup, no destructor segfault
     }
 
     if (waitRes != VK_SUCCESS) {
@@ -643,13 +644,14 @@ void RTX::VulkanRenderer::pewPew() noexcept {
 }
 
 // =============================================================================
-// VulkanRenderer v30.41 — January 22, 2026
+// VulkanRenderer v30.42 — January 22, 2026
 // - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
 // - Swapchain layout fixed: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR
-// - No VUID-01399 / VUID-01430 — spec compliant, no device lost
+// - No VUID-01399 / VUID-01430 / VUID-09600 — spec compliant, no device lost
 // - Linear tiling toggleable (default off for perf)
 // - HDR creation respects toggle + safety fallback
 // - FPS concept dead — render as fast as possible, compositor paces
+// - Hard _Exit on device lost — skips destructors, no segfault
 // - Stone device used everywhere — no lost device nonsense
 // Empire stable — pink photons eternal
 // =============================================================================
