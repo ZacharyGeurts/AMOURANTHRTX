@@ -636,21 +636,27 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    // Submit — no fence, no CPU wait
+    // END THE COMMAND BUFFER — this is the missing call
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkEndCommandBuffer failed");
+        vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
+        return;
+    }
+
+    // Submit — no fence, fire-and-forget
     VkSubmitInfo submitInfo{};
     submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount   = 1;
     submitInfo.pCommandBuffers      = &cmd;
-
-    // Wait on acquire semaphore before blit (only stage that needs it)
-    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
     submitInfo.waitSemaphoreCount   = 1;
     submitInfo.pWaitSemaphores      = &currentAcquire;
+
+    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
     submitInfo.pWaitDstStageMask    = waitStages;
 
     vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);  // NO FENCE
 
-    // Present immediately — no wait semaphore needed (compositor handles pacing)
+    // Present
     SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, VK_NULL_HANDLE);
 }
 
