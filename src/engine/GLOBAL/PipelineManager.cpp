@@ -830,7 +830,7 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
 }
 
 // =============================================================================
-// Get descriptor set — always the single one
+// Get Descriptor set — always the single one
 // =============================================================================
 VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 {
@@ -844,11 +844,4 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 
 // =============================================================================
 // PipelineManager v30.19 — January 23, 2026
-// - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
-// - UPDATE_AFTER_BIND enabled on pool/layout — safe updates every frame
-// - updateRTDescriptorSet & traceRays simplified — no frameIndex/imageIndex
-// - Descriptor writes safe — skip invalid, offset 0, no mismatch
-// - Materials write commented (resolve STORAGE_BUFFER vs STORAGE_IMAGE)
-// - Silent success — no spam
-// - Ready for rendering — no garbage, no lost device
 // =============================================================================

@@ -1,15 +1,15 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
-// Pure light ray tracing core — no frames, no state, pew pew forever
-// Version 30.43 — January 22, 2026
+// Pure light ray tracing core — no frames, no state, pew forever
+// Version 30.46 — January 23, 2026
 // - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
-// - Swapchain layout: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR (spec-compliant)
-// - Device lost handling: retry frame up to 3 times before hard exit
-// - Linear tiling toggleable (default off for perf)
+// - Cmd buffer ring (3) — reset + re-record each pew (flush previous safely)
+// - No fences, no waits — fire-and-forget submit
+// - Swapchain layout: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR
+// - Linear tiling toggleable (default off)
 // - HDR creation respects toggle + safety fallback
 // - FPS concept dead — render as fast as possible, compositor paces
-// - Stone device used everywhere — no lost device nonsense
-// Empire stable — pink photons eternal
+// - Empire stable — pink photons eternal
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -38,6 +38,9 @@
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_swapchain;
+
+// Ring size — 3 is safe for most GPUs (2 is minimum)
+constexpr size_t CMD_RING_SIZE = 3;
 
 // =============================================================================
 // Material struct — file scope
@@ -133,7 +136,8 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
       hdrOutputImage_(VK_NULL_HANDLE),
       hdrOutputView_(VK_NULL_HANDLE),
       hdrOutputMemory_(VK_NULL_HANDLE),
-      pipelineManager_(stone_device(), StoneKey::stone_physical())
+      pipelineManager_(stone_device(), StoneKey::stone_physical()),
+      cmdRingIndex_(0)
 {
     LOG_INFO_CAT("RENDERER", "Initializing pure light engine — {}x{}", width, height);
 
@@ -156,7 +160,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
         return;
     }
 
-    // Per-frame acquire semaphores (still needed for acquire/present sync)
+    // Per-frame acquire semaphores
     VkSemaphoreCreateInfo acquireSemCI{};
     acquireSemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     for (auto& s : acquireSemaphores_) {
@@ -260,13 +264,12 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     vkGetImageMemoryRequirements(stone_device(), hdrOutputImage_, &memReqs);
 
-    VkMemoryAllocateInfo allocInfo2{};
-    allocInfo2.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo2.allocationSize  = memReqs.size;
-    allocInfo2.memoryTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits,
+    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize  = memReqs.size;
+    allocInfo.memoryTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits,
                                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    if (vkAllocateMemory(stone_device(), &allocInfo2, nullptr, &hdrOutputMemory_) != VK_SUCCESS ||
+    if (vkAllocateMemory(stone_device(), &allocInfo, nullptr, &hdrOutputMemory_) != VK_SUCCESS ||
         vkBindImageMemory(stone_device(), hdrOutputImage_, hdrOutputMemory_, 0) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "Failed to allocate/bind HDR image memory");
         vkDestroyImage(stone_device(), hdrOutputImage_, nullptr);
@@ -300,18 +303,37 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     VkCommandBuffer oneTimeCmd = getOneTimeCommandBuffer();
     if (oneTimeCmd != VK_NULL_HANDLE) {
         pipelineManager_.createShaderBindingTable(transientCmdPool_, stone_graphics_queue(), oneTimeCmd);
-        (void)submitAndWaitOneTime(oneTimeCmd);  // Startup-only
+        VkResult sbtRes = submitAndWaitOneTime(oneTimeCmd);  // Startup-only — wait here
+        if (sbtRes != VK_SUCCESS) {
+            LOG_FATAL_CAT("RENDERER", "SBT submit/wait failed: {}", string_VkResult(sbtRes));
+        }
     }
 
     // One-time global descriptor update
     updateGlobalDescriptorSet();
 
-    LOG_SUCCESS_CAT("RENDERER", "Pure light engine initialized");
+    // Create cmd buffer ring
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool        = transientCmdPool_;
+    cmdAllocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = CMD_RING_SIZE;
+
+    if (vkAllocateCommandBuffers(stone_device(), &cmdAllocInfo, cmdRing_.data()) != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "Failed to allocate cmd buffer ring");
+        return;
+    }
+
+    LOG_SUCCESS_CAT("RENDERER", "Pure light engine initialized — cmd ring ready");
 }
 
 RTX::VulkanRenderer::~VulkanRenderer() {
     destroyed_ = true;
     vkDeviceWaitIdle(stone_device());
+
+    if (!cmdRing_.empty()) {
+        vkFreeCommandBuffers(stone_device(), transientCmdPool_, CMD_RING_SIZE, cmdRing_.data());
+    }
 
     if (hdrOutputView_ != VK_NULL_HANDLE) {
         vkDestroyImageView(stone_device(), hdrOutputView_, nullptr);
@@ -364,7 +386,7 @@ void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
 
     VkCommandPoolCreateInfo info{};
     info.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    info.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    info.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     info.queueFamilyIndex = StoneKey::stone_graphics_family();
 
     if (vkCreateCommandPool(stone_device(), &info, nullptr, &transientCmdPool_) != VK_SUCCESS) {
@@ -373,28 +395,20 @@ void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
 }
 
 // =============================================================================
-// getOneTimeCommandBuffer
+// getOneTimeCommandBuffer — from ring (reset previous)
 // =============================================================================
 VkCommandBuffer RTX::VulkanRenderer::getOneTimeCommandBuffer() noexcept {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = transientCmdPool_;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+    VkCommandBuffer cmd = cmdRing_[cmdRingIndex_];
+    cmdRingIndex_ = (cmdRingIndex_ + 1) % CMD_RING_SIZE;
 
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to allocate one-time command buffer");
-        return VK_NULL_HANDLE;
-    }
+    vkResetCommandBuffer(cmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
     if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command buffer");
-        vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
+        LOG_FATAL_CAT("RENDERER", "Failed to begin command buffer");
         return VK_NULL_HANDLE;
     }
 
@@ -402,17 +416,13 @@ VkCommandBuffer RTX::VulkanRenderer::getOneTimeCommandBuffer() noexcept {
 }
 
 // =============================================================================
-// submitAndWaitOneTime — returns result for error checking
+// submitAndWaitOneTime — only for startup
 // =============================================================================
 VkResult RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept {
-    if (cmd == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("RENDERER", "Cannot submit null command buffer");
-        return VK_ERROR_UNKNOWN;
-    }
+    if (cmd == VK_NULL_HANDLE) return VK_ERROR_UNKNOWN;
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkEndCommandBuffer failed");
-        vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
         return VK_ERROR_UNKNOWN;
     }
 
@@ -421,36 +431,20 @@ VkResult RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept
     submitInfo.commandBufferCount   = 1;
     submitInfo.pCommandBuffers      = &cmd;
 
+    VkFence fence = VK_NULL_HANDLE;
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
-    VkFence fence = VK_NULL_HANDLE;
-    if (vkCreateFence(stone_device(), &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to create fence");
-        vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
-        return VK_ERROR_UNKNOWN;
-    }
+    vkCreateFence(stone_device(), &fenceInfo, nullptr, &fence);
 
     VkResult submitRes = vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, fence);
     if (submitRes != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", string_VkResult(submitRes));
         vkDestroyFence(stone_device(), fence, nullptr);
-        vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
         return submitRes;
     }
 
     VkResult waitRes = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
-    if (waitRes == VK_ERROR_DEVICE_LOST) {
-        LOG_FATAL_CAT("RENDERER", "DEVICE LOST — immediate hard exit, skipping destructors");
-        std::_Exit(1);  // skips all cleanup, no destructor segfault
-    }
-
-    if (waitRes != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "vkWaitForFences failed: {}", string_VkResult(waitRes));
-    }
-
     vkDestroyFence(stone_device(), fence, nullptr);
-    vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
 
     return waitRes;
 }
@@ -584,7 +578,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
 }
 
 // =============================================================================
-// pewPew — main render loop (no frames, no FPS)
+// pew — main render loop (ring-based, no fences)
 // =============================================================================
 void RTX::VulkanRenderer::pew() noexcept {
     if (minimized_ || destroyed_) return;
@@ -602,7 +596,7 @@ void RTX::VulkanRenderer::pew() noexcept {
     VkResult res = SwapchainManager::acquireNextImage(&imageIndex, currentAcquire);
     if (res != VK_SUCCESS) return;
 
-    VkCommandBuffer cmd = getOneTimeCommandBuffer();
+    VkCommandBuffer cmd = getOneTimeCommandBuffer();  // resets previous
     if (!cmd) return;
 
     RTDescriptorUpdate update{};
@@ -636,14 +630,13 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    // END THE COMMAND BUFFER — this is the missing call
+    // End cmd buffer
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkEndCommandBuffer failed");
-        vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
         return;
     }
 
-    // Submit — no fence, fire-and-forget
+    // Submit — no fence
     VkSubmitInfo submitInfo{};
     submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount   = 1;
@@ -654,21 +647,12 @@ void RTX::VulkanRenderer::pew() noexcept {
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
     submitInfo.pWaitDstStageMask    = waitStages;
 
-    vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);  // NO FENCE
+    vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
 
     // Present
     SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, VK_NULL_HANDLE);
 }
 
 // =============================================================================
-// VulkanRenderer v30.42 — January 22, 2026
-// - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
-// - Swapchain layout fixed: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR
-// - No VUID-01399 / VUID-01430 — spec compliant, no device lost
-// - Linear tiling toggleable (default off for perf)
-// - HDR creation respects toggle + safety fallback
-// - FPS concept dead — render as fast as possible, compositor paces
-// - Hard _Exit on device lost — skips destructors, no segfault
-// - Stone device used everywhere — no lost device nonsense
-// Empire stable — pink photons eternal
+// VulkanRenderer v30.46 — January 23, 2026
 // =============================================================================

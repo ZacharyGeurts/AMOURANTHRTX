@@ -1,16 +1,18 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.41 — JANUARY 22, 2026
-// VULKAN RENDERER HEADER — PURE LIGHT | NO FRAMES | PEW PEW FOREVER
-// SINGLE ETERNAL DESCRIPTOR SET • TRANSIENT CMD PER PRESENT • LINEAR TILING TOGGLEABLE
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.46 — JANUARY 23, 2026
+// VULKAN RENDERER HEADER — PURE LIGHT | NO FRAMES | PEW FOREVER
+// SINGLE ETERNAL DESCRIPTOR SET • CMD BUFFER RING (RESET + RE-RECORD) • LINEAR TILING TOGGLEABLE
 // OWNS: LAS TLAS QUERY • PIPELINE • SBT • DESCRIPTOR UPDATE • UBO • HDR STORAGE • SUNLIGHT
 // =============================================================================
-// v30.41 changes:
+// v30.46 changes:
+// - Renamed pewPew → pew (RIP Pew)
 // - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT, no frame index
-// - Constructor matches .cpp: (width, height, window, overclock = false)
+// - Cmd buffer ring (3) — reset + re-record each pew (flush previous safely)
+// - Constructor matches .cpp: (width, height, window)
 // - Member declaration order EXACTLY matches initializer list (-Werror=reorder fixed)
 // - Per-frame acquire semaphores for sync (fixes pending operations VUID)
-// - Proper HDR memory cleanup
-// - No frames — pew pew forever
+// - Proper cleanup of HDR memory + cmd ring
+// - Pure light — pew forever
 // Empire complete — pink photons eternal — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -27,7 +29,6 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 
-#include <vector>
 #include <array>
 #include <cstdint>
 #include <chrono>
@@ -60,7 +61,7 @@ private:
     double      totalTime_ = 0.0;                           // accumulated lifetime seconds
     std::chrono::steady_clock::time_point last_time_;       // last measurement for dt
 
-    // Timeline semaphore — pacing if queue backs up
+    // Timeline semaphore — pacing if queue backs up (optional)
     VkSemaphore timelineSemaphore_ = VK_NULL_HANDLE;
     uint64_t    currentTimelineValue_ = 0;
 
@@ -74,7 +75,7 @@ private:
     VkBuffer    cameraUBOBuffer_  = VK_NULL_HANDLE;  // Manual UBO buffer
     VkDeviceMemory cameraUBOMemory_  = VK_NULL_HANDLE;  // Manual UBO memory
 
-    // Transient command pool — allocate per pew pew
+    // Transient command pool — used for ring
     VkCommandPool transientCmdPool_ = VK_NULL_HANDLE;
 
     // HDR storage image for rtOutput
@@ -83,6 +84,10 @@ private:
     VkDeviceMemory hdrOutputMemory_ = VK_NULL_HANDLE;
 
     PipelineManager pipelineManager_;
+
+    // Cmd buffer ring — 3 reusable buffers (reset each pew)
+    std::array<VkCommandBuffer, 3> cmdRing_{};
+    uint32_t cmdRingIndex_ = 0;
 
     // Core private functions
     void createTransientCommandPool() noexcept;
@@ -104,12 +109,13 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — v30.41 — JANUARY 22, 2026
+// FINAL HEADER — v30.46 — JANUARY 23, 2026
 // - Frame-free: single descriptor set, no frame index, no MAX_FRAMES_IN_FLIGHT
-// - Constructor matches .cpp: (width, height, window, overclock = false)
+// - Cmd buffer ring — reset + re-record each pew (flush previous safely)
+// - Constructor matches .cpp: (width, height, window)
 // - Member declaration order EXACTLY matches initializer list (-Werror=reorder fixed)
 // - Per-frame acquire semaphores for sync
-// - Proper cleanup of HDR memory
-// - Pure light — pew pew forever
+// - Proper cleanup of HDR memory + cmd ring
+// - Pure light — pew forever
 // Empire complete — AMOURANTH FOREVER 💖
 // =============================================================================
