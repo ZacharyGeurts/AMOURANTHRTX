@@ -1,5 +1,5 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.6
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.7
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
 // PHILOSOPHY: Datacenter domination + desktop coexistence
@@ -7,6 +7,7 @@
 //             Instant relinquish on explicit command (no auto-purge)
 //             Tiny safety margin for YouTube PiP / browser tabs
 //             JANUARY 22, 2026 — BIT-LEVEL LOGGING, UNIVERSAL SCALE
+//             NEW: Toggleable linear tiling for images (via OptionsMenu)
 // =============================================================================
 
 #pragma once
@@ -27,6 +28,11 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/logging.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"  // for USE_LINEAR_TILING toggle
+
+using StoneKey::stone_device;
+using StoneKey::stone_physical;
+using RTX::g_ext;
 
 namespace BufferManager {
 
@@ -51,6 +57,13 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
     VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+
+// ── TILING TOGGLE — controlled by OptionsMenu
+// Default: false (optimal tiling — fast)
+// Set true in menu for predictable row-major (linear tiling)
+[[nodiscard]] inline bool useLinearTiling() noexcept {
+    return Options::Rendering::USE_LINEAR_TILING;
+}
 
 // ── UNIVERSAL SCALE PRINT HELPER ───────────────────────────────────────────
 inline std::string formatBytes(VkDeviceSize bytes) noexcept {
@@ -88,9 +101,9 @@ inline std::string formatBits(VkDeviceSize bytes) noexcept {
 // =============================================================================
 struct VRAMReality {
     VkDeviceSize total          = 0;
-    VkDeviceSize driver_footprint = 0;  // live measured (budget extension or estimate)
+    VkDeviceSize driver_footprint = 0;
     VkDeviceSize safety_margin   = TINY_SAFETY_MARGIN;
-    VkDeviceSize usable         = 0;    // total - driver - safety
+    VkDeviceSize usable         = 0;
 };
 
 [[nodiscard]] inline VRAMReality measureReality() noexcept {
@@ -105,7 +118,6 @@ struct VRAMReality {
         }
     }
 
-    // Try VK_EXT_memory_budget (preferred — real driver usage)
     VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
     budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
     props2.pNext = &budget;
@@ -118,10 +130,9 @@ struct VRAMReality {
         }
     }
 
-    // Fallback if extension not available: conservative estimate
     if (reality.driver_footprint == 0) {
-        reality.driver_footprint = 1'500'000'000ULL;  // ~1.5 GiB conservative guess
-        LOG_WARN("BufferManager", "VK_EXT_memory_budget unavailable — using conservative driver footprint estimate");
+        reality.driver_footprint = 1'500'000'000ULL;
+        LOG_WARN("BufferManager", "VK_EXT_memory_budget unavailable — conservative estimate");
     }
 
     reality.usable = reality.total > (reality.driver_footprint + reality.safety_margin)
@@ -153,6 +164,53 @@ struct VRAMReality {
     }
     LOG_ERROR("BufferManager", "No suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
     return ~0u;
+}
+
+// ── NEW: Centralized image creation with tiling toggle
+// =============================================================================
+[[nodiscard]] inline VkImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,
+                                         VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                         std::string_view tag = "Image") noexcept {
+    VkImageCreateInfo ci{};
+    ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.format = format;
+    ci.extent = extent;
+    ci.mipLevels = 1;
+    ci.arrayLayers = 1;
+    ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    ci.tiling = useLinearTiling() ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
+    ci.usage = usage;
+    ci.initialLayout = initialLayout;
+    ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkImage image = VK_NULL_HANDLE;
+    if (vkCreateImage(StoneKey::stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
+        LOG_FATAL("BufferManager", "Failed to create image: {}", tag);
+        return VK_NULL_HANDLE;
+    }
+
+    // Safety check for linear tiling support
+    if (useLinearTiling()) {
+        VkFormatProperties props{};
+        vkGetPhysicalDeviceFormatProperties(StoneKey::stone_physical(), format, &props);
+        VkFormatFeatureFlags req = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+        if ((props.linearTilingFeatures & req) != req) {
+            LOG_ERROR("BufferManager", "LINEAR tiling unsupported for format {} — fallback to OPTIMAL", string_VkFormat(format));
+            vkDestroyImage(StoneKey::stone_device(), image, nullptr);
+            ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+            if (vkCreateImage(StoneKey::stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
+                LOG_FATAL("BufferManager", "Fallback optimal image creation failed");
+                return VK_NULL_HANDLE;
+            }
+        }
+    }
+
+    LOG_INFO_CAT("BufferManager", "Image created — {} | {}×{}×{} | {} | {}", tag,
+                 extent.width, extent.height, extent.depth, string_VkFormat(format),
+                 useLinearTiling() ? "LINEAR" : "OPTIMAL");
+
+    return image;
 }
 
 // ── INTERNAL STRUCTURES ────────────────────────────────────────────────────
@@ -193,8 +251,7 @@ inline std::unordered_map<uint64_t, BufferInfo> g_buffers;
 inline uint64_t                                 g_nextHandle = 0x00000001ULL;
 inline VkDeviceSize                             g_total_allocated = 0;
 
-// ── HELPER FUNCTIONS — MOVED UP FOR VISIBILITY
-// =============================================================================
+// ── HELPER FUNCTIONS ───────────────────────────────────────────────────────
 [[nodiscard]] inline const BufferInfo* get(uint64_t handle) noexcept {
     auto it = g_buffers.find(handle);
     return it != g_buffers.end() ? &it->second : nullptr;
@@ -208,7 +265,6 @@ inline VkDeviceSize                             g_total_allocated = 0;
 [[nodiscard]] inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end()) return 0;
-
     return it->second.deviceAddress + it->second.offset;
 }
 
@@ -272,7 +328,6 @@ inline void ensureStagingRing() noexcept {
     VRAMReality reality = measureReality();
     VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, minSize);
 
-    // Dominate: only fail if not enough left after driver + tiny margin
     if (reality.usable < chunkSize) {
         LOG_FATAL("BufferManager", "GPU reality denies — driver footprint {} ({}), usable left {} ({}), need {} ({})",
                   formatBytes(reality.driver_footprint), formatBits(reality.driver_footprint),

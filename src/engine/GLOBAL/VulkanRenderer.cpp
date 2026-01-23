@@ -1,12 +1,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew pew forever
-// Version 30.38 — January 22, 2026
-// - Fixed stone_physical() namespace qualification
-// - Silenced -Wunused-result on oneTimeCmd submit (startup-only, fatal on fail)
-// - Member initializer list order matches header declaration
-// - Per-frame acquire semaphores, proper cleanup, submit error handling
-// - Empire stable — pink photons eternal, no more lost device
+// Version 30.40 — January 22, 2026
+// - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
+// - Linear tiling toggleable (Options::Rendering::USE_LINEAR_TILING, default off for perf)
+// - HDR creation respects toggle + safety check/fallback
+// - Direct blit to PRESENT_SRC_KHR — no TRANSFER_DST lingering
+// - Hard exit on VK_ERROR_DEVICE_LOST — no zombie state
+// - Stone device used everywhere — no lost device nonsense
+// Empire stable — pink photons eternal
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -18,6 +20,7 @@
 #include "engine/GLOBAL/camera.hpp"
 #include "engine/GLOBAL/camera_utils.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 
 #include "engine/GLOBAL/StoneKey.hpp"
 
@@ -29,6 +32,7 @@
 #include <cmath>
 #include <utility>
 #include <chrono>
+#include <cstdlib>  // for std::exit
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
@@ -128,7 +132,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
       hdrOutputImage_(VK_NULL_HANDLE),
       hdrOutputView_(VK_NULL_HANDLE),
       hdrOutputMemory_(VK_NULL_HANDLE),
-      pipelineManager_(stone_device(), StoneKey::stone_physical())  // ← Fixed namespace
+      pipelineManager_(stone_device(), StoneKey::stone_physical())
 {
     LOG_INFO_CAT("RENDERER", "Initializing pure light engine — {}x{}", width, height);
 
@@ -151,7 +155,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
         return;
     }
 
-    // Per-frame acquire semaphores
+    // Per-frame acquire semaphores (still needed for acquire/present sync)
     VkSemaphoreCreateInfo acquireSemCI{};
     acquireSemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     for (auto& s : acquireSemaphores_) {
@@ -219,7 +223,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     BufferManager::uploadToBuffer(defaultMaterialsHandle_, defaultMats.data(), sizeof(defaultMats));
     LOG_SUCCESS_CAT("RENDERER", "Default materials uploaded");
 
-    // HDR storage image
+    // HDR storage image — respects Options::Rendering::USE_LINEAR_TILING
     VkImageCreateInfo hdrInfo{};
     hdrInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     hdrInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -228,13 +232,29 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     hdrInfo.mipLevels = 1;
     hdrInfo.arrayLayers = 1;
     hdrInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    hdrInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    hdrInfo.tiling = Options::Rendering::USE_LINEAR_TILING ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
     hdrInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     hdrInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     if (vkCreateImage(stone_device(), &hdrInfo, nullptr, &hdrOutputImage_) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkCreateImage failed for HDR output");
         return;
+    }
+
+    // Safety check for linear tiling support (if toggled on)
+    if (Options::Rendering::USE_LINEAR_TILING) {
+        VkFormatProperties props{};
+        vkGetPhysicalDeviceFormatProperties(stone_physical(), hdrInfo.format, &props);
+        VkFormatFeatureFlags req = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+        if ((props.linearTilingFeatures & req) != req) {
+            LOG_ERROR_CAT("RENDERER", "LINEAR tiling unsupported for HDR format — fallback to OPTIMAL");
+            vkDestroyImage(stone_device(), hdrOutputImage_, nullptr);
+            hdrInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+            if (vkCreateImage(stone_device(), &hdrInfo, nullptr, &hdrOutputImage_) != VK_SUCCESS) {
+                LOG_FATAL_CAT("RENDERER", "Fallback optimal HDR image creation failed");
+                return;
+            }
+        }
     }
 
     vkGetImageMemoryRequirements(stone_device(), hdrOutputImage_, &memReqs);
@@ -263,7 +283,8 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
         LOG_FATAL_CAT("RENDERER", "Failed to create HDR image view");
         return;
     }
-    LOG_SUCCESS_CAT("RENDERER", "HDR output image & view created");
+    LOG_SUCCESS_CAT("RENDERER", "HDR output image & view created — tiling: {}", 
+                    Options::Rendering::USE_LINEAR_TILING ? "LINEAR" : "OPTIMAL");
 
     // Force initial TLAS build
     LAS::instance().getTLAS();
@@ -278,10 +299,10 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, b
     VkCommandBuffer oneTimeCmd = getOneTimeCommandBuffer();
     if (oneTimeCmd != VK_NULL_HANDLE) {
         pipelineManager_.createShaderBindingTable(transientCmdPool_, stone_graphics_queue(), oneTimeCmd);
-        (void)submitAndWaitOneTime(oneTimeCmd);  // Startup-only — ignore result (fatal on fail anyway)
+        (void)submitAndWaitOneTime(oneTimeCmd);  // Startup-only
     }
 
-    // One-time global descriptor update (initial)
+    // One-time global descriptor update
     updateGlobalDescriptorSet();
 
     LOG_SUCCESS_CAT("RENDERER", "Pure light engine initialized");
@@ -291,7 +312,6 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     destroyed_ = true;
     vkDeviceWaitIdle(stone_device());
 
-    // Destroy children first — Vulkan requires this order
     if (hdrOutputView_ != VK_NULL_HANDLE) {
         vkDestroyImageView(stone_device(), hdrOutputView_, nullptr);
         hdrOutputView_ = VK_NULL_HANDLE;
@@ -419,6 +439,11 @@ VkResult RTX::VulkanRenderer::submitAndWaitOneTime(VkCommandBuffer cmd) noexcept
     }
 
     VkResult waitRes = vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
+    if (waitRes == VK_ERROR_DEVICE_LOST) {
+        LOG_FATAL_CAT("RENDERER", "DEVICE LOST — exiting to prevent further corruption");
+        std::exit(1);  // Hard stop — no zombie state
+    }
+
     if (waitRes != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkWaitForFences failed: {}", string_VkResult(waitRes));
     }
@@ -436,8 +461,7 @@ void RTX::VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd,
                                                 VkImage image,
                                                 VkImageLayout oldLayout,
                                                 VkImageLayout newLayout) noexcept {
-    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE) return;
-    if (oldLayout == newLayout) return;
+    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE || oldLayout == newLayout) return;
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -510,7 +534,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
         return;
     }
 
-    VkDescriptorSet globalSet = pipelineManager_.getDescriptorSet(0);
+    VkDescriptorSet globalSet = pipelineManager_.getDescriptorSet();
     if (globalSet == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RENDERER", "Global descriptor set is null");
         return;
@@ -559,7 +583,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
 }
 
 // =============================================================================
-// pewPew — main loop
+// pewPew — main loop (hilariously short)
 // =============================================================================
 void RTX::VulkanRenderer::pewPew() noexcept {
     if (minimized_ || destroyed_) return;
@@ -588,36 +612,26 @@ void RTX::VulkanRenderer::pewPew() noexcept {
     update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
     update.materialsSize   = BufferManager::get(defaultMaterialsHandle_)->size;
 
-    pipelineManager_.updateRTDescriptorSet(imageIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT, update);
-
-    // Render at reduced res (shave optimal)
-    uint32_t renderW = width_  * 3 / 4; // 75% — adjust to taste
-    uint32_t renderH = height_ * 3 / 4;
+    pipelineManager_.updateRTDescriptorSet(update);
 
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-    pipelineManager_.traceRays(cmd, imageIndex, renderW, renderH);
+    pipelineManager_.traceRays(cmd, width_, height_);
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     VkImage swapImg = SwapchainManager::image(imageIndex);
-    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    // Blit with upscale + nearest/linear filter
     VkImageBlit blit{};
     blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     blit.srcOffsets[0] = {0, 0, 0};
-    blit.srcOffsets[1] = {static_cast<int32_t>(renderW), static_cast<int32_t>(renderH), 1};
+    blit.srcOffsets[1] = {width_, height_, 1};
     blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     blit.dstOffsets[0] = {0, 0, 0};
-    blit.dstOffsets[1] = {static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1};
+    blit.dstOffsets[1] = {width_, height_, 1};
 
     vkCmdBlitImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                    1, &blit, VK_FILTER_LINEAR);
-
-    // Final transition — kill VUID-01430 forever
-    SwapchainManager::transitionImageLayout(cmd, swapImg,
-                                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VkResult submitRes = submitAndWaitOneTime(cmd);
     if (submitRes != VK_SUCCESS) return;
@@ -626,9 +640,12 @@ void RTX::VulkanRenderer::pewPew() noexcept {
 }
 
 // =============================================================================
-// VulkanRenderer v30.38 — January 22, 2026
-// - Fixed namespace for stone_physical()
-// - Ignored submit result for one-time SBT (startup-only)
-// - All compilation errors resolved
-// - Ready for stable rendering — pink photons eternal
+// VulkanRenderer v30.40 — January 22, 2026
+// - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
+// - Linear tiling toggleable (Options::Rendering::USE_LINEAR_TILING, default off for perf)
+// - HDR creation respects toggle + safety check/fallback
+// - Direct blit to PRESENT_SRC_KHR — no TRANSFER_DST lingering
+// - Hard exit on VK_ERROR_DEVICE_LOST — no zombie state
+// - Stone device used everywhere — no lost device nonsense
+// Empire stable — pink photons eternal
 // =============================================================================

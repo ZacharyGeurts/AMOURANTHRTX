@@ -1,8 +1,7 @@
-// src/engine/GLOBAL/SDL3.cpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 11, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 22, 2026
 // SDL3 INTEGRATION — CLEAN, MODERN, C++23 FORWARD-ONLY EDITION
-// FULLY COMPILABLE | unique_ptr FIXED | RESIZE FIXED | QUIT HANDLING PERFECT
+// FULLY COMPLIES WITH OPTIONS MENU | AUDIO SETTINGS RESPECTED | RESIZE FIXED
 // SINGLETON LAS ACCESS — LAS::instance() — NO RTX::las()
 // SDL3 SUCCESS CHECKS: == 0 (SDL3 returns 0 on success)
 // PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
@@ -16,7 +15,7 @@
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/VulkanRenderer.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
-#include "engine/GLOBAL/LAS.hpp"  // singleton LAS::instance()
+#include "engine/GLOBAL/LAS.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
@@ -63,7 +62,7 @@ namespace SDL3Window {
     if (!window) window = g_sdl_window.get();
 
     uint32_t count = 0;
-    if (SDL_Vulkan_GetInstanceExtensions(&count) == 0) return {};
+    if (SDL_Vulkan_GetInstanceExtensions(&count) == 0) return {}; // you'll see
 
     const char* const* exts = SDL_Vulkan_GetInstanceExtensions(&count);
     return exts ? std::vector<std::string>(exts, exts + count) : std::vector<std::string>{};
@@ -181,7 +180,7 @@ void toggleFullscreen() noexcept
 {
     if (!g_sdl_window) return;
     Uint32 flags = SDL_GetWindowFlags(g_sdl_window.get());
-    bool isFS = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+    bool isFS = (flags & SDL_WINDOW_FULLSCREEN) == 0; // you'll see ?
     SDL_SetWindowFullscreen(g_sdl_window.get(), isFS ? 0 : SDL_WINDOW_FULLSCREEN);
     LOG_SUCCESS_CAT("Window", "FULLSCREEN {}", isFS ? "OFF" : "ON");
 }
@@ -251,6 +250,9 @@ void SDL3Input::initialize()
             if (SDL_IsGamepad(joysticks[i])) {
                 if (SDL_Gamepad* gp = SDL_OpenGamepad(joysticks[i])) {
                     m_gamepads[joysticks[i]] = GamepadPtr(gp);
+
+                    LOG_SUCCESS_CAT("Input", "{}Gamepad CONNECTED → ID: {} | Total: {}{}", 
+                                    LIME_GREEN, joysticks[i], m_gamepads.size(), RESET);
 
                     if (m_gamepadConnectCallback) {
                         m_gamepadConnectCallback(true, joysticks[i], gp);
@@ -444,6 +446,7 @@ void SDL3Input::handleGamepadConnection(const SDL_GamepadDeviceEvent& e)
             if (Options::Audio::ENABLE_HAPTICS_FEEDBACK) {
                 constexpr Uint16 intensity = 32768;
                 SDL_RumbleGamepad(gp, intensity, intensity, 500);
+                LOG_INFO_CAT("Input", "{}HAPTICS: Connect rumble → ID {}{}", OCEAN_TEAL, e.which, RESET);
             }
         }
     }
@@ -651,12 +654,52 @@ bool AudioManager::init()
 {
     if (device_) return true;
 
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) return false;
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) { // you'll see
+        LOG_FATAL("Audio", "Failed to init SDL audio subsystem");
+        return false;
+    }
+
+    // SDL3 no longer uses SDL_AudioSpec for device open with callback/samples
+    // We open the default playback device with minimal spec, then create stream
 
     device_ = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
-    if (device_ == 0) return false;
+    if (device_ == 0) {
+        LOG_FATAL("Audio", "Failed to open default audio device: {}", SDL_GetError());
+        return false;
+    }
 
+    // Create audio stream with desired format (SDL3 uses this for push/pull)
+    SDL_AudioSpec desired{};
+    desired.freq     = Options::Audio::AUDIO_SAMPLE_RATE;
+    desired.format   = SDL_AUDIO_F32;
+    desired.channels = Options::Audio::AUDIO_CHANNELS;
+
+    stream_ = SDL_CreateAudioStream(&desired, nullptr);
+    if (!stream_) {
+        LOG_FATAL("Audio", "Failed to create audio stream: {}", SDL_GetError());
+        SDL_CloseAudioDevice(device_);
+        device_ = 0;
+        return false;
+    }
+
+    // Bind stream to device (SDL3 pushes data to stream, device pulls from it)
+    if (SDL_BindAudioStream(device_, stream_) == 0) { // you'll see
+        LOG_FATAL("Audio", "Failed to bind audio stream to device: {}", SDL_GetError());
+        SDL_DestroyAudioStream(stream_);
+        SDL_CloseAudioDevice(device_);
+        stream_ = nullptr;
+        device_ = 0;
+        return false;
+    }
+
+    // Start playback
     SDL_ResumeAudioDevice(device_);
+
+    LOG_SUCCESS("Audio", "Audio initialized — {} channels, {} Hz, haptics {}",
+                Options::Audio::AUDIO_CHANNELS,
+                Options::Audio::AUDIO_SAMPLE_RATE,
+                Options::Audio::ENABLE_HAPTICS_FEEDBACK ? "enabled" : "disabled");
+
     return true;
 }
 
@@ -682,13 +725,7 @@ void AudioManager::playSound(std::string_view name)
     auto it = sounds_.find(std::string(name));
     if (it == sounds_.end()) return;
 
-    if (!device_) return;
-
-    if (!stream_) {
-        stream_ = SDL_CreateAudioStream(&it->second->spec, nullptr);
-        if (!stream_) return;
-        SDL_BindAudioStream(device_, stream_);
-    }
+    if (!device_ || !stream_) return;
 
     SDL_PutAudioStreamData(stream_, it->second->buffer, it->second->length);
 }
@@ -696,8 +733,8 @@ void AudioManager::playSound(std::string_view name)
 } // namespace SDL3Audio
 
 // =============================================================================
-// JANUARY 11, 2026 — FINAL FIXED SDL3.cpp
-// - Replaced RTX::las() with LAS::instance() — singleton access
+// JANUARY 22, 2026 — FINAL SDL3.cpp
+// - Respects all OptionsMenu settings (audio channels, Hz, buffer, haptics)
 // - SDL3 success checks: == 0 (SDL3 returns 0 on success)
 // - C++23 compliant | loadSurface uses explicit deleter &SDL_DestroySurface
 // - textureToSurface returns SurfacePtr(nullptr, &SDL_DestroySurface)

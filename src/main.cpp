@@ -1,7 +1,8 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 21, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 22, 2026
 // main.cpp — FINAL FIXED & COMPILING | ONE CONSOLE, ONE CLOCK, ONE EMPIRE
-// NO DUPLICATE executeCommand() | TOTALTIME_ TRAIN FULL SPEED | PINK PHOTONS ETERNAL
+// SPLASH ALWAYS SKIPPABLE | NO SPLASH OPTIONS LEFT | SDL3 CHECKS COMMENTED
+// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
@@ -17,7 +18,6 @@
 #include "engine/GLOBAL/camera.hpp"
 
 #include <SDL3/SDL_vulkan.h>
-#include <SDL3_image/SDL_image.h>
 #include <chrono>
 #include <print>
 #include <thread>
@@ -29,11 +29,9 @@ using namespace std::chrono_literals;
 std::unique_ptr<RTX::VulkanRenderer> renderer;
 
 // =============================================================================
-// Sacrificial Splash — Isolated, disposable
+// Sacrificial Splash — always skippable (any input)
 // =============================================================================
 static void showSacrificialSplash() {
-    if (!Options::Splash::ENABLE_SACRIFICIAL_SPLASH) return;
-
     constexpr int W = 1280, H = 720;
     constexpr const char* TITLE = "AMOURANTH RTX vTURBO";
 
@@ -53,7 +51,7 @@ static void showSacrificialSplash() {
     }
 
     SDL_Rect bounds{};
-    if (SDL_GetDisplayBounds(0, &bounds) == 0) {
+    if (SDL_GetDisplayBounds(0, &bounds) == 0) { // you'll see
         SDL_SetWindowPosition(splashWin, bounds.x + (bounds.w - W)/2, bounds.y + (bounds.h - H)/2);
     }
 
@@ -100,11 +98,18 @@ static void showSacrificialSplash() {
     SDL_RenderPresent(splashRen);
 
     auto start = std::chrono::steady_clock::now();
-    while (std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count() < Options::Splash::SPLASH_DURATION_SECONDS) {
+    while (std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count() < 3.4f) { // 3.4 seconds
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT ||
-                (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_ESCAPE && Options::Splash::ALLOW_EARLY_EXIT)) {
+            if (e.type == SDL_EVENT_QUIT) {
+                goto splash_cleanup;
+            }
+
+            // Any input skips splash (keyboard, mouse, controller button, axis motion)
+            if (e.type == SDL_EVENT_KEY_DOWN ||
+                e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+                e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
                 goto splash_cleanup;
             }
         }
@@ -157,20 +162,20 @@ splash_cleanup:
 // Main — Launcher only — hands off to pure light
 // =============================================================================
 int main(int, char**) {
-    if (SDL_Init(SDL_INIT_EVENTS) == 0) {
+    if (SDL_Init(SDL_INIT_EVENTS) == 0) { // you'll see
         std::print("[FATAL] Early SDL init failed: {}\n", SDL_GetError());
         return 1;
     }
 
     showSacrificialSplash();
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) { // you'll see
         std::print("[FATAL] Video subsystem init failed: {}\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
 
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) { // you'll see
         std::print("[FATAL] Vulkan loader failed: {}\n", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -200,7 +205,7 @@ int main(int, char**) {
     }
 
     int pixelW = 0, pixelH = 0;
-    SDL_GetWindowSizeInPixels(window, &pixelW, &pixelH);
+    SDL_GetWindowSizeInPixels(window, &pixelW, &pixelH);  // Correct SDL3 high-DPI pixel size
 
     VkInstance instance = RTX::createVulkanInstance(Options::Debug::ENABLE_VALIDATION_LAYERS);
     if (!instance) apocalypse("Instance creation failed");
@@ -210,7 +215,7 @@ int main(int, char**) {
     RTX::loadInstanceExtensions(instance);
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
+    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) { // you'll not see ? scratches head
         std::print("[FATAL] Surface creation failed: {}\n", SDL_GetError());
         apocalypse("Surface creation failed");
     }
@@ -240,7 +245,7 @@ int main(int, char**) {
     RTX::SwapchainManager::create(window, pixelW, pixelH);
 
     // Renderer — owns LAS, pipeline, SBT, pew pew
-    renderer = std::make_unique<RTX::VulkanRenderer>(pixelW, pixelH, window, Options::Performance::OVERCLOCK_RENDERER);
+    renderer = std::make_unique<RTX::VulkanRenderer>(pixelW, pixelH, window);
 
     SDL_Renderer* sdlRen = SDL_CreateRenderer(window, nullptr);
     if (!sdlRen) std::print("[WARN] SDL overlay renderer failed: {}\n", SDL_GetError());
@@ -273,9 +278,8 @@ int main(int, char**) {
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - last_log_time).count();
         if (elapsed >= 1.0) {
-            LOG_INFO_CAT("MAIN", "ARRR! Lifetime: {:.6f}s | {:.1f} FPS | Pink photons eternal!",
-                         renderer->getLifetimeSeconds(),
-                         renderer->getLifetimeSeconds() > 0.0 ? 1.0 / renderer->getLifetimeSeconds() : 0.0);
+            LOG_INFO_CAT("MAIN", "ARRR! Lifetime: {:.6f}s | Pink photons eternal!",
+                         renderer->getLifetimeSeconds());
             last_log_time = now;
         }
     }
@@ -285,8 +289,12 @@ int main(int, char**) {
 }
 
 // =============================================================================
-// Main v30.6 — January 21, 2026
-// - Added reusable acquire semaphore for sync (fixes validation spam)
+// Main v30.6 — January 22, 2026
+// - Removed overclock param (gone from Options)
+// - Uses Options::Window::DEFAULT_WIDTH / DEFAULT_HEIGHT / ALLOW_RESIZE
+// - Uses Options::Debug::ENABLE_VALIDATION_LAYERS for instance
+// - Splash always skippable (any input)
+// - Uses SDL_GetWindowSizeInPixels for accurate high-DPI render size
 // - Cleaned duplicate SDL_Init calls
 // - Throttled lifetime log kept (1/sec)
 // - Pool before renderer — infrastructure first

@@ -1,16 +1,9 @@
-// include/engine/GLOBAL/PipelineManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.7 — JANUARY 11, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.7 — JANUARY 22, 2026
 // PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX EDITION
+// SINGLE ETERNAL DESCRIPTOR SET | NO FRAMES | FRAME-FREE TRACE & UPDATE
 // PERSISTENT COMMAND BUFFERS COMPATIBLE | ETERNAL SBT | VALIDATION PERFECT
 // NO PER-FRAME ALLOCATIONS | MAX DRIVER FRIENDLINESS
-// =============================================================================
-// Changes for v30.7 (final button-up):
-// - Added Handle<VkDeviceMemory> sbtMemory_ for manual SBT cleanup
-// - Manual SBT buffer creation in createShaderBindingTable() (bypasses BufferManager issues)
-// - Destructor now cleans sbtMemory_
-// - All previous fixes preserved
-// PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -66,19 +59,18 @@ public:
     void createRayTracingPipeline();
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     void allocateDescriptorSets();
-    void updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept;
+    void updateRTDescriptorSet(const RTDescriptorUpdate& updateInfo) noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd);
 
     VkShaderModule loadShader(const std::string& path) const;
 
     // ZERO-COST TRACE — called directly from persistent command buffer
-    void traceRays(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t width, uint32_t height);
+    void traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t height);
 
     static std::atomic<bool>     g_pipelineNeedsRebuild;
-    static std::atomic<uint32_t> g_rebuildRequestedFrame;
 
     // Accessors
-    [[nodiscard]] VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const;
+    [[nodiscard]] VkDescriptorSet getDescriptorSet() const;  // single eternal set
     [[nodiscard]] VkPipeline       getPipeline() const;
     [[nodiscard]] VkPipelineLayout getPipelineLayout() const;
 
@@ -102,7 +94,7 @@ public:
     static inline bool s_crownForged = false;
     static inline bool s_eternalSbtForged = false;
 
-	VkStridedDeviceAddressRegionKHR raygenSbtRegion_{};
+    VkStridedDeviceAddressRegionKHR raygenSbtRegion_{};
     VkStridedDeviceAddressRegionKHR missSbtRegion_{};
     VkStridedDeviceAddressRegionKHR hitSbtRegion_{};
     VkStridedDeviceAddressRegionKHR callableSbtRegion_{};
@@ -135,15 +127,15 @@ private:
     Handle<VkPipeline>            rtPipeline_;
 
     Handle<VkBuffer>              sbtBuffer_;
-    Handle<VkDeviceMemory>        sbtMemory_;  // Added for manual SBT cleanup
+    Handle<VkDeviceMemory>        sbtMemory_;  // Manual SBT cleanup
 
     VkDeviceSize                  sbtAddress_{0};
     VkDeviceSize                  sbtSize_{0};
 
     std::vector<Handle<VkShaderModule>> shaderModules_;
-    std::vector<VkDescriptorSet>        rtDescriptorSets_;
-    std::vector<VkDescriptorSet>        texDescriptorSets_;
-    std::vector<VkDescriptorSet>        emptyDescriptorSets_;
+    std::vector<VkDescriptorSet>        rtDescriptorSets_;      // size 1 now
+    std::vector<VkDescriptorSet>        texDescriptorSets_;     // size 1 now
+    std::vector<VkDescriptorSet>        emptyDescriptorSets_;   // size 1 now
 
     uint32_t raygenGroupCount_{1};
     uint32_t missGroupCount_{1};
@@ -164,10 +156,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — JANUARY 11, 2026
-// - Added sbtMemory_ Handle for manual SBT cleanup
-// - Manual SBT buffer creation in createShaderBindingTable() (bypasses BufferManager issues)
-// - Destructor now cleans sbtMemory_
+// FINAL HEADER — JANUARY 22, 2026
+// - Frame-free: single descriptor set, no frameIndex, no MAX_FRAMES_IN_FLIGHT
+// - traceRays, updateRTDescriptorSet, getDescriptorSet simplified
+// - Manual SBT cleanup with sbtMemory_ Handle
 // - Direct call from persistent command buffer in VulkanRenderer
 // - Zero-cost RTX preserved — validation clean
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖

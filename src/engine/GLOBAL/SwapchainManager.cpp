@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.2
-// SWAPCHAIN MANAGER — PURE LIGHT | HDR | NO TEARING | SELF-HEALING
-// JANUARY 22, 2026 — FIXED COMPILATION + FINAL TRANSITION — PINK PHOTONS FLOW
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.4
+// SWAPCHAIN MANAGER — NEW & CLEAN | HDR | NO TEARING | SELF-HEALING
+// JANUARY 22, 2026 — KILLED OLD CODE — PINK PHOTONS FLOW TO SCREEN
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -10,14 +10,11 @@
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 
-#include <thread>
-#include <chrono>
 #include <algorithm>
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
 using StoneKey::stone_surface;
-using StoneKey::stone_window;
 using StoneKey::stone_seal_swapchain;
 using StoneKey::stone_seal_extent;
 using StoneKey::stone_seal_image_count;
@@ -29,16 +26,10 @@ using StoneKey::stone_height;
 
 namespace RTX {
 
-// =============================================================================
-// ensureSwapchainExtension — load proc addresses
-// =============================================================================
 static void ensureSwapchainExtension() noexcept {
     if (!g_ext.vkCreateSwapchainKHR) {
         g_ext.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
             vkGetDeviceProcAddr(stone_device(), "vkCreateSwapchainKHR"));
-        if (!g_ext.vkCreateSwapchainKHR) {
-            LOG_FATAL("SWAPCHAIN", "Failed to load vkCreateSwapchainKHR");
-        }
     }
     if (!g_ext.vkDestroySwapchainKHR) {
         g_ext.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
@@ -50,9 +41,6 @@ static void ensureSwapchainExtension() noexcept {
     }
 }
 
-// =============================================================================
-// transitionImageLayout — now used everywhere
-// =============================================================================
 void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                              VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
     if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE || oldLayout == newLayout) return;
@@ -71,34 +59,18 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     VkAccessFlags srcAccess = 0;
     VkAccessFlags dstAccess = 0;
 
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
         srcAccess = 0;
-        dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
+        dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
         srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-        srcAccess = VK_ACCESS_SHADER_WRITE_BIT;
-        dstAccess = VK_ACCESS_TRANSFER_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
         dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-        srcAccess = VK_ACCESS_TRANSFER_READ_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        srcAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
         dstAccess = VK_ACCESS_MEMORY_READ_BIT;
         srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        srcAccess = 0;
-        dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        srcAccess = VK_ACCESS_MEMORY_READ_BIT;
-        dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     } else {
-        LOG_WARNING("SWAPCHAIN", "Unsupported transition: {} → {}", string_VkImageLayout(oldLayout), string_VkImageLayout(newLayout));
-        return;
+        return; // only care about swapchain transitions
     }
 
     barrier.srcAccessMask = srcAccess;
@@ -107,9 +79,6 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
-// =============================================================================
-// createOrRecreateSwapchain — auto HDR + simple pacing
-// =============================================================================
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason) noexcept {
     ensureSwapchainExtension();
 
@@ -117,15 +86,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     VkPhysicalDevice phys = stone_physical();
     VkSurfaceKHR surf = stone_surface();
 
-    if (!dev || !phys || !surf) {
+    if (!dev || !phys || !surf || w == 0 || h == 0) {
         minimized_ = true;
-        LOG_FATAL("SWAPCHAIN", "Core Vulkan objects missing");
-        return;
-    }
-
-    if (w == 0 || h == 0) {
-        minimized_ = true;
-        LOG_INFO("SWAPCHAIN", "Window minimized — swapchain paused");
         return;
     }
 
@@ -133,9 +95,11 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     if (isRecreate) {
         cleanupImageViews();
-        cleanupSwapchain();
+        if (swapchain_.valid()) {
+            vkDestroySwapchainKHR(dev, swapchain_.get(), nullptr);
+            swapchain_ = {};
+        }
         LAS::instance().onResize();
-        LOG_SUCCESS("SWAPCHAIN", "Recreation: {}", reason.empty() ? "unknown" : reason);
     }
 
     minimized_ = false;
@@ -143,15 +107,13 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     VkSurfaceCapabilitiesKHR caps{};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps);
 
-    VkExtent2D extent = caps.currentExtent;
-    if (extent.width == UINT32_MAX) {
-        extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
-        extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
-    }
+    VkExtent2D extent = caps.currentExtent.width == UINT32_MAX ?
+        VkExtent2D{std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width),
+                   std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height)} :
+        caps.currentExtent;
 
     if (extent.width == 0 || extent.height == 0) {
         minimized_ = true;
-        LOG_INFO("SWAPCHAIN", "Zero extent — minimized");
         return;
     }
 
@@ -169,10 +131,9 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     for (const auto& cand : hdrPrefs) {
         auto it = std::find_if(formats.begin(), formats.end(),
-            [&](const auto& f){ return f.format == cand.format && f.colorSpace == cand.colorSpace; });
+                               [&](const auto& f) { return f.format == cand.format && f.colorSpace == cand.colorSpace; });
         if (it != formats.end()) {
             chosen = *it;
-            LOG_SUCCESS("SWAPCHAIN", "Selected format: {}", string_VkFormat(cand.format));
             break;
         }
     }
@@ -187,9 +148,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     ci.imageColorSpace = chosen.colorSpace;
     ci.imageExtent     = extent;
     ci.imageArrayLayers= 1;
-    ci.imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                         VK_IMAGE_USAGE_TRANSFER_DST_BIT    |
-                         VK_IMAGE_USAGE_STORAGE_BIT;
+    ci.imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     ci.imageSharingMode= VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform    = caps.currentTransform;
     ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -200,7 +159,6 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     VkSwapchainKHR newSwap = VK_NULL_HANDLE;
     if (vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap) != VK_SUCCESS) {
         minimized_ = true;
-        LOG_ERROR("SWAPCHAIN", "vkCreateSwapchainKHR failed");
         return;
     }
 
@@ -223,10 +181,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 
     for (uint32_t i = 0; i < count; ++i) {
         viewCI.image = swapchainImages_[i];
-        if (vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageViews_[i]) != VK_SUCCESS) {
-            LOG_FATAL("SWAPCHAIN", "Failed to create image view {}", i);
-            return;
-        }
+        vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageViews_[i]);
     }
 
     stone_seal_swapchain(newSwap);
@@ -235,20 +190,13 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    LOG_SUCCESS("SWAPCHAIN", "Swapchain ready — {} images | {}×{} | {} ",
-                count, extent.width, extent.height, string_VkFormat(chosen.format));
+    LOG_SUCCESS("SWAPCHAIN", "Swapchain ready — {} images | {}×{} | {}", count, extent.width, extent.height, string_VkFormat(chosen.format));
 }
 
-// =============================================================================
-// acquireNextImage
-// =============================================================================
-VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
-                                            VkSemaphore semaphore,
-                                            VkFence fence) noexcept {
+VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept {
     if (minimized_ || !swapchain_.valid()) return VK_NOT_READY;
 
-    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(),
-                                         UINT64_MAX, semaphore, fence, pImageIndex);
+    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(), UINT64_MAX, semaphore, fence, pImageIndex);
 
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
         recreate(stone_width(), stone_height(), "acquire invalid");
@@ -258,13 +206,10 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex,
     return res;
 }
 
-// =============================================================================
-// presentImage — assumes transition already done
-// =============================================================================
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
     if (minimized_ || !swapchain_.valid()) return;
 
-    VkSwapchainKHR currentSwap = swapchain_.get();  // copy to local lvalue
+    VkSwapchainKHR currentSwap = swapchain_.get();
 
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -281,23 +226,14 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     }
 }
 
-// =============================================================================
-// Recreate the swapchain on invalid/out-of-date/suboptimal/surface-lost
-// =============================================================================
 void SwapchainManager::recreate(uint32_t width, uint32_t height, std::string_view reason) noexcept {
     createOrRecreateSwapchain(width, height, true, reason);
 }
 
-// =============================================================================
-// Initial creation — calls the core function with isRecreate = false
-// =============================================================================
 void SwapchainManager::create(SDL_Window* window, uint32_t width, uint32_t height) noexcept {
-    createOrRecreateSwapchain(width, height, false, "initial create");
+    createOrRecreateSwapchain(width, height, false, "initial");
 }
 
-// =============================================================================
-// cleanup
-// =============================================================================
 void SwapchainManager::cleanup() noexcept {
     if (!stone_device()) return;
     vkDeviceWaitIdle(stone_device());

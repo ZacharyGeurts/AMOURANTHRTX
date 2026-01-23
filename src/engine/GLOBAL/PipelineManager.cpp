@@ -1,18 +1,19 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing pipeline, SBT, and descriptor management
-// Version 30.16 — January 22, 2026
-// - Fixed descriptor buffer writes — skip if invalid, always offset 0, range full
-// - Removed materials buffer write for binding 3 (type mismatch with layout STORAGE_IMAGE)
-// - Explicit guards and logs for all writes
-// - No more invalid buffers or alignment VUIDs
-// - Empire stable — no garbage, no lost device
+// Version 30.17 — January 22, 2026
+// - KILLED FRAMES — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no frame index
+// - updateRTDescriptorSet & traceRays no longer take frameIndex/imageIndex
+// - allocateDescriptorSets now creates 1 of each set type
+// - getDescriptorSet() always returns the single set
+// - Fixed descriptor buffer writes — skip invalid, offset 0, range full
+// - Materials write still commented (binding 3 = STORAGE_IMAGE)
+// - Empire stable — no garbage, no lost device, no frame state
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
@@ -35,30 +36,29 @@ using BufferManager::align_up;
 
 // Static atomic members
 std::atomic<bool>     RTX::PipelineManager::g_pipelineNeedsRebuild{false};
-std::atomic<uint32_t> RTX::PipelineManager::g_rebuildRequestedFrame{UINT32_MAX};
-
-namespace RTX {
-
-inline static std::mutex rebuildMutex;
 
 // Fixed 8 safe bindings for set 0 — Vulkan guaranteed
 static constexpr std::array<VkDescriptorSetLayoutBinding, 8> kMainBindings = {{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
     {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
-    {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // Changed to STORAGE_IMAGE to match running layout
+    {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR},
     {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
     {7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}
 }};
 
+namespace RTX {
+
+inline static std::mutex rebuildMutex;
+
 // =============================================================================
 // Constructor
 // =============================================================================
 PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 {
-    LOG_INFO_CAT("PIPELINE", "Initializing PipelineManager");
+    LOG_INFO_CAT("PIPELINE", "Initializing PipelineManager — frame-free mode");
 
     RTX::loadDeviceExtensions(device);
 
@@ -162,11 +162,11 @@ void PipelineManager::createPipelineLayout()
 }
 
 // =============================================================================
-// Descriptor Set Allocation
+// Descriptor Set Allocation — single set only (frame-free)
 // =============================================================================
 void PipelineManager::allocateDescriptorSets()
 {
-    LOG_INFO_CAT("PIPELINE", "Allocating descriptor sets from global pool");
+    LOG_INFO_CAT("PIPELINE", "Allocating single descriptor sets (frame-free)");
 
     VkDescriptorPool globalPool = RTX::g_ctx().descriptorPool_.get();
     if (globalPool == VK_NULL_HANDLE) {
@@ -174,26 +174,24 @@ void PipelineManager::allocateDescriptorSets()
         return;
     }
 
-    constexpr uint32_t frames = Options::Performance::MAX_FRAMES_IN_FLIGHT;
-
-    auto allocate = [this, globalPool, frames](std::vector<VkDescriptorSet>& sets,
-                                              VkDescriptorSetLayout layout,
-                                              std::string_view name) {
-        sets.resize(frames);
-        std::vector<VkDescriptorSetLayout> layouts(frames, layout);
+    auto allocate = [this, globalPool](std::vector<VkDescriptorSet>& sets,
+                                       VkDescriptorSetLayout layout,
+                                       std::string_view name) {
+        sets.resize(1);  // only one set
+        VkDescriptorSetLayout layouts[1] = {layout};
 
         VkDescriptorSetAllocateInfo info{};
         info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         info.descriptorPool     = globalPool;
-        info.descriptorSetCount = frames;
-        info.pSetLayouts        = layouts.data();
+        info.descriptorSetCount = 1;
+        info.pSetLayouts        = layouts;
 
         VkResult result = vkAllocateDescriptorSets(stone_device(), &info, sets.data());
         if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "Failed to allocate {} descriptor sets: {}", name, string_VkResult(result));
+            LOG_FATAL_CAT("PIPELINE", "Failed to allocate {} descriptor set: {}", name, string_VkResult(result));
             return;
         }
-        LOG_SUCCESS_CAT("PIPELINE", "Allocated {} {} descriptor sets", frames, name);
+        LOG_SUCCESS_CAT("PIPELINE", "Allocated single {} descriptor set", name);
     };
 
     allocate(rtDescriptorSets_,    rtDescriptorSetLayout_.get(),    "main RT (set 0)");
@@ -638,9 +636,9 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 }
 
 // =============================================================================
-// Trace Rays — Silent hot path
+// Trace Rays — Silent hot path (no frame index)
 // =============================================================================
-void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t imageIndex, uint32_t width, uint32_t height)
+void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t height)
 {
     std::lock_guard<std::mutex> lock(rebuildMutex);
 
@@ -654,7 +652,7 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t imageIndex, uint32
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipeline_.get());
 
     VkDescriptorSet sets[] = {
-        getDescriptorSet(imageIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT)
+        getDescriptorSet()  // always the single set
     };
 
     if (sets[0] == VK_NULL_HANDLE) return;
@@ -667,7 +665,7 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t imageIndex, uint32
         uint32_t frame;
     } push{};
     push.time = 0.0f;
-    push.frame = imageIndex;
+    push.frame = 0;  // meaningless now — can remove later
 
     vkCmdPushConstants(cmd, rtPipelineLayout_.get(),
                        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
@@ -732,16 +730,16 @@ void RTX::PipelineManager::cacheDeviceProperties()
 }
 
 // =============================================================================
-// Update RT descriptor set — now safe & clean
+// Update RT descriptor set — single set only (frame-free)
 // =============================================================================
-void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDescriptorUpdate& updateInfo) noexcept
+void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updateInfo) noexcept
 {
-    if (frameIndex >= rtDescriptorSets_.size() || rtDescriptorSets_[frameIndex] == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Invalid frame index or null descriptor set");
+    if (rtDescriptorSets_.empty() || rtDescriptorSets_[0] == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "No descriptor set allocated");
         return;
     }
 
-    VkDescriptorSet set = rtDescriptorSets_[frameIndex];
+    VkDescriptorSet set = rtDescriptorSets_[0];
 
     if (updateInfo.tlas == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "TLAS is NULL — skipping descriptor update");
@@ -757,7 +755,6 @@ void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDe
     VkDescriptorImageInfo blueNoiseImageInfo{};
     VkDescriptorImageInfo nexusImageInfo{};
     VkDescriptorBufferInfo uboInfo{};
-    //VkDescriptorBufferInfo materialsInfo{};
 
     // Binding 0: Acceleration structure (always written)
     accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
@@ -809,7 +806,6 @@ void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDe
 
     // Binding 3: Materials — SKIPPED due to type mismatch (STORAGE_IMAGE in layout)
     // If you need storage buffer here, change kMainBindings[3] to STORAGE_BUFFER
-    // For now, do NOT write to binding 3 unless you fix the layout
 
     // Binding 5: Blue noise (optional)
     if (updateInfo.blueNoiseSampler != VK_NULL_HANDLE && updateInfo.blueNoiseView != VK_NULL_HANDLE) {
@@ -828,8 +824,8 @@ void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDe
     }
 
     // Binding 6: Nexus/prev frame (optional)
-    if (!updateInfo.nexusScoreViews.empty() && frameIndex < updateInfo.nexusScoreViews.size()) {
-        nexusImageInfo.imageView   = updateInfo.nexusScoreViews[frameIndex];
+    if (!updateInfo.nexusScoreViews.empty()) {
+        nexusImageInfo.imageView   = updateInfo.nexusScoreViews[0];  // single set — use first
         nexusImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         nexusImageInfo.sampler     = VK_NULL_HANDLE;
 
@@ -849,20 +845,22 @@ void RTX::PipelineManager::updateRTDescriptorSet(uint32_t frameIndex, const RTDe
 }
 
 // =============================================================================
-// Get descriptor set
+// Get descriptor set — always the single one
 // =============================================================================
-VkDescriptorSet RTX::PipelineManager::getDescriptorSet(uint32_t frameIndex) const
+VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 {
-    if (frameIndex >= rtDescriptorSets_.size()) {
+    if (rtDescriptorSets_.empty()) {
         return VK_NULL_HANDLE;
     }
-    return rtDescriptorSets_[frameIndex];
+    return rtDescriptorSets_[0];
 }
 
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.16 — January 22, 2026
+// PipelineManager v30.17 — January 22, 2026
+// - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
+// - updateRTDescriptorSet & traceRays simplified — no frameIndex/imageIndex
 // - Descriptor writes safe — skip invalid, offset 0, no mismatch
 // - Materials write commented (resolve STORAGE_BUFFER vs STORAGE_IMAGE)
 // - Silent success — no spam
