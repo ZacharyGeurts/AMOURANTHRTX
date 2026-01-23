@@ -1,12 +1,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew pew forever
-// Version 30.40 — January 22, 2026
+// Version 30.41 — January 22, 2026
 // - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
-// - Linear tiling toggleable (Options::Rendering::USE_LINEAR_TILING, default off for perf)
-// - HDR creation respects toggle + safety check/fallback
-// - Direct blit to PRESENT_SRC_KHR — no TRANSFER_DST lingering
-// - Hard exit on VK_ERROR_DEVICE_LOST — no zombie state
+// - Swapchain layout fixed: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR
+// - No VUID-01399 / VUID-01430 — spec compliant, no device lost
+// - Linear tiling toggleable (default off for perf)
+// - HDR creation respects toggle + safety fallback
+// - FPS concept dead — render as fast as possible, compositor paces
 // - Stone device used everywhere — no lost device nonsense
 // Empire stable — pink photons eternal
 // =============================================================================
@@ -112,7 +113,7 @@ static LivingWorld g_world;
 // =============================================================================
 // VulkanRenderer — Pure light ray tracing engine
 // =============================================================================
-RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window, bool overclock)
+RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     : window_(window),
       width_(width),
       height_(height),
@@ -497,11 +498,11 @@ void RTX::VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd,
         dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
         srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        srcAccess = VK_ACCESS_MEMORY_READ_BIT;
-        dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        srcAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+        dstAccess = VK_ACCESS_MEMORY_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     } else {
         return;
     }
@@ -583,7 +584,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
 }
 
 // =============================================================================
-// pewPew — main loop (hilariously short)
+// pewPew — main render loop (no frames, no FPS)
 // =============================================================================
 void RTX::VulkanRenderer::pewPew() noexcept {
     if (minimized_ || destroyed_) return;
@@ -619,7 +620,7 @@ void RTX::VulkanRenderer::pewPew() noexcept {
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     VkImage swapImg = SwapchainManager::image(imageIndex);
-    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     VkImageBlit blit{};
     blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -630,8 +631,10 @@ void RTX::VulkanRenderer::pewPew() noexcept {
     blit.dstOffsets[1] = {width_, height_, 1};
 
     vkCmdBlitImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   swapImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                   swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
+
+    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VkResult submitRes = submitAndWaitOneTime(cmd);
     if (submitRes != VK_SUCCESS) return;
@@ -640,12 +643,13 @@ void RTX::VulkanRenderer::pewPew() noexcept {
 }
 
 // =============================================================================
-// VulkanRenderer v30.40 — January 22, 2026
+// VulkanRenderer v30.41 — January 22, 2026
 // - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
-// - Linear tiling toggleable (Options::Rendering::USE_LINEAR_TILING, default off for perf)
-// - HDR creation respects toggle + safety check/fallback
-// - Direct blit to PRESENT_SRC_KHR — no TRANSFER_DST lingering
-// - Hard exit on VK_ERROR_DEVICE_LOST — no zombie state
+// - Swapchain layout fixed: TRANSFER_DST_OPTIMAL → blit → PRESENT_SRC_KHR
+// - No VUID-01399 / VUID-01430 — spec compliant, no device lost
+// - Linear tiling toggleable (default off for perf)
+// - HDR creation respects toggle + safety fallback
+// - FPS concept dead — render as fast as possible, compositor paces
 // - Stone device used everywhere — no lost device nonsense
 // Empire stable — pink photons eternal
 // =============================================================================
