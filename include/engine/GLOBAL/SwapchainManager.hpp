@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.3
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.5
 // SWAPCHAIN MANAGER HEADER — PURE LIGHT | HDR | NO TEARING | SELF-HEALING
-// JANUARY 22, 2026 — STATIC TRANSITION + CLEANUP — PINK PHOTONS FLOW
+// JANUARY 23, 2026 — ADDED isReady() & ensureReady() — PINK PHOTONS FLOW READY
 // =============================================================================
 
 #pragma once
@@ -36,6 +36,10 @@ public:
     static void recreate(uint32_t width, uint32_t height, std::string_view reason = "") noexcept;
     static void cleanup() noexcept;
 
+    // Ensure swapchain readiness
+    static void ensureReady(uint32_t width, uint32_t height) noexcept;
+    [[nodiscard]] static bool isReady() noexcept;
+
     // Acquire & present
     [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex,
                                                    VkSemaphore semaphore = VK_NULL_HANDLE,
@@ -43,7 +47,7 @@ public:
 
     static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
 
-    // Transition helper — now static so no object needed
+    // Transition helper — static
     static void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                       VkImageLayout oldLayout, VkImageLayout newLayout) noexcept;
 
@@ -95,6 +99,12 @@ inline void recreateSwapchain(uint32_t w, uint32_t h, std::string_view reason = 
 inline void destroySwapchain() noexcept
 { SwapchainManager::cleanup(); }
 
+inline void ensureSwapchainReady(uint32_t w, uint32_t h) noexcept
+{ SwapchainManager::ensureReady(w, h); }
+
+inline bool swapchainIsReady() noexcept
+{ return SwapchainManager::isReady(); }
+
 inline VkSwapchainKHR           swapchain()           noexcept { return SwapchainManager::swapchain(); }
 inline VkExtent2D               swapchainExtent()     noexcept { return SwapchainManager::extent(); }
 inline uint32_t                 swapchainWidth()      noexcept { return SwapchainManager::width(); }
@@ -109,9 +119,9 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// CLEAN HEADER — v30.3 — JANUARY 22, 2026
-// - transitionImageLayout is now static — call without object
-// - Removed mailbox complexity (unused)
-// - All functions link cleanly
-// Empire ready — pink photons eternal
+// CLEAN HEADER — v30.5 — JANUARY 23, 2026
+// - Added isReady() & ensureReady() — self-healing readiness checks
+// - transitionImageLayout remains static
+// - Global convenience macros for easy access
+// Empire ready — pink photons flow ready
 // =============================================================================
