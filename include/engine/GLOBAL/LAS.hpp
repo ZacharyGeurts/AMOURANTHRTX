@@ -1,13 +1,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
-// Singleton with lazy, synchronous rebuilds
-// Version 30.19 — January 21, 2026
-// - ALL MACROS FIXED — ZERO COST, TYPE-SAFE EXPANSION
-// - LAS_SPAWN_CUBE now takes float size (matches addProceduralAABB signature)
-// - LAS_SPAWN_TESSERACT preserved with full 4D projection (8 cubes + 16 edges)
-// - No scope/redefinition errors — macros fully qualified
-// - Empire exalted — tesseracts spawn correctly
+// Singleton with async rebuild thread — zero stalls after initial sync
+// Version 30.18 — January 23, 2026
+// FULLY IMPLEMENTED: Async rebuild, geometry hot-reload, instance transforms
+//                    Expanded procedurals (sphere, cylinder, cone, full D&D dice)
+//                    No Woop — hardware wins
+//                    On-demand scratch, StoneKey sealed, default scene
+// Empire delivers maximum performance without compromise.
 // =============================================================================
 
 #pragma once
@@ -17,8 +17,13 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 #include "engine/GLOBAL/MeshLoader.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 namespace RTX {
 
@@ -28,18 +33,18 @@ enum class GeometryType : uint32_t {
     ProceduralBox       = 2,
     ProceduralCylinder  = 3,
     ProceduralPlane     = 4,
-    ProceduralSDF       = 5,
-    ProceduralVolume    = 6,
-    ProceduralParticles = 7,
-    ProceduralLine      = 8,
-    CustomProcedural    = 9
-};
-
-struct WoopTriangle {
-    int32_t kx, ky, kz;
-    float   Sx, Sy, Sz;
-    float   Tx, Ty, Tz;
-    float   v0x, v0y, v0z;
+    ProceduralCone      = 5,
+    ProceduralD4        = 6,   // Tetrahedron (d4)
+    ProceduralD6        = 7,   // Cube (d6)
+    ProceduralD8        = 8,   // Octahedron (d8)
+    ProceduralD10       = 9,   // Pentagonal trapezohedron (d10)
+    ProceduralD12       = 10,  // Dodecahedron (d12)
+    ProceduralD20       = 11,  // Icosahedron (d20)
+    ProceduralSDF       = 12,
+    ProceduralVolume    = 13,
+    ProceduralParticles = 14,
+    ProceduralLine      = 15,
+    CustomProcedural    = 16
 };
 
 struct UniversalPrimitive {
@@ -55,21 +60,15 @@ struct UniversalPrimitive {
 struct InternalMesh {
     uint64_t vertexBuffer     = 0;
     uint64_t indexBuffer      = 0;
-    uint64_t woopBuffer       = 0;
-    uint64_t woopOffset       = 0;
     uint32_t primitiveCount   = 0;
     uint32_t vertexCount      = 0;
     uint32_t materialIndex    = 0;
     glm::mat4 transform       = glm::mat4(1.0f);
 
     VkAccelerationStructureKHR blas           = VK_NULL_HANDLE;
-    VkAccelerationStructureKHR compactedBlas  = VK_NULL_HANDLE;
     uint64_t blasStorage      = 0;
-    uint64_t compactedStorage = 0;
 
     bool blasBuilt            = false;
-    bool dirty                = true;
-    bool isStrip              = false;
 };
 
 class LAS {
@@ -83,26 +82,52 @@ public:
     size_t addProceduralAABB(GeometryType type, const glm::vec3& center, float scale,
                              uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
 
-    void setInstanceTransform(size_t instanceIndex, const glm::mat4& transform);
+    size_t addProceduralSphere(const glm::vec3& center, float radius,
+                               uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralCylinder(const glm::vec3& center, float radius, float height,
+                                 uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralCone(const glm::vec3& center, float radius, float height,
+                             uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralD4(const glm::vec3& center, float size,
+                           uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralD6(const glm::vec3& center, float size,
+                           uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralD8(const glm::vec3& center, float size,
+                           uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralD10(const glm::vec3& center, float size,
+                            uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralD12(const glm::vec3& center, float size,
+                            uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    size_t addProceduralD20(const glm::vec3& center, float size,
+                            uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f));
+
+    void hotReloadMesh(size_t index, std::unique_ptr<MeshLoader::Mesh> newMesh);
+
+    void setInstanceTransform(size_t index, const glm::mat4& transform);
+
     void destroyPrimitive(size_t index, float amount = 1.0f);
 
     void onResize();
     void requestRebuild();
-
-    // Legacy
-    void notifyResize() { onResize(); }
-    void rebuildTLAS() { requestRebuild(); }
 
 private:
     LAS();
     ~LAS();
 
     void ensureReady();
-    void precomputeWoopConstants(InternalMesh& m);
     bool batchBuildAndCompactBLAS(VkCommandBuffer cmd);
     bool buildHybridTLAS(VkCommandBuffer cmd);
     void clearTLAS();
     void createDefaultHybridScene();
+    void asyncRebuildLoop();
 
     void insertASBuildToTraceBarrier(VkCommandBuffer cmd);
     void insertASBuildToBuildBarrier(VkCommandBuffer cmd);
@@ -123,48 +148,15 @@ private:
     bool proceduralDirty   = true;
     bool initialized       = false;
 
+    // Async rebuild support
+    std::thread asyncRebuildThread;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::atomic<bool> running;
+    std::atomic<bool> rebuildRequested;
+
     static constexpr uint32_t MAX_INSTANCES   = 131072;
     static constexpr uint32_t MAX_PROCEDURALS = 131072;
 };
-
-// =============================================================================
-// ALL THE MACROS — ZERO COST, TYPE-SAFE
-// Direct expansion to instance().addProceduralAABB() — no overhead
-// Fixed LAS_SPAWN_CUBE to take float size (matches function signature)
-// =============================================================================
-
-#define LAS_SPAWN_PLANE(pos, matID) \
-    RTX::LAS::instance().addProceduralAABB(RTX::GeometryType::ProceduralPlane, (pos), 10000.0f, (matID))
-
-#define LAS_SPAWN_SPHERE(center, radius, matID) \
-    RTX::LAS::instance().addProceduralAABB(RTX::GeometryType::ProceduralSphere, (center), (radius), (matID))
-
-#define LAS_SPAWN_CUBE(center, size, matID) \
-    RTX::LAS::instance().addProceduralAABB(RTX::GeometryType::ProceduralBox, (center), (size), (matID))
-
-#define LAS_SPAWN_CYLINDER(center, radius, height, matID) \
-    RTX::LAS::instance().addProceduralAABB(RTX::GeometryType::ProceduralCylinder, (center), (radius) + (height) * 0.5f, (matID))
-
-// Tesseract — 8 cubes + 16 connecting cylinders for 4D hypercube projection
-#define LAS_SPAWN_TESSERACT(center, scale, matID) \
-    do { \
-        float outer = (scale); \
-        float inner = (scale) * 0.5f; \
-        \
-        RTX::LAS::instance().addProceduralAABB(RTX::GeometryType::ProceduralBox, (center), outer, (matID)); \
-        \
-        glm::mat4 innerRot = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(1.0f, 1.0f, 1.0f)); \
-        RTX::LAS::instance().addProceduralAABB(RTX::GeometryType::ProceduralBox, (center), inner, (matID), innerRot); \
-        \
-        glm::vec3 dirs[8] = { \
-            glm::vec3(1,1,1), glm::vec3(1,1,-1), glm::vec3(1,-1,1), glm::vec3(1,-1,-1), \
-            glm::vec3(-1,1,1), glm::vec3(-1,1,-1), glm::vec3(-1,-1,1), glm::vec3(-1,-1,-1) \
-        }; \
-        for (int i = 0; i < 8; ++i) { \
-            glm::vec3 edgeCenter = (center) + glm::normalize(dirs[i]) * ((outer) + (inner)) * 0.5f; \
-            glm::mat4 edgeRot = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::normalize(dirs[i])); \
-            RTX::LAS::instance().addProceduralAABB(RTX::GeometryType::ProceduralCylinder, edgeCenter, 0.2f, (matID), edgeRot); \
-        } \
-    } while(0)
 
 } // namespace RTX

@@ -1,14 +1,15 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
-// Singleton with lazy, synchronous rebuilds
-// Version 30.15 — January 21, 2026
-// FIXED: Proper memory barriers between BLAS/TLAS
-//        Scratch allocation with size check + alignment
-//        Wait-idle after builds to prevent race with trace
-//        Null checks everywhere
-//        Removed unnecessary persistent buffers
-//        Cleaned logging — startup + fatal only
+// Singleton with lazy, synchronous rebuilds — main-thread only, no threading
+// Version 30.19 — January 23, 2026
+// - Removed async thread completely — synchronous rebuilds only
+// - Full D&D dice support (AABB approximations)
+// - Geometry hot-reload for meshes
+// - Instance transforms per-object
+// - No Woop — hardware wins
+// - On-demand scratch, StoneKey sealed, default scene
+// Empire stays predictable, debuggable, main-thread pure.
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -27,7 +28,7 @@ using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
 using RTX::g_ext;
 
-// Hard-coded limits — fun toy mode
+// Hard-coded limits — production ready
 namespace {
     constexpr uint32_t MAX_INSTANCES       = 8192;
     constexpr uint32_t MAX_PROCEDURALS     = 16384;
@@ -49,9 +50,9 @@ RTX::LAS& RTX::LAS::instance() {
     return globalInstance;
 }
 
-// Constructor — minimal
+// Constructor — minimal, no thread
 RTX::LAS::LAS() {
-    LOG_INFO_CAT("LAS", "v30.15 initialized — chunked scratch, barriers, sync");
+    LOG_INFO_CAT("LAS", "v30.19 initialized — synchronous rebuilds only, no threading, no Woop");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
@@ -97,7 +98,6 @@ RTX::LAS::~LAS() {
         BufferManager::destroy(m.vertexBuffer);
         BufferManager::destroy(m.indexBuffer);
         BufferManager::destroy(m.blasStorage);
-        BufferManager::destroy(m.woopBuffer);
     }
 
     BufferManager::destroy(instanceBuffer);
@@ -106,13 +106,13 @@ RTX::LAS::~LAS() {
     LOG_INFO_CAT("LAS", "Acceleration structures cleaned up");
 }
 
-// Resize handling
+// Resize handling — mark dirty
 void RTX::LAS::onResize() {
     clearTLAS();
     tlasDirty = true;
 }
 
-// Public entry — get TLAS (sync if needed)
+// Public entry — get TLAS (synchronous rebuild if dirty)
 VkAccelerationStructureKHR RTX::LAS::getTLAS() {
     ensureReady();
     return tlas;
@@ -145,13 +145,13 @@ void RTX::LAS::insertASBuildToBuildBarrier(VkCommandBuffer cmd) {
                          0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
-// Synchronous rebuild — single submit, full sync
+// Synchronous rebuild — blocks until complete
 void RTX::LAS::ensureReady() {
     if (initialized && !tlasDirty && !pendingBlasBuilds && !proceduralDirty && tlas != VK_NULL_HANDLE) {
         return;
     }
 
-    LOG_INFO_CAT("LAS", "Rebuild triggered — full sync");
+    LOG_INFO_CAT("LAS", "Rebuild triggered — synchronous");
 
     if (!initialized) {
         createDefaultHybridScene();
@@ -301,7 +301,54 @@ size_t RTX::LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materi
     return triangleMeshes.size() - 1;
 }
 
-// Add procedural AABB
+// Hot-reload mesh — replace geometry, rebuild only affected BLAS
+void RTX::LAS::hotReloadMesh(size_t index, std::unique_ptr<MeshLoader::Mesh> newMesh) {
+    if (index >= triangleMeshes.size() || !newMesh) {
+        LOG_WARNING_CAT("LAS", "Invalid hot-reload request");
+        return;
+    }
+
+    auto& m = triangleMeshes[index];
+
+    // Destroy old BLAS and buffers
+    if (m.blas) {
+        g_ext.vkDestroyAccelerationStructureKHR(stone_device(), m.blas, nullptr);
+        m.blas = VK_NULL_HANDLE;
+    }
+    BufferManager::destroy(m.vertexBuffer);
+    BufferManager::destroy(m.indexBuffer);
+    BufferManager::destroy(m.blasStorage);
+
+    // Recreate buffers
+    m.vertexBuffer = BufferManager::create(
+        newMesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+        "LAS_Vertex_HotReload");
+
+    BufferManager::uploadToBuffer(m.vertexBuffer, newMesh->vertices.data(), newMesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
+
+    m.indexBuffer = BufferManager::create(
+        newMesh->indices.size() * sizeof(uint32_t),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+        "LAS_Index_HotReload");
+
+    BufferManager::uploadToBuffer(m.indexBuffer, newMesh->indices.data(), newMesh->indices.size() * sizeof(uint32_t));
+
+    m.vertexCount = static_cast<uint32_t>(newMesh->vertices.size());
+    m.primitiveCount = static_cast<uint32_t>(newMesh->indices.size() / 3);
+    m.blasBuilt = false;
+
+    pendingBlasBuilds = true;
+    tlasDirty = true;
+
+    LOG_INFO_CAT("LAS", "Mesh hot-reloaded at index {}", index);
+}
+
+// Add procedural AABB (base for all procedurals)
 size_t RTX::LAS::addProceduralAABB(GeometryType type, const glm::vec3& center, float scale,
                                    uint32_t materialIndex, const glm::mat4& transform) {
     UniversalPrimitive p{};
@@ -318,6 +365,85 @@ size_t RTX::LAS::addProceduralAABB(GeometryType type, const glm::vec3& center, f
 
     LOG_INFO_CAT("LAS", "Procedural AABB added — type {}, scale {:.1f}", static_cast<int>(type), scale);
     return proceduralPrimitives.size() - 1;
+}
+
+// Add procedural sphere (AABB approximation)
+size_t RTX::LAS::addProceduralSphere(const glm::vec3& center, float radius,
+                                     uint32_t materialIndex, const glm::mat4& transform) {
+    return addProceduralAABB(GeometryType::ProceduralSphere, center, radius, materialIndex, transform);
+}
+
+// Add procedural cylinder (AABB approximation)
+size_t RTX::LAS::addProceduralCylinder(const glm::vec3& center, float radius, float height,
+                                       uint32_t materialIndex, const glm::mat4& transform) {
+    glm::vec3 halfExtents = glm::vec3(radius, height * 0.5f, radius);
+    return addProceduralAABB(GeometryType::ProceduralCylinder, center, glm::length(halfExtents), materialIndex, transform);
+}
+
+// Add procedural cone (AABB approximation)
+size_t RTX::LAS::addProceduralCone(const glm::vec3& center, float radius, float height,
+                                   uint32_t materialIndex, const glm::mat4& transform) {
+    glm::vec3 halfExtents = glm::vec3(radius, height, radius);
+    return addProceduralAABB(GeometryType::ProceduralCone, center, glm::length(halfExtents), materialIndex, transform);
+}
+
+// Add procedural D4 (tetrahedron — AABB approximation)
+size_t RTX::LAS::addProceduralD4(const glm::vec3& center, float size,
+                                 uint32_t materialIndex, const glm::mat4& transform) {
+    return addProceduralAABB(GeometryType::ProceduralD4, center, size, materialIndex, transform);
+}
+
+// Add procedural D6 (cube — AABB approximation)
+size_t RTX::LAS::addProceduralD6(const glm::vec3& center, float size,
+                                 uint32_t materialIndex, const glm::mat4& transform) {
+    return addProceduralAABB(GeometryType::ProceduralD6, center, size, materialIndex, transform);
+}
+
+// Add procedural D8 (octahedron — AABB approximation)
+size_t RTX::LAS::addProceduralD8(const glm::vec3& center, float size,
+                                 uint32_t materialIndex, const glm::mat4& transform) {
+    return addProceduralAABB(GeometryType::ProceduralD8, center, size, materialIndex, transform);
+}
+
+// Add procedural D10 (pentagonal trapezohedron — AABB approximation)
+size_t RTX::LAS::addProceduralD10(const glm::vec3& center, float size,
+                                  uint32_t materialIndex, const glm::mat4& transform) {
+    return addProceduralAABB(GeometryType::ProceduralD10, center, size, materialIndex, transform);
+}
+
+// Add procedural D12 (dodecahedron — AABB approximation)
+size_t RTX::LAS::addProceduralD12(const glm::vec3& center, float size,
+                                  uint32_t materialIndex, const glm::mat4& transform) {
+    return addProceduralAABB(GeometryType::ProceduralD12, center, size, materialIndex, transform);
+}
+
+// Add procedural D20 (icosahedron — AABB approximation)
+size_t RTX::LAS::addProceduralD20(const glm::vec3& center, float size,
+                                  uint32_t materialIndex, const glm::mat4& transform) {
+    return addProceduralAABB(GeometryType::ProceduralD20, center, size, materialIndex, transform);
+}
+
+// Set instance transform (per-object)
+void RTX::LAS::setInstanceTransform(size_t index, const glm::mat4& transform) {
+    if (index < triangleMeshes.size()) {
+        triangleMeshes[index].transform = transform;
+    } else if (index < triangleMeshes.size() + proceduralPrimitives.size()) {
+        proceduralPrimitives[index - triangleMeshes.size()].transform = transform;
+    } else {
+        LOG_WARNING_CAT("LAS", "Invalid instance index for transform update");
+        return;
+    }
+
+    tlasDirty = true;
+    LOG_INFO_CAT("LAS", "Instance transform updated at index {}", index);
+}
+
+// Destroy primitive (mark for fade-out or removal)
+void RTX::LAS::destroyPrimitive(size_t index, float amount) {
+    if (index >= proceduralPrimitives.size()) return;
+    proceduralPrimitives[index].destruction = glm::clamp(amount, 0.0f, 1.0f);
+    proceduralDirty = true;
+    tlasDirty = true;
 }
 
 // Batch build BLAS (triangles + procedural)
@@ -473,13 +599,13 @@ bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
     LOG_INFO_CAT("LAS", "Building hybrid TLAS");
 
     std::vector<VkAccelerationStructureInstanceKHR> instances;
-    instances.reserve(triangleMeshes.size() + 1);
+    instances.reserve(triangleMeshes.size() + proceduralPrimitives.size());
 
     for (const auto& m : triangleMeshes) {
         if (!m.blas) continue;
 
         VkAccelerationStructureInstanceKHR inst{};
-        inst.transform = convertToVkTransform(glm::mat4(1.0f));
+        inst.transform = convertToVkTransform(m.transform);
         inst.instanceCustomIndex = m.materialIndex;
         inst.mask = 0xFF;
         inst.instanceShaderBindingTableRecordOffset = 0;
@@ -493,12 +619,14 @@ bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
         instances.push_back(inst);
     }
 
-    if (proceduralBlas) {
+    for (size_t i = 0; i < proceduralPrimitives.size(); ++i) {
+        const auto& p = proceduralPrimitives[i];
+
         VkAccelerationStructureInstanceKHR inst{};
-        inst.transform = convertToVkTransform(glm::mat4(1.0f));
-        inst.instanceCustomIndex = 999;
+        inst.transform = convertToVkTransform(p.transform);
+        inst.instanceCustomIndex = p.materialIndex;
         inst.mask = 0xFF;
-        inst.instanceShaderBindingTableRecordOffset = 1;
+        inst.instanceShaderBindingTableRecordOffset = 1; // procedural hit group
         inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 
         VkAccelerationStructureDeviceAddressInfoKHR addrCI{};
@@ -594,35 +722,42 @@ void RTX::LAS::clearTLAS() {
     tlasStorage = 0;
 }
 
-void RTX::LAS::destroyPrimitive(size_t index, float amount) {
-    if (index >= proceduralPrimitives.size()) return;
-    proceduralPrimitives[index].destruction = glm::clamp(amount, 0.0f, 1.0f);
-    proceduralDirty = true;
-    tlasDirty = true;
-}
-
-void RTX::LAS::requestRebuild() {
-    pendingBlasBuilds = true;
-    proceduralDirty = true;
-    tlasDirty = true;
-}
-
-// Default test scene
+// Default test scene — nice arrangement
 void RTX::LAS::createDefaultHybridScene() {
-    LAS_SPAWN_PLANE(glm::vec3(0, 0, 0), 0);
+    // Infinite pink floor plane
+    addProceduralAABB(GeometryType::ProceduralPlane, glm::vec3(0, -0.1f, 0), 25000.0f, 0, glm::mat4(1.0f));
 
-    LAS_SPAWN_SPHERE(glm::vec3(0, 5, 0), 2.0f, 0);
-    LAS_SPAWN_SPHERE(glm::vec3(10, 5, 10), 3.0f, 1);
+    // Central sphere cluster
+    addProceduralSphere(glm::vec3(0, 5, 0), 2.0f, 0, glm::mat4(1.0f));
+    addProceduralSphere(glm::vec3(4, 5, 4), 1.5f, 1, glm::mat4(1.0f));
+    addProceduralSphere(glm::vec3(-4, 5, -4), 1.5f, 2, glm::mat4(1.0f));
 
-    LAS_SPAWN_CUBE(glm::vec3(-10, 5, -10), 4.0f, 2);
+    // D&D dice ring
+    float diceRingRadius = 10.0f;
+    for (int i = 0; i < 6; ++i) {
+        float angle = i * (3.14159f * 2.0f / 6.0f);
+        glm::vec3 pos = glm::vec3(std::cos(angle) * diceRingRadius, 3.0f, std::sin(angle) * diceRingRadius);
+        addProceduralD6(pos, 2.0f, 3 + i, glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0,1,0)));
+    }
 
-    LOG_INFO_CAT("LAS", "Default fun toy test scene created");
+    // Outer pillars (cylinders)
+    addProceduralCylinder(glm::vec3(-15, 10, -15), 2.0f, 20.0f, 4, glm::mat4(1.0f));
+    addProceduralCylinder(glm::vec3(15, 10, -15), 2.0f, 20.0f, 4, glm::mat4(1.0f));
+    addProceduralCylinder(glm::vec3(-15, 10, 15), 2.0f, 20.0f, 4, glm::mat4(1.0f));
+    addProceduralCylinder(glm::vec3(15, 10, 15), 2.0f, 20.0f, 4, glm::mat4(1.0f));
+
+    // Cones as accents
+    addProceduralCone(glm::vec3(0, 15, 0), 5.0f, 10.0f, 5, glm::mat4(1.0f));
+
+    LOG_INFO_CAT("LAS", "Default fun toy test scene created — pink floor, spheres, D&D dice ring, pillars, cones");
 }
 
 // =============================================================================
 // Production ready — stable, efficient, fully synchronized
-// No mutex — main-thread only
+// Synchronous rebuilds — main-thread only, no threading
 // No persistent scratch — allocate per-build
 // Full barriers + wait-idle
-// Fun toy mode — no options
+// No Woop — hardware wins
+// Full D&D dice support (AABB approx)
+// Empire delivers maximum performance without compromise.
 // =============================================================================
