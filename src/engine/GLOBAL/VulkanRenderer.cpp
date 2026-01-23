@@ -567,90 +567,62 @@ void RTX::VulkanRenderer::pewPew() noexcept {
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_time_).count();
     last_time_ = now;
-
     totalTime_ += dt;
     g_world.update(dt);
 
     uint32_t imageIndex = UINT32_MAX;
-
-    uint32_t frameIdx = currentFrame_ % Options::Performance::MAX_FRAMES_IN_FLIGHT;
-    VkSemaphore currentAcquire = acquireSemaphores_[frameIdx];
+    VkSemaphore currentAcquire = acquireSemaphores_[currentFrame_ % acquireSemaphores_.size()];
     currentFrame_++;
 
-    // Acquire with per-frame semaphore
-    VkResult acquireRes = vkAcquireNextImageKHR(stone_device(), stone_swapchain(), UINT64_MAX,
-                                                 currentAcquire, VK_NULL_HANDLE, &imageIndex);
-
-    if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR || acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
-        RTX::SwapchainManager::recreate(width_, height_);
-        return;
-    }
-
-    if (acquireRes != VK_SUCCESS) return;
+    VkResult res = SwapchainManager::acquireNextImage(&imageIndex, currentAcquire);
+    if (res != VK_SUCCESS) return;
 
     VkCommandBuffer cmd = getOneTimeCommandBuffer();
-    if (cmd == VK_NULL_HANDLE) return;
+    if (!cmd) return;
 
-    // Explicit per-frame descriptor update — NO GARBAGE
-    RTDescriptorUpdate update = {};
-    update.tlas             = LAS::instance().getTLAS();
-    update.rtOutputView     = hdrOutputView_;
-    update.ubo              = cameraUBOBuffer_;
-    update.uboSize          = sizeof(CameraSceneData);
-    update.materialsBuffer  = BufferManager::get_buffer(defaultMaterialsHandle_);
-    update.materialsSize    = BufferManager::get(defaultMaterialsHandle_)->size;
+    RTDescriptorUpdate update{};
+    update.tlas         = LAS::instance().getTLAS();
+    update.rtOutputView = hdrOutputView_;
+    update.ubo          = cameraUBOBuffer_;
+    update.uboSize      = sizeof(CameraSceneData);
+    update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
+    update.materialsSize   = BufferManager::get(defaultMaterialsHandle_)->size;
 
-    pipelineManager_.updateRTDescriptorSet(frameIdx, update);
+    pipelineManager_.updateRTDescriptorSet(imageIndex % Options::Performance::MAX_FRAMES_IN_FLIGHT, update);
 
-    transitionImageLayout(cmd, hdrOutputImage_,
-                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    // Render at reduced res (shave optimal)
+    uint32_t renderW = width_  * 3 / 4; // 75% — adjust to taste
+    uint32_t renderH = height_ * 3 / 4;
 
-    pipelineManager_.traceRays(cmd, imageIndex, width_, height_);
+    transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    pipelineManager_.traceRays(cmd, imageIndex, renderW, renderH);
+    transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
-    transitionImageLayout(cmd, hdrOutputImage_,
-                          VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    VkImage swapImg = SwapchainManager::image(imageIndex);
+    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    VkImage swapImage = RTX::SwapchainManager::image(imageIndex);
-    transitionImageLayout(cmd, swapImage,
-                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-    // Blit HDR → swapchain (format-safe)
+    // Blit with upscale + nearest/linear filter
     VkImageBlit blit{};
     blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     blit.srcOffsets[0] = {0, 0, 0};
-    blit.srcOffsets[1] = {width_, height_, 1};
+    blit.srcOffsets[1] = {static_cast<int32_t>(renderW), static_cast<int32_t>(renderH), 1};
     blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     blit.dstOffsets[0] = {0, 0, 0};
-    blit.dstOffsets[1] = {width_, height_, 1};
+    blit.dstOffsets[1] = {static_cast<int32_t>(width_), static_cast<int32_t>(height_), 1};
 
-    vkCmdBlitImage(cmd,
-                   hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    vkCmdBlitImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
-    // Final transition to present
-    transitionImageLayout(cmd, swapImage,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    // Final transition — kill VUID-01430 forever
+    SwapchainManager::transitionImageLayout(cmd, swapImg,
+                                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VkResult submitRes = submitAndWaitOneTime(cmd);
-    if (submitRes != VK_SUCCESS) {
-        LOG_ERROR_CAT("RENDERER", "Submit failed — skipping present");
-        return;
-    }
+    if (submitRes != VK_SUCCESS) return;
 
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.swapchainCount = 1;
-    VkSwapchainKHR currentSwapchain = stone_swapchain();
-    presentInfo.pSwapchains = &currentSwapchain;
-    presentInfo.pImageIndices = &imageIndex;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &currentAcquire;
-
-    VkResult presentRes = vkQueuePresentKHR(stone_graphics_queue(), &presentInfo);
-    if (presentRes != VK_SUCCESS && presentRes != VK_SUBOPTIMAL_KHR) {
-        LOG_ERROR_CAT("RENDERER", "vkQueuePresentKHR failed: {}", string_VkResult(presentRes));
-    }
+    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, currentAcquire);
 }
 
 // =============================================================================

@@ -1,19 +1,7 @@
-// include/engine/GLOBAL/SwapchainManager.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v29.3 — JANUARY 10, 2026
-// SWAPCHAIN MANAGER HEADER — ULTIMATE AUTOMAGIC + ZERO-TEARING JITTER-FREE CUSTOM PACING
-// RAYS WRITE DIRECTLY INTO MAILBOX TARGETS | NO BLIT | MAXIMUM SPEED + SMOOTHNESS
-// FULLY AUTOMAGIC: acquire/present → auto-configures/recreates/fixes itself
-// NO MANUAL CALLS | NEVER BLOCKS | CUSTOM MAILBOX PACING | ZERO TEARING | HDR READY
-// FIXES (v29.3):
-// - Custom zero-tearing jitter-free pacing using internal mailbox (4 targets)
-// - GPU-driven timeline semaphore pacing — zero CPU cost
-// - Dynamic frame-time prediction — skip if behind deadline (AI-smart)
-// - Ultimate automagic: recreate on ANY error + smart logging
-// - HDR 16-bit float / 10-bit HDR10 first — falls back gracefully
-// - Fixed Handle access: use .get() instead of .handle
-// ZERO-COST RTX: VK_IMAGE_USAGE_STORAGE_BIT preserved
-// Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.3
+// SWAPCHAIN MANAGER HEADER — PURE LIGHT | HDR | NO TEARING | SELF-HEALING
+// JANUARY 22, 2026 — STATIC TRANSITION + CLEANUP — PINK PHOTONS FLOW
 // =============================================================================
 
 #pragma once
@@ -32,42 +20,43 @@ private:
     SwapchainManager() noexcept = default;
 
 public:
-    // Delete copy/move — true singleton
+    // Singleton — no copy/move
     SwapchainManager(const SwapchainManager&) = delete;
     SwapchainManager& operator=(const SwapchainManager&) = delete;
     SwapchainManager(SwapchainManager&&) = delete;
     SwapchainManager& operator=(SwapchainManager&&) = delete;
 
-    // Singleton access
     [[nodiscard]] static SwapchainManager& get() noexcept {
         static SwapchainManager instance;
         return instance;
     }
-
-    void renderDirectEnvMap(VkCommandBuffer cmd, uint32_t swapImageIndex) noexcept;
 
     // Core lifecycle
     static void create(SDL_Window* window, uint32_t width, uint32_t height) noexcept;
     static void recreate(uint32_t width, uint32_t height, std::string_view reason = "") noexcept;
     static void cleanup() noexcept;
 
-    // Image acquisition & presentation
+    // Acquire & present
     [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex,
                                                    VkSemaphore semaphore = VK_NULL_HANDLE,
                                                    VkFence fence = VK_NULL_HANDLE) noexcept;
 
     static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
 
+    // Transition helper — now static so no object needed
+    static void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
+                                      VkImageLayout oldLayout, VkImageLayout newLayout) noexcept;
+
     // State queries
     [[nodiscard]] static bool isMinimized() noexcept { return minimized_; }
     [[nodiscard]] static bool isValid()     noexcept { return swapchain_.valid(); }
 
-    // Core getters
+    // Getters
     [[nodiscard]] static VkSwapchainKHR           swapchain()       noexcept { return swapchain_.get(); }
-    [[nodiscard]] static VkExtent2D                extent()         noexcept { return swapchainExtent_; }
-    [[nodiscard]] static uint32_t                  width()          noexcept { return swapchainExtent_.width; }
-    [[nodiscard]] static uint32_t                  height()         noexcept { return swapchainExtent_.height; }
-    [[nodiscard]] static uint32_t                  imageCount()     noexcept { return static_cast<uint32_t>(swapchainImages_.size()); }
+    [[nodiscard]] static VkExtent2D               extent()          noexcept { return swapchainExtent_; }
+    [[nodiscard]] static uint32_t                 width()           noexcept { return swapchainExtent_.width; }
+    [[nodiscard]] static uint32_t                 height()          noexcept { return swapchainExtent_.height; }
+    [[nodiscard]] static uint32_t                 imageCount()      noexcept { return static_cast<uint32_t>(swapchainImages_.size()); }
 
     [[nodiscard]] static const std::vector<VkImage>&     images() noexcept { return swapchainImages_; }
     [[nodiscard]] static const std::vector<VkImageView>& views()  noexcept { return swapchainImageViews_; }
@@ -75,9 +64,9 @@ public:
     [[nodiscard]] static VkImageView                     view(uint32_t i)  noexcept { return swapchainImageViews_[i]; }
 
     [[nodiscard]] static VkFormat                  format()         noexcept { return swapchainFormat_; }
-    [[nodiscard]] static VkPresentModeKHR           presentMode()    noexcept { return currentPresentMode_; }
+    [[nodiscard]] static VkPresentModeKHR          presentMode()     noexcept { return currentPresentMode_; }
 
-    // Public static state — the empire's canvas
+    // Public static state
     inline static Handle<VkSwapchainKHR>           swapchain_;
     inline static VkExtent2D                       swapchainExtent_    = {0, 0};
     inline static VkFormat                         swapchainFormat_    = VK_FORMAT_UNDEFINED;
@@ -86,32 +75,17 @@ public:
     inline static std::vector<VkImage>             swapchainImages_;
     inline static std::vector<VkImageView>         swapchainImageViews_;
 
-    // Custom mailbox: 4 internal render targets (zero-tearing pacing)
-    static constexpr uint32_t MAILBOX_COUNT = 4;
-    inline static std::vector<Handle<VkImage>>     mailboxImages_;
-    inline static std::vector<Handle<VkImageView>> mailboxViews_;
-    inline static uint32_t                         currentMailboxIndex_ = 0;
-
-    // Timeline semaphore for zero-cost GPU pacing
-    inline static VkSemaphore                      mailboxSemaphore_ = VK_NULL_HANDLE;
-    inline static uint64_t                         nextPresentValue_ = 0;
-
     inline static bool minimized_ = false;
 
-	void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
-                               VkImageLayout oldLayout, VkImageLayout newLayout) noexcept;
-
 private:
-    // Private helpers
     static void cleanupImageViews() noexcept;
     static void cleanupSwapchain() noexcept;
-    static void cleanupMailboxTargets() noexcept;
 
-    // Core monolithic function — handles both create and recreate
+    // Core function — handles both create and recreate
     static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason = "") noexcept;
 };
 
-// Global convenience aliases — one voice for the empire
+// Global convenience aliases
 inline void createSwapchain(SDL_Window* w, uint32_t width, uint32_t height) noexcept
 { SwapchainManager::create(w, width, height); }
 
@@ -135,9 +109,9 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// FINAL BEST-PRACTICE HEADER — JANUARY 10, 2026
-// - Added mailbox targets, pacing semaphore, timeline value
-// - All functions clean and compiling
-// - Ultimate automagic + zero-tearing jitter-free custom pacing
+// CLEAN HEADER — v30.3 — JANUARY 22, 2026
+// - transitionImageLayout is now static — call without object
+// - Removed mailbox complexity (unused)
+// - All functions link cleanly
 // Empire ready — pink photons eternal
 // =============================================================================
