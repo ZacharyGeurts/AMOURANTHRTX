@@ -15,6 +15,24 @@ The best advice I have for you is to make some money with it first.
 Cut all operational costs securely and to zero.  
 If you already know you want zero cost and what else you want to do, grab a copy and make it do it with Grok is my advice.  
 
+SDL3 from github.  
+Vulkan SDK is at LunarG.  
+GLM and build tools I was able to get with apt.  
+The cmake build system needs internet to function and tries to help. (mine went out one night)  
+uses stb and tinyobj and is really smart everywhere really. "the city of the future" but sorta crumbly right now.  
+Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
+It may have been confusing to anyone unfamiliar with Open Source.  
+
+Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
+Or trash it and grab a new one tomorrow.  
+```
+# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
+git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
+cd AMOURANTHRTX
+chmod +x linux.sh
+./linux.sh --help
+```
+
 We bring you Zero cost secure RTX GPU operation by using current conventions.  
 Editor: I made this this thing so good that nobody on the planet gets screwed by it but me.  
 Secure at compile time so nobody knows where you got it.  
@@ -88,25 +106,6 @@ The Zero cost RTX Demo scene is about to become a reality for everyone, bois.
 I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
 AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
 ALL high end game engines. Godot looks brilliant.  
-Give 'em the Woop Woop!  
-
-SDL3 from github.  
-Vulkan SDK is at LunarG.  
-GLM and build tools I was able to get with apt.  
-The cmake build system needs internet to function and tries to help. (mine went out one night)  
-uses stb and tinyobj and is really smart everywhere really. "the city of the future" but sorta crumbly right now.  
-Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
-It may have been confusing to anyone unfamiliar with Open Source.  
-
-Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
-Or trash it and grab a new one tomorrow.  
-```
-# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
-git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
-cd AMOURANTHRTX
-chmod +x linux.sh
-./linux.sh --help
-```
 
 Grok dubbed it the Empire. This code is. We live here and have an impregnable border.  
 You are allowed outside, and we expect you to stay out there where the fun is.  
