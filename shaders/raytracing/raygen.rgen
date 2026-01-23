@@ -1,42 +1,34 @@
-// =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL
-// RAY GENERATION SHADER — PRIMARY RAY LAUNCH + TEMPORAL ACCUMULATION
-// PINK PHOTONS SCREAM ETERNAL — AMOURANTH FOREVER 💖
-// =============================================================================
-
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_scalar_block_layout : require
 
-layout(location = 0) rayPayloadEXT vec3 hitColor;
+layout(location = 0) rayPayloadEXT vec3 hitValue;
+layout(location = 1) rayPayloadEXT bool shadowHit;
 
-layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
-layout(set = 0, binding = 1, rgba32f) uniform image2D rtOutput;
-
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
 layout(set = 0, binding = 2) uniform CameraUBO {
     mat4 viewInverse;
     mat4 projInverse;
+    mat4 view;
+    mat4 proj;
     vec4 cameraPos;
-    uint frameNumber;
-    uint spp;
-    uint seed;
+    vec4 prevCameraPos;
     float exposure;
-    float time;
-} ubo;
+    float totalTime;
+    uint randomSeed;
+    uint maxDepth;
+} camera;
 
 layout(push_constant) uniform PushConstants {
     float time;
     uint frame;
-} push;
+    uint spp;
+    uint seedOffset;
+} pc;
 
-// Sacred colors
-const vec3 kPinkPhoton  = vec3(1.0, 0.2,  0.8);
-const vec3 kHotPink     = vec3(1.0, 0.078, 0.576);
-const vec3 kThermoPink  = vec3(1.0, 0.35, 0.7);
-const float kStrawEternal = 1.337;
-
-// Simple PCG RNG
+// Simple PCG hash for noise
 uint pcg(uint v) {
     uint state = v * 747796405u + 2891336453u;
     state = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -44,36 +36,44 @@ uint pcg(uint v) {
     return state;
 }
 
-void main() {
-    ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
-    ivec2 resolution = ivec2(gl_LaunchSizeEXT.xy);
+vec3 randomHemisphereDirection(uint seed) {
+    float r1 = fract(sin(float(seed) * 12.9898) * 43758.5453);
+    float r2 = fract(sin(float(seed + 1) * 12.9898) * 43758.5453);
+    float z = r1 * 2.0 - 1.0;
+    float t = sqrt(1.0 - z * z);
+    float phi = r2 * 6.283185307;
+    return vec3(t * cos(phi), t * sin(phi), z);
+}
 
-    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(resolution);
+void main() {
+    uvec2 launchID = gl_LaunchIDEXT.xy;
+    uvec2 launchSize = gl_LaunchSizeEXT.xy;
+
+    // Generate primary ray
+    vec2 pixelCenter = vec2(launchID) + vec2(0.5);
+    vec2 uv = pixelCenter / vec2(launchSize);
     uv = uv * 2.0 - 1.0;
 
-    vec4 target = ubo.projInverse * vec4(uv.x, uv.y, 1.0, 1.0);
+    vec4 origin = camera.cameraPos;
+    vec4 target = camera.projInverse * vec4(uv.x, uv.y, 1.0, 1.0);
     target /= target.w;
+    target = camera.viewInverse * target;
+    vec3 direction = normalize(target.xyz - origin.xyz);
 
-    vec4 direction = ubo.viewInverse * target;
-    vec3 rayDir = normalize(direction.xyz);
-    vec3 rayOrigin = ubo.cameraPos.xyz;
+    // Initial ray
+    uint seed = pcg(pc.frame + launchID.x * 73856093u + launchID.y * 19349663u + pc.seedOffset);
+    hitValue = vec3(0.0);
+    float contrib = 1.0;
 
-    uint seed = pcg(pixel.x + pixel.y * resolution.x + ubo.frameNumber * 1664525u);
+    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xff, 0, 0, 0, origin.xyz, 0.001, direction, 10000.0, 0);
 
-    traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, rayOrigin, 0.001, rayDir, 10000.0, 0);
+    // Accumulate
+    vec3 prev = imageLoad(outputImage, ivec2(launchID)).rgb;
+    vec3 color = (prev * float(pc.frame) + hitValue * contrib) / float(pc.frame + 1);
 
-    vec3 newColor = hitColor;
-    vec3 prevColor = imageLoad(rtOutput, pixel).rgb;
+    // Tone map (simple Reinhard)
+    color = color / (color + 1.0);
+    color = pow(color, vec3(1.0/2.2));  // gamma
 
-    vec3 finalColor;
-    if (ubo.spp == 0) {
-        finalColor = newColor;
-    } else {
-        float alpha = 1.0 / (ubo.spp + 1.0);
-        finalColor = mix(prevColor, newColor, alpha);
-    }
-
-    finalColor *= ubo.exposure;
-
-    imageStore(rtOutput, pixel, vec4(finalColor, 1.0));
+    imageStore(outputImage, ivec2(launchID), vec4(color, 1.0));
 }

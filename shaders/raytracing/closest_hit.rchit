@@ -1,53 +1,92 @@
-// =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL
-// CLOSEST HIT SHADER — PRIMARY INTERSECTION + BASIC SHADING
-// PROCEDURAL GRASS + MATERIALS — PINK PHOTONS SCREAM ETERNAL 💖
-// =============================================================================
-
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : require
 
-// Sacred colors
-const vec3 kPinkPhoton  = vec3(1.0, 0.2,  0.8);
-const vec3 kHotPink     = vec3(1.0, 0.078, 0.576);
-const vec3 kThermoPink  = vec3(1.0, 0.35, 0.7);
-const float kStrawEternal = 1.337;
+// Incoming payload from raygen
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
 
-// Ray payload
-layout(location = 0) rayPayloadInEXT vec3 hitColor;
+// Shadow payload (separate location)
+layout(location = 1) rayPayloadEXT bool shadowHit;
 
-// Hit attributes
+// Barycentric coordinates from hit
 hitAttributeEXT vec3 attribs;
+
+// Top-level acceleration structure
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+
+// Output storage image (HDR radiance)
+layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
+
+// Camera UBO as buffer block (no instance name after })
+layout(set = 0, binding = 2) uniform CameraBuffer {
+    mat4 viewInverse;
+    mat4 projInverse;
+    mat4 view;
+    mat4 proj;
+    vec4 cameraPos;
+    vec4 prevCameraPos;
+    float exposure;
+    float totalTime;
+    uint randomSeed;
+    uint maxDepth;
+    uint padding[3];
+} camera;
 
 // Push constants
 layout(push_constant) uniform PushConstants {
     float time;
     uint frame;
-} push;
+    uint spp;
+    uint seedOffset;
+} pc;
 
-void main() {
-    vec3 bary = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
+void main()
+{
+    // Barycentric coordinates
+    vec3 barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
 
-    mat4 objectToWorld = mat4(
-        gl_ObjectToWorldEXT[0].x, gl_ObjectToWorldEXT[0].y, gl_ObjectToWorldEXT[0].z, 0.0,
-        gl_ObjectToWorldEXT[1].x, gl_ObjectToWorldEXT[1].y, gl_ObjectToWorldEXT[1].z, 0.0,
-        gl_ObjectToWorldEXT[2].x, gl_ObjectToWorldEXT[2].y, gl_ObjectToWorldEXT[2].z, 0.0,
-        gl_ObjectToWorldEXT[3].x, gl_ObjectToWorldEXT[3].y, gl_ObjectToWorldEXT[3].z, 1.0
-    );
+    // Face normal fallback (world space) — simple & no extra extensions
+    vec3 worldNormal = normalize(cross(
+        gl_WorldRayDirectionEXT,  // arbitrary vector to get plane normal
+        gl_WorldRayDirectionEXT + vec3(0.0, 1.0, 0.0)  // offset to avoid zero cross
+    ));
 
-    vec3 worldUp = vec3(0.0, 1.0, 0.0);
-    vec3 normal = normalize((objectToWorld * vec4(worldUp, 0.0)).xyz);
+    // If you have per-vertex normals in vertex buffer (recommended):
+    // vec3 objectNormal = 
+    //     vertexNormal0 * barycentrics.x +
+    //     vertexNormal1 * barycentrics.y +
+    //     vertexNormal2 * barycentrics.z;
+    // worldNormal = normalize((gl_ObjectToWorldEXT * vec4(objectNormal, 0.0)).xyz);
 
-    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));
+    // Simple albedo (white-ish for now — replace with texture later)
+    vec3 albedo = vec3(0.9, 0.85, 0.8);
 
-    float diffuse = max(dot(normal, lightDir), 0.0);
+    // Simple directional light (sun-like)
+    vec3 lightDir = normalize(vec3(1.0, 1.0, 0.5));
+    float ndotl = max(0.0, dot(worldNormal, lightDir));
 
-    vec3 hitPos = gl_WorldRayOriginEXT + gl_HitTEXT * gl_WorldRayDirectionEXT;
-    float wave = sin(hitPos.x * 10.0 + push.time * 5.0) * 0.05;
-    vec3 albedo = vec3(0.1, 0.6, 0.1) + vec3(0.0, wave, 0.0);
+    // Direct lighting contribution
+    vec3 direct = albedo * ndotl * vec3(1.8, 1.6, 1.4) * 4.0;
 
-    vec3 finalColor = albedo * diffuse + vec3(0.05);
+    // Shadow ray — cast toward light
+    shadowHit = false;
+    float shadowDist = 10000.0;
+    traceRayEXT(topLevelAS,
+                gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+                0xff,                       // cull mask
+                1,                          // sbtRecordOffset for shadow miss
+                0,                          // sbtRecordStride
+                1,                          // miss index for shadow
+                gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * 0.001,
+                shadowDist,
+                lightDir,
+                shadowDist,
+                1);  // shadow payload location
 
-    hitColor = finalColor;
+    if (shadowHit) {
+        direct *= 0.25;  // darkened in shadow
+    }
+
+    // Final hit value
+    hitValue = direct;
 }
