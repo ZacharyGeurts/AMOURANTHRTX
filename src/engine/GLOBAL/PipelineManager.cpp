@@ -1,14 +1,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing pipeline, SBT, and descriptor management
-// Version 30.17 — January 22, 2026
-// - KILLED FRAMES — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no frame index
-// - updateRTDescriptorSet & traceRays no longer take frameIndex/imageIndex
-// - allocateDescriptorSets now creates 1 of each set type
-// - getDescriptorSet() always returns the single set
-// - Fixed descriptor buffer writes — skip invalid, offset 0, range full
+// Version 30.18 — January 23, 2026
+// - Single eternal descriptor set — no frames, no MAX_FRAMES_IN_FLIGHT
+// - traceRays & updateRTDescriptorSet take no frame/image index
+// - allocateDescriptorSets creates 1 of each type
+// - getDescriptorSet() returns the single set
+// - Descriptor writes safe — skip invalid, offset 0, range full
 // - Materials write still commented (binding 3 = STORAGE_IMAGE)
-// - Empire stable — no garbage, no lost device, no frame state
+// - Empire stable — no garbage, no lost device
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -35,7 +35,7 @@ using BufferManager::BufferInfo;
 using BufferManager::align_up;
 
 // Static atomic members
-std::atomic<bool>     RTX::PipelineManager::g_pipelineNeedsRebuild{false};
+std::atomic<bool> RTX::PipelineManager::g_pipelineNeedsRebuild{false};
 
 // Fixed 8 safe bindings for set 0 — Vulkan guaranteed
 static constexpr std::array<VkDescriptorSetLayoutBinding, 8> kMainBindings = {{
@@ -858,7 +858,7 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.17 — January 22, 2026
+// PipelineManager v30.18 — January 23, 2026
 // - Frame-free — single descriptor set, no MAX_FRAMES_IN_FLIGHT, no %
 // - updateRTDescriptorSet & traceRays simplified — no frameIndex/imageIndex
 // - Descriptor writes safe — skip invalid, offset 0, no mismatch
