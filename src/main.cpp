@@ -207,7 +207,7 @@ int main(int, char**) {
     int pixelW = 0, pixelH = 0;
     SDL_GetWindowSizeInPixels(window, &pixelW, &pixelH);  // Correct SDL3 high-DPI pixel size
 
-    VkInstance instance = RTX::createVulkanInstance(Options::Debug::ENABLE_VALIDATION_LAYERS);
+    VkInstance instance = RTX::createVulkanInstance();
     if (!instance) apocalypse("Instance creation failed");
 
     StoneKey::stone_seal_instance(instance);
@@ -226,15 +226,15 @@ int main(int, char**) {
 
     // Seal device and related objects
     StoneKey::stone_seal_device(device);
-    StoneKey::stone_seal_physical(RTX::g_ctx().physical_);
-    StoneKey::stone_seal_graphics_family(RTX::g_ctx().graphicsFamily_);
-    StoneKey::stone_seal_present_family(RTX::g_ctx().presentFamily_);
-    StoneKey::stone_seal_transfer_family(RTX::g_ctx().transferFamily_);
-    StoneKey::stone_seal_compute_family(RTX::g_ctx().computeFamily_);
-    StoneKey::stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue_);
-    StoneKey::stone_seal_present_queue(RTX::g_ctx().presentQueue_);
-    StoneKey::stone_seal_transfer_queue(RTX::g_ctx().transferQueue_);
-    StoneKey::stone_seal_compute_queue(RTX::g_ctx().computeQueue_);
+    StoneKey::stone_seal_physical(RTX::g_ctx().physical);
+    StoneKey::stone_seal_graphics_family(RTX::g_ctx().graphicsFamily);
+    StoneKey::stone_seal_present_family(RTX::g_ctx().presentFamily);
+    StoneKey::stone_seal_transfer_family(RTX::g_ctx().transferFamily);
+    StoneKey::stone_seal_compute_family(RTX::g_ctx().computeFamily);
+    StoneKey::stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue);
+    StoneKey::stone_seal_present_queue(RTX::g_ctx().presentQueue);
+    StoneKey::stone_seal_transfer_queue(RTX::g_ctx().transferQueue);
+    StoneKey::stone_seal_compute_queue(RTX::g_ctx().computeQueue);
 
     RTX::loadDeviceExtensions(device);
     RTX::g_ctx().init();

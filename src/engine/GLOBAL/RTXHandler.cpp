@@ -1,19 +1,17 @@
 // =============================================================================
-// AMOURANTH RTX Engine - RTX Handler
-// Global Vulkan context, instance, device, and queue management
-// Full RTX feature enablement (ray tracing, acceleration structures, timeline semaphores)
-// Descriptor indexing and safe pool configuration
-// Version 30.0 — January 20, 2026
-// Production ready: Descriptor pool creation delayed (called externally after initial AS build)
-// All sealing centralized externally for stability
-// Validation clean, driver-safe
+// AMOURANTH RTX Engine - RTX Handler Implementation
+// Global Vulkan context, instance, device, queues
+// RTX feature enablement | Descriptor indexing | Timeline semaphores
+// Version 30.1 — January 22, 2026
+// - Descriptor pool delayed (called externally after first AS build)
+// - All sealing centralized externally (StoneKey)
+// - Minimal, production-stable
 // =============================================================================
 
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
-#include "engine/GLOBAL/BufferManager.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
@@ -24,22 +22,20 @@
 
 namespace RTX {
 
-// Global context singleton
 Context g_context_instance{};
 
 // =============================================================================
-// Global Descriptor Pool — Driver-safe configuration
+// Global Descriptor Pool — delayed creation
 // =============================================================================
-void createGlobalDescriptorPool() noexcept
-{
+void createGlobalDescriptorPool() noexcept {
     VkDevice dev = StoneKey::stone_device();
     if (dev == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "Cannot create descriptor pool — device is NULL");
+        LOG_FATAL_CAT("RTX", "Cannot create pool — device is NULL");
         return;
     }
 
-    if (g_ctx().descriptorPool_.valid()) {
-        LOG_INFO_CAT("RTX", "Global descriptor pool already exists — skipping");
+    if (g_ctx().descriptorPool.valid()) {
+        LOG_INFO_CAT("RTX", "Global descriptor pool already exists");
         return;
     }
 
@@ -52,17 +48,13 @@ void createGlobalDescriptorPool() noexcept
         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,              100'000},
         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,               100'000},
         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,      200'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,               100'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER,                     50'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 50'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,            10'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,      10'000}
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  50'000},
     };
 
     VkDescriptorPoolCreateInfo info{};
     info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
-                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT;
+                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
     info.maxSets       = MAX_SETS;
     info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     info.pPoolSizes    = poolSizes.data();
@@ -70,16 +62,14 @@ void createGlobalDescriptorPool() noexcept
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VkResult result = vkCreateDescriptorPool(dev, &info, nullptr, &pool);
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("RTX", "vkCreateDescriptorPool failed: {} (check driver/VRAM limits)", string_VkResult(result));
+        LOG_FATAL_CAT("RTX", "vkCreateDescriptorPool failed: {}", string_VkResult(result));
         return;
     }
 
-    g_ctx().descriptorPool_ = Handle<VkDescriptorPool>(
+    g_ctx().descriptorPool = Handle<VkDescriptorPool>(
         pool,
         dev,
-        [](VkDevice d, VkDescriptorPool p, const VkAllocationCallbacks*) {
-            vkDestroyDescriptorPool(d, p, nullptr);
-        }
+        vkDestroyDescriptorPool
     );
 
     LOG_SUCCESS_CAT("RTX", "Global descriptor pool created — capacity: {} sets", MAX_SETS);
@@ -89,164 +79,145 @@ void createGlobalDescriptorPool() noexcept
 // Queue Family Indices
 // =============================================================================
 struct QueueFamilyIndices {
-    std::optional<uint32_t> graphicsFamily;
-    std::optional<uint32_t> presentFamily;
-    std::optional<uint32_t> computeFamily;
-    std::optional<uint32_t> transferFamily;
+    std::optional<uint32_t> graphics;
+    std::optional<uint32_t> present;
+    std::optional<uint32_t> compute;
+    std::optional<uint32_t> transfer;
 
-    [[nodiscard]] bool isComplete() const noexcept {
-        return graphicsFamily.has_value() && presentFamily.has_value();
+    [[nodiscard]] bool complete() const noexcept {
+        return graphics.has_value() && present.has_value();
     }
 };
 
-static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) noexcept
-{
+static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR surface) noexcept {
     QueueFamilyIndices indices;
 
     uint32_t count = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
+    vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, nullptr);
     std::vector<VkQueueFamilyProperties> families(count);
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
+    vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, families.data());
 
     for (uint32_t i = 0; i < count; ++i) {
-        const auto& family = families[i];
+        const auto& f = families[i];
 
-        if (family.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            indices.graphicsFamily = i;
-        }
-
-        if (family.queueFlags & VK_QUEUE_COMPUTE_BIT) {
-            indices.computeFamily = i;
-        }
+        if (f.queueFlags & VK_QUEUE_GRAPHICS_BIT) indices.graphics = i;
+        if (f.queueFlags & VK_QUEUE_COMPUTE_BIT)  indices.compute  = i;
 
         if (surface != VK_NULL_HANDLE) {
-            VkBool32 presentSupport = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
-            if (presentSupport) {
-                indices.presentFamily = i;
-            }
+            VkBool32 present = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(dev, i, surface, &present);
+            if (present) indices.present = i;
         }
 
-        if ((family.queueFlags & VK_QUEUE_TRANSFER_BIT) && !(family.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-            indices.transferFamily = i;
+        if ((f.queueFlags & VK_QUEUE_TRANSFER_BIT) && !(f.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+            indices.transfer = i;
         }
     }
 
-    if (!indices.computeFamily.has_value()) indices.computeFamily = indices.graphicsFamily;
-    if (!indices.transferFamily.has_value()) indices.transferFamily = indices.graphicsFamily;
+    if (!indices.compute.has_value())  indices.compute  = indices.graphics;
+    if (!indices.transfer.has_value()) indices.transfer = indices.graphics;
 
     return indices;
 }
 
 // =============================================================================
-// Vulkan Instance Creation
+// Instance Creation — validation toggleable via Options::Debug
 // =============================================================================
-[[nodiscard]] VkInstance createVulkanInstance(bool enableValidation) noexcept
-{
+VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName   = "AMOURANTH RTX Engine vTURBO";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    appInfo.pEngineName        = "AMOURANTH RTX";
+    appInfo.pApplicationName   = "AMOURANTH RTX";
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 30, 0, 0);
+    appInfo.pEngineName        = "VALHALLA";
     appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 30, 0, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
-    uint32_t sdlExtCount = 0;
-    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
+    uint32_t sdlCount = 0;
+    const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
 
-    std::vector<const char*> extensions(sdlExtensions, sdlExtensions + sdlExtCount);
-    if (enableValidation) {
+    std::vector<const char*> extensions(sdlExts, sdlExts + sdlCount);
+    if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
     std::vector<const char*> layers;
-    if (enableValidation) {
+    if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
         layers.push_back("VK_LAYER_KHRONOS_validation");
     }
 
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo        = &appInfo;
-    createInfo.enabledLayerCount       = static_cast<uint32_t>(layers.size());
-    createInfo.ppEnabledLayerNames     = layers.data();
-    createInfo.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
-    createInfo.ppEnabledExtensionNames = extensions.data();
+    VkInstanceCreateInfo ci{};
+    ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    ci.pApplicationInfo        = &appInfo;
+    ci.enabledLayerCount       = static_cast<uint32_t>(layers.size());
+    ci.ppEnabledLayerNames     = layers.data();
+    ci.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
+    ci.ppEnabledExtensionNames = extensions.data();
 
-    VkInstance instance = VK_NULL_HANDLE;
-    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance);
-    if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("Vulkan", "vkCreateInstance failed: {}", string_VkResult(result));
+    VkInstance inst = VK_NULL_HANDLE;
+    VkResult res = vkCreateInstance(&ci, nullptr, &inst);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkCreateInstance failed: {}", string_VkResult(res));
         return VK_NULL_HANDLE;
     }
 
-    LOG_SUCCESS_CAT("RTX", "Vulkan instance created — {} extensions, validation {}", extensions.size(), enableValidation ? "ON" : "OFF");
-    return instance;
+    LOG_SUCCESS_CAT("RTX", "Instance created — {} extensions, validation {}",
+                    extensions.size(), Options::Debug::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF");
+    return inst;
 }
 
 // =============================================================================
-// Logical Device & GPU Selection — Full RTX features
+// Logical Device & GPU Selection — RTX mandatory
 // =============================================================================
-[[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept
-{
-    uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-    if (deviceCount == 0) {
-        LOG_FATAL_CAT("RTX", "No Vulkan-capable GPUs found");
+VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noexcept {
+    uint32_t count = 0;
+    vkEnumeratePhysicalDevices(inst, &count, nullptr);
+    if (count == 0) {
+        LOG_FATAL_CAT("RTX", "No Vulkan GPUs found");
         return VK_NULL_HANDLE;
     }
 
-    std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+    std::vector<VkPhysicalDevice> devices(count);
+    vkEnumeratePhysicalDevices(inst, &count, devices.data());
 
     VkPhysicalDevice selected = VK_NULL_HANDLE;
-    QueueFamilyIndices bestIndices;
+    QueueFamilyIndices best;
     int bestScore = -1;
 
-    constexpr std::array requiredExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
-    };
-
-    for (VkPhysicalDevice dev : devices) {
+    for (VkPhysicalDevice pd : devices) {
         VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(dev, &props);
+        vkGetPhysicalDeviceProperties(pd, &props);
 
         if (props.apiVersion < VK_API_VERSION_1_3) continue;
 
-        QueueFamilyIndices indices = findQueueFamilies(dev, surface);
-        if (!indices.isComplete()) continue;
+        QueueFamilyIndices indices = findQueueFamilies(pd, surf);
+        if (!indices.complete()) continue;
 
         uint32_t extCount = 0;
-        vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, nullptr);
-        std::vector<VkExtensionProperties> available(extCount);
-        vkEnumerateDeviceExtensionProperties(dev, nullptr, &extCount, available.data());
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr);
+        std::vector<VkExtensionProperties> exts(extCount);
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data());
 
-        bool hasAllExtensions = std::all_of(requiredExtensions.begin(), requiredExtensions.end(),
-            [&available](const char* ext) {
-                return std::any_of(available.begin(), available.end(),
-                    [ext](const auto& e) { return strcmp(e.extensionName, ext) == 0; });
+        bool hasAll = std::all_of(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end(),
+            [&exts](const char* need) {
+                return std::any_of(exts.begin(), exts.end(),
+                    [need](const auto& e) { return strcmp(e.extensionName, need) == 0; });
             });
 
-        if (!hasAllExtensions) continue;
+        if (!hasAll) continue;
 
         int score = 0;
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
         if (strstr(props.deviceName, "RTX") || strstr(props.deviceName, "GeForce")) score += 300000;
-        if (props.apiVersion >= VK_MAKE_VERSION(1, 3, 0)) score += 500000;
 
         if (score > bestScore) {
             bestScore = score;
-            selected = dev;
-            bestIndices = indices;
+            selected = pd;
+            best = indices;
         }
     }
 
-    if (selected == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "No suitable GPU found with required RTX features");
+    if (!selected) {
+        LOG_FATAL_CAT("RTX", "No RTX-capable GPU found");
         return VK_NULL_HANDLE;
     }
 
@@ -256,84 +227,100 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKH
 
     g_ctx().setPhysicalDevice(selected);
 
-    std::set<uint32_t> uniqueQueues = { bestIndices.graphicsFamily.value(), bestIndices.presentFamily.value() };
-    if (bestIndices.transferFamily.has_value()) uniqueQueues.insert(bestIndices.transferFamily.value());
+    std::set<uint32_t> uniqueQ = {best.graphics.value(), best.present.value()};
+    if (best.transfer.has_value()) uniqueQ.insert(best.transfer.value());
 
-    float priority = 1.0f;
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    for (uint32_t family : uniqueQueues) {
-        queueCreateInfos.push_back({
+    float prio = 1.0f;
+    std::vector<VkDeviceQueueCreateInfo> qInfos;
+    for (uint32_t fam : uniqueQ) {
+        qInfos.push_back({
             .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = family,
+            .queueFamilyIndex = fam,
             .queueCount       = 1,
-            .pQueuePriorities = &priority
+            .pQueuePriorities = &prio
         });
     }
 
-    VkPhysicalDeviceVulkan12Features vk12Features{};
-    vk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12Features.timelineSemaphore = VK_TRUE;
-    vk12Features.bufferDeviceAddress = VK_TRUE;
-    vk12Features.descriptorIndexing = VK_TRUE;
+    VkPhysicalDeviceVulkan12Features vk12{};
+    vk12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vk12.timelineSemaphore = VK_TRUE;
+    vk12.bufferDeviceAddress = VK_TRUE;
+    vk12.descriptorIndexing = VK_TRUE;
 
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStruct{};
-    accelStruct.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accelStruct.pNext = &vk12Features;
-    accelStruct.accelerationStructure = VK_TRUE;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{};
+    accel.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accel.pNext = &vk12;
+    accel.accelerationStructure = VK_TRUE;
 
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracing{};
-    rayTracing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rayTracing.pNext = &accelStruct;
-    rayTracing.rayTracingPipeline = VK_TRUE;
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipe{};
+    rtPipe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtPipe.pNext = &accel;
+    rtPipe.rayTracingPipeline = VK_TRUE;
 
-    VkDeviceCreateInfo deviceInfo{};
-    deviceInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceInfo.pNext                   = &rayTracing;
-    deviceInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size());
-    deviceInfo.pQueueCreateInfos       = queueCreateInfos.data();
-    deviceInfo.enabledExtensionCount   = static_cast<uint32_t>(requiredExtensions.size());
-    deviceInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    VkDeviceCreateInfo devInfo{};
+    devInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    devInfo.pNext                   = &rtPipe;
+    devInfo.queueCreateInfoCount    = static_cast<uint32_t>(qInfos.size());
+    devInfo.pQueueCreateInfos       = qInfos.data();
+    devInfo.enabledExtensionCount   = static_cast<uint32_t>(requiredDeviceExtensions.size());
+    devInfo.ppEnabledExtensionNames = requiredDeviceExtensions.data();
 
-    VkDevice device = VK_NULL_HANDLE;
-    VkResult result = vkCreateDevice(selected, &deviceInfo, nullptr, &device);
-    if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("RTX", "vkCreateDevice failed: {}", string_VkResult(result));
+    VkDevice dev = VK_NULL_HANDLE;
+    VkResult res = vkCreateDevice(selected, &devInfo, nullptr, &dev);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("RTX", "vkCreateDevice failed: {}", string_VkResult(res));
         return VK_NULL_HANDLE;
     }
 
-    vkGetDeviceQueue(device, bestIndices.graphicsFamily.value(), 0, &g_ctx().graphicsQueue_);
-    vkGetDeviceQueue(device, bestIndices.presentFamily.value(), 0, &g_ctx().presentQueue_);
-    g_ctx().transferQueue_ = bestIndices.transferFamily.has_value()
-        ? [&]{ VkQueue q; vkGetDeviceQueue(device, bestIndices.transferFamily.value(), 0, &q); return q; }()
-        : g_ctx().graphicsQueue_;
-    g_ctx().computeQueue_ = g_ctx().graphicsQueue_;
+    vkGetDeviceQueue(dev, best.graphics.value(), 0, &g_ctx().graphicsQueue);
+    vkGetDeviceQueue(dev, best.present.value(), 0, &g_ctx().presentQueue);
+    g_ctx().transferQueue = best.transfer.has_value()
+        ? [&]{ VkQueue q; vkGetDeviceQueue(dev, best.transfer.value(), 0, &q); return q; }()
+        : g_ctx().graphicsQueue;
+    g_ctx().computeQueue = g_ctx().graphicsQueue;
 
-    g_ctx().graphicsFamily_ = bestIndices.graphicsFamily.value();
-    g_ctx().presentFamily_  = bestIndices.presentFamily.value();
-    g_ctx().transferFamily_ = bestIndices.transferFamily.value_or(bestIndices.graphicsFamily.value());
-    g_ctx().computeFamily_  = bestIndices.graphicsFamily.value();
+    g_ctx().graphicsFamily = best.graphics.value();
+    g_ctx().presentFamily  = best.present.value();
+    g_ctx().transferFamily = best.transfer.value_or(best.graphics.value());
+    g_ctx().computeFamily  = best.graphics.value();
 
-    LOG_SUCCESS_CAT("RTX", "Logical device created — full RTX features enabled");
+    LOG_SUCCESS_CAT("RTX", "Logical device created — full RTX enabled");
 
-    return device;
+    return dev;
 }
 
 // =============================================================================
-// Context Initialization
+// Context init — minimal
 // =============================================================================
-void Context::init() noexcept
-{
-    valid_ = true;
-    ready_.store(true, std::memory_order_release);
+void Context::init() noexcept {
+    valid = true;
+    ready.store(true, std::memory_order_release);
+    LOG_INFO_CAT("RTX", "Context initialized");
+}
 
-    LOG_INFO_CAT("RTX", "RTX context initialized");
+// =============================================================================
+// Acceleration structure descriptor write helper
+// =============================================================================
+void writeAccelerationStructureDescriptor(
+    VkDescriptorSet set,
+    uint32_t binding,
+    uint32_t arrayElement,
+    VkAccelerationStructureKHR accel) noexcept {
+    VkWriteDescriptorSetAccelerationStructureKHR asWrite{};
+    asWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    asWrite.accelerationStructureCount = 1;
+    asWrite.pAccelerationStructures = &accel;
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.pNext = &asWrite;
+    write.dstSet = set;
+    write.dstBinding = binding;
+    write.dstArrayElement = arrayElement;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+
+    vkUpdateDescriptorSets(StoneKey::stone_device(), 1, &write, 0, nullptr);
 }
 
 } // namespace RTX
-
-// =============================================================================
-// RTX Handler v30.0 — January 20, 2026
-// - Descriptor pool creation is now external (call RTX::createGlobalDescriptorPool() after first LAS build)
-// - All StoneKey sealing removed from this file (centralized externally)
-// - Clean, focused, production-stable
-// =============================================================================

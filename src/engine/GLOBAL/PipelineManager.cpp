@@ -168,7 +168,7 @@ void PipelineManager::allocateDescriptorSets()
 {
     LOG_INFO_CAT("PIPELINE", "Allocating single descriptor sets (frame-free)");
 
-    VkDescriptorPool globalPool = RTX::g_ctx().descriptorPool_.get();
+    VkDescriptorPool globalPool = RTX::g_ctx().descriptorPool.get();
     if (globalPool == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Global descriptor pool not available");
         return;

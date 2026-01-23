@@ -1,8 +1,8 @@
-// include/engine/GLOBAL/RTXHandler.hpp
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v28.1 — JANUARY 08, 2026
-// RTX HANDLER — GLOBAL VULKAN CONTEXT | MODERN C++23 | SAFE & ETERNAL
-// FULL RTX SUPPORT | ZERO-COST COMPATIBLE | VALIDATION PERFECT
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.1 — JANUARY 22, 2026
+// RTX HANDLER — GLOBAL VULKAN CONTEXT | MODERN C++23 | RTX-FIRST | MINIMAL STATE
+// FULL RTX FEATURES | DESCRIPTOR INDEXING | TIMELINE SEMAPHORES | BUFFER DEVICE ADDRESS
+// NO FRAMES | NO BLOAT | EXTERNAL SEALING | POOL DELAYED | VALIDATION TOGGLEABLE
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -11,18 +11,20 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL_vulkan.h>
 
-#include <functional>
+#include <array>
 #include <optional>
+#include <string_view>
+#include <vector>
 
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 
 namespace RTX {
 
 // =============================================================================
-// RAII Handle — Classic function pointer version (C++20 compatible)
+// RAII Handle — minimal, function-pointer based (C++20 compatible)
 // =============================================================================
 template<typename T>
 class Handle {
@@ -32,15 +34,12 @@ public:
     Handle(T h, VkDevice d, void (*del)(VkDevice, T, const VkAllocationCallbacks*) = nullptr) noexcept
         : handle_(h), device_(d), deleter_(del) {}
 
-    ~Handle() {
-        reset();
-    }
+    ~Handle() { reset(); }
 
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
 
-    Handle(Handle&& other) noexcept
-        : handle_(other.handle_), device_(other.device_), deleter_(other.deleter_) {
+    Handle(Handle&& other) noexcept : handle_(other.handle_), device_(other.device_), deleter_(other.deleter_) {
         other.handle_ = VK_NULL_HANDLE;
         other.device_ = VK_NULL_HANDLE;
         other.deleter_ = nullptr;
@@ -80,29 +79,41 @@ private:
 };
 
 // =============================================================================
-// Global Vulkan Context — Singleton with modern design
+// Required Device Extensions — RTX minimum set
+// =============================================================================
+inline constexpr std::array<const char*, 6> requiredDeviceExtensions = {{
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+    VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+}};
+
+// =============================================================================
+// Global Context — minimal singleton
 // =============================================================================
 struct Context {
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physical_ = VK_NULL_HANDLE;
+    VkDevice device = VK_NULL_HANDLE;
+    VkPhysicalDevice physical = VK_NULL_HANDLE;
 
-    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
-    VkQueue presentQueue_ = VK_NULL_HANDLE;
-    VkQueue transferQueue_ = VK_NULL_HANDLE;
-    VkQueue computeQueue_ = VK_NULL_HANDLE;
+    VkQueue graphicsQueue = VK_NULL_HANDLE;
+    VkQueue presentQueue = VK_NULL_HANDLE;
+    VkQueue transferQueue = VK_NULL_HANDLE;
+    VkQueue computeQueue = VK_NULL_HANDLE;
 
-    uint32_t graphicsFamily_ = ~0u;
-    uint32_t presentFamily_ = ~0u;
-    uint32_t transferFamily_ = ~0u;
-    uint32_t computeFamily_ = ~0u;
+    uint32_t graphicsFamily = ~0u;
+    uint32_t presentFamily = ~0u;
+    uint32_t transferFamily = ~0u;
+    uint32_t computeFamily = ~0u;
 
-    Handle<VkDescriptorPool> descriptorPool_;
+    Handle<VkDescriptorPool> descriptorPool;
 
-    bool rtxCapable_ = false;
-    bool valid_ = false;
-    std::atomic<bool> ready_{false};
+    bool rtxCapable = false;
+    bool valid = false;
+    std::atomic<bool> ready{false};
 
-    void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physical_ = pd; }
+    void setPhysicalDevice(VkPhysicalDevice pd) noexcept { physical = pd; }
 
     [[nodiscard]] static Context& get() noexcept {
         static Context instance;
@@ -115,46 +126,23 @@ struct Context {
 [[nodiscard]] inline Context& g_ctx() noexcept { return Context::get(); }
 
 // =============================================================================
-// Required Device Extensions — RTX Complete Set
-// =============================================================================
-inline constexpr std::array<const char*, 6> requiredExtensions = {{
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-    VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
-}};
-
-// =============================================================================
-// Public API — Clean and Modern
+// Public API — Clean & Modern
 // =============================================================================
 
-// Vulkan instance creation
-[[nodiscard]] VkInstance createVulkanInstance(bool enableValidation = true) noexcept;
+// Instance creation — validation toggleable via Options::Debug
+[[nodiscard]] VkInstance createVulkanInstance() noexcept;
 
-// GPU selection and logical device creation
+// GPU selection + logical device creation — RTX features mandatory
 [[nodiscard]] VkDevice createLogicalDeviceAndSelectGPU(VkInstance instance, VkSurfaceKHR surface) noexcept;
 
-// Global descriptor pool (called internally after device creation)
-// Declaration only — definition is in RTXHandler.cpp with static linkage
+// Global descriptor pool — delayed call (after first LAS build)
 void createGlobalDescriptorPool() noexcept;
 
-// Helper for writing acceleration structure descriptors
-void WriteAccelerationStructureDescriptor(
-    VkDescriptorSet dstSet,
-    uint32_t dstBinding,
-    uint32_t dstArrayElement,
+// Helper for acceleration structure descriptor writes
+void writeAccelerationStructureDescriptor(
+    VkDescriptorSet set,
+    uint32_t binding,
+    uint32_t arrayElement,
     VkAccelerationStructureKHR accelStruct) noexcept;
 
 } // namespace RTX
-
-// =============================================================================
-// RTX CORE v28.1 — JANUARY 08, 2026
-// Modern C++23 | Classic function pointer Handle (C++20 compatible)
-// constexpr arrays | Clean minimal includes
-// Safe, robust, production-ready Vulkan context
-// RTX-first selection — truth and performance
-// THE EMPIRE IS ETERNAL — PHOTONS FLOW UNBROKEN
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
-// =============================================================================
