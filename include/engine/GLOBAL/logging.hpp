@@ -3,7 +3,7 @@
 // =============================================================================
 // =============================================================================
 // AMOURANTH RTX — VALHALLA v80 TURBO — APOCALYPSE FINAL v10.3
-// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — JANUARY 04, 2026
+// FIRST LIGHT ACHIEVED — PINK PHOTONS ETERNAL — DECEMBER 09, 2025
 // FULLY COMPILING — PURE EMPIRE - Inspired by Ellie Fier
 // =============================================================================
 
@@ -46,15 +46,19 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-// Global lifetime clock — updated by renderer every frame
+// Global lifetime clock — updated by renderer
 extern double totalTime_;
+
+// Forward declarations
+extern uint64_t kStone1; // logging.cpp
+extern uint64_t kStone2;
 
 // =============================================================================
 // DELTA TIME MACROS — NO GLOBALS — PASS TOTALTIME FROM RENDERER
 // =============================================================================
 // These macros now take totalTime as parameter (from renderer) or use timestamp
 // No more g_deltaTime — pure timestamp-based logging
-// Call from renderer: LOG_DELTA(totalTime_)
+// Call: LOG_DELTA(totalTime_)
 // =============================================================================
 
 #define LOG_DELTA(totalTime) \
@@ -240,10 +244,6 @@ namespace std {
         }
     };
 } // namespace std
-
-// Forward declarations
-extern uint64_t kStone1;
-extern uint64_t kStone2;
 
 // ========================================================================
 // 0. CONFIGURATION
