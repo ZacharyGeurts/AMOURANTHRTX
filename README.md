@@ -1,7 +1,7 @@
 [Current over head code view](https://x.com/ZacharyGeurts/status/2015005228794327380)  
 
 We are THE ZERO COST RTX development research page, unless someone beat Amouranth to it.  
-The commit count is stoopid.  
+The commit count is stoopid. <3 Gorillaz    
 
 Development and memes https://x.com/ZacharyGeurts
 Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
@@ -25,6 +25,7 @@ The cmake build system needs internet to function and tries to help. (mine went 
 uses stb and tinyobj and is really smart everywhere really. "the city of the future" but sorta crumbly right now.  
 Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
 It may have been confusing to anyone unfamiliar with Open Source.  
+You owe me 3% of every dollar I can make you. *sigh, already gone.  
 
 Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
 Or trash it and grab a new one tomorrow.  
@@ -45,10 +46,11 @@ Which one? StoneKey.hpp. Have Grok 4.1 beta or whatever change to your hearts co
 C++23 but Grok can probably make it C# in a day.  
 
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
-"Maybe another Zero computational cost that makes itself unreadable" First?  
+"Maybe another Zero computational cost that makes itself unreadable" First? Is there second?  
 
-How far along? All components tested now assuming needed StoneKey shaders for visuals.  
-If you just want to update a component of your engine, take a look and see if you can adapt.  
+How far along? "chugged" along at over 272,000 FPS on 4070ti so we deconceptualized framerates.    
+If you just want to update a component of your engine, you will have a better time using the wiki over the source.  
+Remove the StoneKey references in the wiki and I frown upon losing security. Come back when I am further along. Please.  
 
 I can eat and I play Minecraft and I have RTX. I want developers to have another RTX resource.  
 These are my current iterations and subject to change daily.  
