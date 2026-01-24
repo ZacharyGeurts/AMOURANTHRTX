@@ -81,6 +81,7 @@ public:
     inline static std::vector<VkImageView>         swapchainImageViews_;
 
     inline static bool minimized_ = false;
+	inline static bool directWriteEnabled = false;
 
 private:
     static void cleanupImageViews() noexcept;

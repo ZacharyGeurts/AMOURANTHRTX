@@ -22,9 +22,6 @@ namespace Rendering {
     inline uint32_t MAX_RAY_RECURSION        = 12;        // Bounce limit — higher = more noise but realism
     inline bool    USE_LINEAR_TILING         = false;     // Default OFF — optimal tiling for gains
                                                           // Turn on for row-major memory / CPU readback
-    inline bool    DIRECT_SWAPCHAIN_WRITE    = false;     // Direct ray write to swapchain images (GENERAL layout)
-                                                          // Zero-copy bleed — requires STORAGE_BIT on swapchain
-                                                          // Driver support varies (NVIDIA usually ok, AMD/Intel spotty)
 }
 
 // ── WINDOW & DISPLAY (SDL3 handles DPI/HDR — we just set sane defaults)

@@ -1,10 +1,11 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.60
-// SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DYNAMIC PRESENT MODE
+// SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | AUTOMAGICAL DIRECT WRITE
 // JANUARY 24, 2026
-// - Dynamic present mode selection — prefers MAILBOX, graceful fallback
-// - Optional STORAGE_BIT for direct swapchain write (Options::Rendering::DIRECT_SWAPCHAIN_WRITE)
-// - Logs chosen mode and direct write status
+// - Automagical direct swapchain write detection
+// - Attempts STORAGE_BIT + direct path first
+// - Falls back to safe HDR + blit if unsupported
+// - Logs chosen path clearly
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -12,7 +13,6 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
 
 #include <algorithm>
 #include <format>
@@ -84,13 +84,13 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
         minimized_ = true;
         LOG_ERROR_CAT("SWAPCHAIN", "Failed to ensure ready after recreation");
     } else {
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain ensured ready — {} images | {}×{}", 
-                        swapchainImages_.size(), w, h);
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain ready — {} images | {}×{} | Direct write: {}",
+                        swapchainImages_.size(), w, h, directWriteEnabled ? "ENABLED" : "fallback (HDR + blit)");
     }
 }
 
 // =============================================================================
-// transitionImageLayout — static helper
+// transitionImageLayout — extended for direct path support
 // =============================================================================
 void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                              VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
@@ -110,6 +110,7 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     VkAccessFlags srcAccess = 0;
     VkAccessFlags dstAccess = 0;
 
+    // Direct path transitions
     if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
         srcAccess = 0;
         dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
@@ -125,7 +126,9 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
         dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
         srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+    }
+    // Fallback blit path transitions
+    else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
         srcAccess = 0;
         dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
         srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -151,7 +154,7 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
 }
 
 // =============================================================================
-// createOrRecreateSwapchain — core logic with dynamic present mode + optional storage
+// createOrRecreateSwapchain — automagical direct write detection
 // =============================================================================
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason) noexcept {
     ensureSwapchainExtension();
@@ -216,19 +219,18 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         }
     }
 
-    // Query present modes and select best
+    // Query present modes
     uint32_t pmCount = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(pmCount);
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, presentModes.data());
 
-    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR; // Guaranteed safe fallback
-
+    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
     const VkPresentModeKHR pmPrefs[] = {
-        VK_PRESENT_MODE_MAILBOX_KHR,         // Best: triple buffer, low latency
-        VK_PRESENT_MODE_FIFO_RELAXED_KHR,    // Good: vsync with tear on late frames
-        VK_PRESENT_MODE_IMMEDIATE_KHR,       // Tearing allowed
-        VK_PRESENT_MODE_FIFO_KHR             // Strict vsync
+        VK_PRESENT_MODE_MAILBOX_KHR,
+        VK_PRESENT_MODE_FIFO_RELAXED_KHR,
+        VK_PRESENT_MODE_IMMEDIATE_KHR,
+        VK_PRESENT_MODE_FIFO_KHR
     };
 
     for (auto pref : pmPrefs) {
@@ -239,13 +241,16 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     }
 
     LOG_INFO_CAT("SWAPCHAIN", "Chosen present mode: {}", 
-                 chosenPM == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX (optimal)" :
+                 chosenPM == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" :
                  chosenPM == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED" :
                  chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" :
-                 "FIFO (fallback)");
+                 "FIFO");
 
     uint32_t imgCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
+
+    // Automagical direct write attempt
+    directWriteEnabled = false;  // Start assuming fallback
 
     VkSwapchainCreateInfoKHR ci{};
     ci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -262,19 +267,25 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     ci.clipped          = VK_TRUE;
     ci.oldSwapchain     = swapchain_.valid() ? swapchain_.get() : VK_NULL_HANDLE;
 
-    // Add STORAGE_BIT if direct write enabled
-    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (Options::Rendering::DIRECT_SWAPCHAIN_WRITE) {
-        ci.imageUsage |= VK_IMAGE_USAGE_STORAGE_BIT;
-        LOG_INFO_CAT("SWAPCHAIN", "Direct swapchain write enabled — STORAGE_BIT added");
-    }
+    // First attempt: direct write (add STORAGE_BIT)
+    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 
     VkSwapchainKHR newSwap = VK_NULL_HANDLE;
     VkResult res = vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
-    if (res != VK_SUCCESS) {
-        minimized_ = true;
-        LOG_FATAL_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {}", string_VkResult(res));
-        return;
+
+    if (res == VK_SUCCESS) {
+        directWriteEnabled = true;
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Direct swapchain write ENABLED — zero-copy bleed achieved");
+    } else {
+        LOG_WARN_CAT("SWAPCHAIN", "Direct write failed ({}), falling back to HDR + blit path", string_VkResult(res));
+        // Fallback: remove STORAGE_BIT
+        ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        res = vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
+        if (res != VK_SUCCESS) {
+            minimized_ = true;
+            LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed even in fallback: {}", string_VkResult(res));
+            return;
+        }
     }
 
     swapchain_ = Handle<VkSwapchainKHR>(newSwap, dev, vkDestroySwapchainKHR);
@@ -310,8 +321,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}×{} | {} | {}", 
-                    count, extent.width, extent.height, string_VkFormat(chosenFormat.format), reason);
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}×{} | Direct write: {}",
+                    count, extent.width, extent.height, directWriteEnabled ? "YES" : "no (fallback)");
 }
 
 // =============================================================================
@@ -343,12 +354,13 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
     if (minimized_ || !swapchain_.valid()) return VK_ERROR_INITIALIZATION_FAILED;
 
+    VkSwapchainKHR currentSwap = stone_swapchain();
+
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount = waitSem ? 1 : 0;
     pi.pWaitSemaphores    = waitSem ? &waitSem : nullptr;
     pi.swapchainCount     = 1;
-	VkSwapchainKHR currentSwap = stone_swapchain();
     pi.pSwapchains        = &currentSwap;
     pi.pImageIndices      = &imageIndex;
 
@@ -402,8 +414,8 @@ void SwapchainManager::cleanupImageViews() noexcept {
 
 // =============================================================================
 // SwapchainManager v30.60 — JANUARY 24, 2026
-// - Dynamic present mode selection — prefers MAILBOX, falls back gracefully
-// - Optional STORAGE_BIT for direct swapchain write (Options::Rendering::DIRECT_SWAPCHAIN_WRITE)
-// - Logs chosen mode and direct write status
-// - Deferred recreate, HDR-ready, self-healing
+// - Automagical direct write: tries STORAGE_BIT first, falls back if unsupported
+// - Global directWriteEnabled flag for renderer to bind correct storage image
+// - Logs path chosen
+// - Zero-copy bleed when driver allows it
 // =============================================================================
