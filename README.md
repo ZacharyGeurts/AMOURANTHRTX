@@ -79,6 +79,10 @@ Zero cost. Zero computational cost. Not using cycles in costs. Zero!
 Old methods. New technology. We are friendly.  
 We also strip and optimize geometry, and really, we really do have RTX in a bottle.  
 I went through top 50 forum wishlists for every component and design is modular as well as interwoven.  
+It is today. I know you can take BufferManager and adapt to your thing with one command to Grok.  
+Please respect where you got it.  
+We do security here. Please respect that.  
+If it turns out Tom Brady is amazing at cryptography too, we will update StoneKey.  
 
 Digress. The swapchain picks always best for your platform.  
 "Seriously?" Yeah. It's like 300 lines, so if you do not like it, Grok can write you a whole new one.  
