@@ -1,9 +1,10 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.20 — JANUARY 23, 2026
-// PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX EDITION (VULKAN 1.4 COMPAT)
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.60
+// PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX + COMPUTE EDITION
 // SINGLE ETERNAL DESCRIPTOR SET | NO FRAMES | FRAME-FREE TRACE & UPDATE
 // UPDATE_AFTER_BIND ENABLED | PERSISTENT COMMAND BUFFERS COMPATIBLE | ETERNAL SBT
-// NO PER-FRAME ALLOCATIONS | MAX DRIVER FRIENDLINESS | VALIDATION CLEAN
+// LIVING WORLD COMPUTE SUPPORT (living_world.spv) | MATERIALS ACTIVE
+// PUSH CONSTANT: 4 BYTES ONLY (time float) | NO DT | MAX DRIVER FRIENDLINESS
 // =============================================================================
 
 #pragma once
@@ -46,8 +47,7 @@ struct RTDescriptorUpdate {
 
 class PipelineManager {
 public:
-    PipelineManager() noexcept = default;
-    explicit PipelineManager(VkDevice device, VkPhysicalDevice phys);
+    PipelineManager();
     ~PipelineManager();
 
     PipelineManager(const PipelineManager&) = delete;
@@ -57,10 +57,14 @@ public:
 
     void createPipelineLayout();
     void createRayTracingPipeline();
+    void createComputePipeline();  // living world breathing
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
     void allocateDescriptorSets();
     void updateRTDescriptorSet(const RTDescriptorUpdate& updateInfo) noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd);
+
+    // Dispatch living world compute — called every pew before trace
+    void dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) noexcept;
 
     VkShaderModule loadShader(const std::string& path) const;
 
@@ -100,7 +104,7 @@ public:
     VkStridedDeviceAddressRegionKHR callableSbtRegion_{};
 
 private:
-    static constexpr std::array<VkDescriptorSetLayoutBinding, 9> kMainBindings{{
+    static constexpr std::array<VkDescriptorSetLayoutBinding, 10> kMainBindings{{
         {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
@@ -108,15 +112,18 @@ private:
         {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
-        {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // Materials — active
         {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+        {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR},
         {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        {8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        {10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-        {31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-         VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}
+        {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // LivingWorldBuffer
+        {8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // MaterialOverrides
+        {9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR} // Reserved for custom/dev compute
     }};
 
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
@@ -125,6 +132,7 @@ private:
 
     Handle<VkPipelineLayout>      rtPipelineLayout_;
     Handle<VkPipeline>            rtPipeline_;
+    Handle<VkPipeline>            computePipeline_;  // living world breathing
 
     Handle<VkBuffer>              sbtBuffer_;
     Handle<VkDeviceMemory>        sbtMemory_;  // Manual SBT cleanup
@@ -145,7 +153,6 @@ private:
     Handle<VkDeviceMemory>            dummyAccelMemory_;
     Handle<VkAccelerationStructureKHR> dummyTLAS_;
 
-    // Private helper — must be declared before use in constructor initializer
     VkAccelerationStructureKHR createDummyTLAS();
 };
 
@@ -162,6 +169,8 @@ private:
 // - traceRays, updateRTDescriptorSet, getDescriptorSet simplified
 // - Manual SBT cleanup with sbtMemory_ Handle
 // - Direct call from persistent command buffer in VulkanRenderer
+// - Compute pipeline added for living world breathing
+// - Push constant: 4 bytes only (time float) — dt killed
 // - Zero-cost RTX preserved — validation clean
 // Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
 // =============================================================================

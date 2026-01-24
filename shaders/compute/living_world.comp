@@ -4,55 +4,52 @@
 
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-// Output: small storage buffer for living world params (64 bytes)
+// Output: small storage buffer for living world params (64 bytes total)
 layout(set = 0, binding = 7, scalar) buffer LivingWorldBuffer {
-    vec4 sunDirAndIntensity;     // .xyz = direction, .w = intensity
-    vec4 windDirAndSpeed;        // .xyz = direction, .w = speed
-    float temperature;
-    float humidity;
-    uint frameSeed;              // for RNG seeding if needed
-    uint padding;
+    vec4 sunDirAndIntensity;     // .xyz = normalized direction, .w = intensity [0..~1.7]
+    vec4 windDirAndSpeed;        // .xyz = normalized direction, .w = speed [~1..13 m/s]
+    float temperature;           // [0..30] °C
+    float humidity;              // [0..1]
+    uint  frameSeed;             // simple LCG seed for RNG in other shaders
+    uint  padding;               // align to 64 bytes
 } world;
 
-// Push: just dt + totalTime from CPU (8 bytes)
+// Push: 4 bytes only — absolute totalTime from CPU (no deltaTime, no bloat)
 layout(push_constant) uniform Push {
-    // float deltaTime; RKO
-    float totalTime;
+    float totalTime; // deltaTime does not exist here (but we kept fun macros)
 } pc;
 
 void main() {
     float t = pc.totalTime;
 
-    // Sun cycle — simple 24-hour sin wave
+    // Sun cycle — 24-hour sin wave, peak at noon
     float dayFrac = fract(t / 24.0);
-    float elevation = sin(dayFrac * 6.28318530718 - 1.57079632679); // peak at noon
+    float elevation = sin(dayFrac * 6.28318530718 - 1.57079632679);  // -90° offset for noon peak
     float azimuth   = dayFrac * 6.28318530718;
 
-    vec3 sunDir = vec3(
+    vec3 sunDir = normalize(vec3(
         cos(elevation) * sin(azimuth),
         sin(elevation),
         cos(elevation) * cos(azimuth)
-    );
-    sunDir = normalize(sunDir);
+    ));
 
-    float sunInt = max(0.0, elevation * 1.5 + 0.2); // day/night falloff
+    float sunInt = max(0.0, elevation * 1.5 + 0.2);  // day/night falloff, ~0 at night, ~1.7 at noon
 
     world.sunDirAndIntensity = vec4(sunDir, sunInt);
 
-    // Wind — swirling over time
+    // Wind — smooth swirling over time
     float windAngle = t * 0.01;
-    vec3 windDir = vec3(cos(windAngle), 0.0, sin(windAngle));
-    windDir = normalize(windDir);
+    vec3 windDir = normalize(vec3(cos(windAngle), 0.0, sin(windAngle)));
 
-    float windSpd = 5.0 + sin(t * 0.1) * 4.0 + sin(t * 0.03) * 2.0;
+    float windSpd = 5.0 + sin(t * 0.1) * 4.0 + sin(t * 0.03) * 2.0;  // ~1–13 m/s range
 
     world.windDirAndSpeed = vec4(windDir, windSpd);
 
-    // Temperature & humidity — derived from day/night
+    // Temperature & humidity — derived from day/night cycle
     float dayFactor = sin(dayFrac * 6.28318530718);
-    world.temperature = 15.0 + dayFactor * 15.0;
-    world.humidity    = 0.5 + (1.0 - abs(dayFactor)) * 0.5;
+    world.temperature = 15.0 + dayFactor * 15.0;  // 0–30 °C
+    world.humidity    = 0.5 + (1.0 - abs(dayFactor)) * 0.5;  // 0.5–1.0
 
-    // Frame seed — simple LCG for RNG if shaders need it
-    world.frameSeed = uint(t * 1000.0) * 1664525u + 1013904223u; // classic LCG params
+    // Frame seed — simple LCG for other shaders to use (e.g. blue noise offset)
+    world.frameSeed = uint(t * 1000.0) * 1664525u + 1013904223u;  // classic LCG params
 }

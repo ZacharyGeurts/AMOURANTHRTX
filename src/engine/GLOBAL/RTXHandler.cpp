@@ -2,9 +2,10 @@
 // AMOURANTH RTX Engine - RTX Handler Implementation
 // Global Vulkan context, instance, device, queues
 // RTX feature enablement | Descriptor indexing | Timeline semaphores
-// Version 30.1 — January 22, 2026
+// Version 30.60 — January 23, 2026
 // - Descriptor pool delayed (called externally after first AS build)
-// - All sealing centralized externally (StoneKey)
+// - All sealing centralized via StoneKey — idempotent + breach detection
+// - Instance, device, physical, surface, queues, families, pool sealed here
 // - Minimal, production-stable
 // =============================================================================
 
@@ -25,7 +26,7 @@ namespace RTX {
 Context g_context_instance{};
 
 // =============================================================================
-// Global Descriptor Pool — delayed creation
+// Global Descriptor Pool — delayed creation + sealing
 // =============================================================================
 void createGlobalDescriptorPool() noexcept {
     VkDevice dev = StoneKey::stone_device();
@@ -71,6 +72,9 @@ void createGlobalDescriptorPool() noexcept {
         dev,
         vkDestroyDescriptorPool
     );
+
+    // Seal the global descriptor pool
+    StoneKey::stone_seal_descriptor_pool(pool);
 
     LOG_SUCCESS_CAT("RTX", "Global descriptor pool created — capacity: {} sets", MAX_SETS);
 }
@@ -160,13 +164,16 @@ VkInstance createVulkanInstance() noexcept {
         return VK_NULL_HANDLE;
     }
 
+    // Seal the instance
+    StoneKey::stone_seal_instance(inst);
+
     LOG_SUCCESS_CAT("RTX", "Instance created — {} extensions, validation {}",
                     extensions.size(), Options::Debug::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF");
     return inst;
 }
 
 // =============================================================================
-// Logical Device & GPU Selection — RTX mandatory
+// Logical Device & GPU Selection — RTX mandatory + sealing
 // =============================================================================
 VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noexcept {
     uint32_t count = 0;
@@ -225,7 +232,8 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
     vkGetPhysicalDeviceProperties(selected, &props);
     LOG_INFO_CAT("RTX", "Selected GPU: {}", props.deviceName);
 
-    g_ctx().setPhysicalDevice(selected);
+    // Seal physical device
+    StoneKey::stone_seal_physical(selected);
 
     std::set<uint32_t> uniqueQ = {best.graphics.value(), best.present.value()};
     if (best.transfer.has_value()) uniqueQ.insert(best.transfer.value());
@@ -272,12 +280,31 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
         return VK_NULL_HANDLE;
     }
 
-    vkGetDeviceQueue(dev, best.graphics.value(), 0, &g_ctx().graphicsQueue);
-    vkGetDeviceQueue(dev, best.present.value(), 0, &g_ctx().presentQueue);
-    g_ctx().transferQueue = best.transfer.has_value()
-        ? [&]{ VkQueue q; vkGetDeviceQueue(dev, best.transfer.value(), 0, &q); return q; }()
-        : g_ctx().graphicsQueue;
-    g_ctx().computeQueue = g_ctx().graphicsQueue;
+    // Seal the device
+    StoneKey::stone_seal_device(dev);
+
+    VkQueue graphicsQ, presentQ, computeQ, transferQ;
+    vkGetDeviceQueue(dev, best.graphics.value(), 0, &graphicsQ);
+    vkGetDeviceQueue(dev, best.present.value(), 0, &presentQ);
+    computeQ = graphicsQ;  // compute on graphics for now
+    transferQ = best.transfer.has_value() ? [&](){ VkQueue q; vkGetDeviceQueue(dev, best.transfer.value(), 0, &q); return q; }() : graphicsQ;
+
+    // Seal queues
+    StoneKey::stone_seal_graphics_queue(graphicsQ);
+    StoneKey::stone_seal_present_queue(presentQ);
+    StoneKey::stone_seal_compute_queue(computeQ);
+    StoneKey::stone_seal_transfer_queue(transferQ);
+
+    // Seal queue families
+    StoneKey::stone_seal_graphics_family(best.graphics.value());
+    StoneKey::stone_seal_present_family(best.present.value());
+    StoneKey::stone_seal_compute_family(best.graphics.value());
+    StoneKey::stone_seal_transfer_family(best.transfer.value_or(best.graphics.value()));
+
+    g_ctx().graphicsQueue = graphicsQ;
+    g_ctx().presentQueue = presentQ;
+    g_ctx().computeQueue = computeQ;
+    g_ctx().transferQueue = transferQ;
 
     g_ctx().graphicsFamily = best.graphics.value();
     g_ctx().presentFamily  = best.present.value();

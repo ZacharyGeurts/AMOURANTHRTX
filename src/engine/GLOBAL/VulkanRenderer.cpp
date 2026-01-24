@@ -1,17 +1,20 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.52 — January 23, 2026
+// Version 30.60 — January 23, 2026
 // - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT
-// - Fixed ring of pre-allocated transient command buffers — reset before reuse
+// - Fixed ring of 128 pre-allocated transient command buffers — reset before reuse
 // - No per-pew allocation/free — self-disposing via vkResetCommandBuffer
 // - Descriptor updates only on change (startup + TLAS rebuild)
 // - Deferred swapchain recreate (flag at frame start — no mid-frame)
-// - Present result checked to set recreate flag
+// - Living world breathing moved to GPU compute shader (living_world.spv)
+// - Compute dispatched every pew before trace — GPU owns sun/wind/temp/humidity
+// - Materials binding 3 active (STORAGE_BUFFER)
 // - Explicit PRESENT_SRC_KHR barrier before end/submit
 // - Acquire semaphores cycled with ring size
 // - HDR optimal tiling only
-// - Empire stable — pink photons eternal
+// - Empire stable — pink photons eternal, GPU breathes alone
+// - DEAD DT: no deltaTime anywhere — absolute totalTime only
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -68,48 +71,6 @@ struct CameraSceneData {
 };
 
 // =============================================================================
-// Living World — Breathing Empire
-// =============================================================================
-struct LivingWorld {
-    float timeOfDay = 12.0f;
-    float cycleSpeed = 0.05f;
-    float temperature = 20.0f;
-    float humidity = 0.6f;
-    float windSpeed = 5.0f;
-    glm::vec3 windDirection = glm::normalize(glm::vec3(1.0f, 0.0f, 0.3f));
-    double totalTime = 0.0;
-
-    void update(double dt) noexcept {
-        totalTime += dt;
-        timeOfDay += static_cast<float>(dt) * cycleSpeed;
-        if (timeOfDay >= 24.0f) timeOfDay -= 24.0f;
-
-        float dayFactor = std::sin((timeOfDay / 24.0f) * glm::pi<float>() * 2.0f);
-        temperature = 15.0f + dayFactor * 15.0f;
-        humidity = 0.5f + (1.0f - std::abs(dayFactor)) * 0.5f;
-
-        windSpeed = 5.0f + std::sin(totalTime * 0.1) * 4.0f + std::sin(totalTime * 0.03) * 2.0f;
-        float windAngle = static_cast<float>(totalTime * 0.01);
-        windDirection = glm::normalize(glm::vec3(std::cos(windAngle), 0.0f, std::sin(windAngle)));
-    }
-
-    [[nodiscard]] float sunHeight() const noexcept {
-        return std::sin((timeOfDay / 24.0f - 0.25f) * glm::two_pi<float>());
-    }
-
-    [[nodiscard]] glm::vec3 sunDirection() const noexcept {
-        float t = timeOfDay / 24.0f;
-        float azimuth = t * glm::two_pi<float>();
-        float elevation = std::asin(sunHeight());
-        return glm::normalize(glm::vec3(std::cos(elevation) * std::sin(azimuth),
-                                        sunHeight(),
-                                        std::cos(elevation) * std::cos(azimuth)));
-    }
-};
-
-static LivingWorld g_world;
-
-// =============================================================================
 // VulkanRenderer — Pure light ray tracing engine
 // =============================================================================
 RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
@@ -137,7 +98,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
       hdrOutputMemory_(VK_NULL_HANDLE),
       cmdRing_(),
       currentRingIndex_(0),
-      pipelineManager_(stone_device(), StoneKey::stone_physical()),
+      pipelineManager_(),
       needsDescriptorUpdate_(true),
       needsSwapchainRecreate_(false)
 {
@@ -270,6 +231,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     pipelineManager_.createPipelineLayout();
     pipelineManager_.allocateDescriptorSets();
     pipelineManager_.createRayTracingPipeline();
+    pipelineManager_.createComputePipeline();  // living world breathing
 
     // One-time SBT — pipeline manager handles submit/wait
     VkCommandBuffer oneTimeCmd = getOneTimeCommandBuffer();
@@ -492,7 +454,6 @@ void RTX::VulkanRenderer::pew() noexcept {
     double dt = std::chrono::duration<double>(now - last_time_).count();
     last_time_ = now;
     totalTime_ += dt;
-    g_world.update(dt);
 
     // Deferred swapchain recreate from previous frame (safe — no recording yet)
     if (needsSwapchainRecreate_) {
@@ -543,6 +504,22 @@ void RTX::VulkanRenderer::pew() noexcept {
         LOG_FATAL_CAT("RENDERER", "vkBeginCommandBuffer failed in ring");
         return;
     }
+
+    // ==============================================
+    // COMPUTE LIVES HERE — early dispatch, GPU breathes first
+    // ==============================================
+    pipelineManager_.dispatchLivingWorld(cmd, static_cast<float>(totalTime_));
+
+    // Barrier: make sure compute writes are visible to ray-tracing
+    VkMemoryBarrier mb{};
+    mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         0, 1, &mb, 0, nullptr, 0, nullptr);
 
     // Update descriptors only if needed
     if (needsDescriptorUpdate_) {
@@ -628,5 +605,5 @@ void RTX::VulkanRenderer::pew() noexcept {
 }
 
 // =============================================================================
-// VulkanRenderer v30.52 — January 23, 2026
+// VulkanRenderer v30.60 — January 23, 2026
 // =============================================================================
