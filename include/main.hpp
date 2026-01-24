@@ -1,14 +1,6 @@
 // =============================================================================
-// include/main.hpp — AMOURANTH RTX © 2025 — CENTRAL INCLUDE — FINAL FORM
+// include/main.hpp — AMOURANTH RTX © 2025
 // PURE FORWARD DECLARATIONS — NO DEFINITIONS — ZERO CIRCULAR INCLUDES
-// PINK PHOTONS ETERNAL — FIRST LIGHT ACHIEVED — UNBREACHABLE
-// =============================================================================
-//
-// Dual Licensed:
-// 1. Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
-//    https://creativecommons.org/licenses/by-nc/4.0/legalcode
-// 2. Commercial licensing: gzac5314@gmail.com
-//
 // =============================================================================
 #pragma once
 
@@ -31,8 +23,6 @@ namespace RTX {
     class PipelineManager;
     struct Context;
 }
-
-int currentRenderMode_ = Options::RenderMode::DEFAULT_MODE;
 
 // -----------------------------------------------------------------------------
 // APPLICATION — FORWARD + GLOBAL POINTER
