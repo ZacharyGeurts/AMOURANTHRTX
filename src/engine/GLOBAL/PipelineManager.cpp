@@ -236,7 +236,7 @@ void PipelineManager::createComputePipeline()
 {
     LOG_INFO_CAT("PIPELINE", "Creating compute pipeline for living world");
 
-    VkShaderModule compModule = loadShader("compute/living_world.spv");
+    VkShaderModule compModule = loadShader("assets/shaders/compute/living_world.spv");
     if (compModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Failed to load living_world.spv — compute disabled");
         return;
@@ -374,7 +374,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 {
     LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
-    const std::string fullPath = std::format("build/bin/Linux/assets/shaders/{}", relativePath);
+    const std::string fullPath = std::format("build/bin/Linux/{}", relativePath);
 
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
