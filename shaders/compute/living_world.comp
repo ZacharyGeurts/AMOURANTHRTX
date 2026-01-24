@@ -16,7 +16,7 @@ layout(set = 0, binding = 7, scalar) buffer LivingWorldBuffer {
 
 // Push: just dt + totalTime from CPU (8 bytes)
 layout(push_constant) uniform Push {
-    float deltaTime;
+    // float deltaTime; RKO
     float totalTime;
 } pc;
 
