@@ -416,6 +416,5 @@ void SwapchainManager::cleanupImageViews() noexcept {
 // SwapchainManager v30.60 — JANUARY 24, 2026
 // - Automagical direct write: tries STORAGE_BIT first, falls back if unsupported
 // - Global directWriteEnabled flag for renderer to bind correct storage image
-// - Logs path chosen
 // - Zero-copy bleed when driver allows it
 // =============================================================================
