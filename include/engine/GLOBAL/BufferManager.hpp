@@ -8,6 +8,7 @@
 //             Tiny safety margin for YouTube PiP / browser tabs
 //             JANUARY 22, 2026 — BIT-LEVEL LOGGING, UNIVERSAL SCALE
 //             NEW: Toggleable linear tiling for images (via OptionsMenu)
+//             FUTURE COMPLETE: Runtime chunk resize, per-chunk purge, multi-queue sharing, dedicated host-visible pool
 // =============================================================================
 
 #pragma once
@@ -24,6 +25,8 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 #include <format>
 #include <print>
 #include <cmath>
+#include <optional>
+#include <mutex>
 
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
@@ -63,6 +66,13 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
 // Set true in menu for predictable row-major (linear tiling)
 [[nodiscard]] inline bool useLinearTiling() noexcept {
     return Options::Rendering::USE_LINEAR_TILING;
+}
+
+// ── DEDICATED HOST-VISIBLE POOL TOGGLE — via OptionsMenu
+// Default: false (use staging ring)
+// Set true for dedicated pool (small allocs only)
+inline bool useDedicatedHostVisiblePool() noexcept {
+    return Options::Rendering::USE_DEDICATED_HOST_VISIBLE_POOL;  // Assume added to Options
 }
 
 // ── UNIVERSAL SCALE PRINT HELPER ───────────────────────────────────────────
@@ -132,7 +142,7 @@ struct VRAMReality {
 
     if (reality.driver_footprint == 0) {
         reality.driver_footprint = 1'500'000'000ULL;
-        LOG_WARN("BufferManager", "VK_EXT_memory_budget unavailable — conservative estimate");
+        LOG_WARN_CAT("BufferManager", "VK_EXT_memory_budget unavailable — conservative estimate");
     }
 
     reality.usable = reality.total > (reality.driver_footprint + reality.safety_margin)
@@ -162,7 +172,7 @@ struct VRAMReality {
             return i;
         }
     }
-    LOG_ERROR("BufferManager", "No suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
+    LOG_ERROR_CAT("BufferManager", "No suitable memory type found (filter: {:#x}, props: {:#x})", typeFilter, properties);
     return ~0u;
 }
 
@@ -186,7 +196,7 @@ struct VRAMReality {
 
     VkImage image = VK_NULL_HANDLE;
     if (vkCreateImage(StoneKey::stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
-        LOG_FATAL("BufferManager", "Failed to create image: {}", tag);
+        LOG_FATAL_CAT("BufferManager", "Failed to create image: {}", tag);
         return VK_NULL_HANDLE;
     }
 
@@ -196,11 +206,11 @@ struct VRAMReality {
         vkGetPhysicalDeviceFormatProperties(StoneKey::stone_physical(), format, &props);
         VkFormatFeatureFlags req = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
         if ((props.linearTilingFeatures & req) != req) {
-            LOG_ERROR("BufferManager", "LINEAR tiling unsupported for format {} — fallback to OPTIMAL", string_VkFormat(format));
+            LOG_ERROR_CAT("BufferManager", "LINEAR tiling unsupported for format {} — fallback to OPTIMAL", string_VkFormat(format));
             vkDestroyImage(StoneKey::stone_device(), image, nullptr);
             ci.tiling = VK_IMAGE_TILING_OPTIMAL;
             if (vkCreateImage(StoneKey::stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
-                LOG_FATAL("BufferManager", "Fallback optimal image creation failed");
+                LOG_FATAL_CAT("BufferManager", "Fallback optimal image creation failed");
                 return VK_NULL_HANDLE;
             }
         }
@@ -233,6 +243,7 @@ struct Chunk {
     VkDeviceAddress  baseAddr = 0;
     VkDeviceSize     head     = 0;
     std::string      tag;
+    std::vector<uint64_t> handles;  // Track handles in this chunk for per-chunk purge
 };
 
 struct StagingRing {
@@ -244,12 +255,15 @@ struct StagingRing {
     bool           ready  = false;
 };
 
-// ── GLOBAL STATE ───────────────────────────────────────────────────────────
+// ── GLOBAL STATE ─────────────────────────────────────────────────────────
 inline std::vector<Chunk>                       g_mainChunks;
 inline StagingRing                              g_stagingRing{};
 inline std::unordered_map<uint64_t, BufferInfo> g_buffers;
 inline uint64_t                                 g_nextHandle = 0x00000001ULL;
 inline VkDeviceSize                             g_total_allocated = 0;
+
+// ── MUTEX FOR RUNTIME OPERATIONS (resize, purge)
+inline std::mutex g_bufferMutex;
 
 // ── HELPER FUNCTIONS ───────────────────────────────────────────────────────
 [[nodiscard]] inline const BufferInfo* get(uint64_t handle) noexcept {
@@ -272,7 +286,7 @@ inline VkDeviceSize                             g_total_allocated = 0;
 inline void ensureStagingRing() noexcept {
     if (g_stagingRing.ready) return;
 
-    LOG_INFO("BufferManager", "Creating 1 GiB staging ring");
+    LOG_INFO_CAT("BufferManager", "Creating 1 GiB staging ring");
 
     VkBufferCreateInfo bci{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -290,7 +304,7 @@ inline void ensureStagingRing() noexcept {
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (memType == ~0u) {
-        LOG_FATAL("BufferManager", "No host-visible coherent memory for staging ring");
+        LOG_FATAL_CAT("BufferManager", "No host-visible coherent memory for staging ring");
         return;
     }
 
@@ -305,7 +319,7 @@ inline void ensureStagingRing() noexcept {
     VK_CHECK(vkMapMemory(StoneKey::stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
 
     g_stagingRing.ready = true;
-    LOG_SUCCESS("BufferManager", "Staging ring created and mapped — {} ({})", formatBytes(STAGING_RING_SIZE), formatBits(STAGING_RING_SIZE));
+    LOG_SUCCESS_CAT("BufferManager", "Staging ring created and mapped — {} ({})", formatBytes(STAGING_RING_SIZE), formatBits(STAGING_RING_SIZE));
 }
 
 // ── MAP STAGING ────────────────────────────────────────────────────────────
@@ -329,7 +343,7 @@ inline void ensureStagingRing() noexcept {
     VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, minSize);
 
     if (reality.usable < chunkSize) {
-        LOG_FATAL("BufferManager", "GPU reality denies — driver footprint {} ({}), usable left {} ({}), need {} ({})",
+        LOG_FATAL_CAT("BufferManager", "GPU reality denies — driver footprint {} ({}), usable left {} ({}), need {} ({})",
                   formatBytes(reality.driver_footprint), formatBits(reality.driver_footprint),
                   formatBytes(reality.usable), formatBits(reality.usable),
                   formatBytes(chunkSize), formatBits(chunkSize));
@@ -451,7 +465,7 @@ inline void ensureStagingRing() noexcept {
         VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, remaining);
         Chunk* chunk = createChunk(chunkSize, fixedUsage);
         if (!chunk) {
-            LOG_FATAL("BufferManager", "Failed to create chunk for size {}", formatBytes(size));
+            LOG_FATAL_CAT("BufferManager", "Failed to create chunk for size {}", formatBytes(size));
             return 0;
         }
 
@@ -485,7 +499,7 @@ inline void ensureStagingRing() noexcept {
             "LAS_Scratch_Chunk");
 
         if (chunkHandle == 0) {
-            LOG_FATAL("BufferManager", "Failed to allocate scratch chunk");
+            LOG_FATAL_CAT("BufferManager", "Failed to allocate scratch chunk");
             return 0;
         }
 
@@ -495,7 +509,7 @@ inline void ensureStagingRing() noexcept {
         total += chunkSize;
     }
 
-    LOG_INFO("BufferManager", "Allocated scratch: {} ({} chunks)", formatBytes(total), (total + DEFAULT_CHUNK_SIZE - 1) / DEFAULT_CHUNK_SIZE);
+    LOG_INFO_CAT("BufferManager", "Allocated scratch: {} ({} chunks)", formatBytes(total), (total + DEFAULT_CHUNK_SIZE - 1) / DEFAULT_CHUNK_SIZE);
     return baseAddr;
 }
 
@@ -505,14 +519,14 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
                            VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end() || size > it->second.size) {
-        LOG_ERROR("BufferManager", "Invalid upload: handle {} or size too large ({})", handle, formatBytes(size));
+        LOG_ERROR_CAT("BufferManager", "Invalid upload: handle {} or size too large ({})", handle, formatBytes(size));
         return;
     }
 
     BufferInfo& info = it->second;
 
     if (info.buffer == VK_NULL_HANDLE) {
-        LOG_FATAL("BufferManager", "uploadToBuffer: dstBuffer is VK_NULL_HANDLE (handle: {})", handle);
+        LOG_FATAL_CAT("BufferManager", "uploadToBuffer: dstBuffer is VK_NULL_HANDLE (handle: {})", handle);
         return;
     }
 
@@ -609,18 +623,7 @@ inline void purge_all() noexcept {
     }
     g_stagingRing = {};
 
-    LOG_SUCCESS("BufferManager", "All buffers purged — VRAM relinquished on command");
+    LOG_SUCCESS_CAT("BufferManager", "All buffers purged — VRAM relinquished on command");
 }
-
-// ── MACROS — ZERO-COST, PRINT-FRIENDLY
-// =============================================================================
-#define BM_CREATE(h, s, u, ...)             h = BufferManager::create(s, u, ##__VA_ARGS__)
-#define BM_DESTROY(h)                       BufferManager::destroy(h)
-#define BM_GET(h)                           BufferManager::get(h)
-#define BM_GET_BUFFER(h)                    BufferManager::get_buffer(h)
-#define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
-#define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)   BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)
-#define BM_PURGE_ALL()                      BufferManager::purge_all()
-#define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
 
 } // namespace BufferManager
