@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.5
-// SWAPCHAIN MANAGER HEADER — PURE LIGHT | HDR | NO TEARING | SELF-HEALING
-// JANUARY 23, 2026 — ADDED isReady() & ensureReady() — PINK PHOTONS FLOW READY
+// AMOURANTH RTX Engine © 2026 — APOCALYPSE FINAL v30.5
+// SWAPCHAIN MANAGER HEADER — HDR | SELF-HEALING
+// JANUARY 23, 2026 — ADDED isReady() & ensureReady()
 // =============================================================================
 
 #pragma once
@@ -123,5 +123,4 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 // - Added isReady() & ensureReady() — self-healing readiness checks
 // - transitionImageLayout remains static
 // - Global convenience macros for easy access
-// Empire ready — pink photons flow ready
 // =============================================================================

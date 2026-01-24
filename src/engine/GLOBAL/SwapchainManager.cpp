@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.5
-// SWAPCHAIN MANAGER — ENSURED READY | HDR | NO TEARING | SELF-HEALING
-// JANUARY 23, 2026 — PINK PHOTONS FLOW TO SCREEN — EMPIRE READY
+// AMOURANTH RTX Engine © 2026 — APOCALYPSE FINAL v30.5
+// SWAPCHAIN MANAGER — HDR | SELF-HEALING
+// JANUARY 23, 2026
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -202,7 +202,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     ci.imageSharingMode= VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform    = caps.currentTransform;
     ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    ci.presentMode     = VK_PRESENT_MODE_FIFO_KHR;  // no tearing
+    ci.presentMode     = VK_PRESENT_MODE_FIFO_KHR;
     ci.clipped         = VK_TRUE;
     ci.oldSwapchain    = swapchain_.valid() ? swapchain_.get() : VK_NULL_HANDLE;
 
@@ -320,3 +320,7 @@ void SwapchainManager::cleanupImageViews() noexcept {
 }
 
 } // namespace RTX
+
+// =============================================================================
+// SwapchainManager.cpp v30.5 — JANUARY 23, 2026
+// =============================================================================
