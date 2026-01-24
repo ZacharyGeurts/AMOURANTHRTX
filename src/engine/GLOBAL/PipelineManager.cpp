@@ -374,7 +374,7 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 {
     LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
-    const std::string fullPath = std::format("build/bin/Linux/{}", relativePath);
+    const std::string fullPath = std::format("build/bin/Linux/assets/shaders/{}", relativePath);
 
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
