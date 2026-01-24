@@ -1,5 +1,5 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 22, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 24, 2026
 // OPTIONS MENU — MINIMAL, FACTUAL, DEVELOPER-FIRST
 // EARTH ONLY — ONE SUN, ONE MOON | ATMOSPHERIC SHADERS | LINEAR TILING DEFAULT OFF
 // CAMERA PRESERVED | AUDIO EXPANDED (CHANNELS, HZ, BUFFER) | PINK PHOTONS ETERNAL
@@ -22,6 +22,9 @@ namespace Rendering {
     inline uint32_t MAX_RAY_RECURSION        = 12;        // Bounce limit — higher = more noise but realism
     inline bool    USE_LINEAR_TILING         = false;     // Default OFF — optimal tiling for gains
                                                           // Turn on for row-major memory / CPU readback
+    inline bool    DIRECT_SWAPCHAIN_WRITE    = false;     // Direct ray write to swapchain images (GENERAL layout)
+                                                          // Zero-copy bleed — requires STORAGE_BIT on swapchain
+                                                          // Driver support varies (NVIDIA usually ok, AMD/Intel spotty)
 }
 
 // ── WINDOW & DISPLAY (SDL3 handles DPI/HDR — we just set sane defaults)
@@ -108,7 +111,8 @@ namespace Debug {
 } // namespace Options
 
 // =============================================================================
-// FINAL CONFIG — JANUARY 22, 2026
+// FINAL CONFIG — JANUARY 24, 2026
+// - Added Rendering::DIRECT_SWAPCHAIN_WRITE toggle — zero-copy bleed when driver allows
 // - Earth only: one sun, one moon — stars via real atmospheric shaders
 // - Linear tiling DEFAULT OFF — max shader perf gains first
 // - Audio expanded: channels, sample rate, buffer size, haptics

@@ -147,11 +147,36 @@ void PipelineManager::createPipelineLayout()
     }
     emptyDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(emptyLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
+    const VkDescriptorSetLayout layouts[4] = {
+        rtDescriptorSetLayout_.get(),
+        emptyDescriptorSetLayout_.get(),
+        texDescriptorSetLayout_.get(),
+        emptyDescriptorSetLayout_.get()
+    };
+
+    VkPushConstantRange push{};
+    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                      VK_SHADER_STAGE_MISS_BIT_KHR |
+                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+                      VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                      VK_SHADER_STAGE_COMPUTE_BIT;
+    push.offset     = 0;
+    push.size       = sizeof(float);  // totalTime only
+
+    VkPipelineLayoutCreateInfo plInfo{};
+    plInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    plInfo.setLayoutCount         = 4;
+    plInfo.pSetLayouts            = layouts;
+    plInfo.pushConstantRangeCount = 1;
+    plInfo.pPushConstantRanges    = &push;
+
     VkPipelineLayout pl = VK_NULL_HANDLE;
+    res = vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create pipeline layout: {}", string_VkResult(res));
         return;
     }
+
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
 
     // Seal the eternal pipeline layout
