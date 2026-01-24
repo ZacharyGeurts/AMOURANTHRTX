@@ -29,7 +29,7 @@
 
 #include <vector>
 #include <chrono>
-#include <cstdlib>  // for std::_Exit
+#include <cstdlib>
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;

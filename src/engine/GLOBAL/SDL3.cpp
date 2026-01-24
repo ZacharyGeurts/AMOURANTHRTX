@@ -1,10 +1,9 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 22, 2026
+// AMOURANTH RTX Engine © 2026 — JANUARY 22, 2026
 // SDL3 INTEGRATION — CLEAN, MODERN, C++23 FORWARD-ONLY EDITION
 // FULLY COMPLIES WITH OPTIONS MENU | AUDIO SETTINGS RESPECTED | RESIZE FIXED
 // SINGLETON LAS ACCESS — LAS::instance() — NO RTX::las()
 // SDL3 SUCCESS CHECKS: == 0 (SDL3 returns 0 on success)
-// PINK PHOTONS SCREAMING — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
@@ -39,7 +38,7 @@ using StoneKey::stone_window;
 // =============================================================================
 // Global state
 // =============================================================================
-SDLWindowPtr                    g_sdl_window;
+SDLWindowPtr      g_sdl_window;
 std::atomic<int>  g_resizeWidth{0};
 std::atomic<int>  g_resizeHeight{0};
 std::atomic<bool> g_resizeRequested{false};
@@ -370,7 +369,7 @@ void SDL3Input::handleKeyboard(const SDL_KeyboardEvent& k, SDL_Window* window, S
     switch (k.key) {
         case SDLK_F: {
             Uint32 flags = SDL_GetWindowFlags(window);
-            bool isFS = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+            bool isFS = (flags & SDL_WINDOW_FULLSCREEN) == 0;
             SDL_SetWindowFullscreen(window, isFS ? 0 : SDL_WINDOW_FULLSCREEN);
             LOG_INFO_CAT("Input", "{}Fullscreen → {}{}", OCEAN_TEAL, !isFS ? "ENABLED" : "DISABLED", RESET);
         } break;
@@ -738,7 +737,4 @@ void AudioManager::playSound(std::string_view name)
 // - SDL3 success checks: == 0 (SDL3 returns 0 on success)
 // - C++23 compliant | loadSurface uses explicit deleter &SDL_DestroySurface
 // - textureToSurface returns SurfacePtr(nullptr, &SDL_DestroySurface)
-// - SDL_GetTextureProperties used correctly
-// - No duplicate g_audio
-// Empire compiles clean — pink photons restored
 // =============================================================================
