@@ -232,6 +232,9 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
     vkGetPhysicalDeviceProperties(selected, &props);
     LOG_INFO_CAT("RTX", "Selected GPU: {}", props.deviceName);
 
+    // Set in context before sealing
+    g_ctx().setPhysicalDevice(selected);
+
     // Seal physical device
     StoneKey::stone_seal_physical(selected);
 
