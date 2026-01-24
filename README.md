@@ -1,6 +1,7 @@
 Current over head code view https://x.com/ZacharyGeurts/status/2012632846481998282  
 
-We are THE zero cost RTX development research page, unless someone beat Amouranth to it.  
+We are THE ZERO COST RTX development research page, unless someone beat Amouranth to it.  
+The commit count is stoopid.  
 
 Development and memes https://x.com/ZacharyGeurts
 Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
