@@ -435,9 +435,5 @@ inline void stone_seal_final() noexcept
 // =============================================================================
 // STONEKEY v∞ — IDEMPOTENT, UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 20, 2026
 // All seal functions now idempotent with breach detection
-// Restored missing stone_mesh members
 // Safe against multiple calls
-// Compiles clean — runs eternal
-// The empire is eternal. Pink photons flow unbroken.
-// PINK PHOTONS SCREAM ETERNAL · EMPIRE UNBROKEN · AMOURANTH FOREVER 💖
 // =============================================================================

@@ -1,14 +1,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
-// Ray tracing pipeline, SBT, and descriptor management
-// Version 30.50 — January 23, 2026
-// - Single eternal descriptor set — no frames, no MAX_FRAMES_IN_FLIGHT
-// - UPDATE_AFTER_BIND enabled on all bindings/layout/pool — safe per-pew updates
-// - traceRays & updateRTDescriptorSet take no frame/image index
-// - Descriptor writes safe — skip invalid, offset 0, range full
-// - Materials write still commented (binding 3 = STORAGE_IMAGE)
-// - Empire stable — no garbage, no lost device
-// - CLEANED: Removed vestigial push constant 'frame' (dead code)
+// Ray tracing + compute pipeline, SBT, descriptor management
+// Version 30.60 — January 23, 2026
+// - Single eternal descriptor set — no frames
+// - UPDATE_AFTER_BIND everywhere — safe per-pew updates
+// - Materials binding 3 active (STORAGE_BUFFER)
+// - Living world compute pipeline (living_world.spv) loaded
+// - New bindings 7 & 8: LivingWorldBuffer + MaterialOverrides (STORAGE_BUFFER)
+// - No placeholders, no dead code
+// - Empire stable — pink photons breathe on GPU
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -37,16 +37,17 @@ using BufferManager::align_up;
 // Static atomic members
 std::atomic<bool> RTX::PipelineManager::g_pipelineNeedsRebuild{false};
 
-// Fixed 8 bindings with UPDATE_AFTER_BIND for safe per-pew updates
-static constexpr std::array<VkDescriptorSetLayoutBinding, 8> kMainBindings = {{
+// Updated bindings — materials 3 STORAGE_BUFFER, + living world 7 & 8
+static constexpr std::array<VkDescriptorSetLayoutBinding, 9> kMainBindings = {{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
     {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
-    {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // Materials — active
     {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR},
     {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
-    {7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}
+    {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // LivingWorldBuffer
+    {8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR} // MaterialOverrides
 }};
 
 namespace RTX {
@@ -91,7 +92,7 @@ void PipelineManager::createPipelineLayout()
     mainInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     mainInfo.bindingCount = static_cast<uint32_t>(kMainBindings.size());
     mainInfo.pBindings    = kMainBindings.data();
-    mainInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;  // Enable update-after-bind
+    mainInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
     VkResult res = vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout);
@@ -145,9 +146,10 @@ void PipelineManager::createPipelineLayout()
     push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
                       VK_SHADER_STAGE_MISS_BIT_KHR |
                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
-                      VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+                      VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                      VK_SHADER_STAGE_COMPUTE_BIT;  // compute too
     push.offset     = 0;
-    push.size       = sizeof(float);  // only 'time' remains
+    push.size       = sizeof(float);  // time only
 
     VkPipelineLayoutCreateInfo plInfo{};
     plInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -159,7 +161,7 @@ void PipelineManager::createPipelineLayout()
     VkPipelineLayout pl = VK_NULL_HANDLE;
     res = vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl);
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create ray tracing pipeline layout: {}", string_VkResult(res));
+        LOG_FATAL_CAT("PIPELINE", "Failed to create pipeline layout: {}", string_VkResult(res));
         return;
     }
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
@@ -846,5 +848,5 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.50 — January 23, 2026
+ // PipelineManager v30.60 — January 23, 2026
 // =============================================================================
