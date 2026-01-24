@@ -1,8 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 22, 2026
-// main.cpp — FINAL FIXED & COMPILING | ONE CONSOLE, ONE CLOCK, ONE EMPIRE
-// SPLASH ALWAYS SKIPPABLE | NO SPLASH OPTIONS LEFT | SDL3 CHECKS COMMENTED
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine © 2026 — JANUARY 22, 2026
+// main.cpp
+// SPLASH ALWAYS SKIPPABLE | SDL3 CHECKS COMMENTED
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
@@ -55,7 +54,7 @@ static void showSacrificialSplash() {
         SDL_SetWindowPosition(splashWin, bounds.x + (bounds.w - W)/2, bounds.y + (bounds.h - H)/2);
     }
 
-    const char* iconPaths[] = {"assets/textures/icon.png", "assets/textures/ammo.png", nullptr};
+    const char* iconPaths[] = {"assets/textures/ammo.ico", "assets/textures/ammo.png", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
         if (SDL_Surface* surf = IMG_Load(iconPaths[i])) {
             SDL_SetWindowIcon(splashWin, surf);
@@ -195,7 +194,7 @@ int main(int, char**) {
 
     StoneKey::stone_seal_window(window);
 
-    const char* iconPaths[] = {"assets/textures/icon.png", "assets/textures/ammo.png", nullptr};
+    const char* iconPaths[] = {"assets/textures/icon.ico", "assets/textures/ammo.png", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
         if (SDL_Surface* surf = IMG_Load(iconPaths[i])) {
             SDL_SetWindowIcon(window, surf);
@@ -244,7 +243,7 @@ int main(int, char**) {
 
     RTX::SwapchainManager::create(window, pixelW, pixelH);
 
-    // Renderer — owns LAS, pipeline, SBT, pew pew
+    // Renderer — owns LAS, pipeline, SBT
     renderer = std::make_unique<RTX::VulkanRenderer>(pixelW, pixelH, window);
 
     SDL_Renderer* sdlRen = SDL_CreateRenderer(window, nullptr);
@@ -290,12 +289,10 @@ int main(int, char**) {
 
 // =============================================================================
 // Main v30.6 — January 22, 2026
-// - Removed overclock param (gone from Options)
 // - Uses Options::Window::DEFAULT_WIDTH / DEFAULT_HEIGHT / ALLOW_RESIZE
 // - Uses Options::Debug::ENABLE_VALIDATION_LAYERS for instance
 // - Splash always skippable (any input)
 // - Uses SDL_GetWindowSizeInPixels for accurate high-DPI render size
-// - Cleaned duplicate SDL_Init calls
 // - Throttled lifetime log kept (1/sec)
 // - Pool before renderer — infrastructure first
 // =============================================================================
