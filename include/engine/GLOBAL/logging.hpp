@@ -1675,3 +1675,4 @@ inline void install_apocalypse_handler() noexcept
 #define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",    Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_JIMROSS(...)     LOG_SUCCESS_CAT("J.R.",       std::format("{}\n[Mr. Ross] {}{}",          Logging::Color::OKLAHOMA_RED_BOLD, std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_VING_RHAMES(...) LOG_SUCCESS_CAT("VINGRHAMES", std::format("{}\n[Ving Rhames] {}{}",       Logging::Color::BRONZE_BROWN,      std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_COFFEE(...)      LOG_SUCCESS_CAT("VINGRHAMES", std::format("{}\n[Ving Rhames] {}{}",       Logging::Color::BRONZE_BROWN,      std::format(__VA_ARGS__),     Logging::Color::RESET))
