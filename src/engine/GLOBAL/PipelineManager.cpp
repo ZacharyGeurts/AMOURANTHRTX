@@ -1,12 +1,10 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing pipeline, SBT, and descriptor management
-// Version 30.20 — January 23, 2026
+// Version 30.50 — January 23, 2026
 // - Single eternal descriptor set — no frames, no MAX_FRAMES_IN_FLIGHT
-// - UPDATE_AFTER_BIND enabled on pool/layout — safe updates every frame
+// - UPDATE_AFTER_BIND enabled on all bindings/layout/pool — safe per-pew updates
 // - traceRays & updateRTDescriptorSet take no frame/image index
-// - allocateDescriptorSets creates 1 of each type
-// - getDescriptorSet() returns the single set
 // - Descriptor writes safe — skip invalid, offset 0, range full
 // - Materials write still commented (binding 3 = STORAGE_IMAGE)
 // - Empire stable — no garbage, no lost device
@@ -39,7 +37,7 @@ using BufferManager::align_up;
 // Static atomic members
 std::atomic<bool> RTX::PipelineManager::g_pipelineNeedsRebuild{false};
 
-// Fixed 8 safe bindings for set 0 — Vulkan guaranteed (no flags here — handled on layout/pool)
+// Fixed 8 bindings with UPDATE_AFTER_BIND for safe per-pew updates
 static constexpr std::array<VkDescriptorSetLayoutBinding, 8> kMainBindings = {{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
@@ -81,7 +79,7 @@ PipelineManager::PipelineManager(VkDevice device, VkPhysicalDevice phys)
 }
 
 // =============================================================================
-// Pipeline Layout — UPDATE_AFTER_BIND on pool
+// Pipeline Layout — UPDATE_AFTER_BIND on layout
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -93,10 +91,12 @@ void PipelineManager::createPipelineLayout()
     mainInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     mainInfo.bindingCount = static_cast<uint32_t>(kMainBindings.size());
     mainInfo.pBindings    = kMainBindings.data();
+    mainInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;  // Enable update-after-bind
 
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout) != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create main descriptor set layout");
+    VkResult res = vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create main descriptor set layout: {}", string_VkResult(res));
         return;
     }
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(mainLayout, stone_device(), vkDestroyDescriptorSetLayout);
@@ -115,8 +115,9 @@ void PipelineManager::createPipelineLayout()
     texInfo.pBindings    = &texBinding;
 
     VkDescriptorSetLayout texLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(stone_device(), &texInfo, nullptr, &texLayout) != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create texture descriptor set layout");
+    res = vkCreateDescriptorSetLayout(stone_device(), &texInfo, nullptr, &texLayout);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create texture descriptor set layout: {}", string_VkResult(res));
         return;
     }
     texDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(texLayout, stone_device(), vkDestroyDescriptorSetLayout);
@@ -126,8 +127,9 @@ void PipelineManager::createPipelineLayout()
     emptyInfo.bindingCount = 0;
 
     VkDescriptorSetLayout emptyLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(stone_device(), &emptyInfo, nullptr, &emptyLayout) != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create empty descriptor set layout");
+    res = vkCreateDescriptorSetLayout(stone_device(), &emptyInfo, nullptr, &emptyLayout);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create empty descriptor set layout: {}", string_VkResult(res));
         return;
     }
     emptyDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(emptyLayout, stone_device(), vkDestroyDescriptorSetLayout);
@@ -155,8 +157,9 @@ void PipelineManager::createPipelineLayout()
     plInfo.pPushConstantRanges    = &push;
 
     VkPipelineLayout pl = VK_NULL_HANDLE;
-    if (vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl) != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create ray tracing pipeline layout");
+    res = vkCreatePipelineLayout(stone_device(), &plInfo, nullptr, &pl);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create ray tracing pipeline layout: {}", string_VkResult(res));
         return;
     }
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
@@ -449,7 +452,6 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     VkBuffer sbtBuffer = VK_NULL_HANDLE;
     VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
 
-    // Create SBT buffer
     VkBufferCreateInfo bci{};
     bci.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bci.size        = sbtSize;
@@ -504,7 +506,6 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     addrInfo.buffer = sbtBuffer;
     VkDeviceAddress sbtAddress = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
-    // Get shader group handles
     std::vector<uint8_t> handles(totalGroups * handleSize);
     res = g_ext.vkGetRayTracingShaderGroupHandlesKHR(
         stone_device(), rtPipeline_.get(), 0, totalGroups,
@@ -517,7 +518,6 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         return;
     }
 
-    // Command buffer handling
     VkCommandBuffer uploadCmd = providedCmd;
     bool ownCmd = (providedCmd == VK_NULL_HANDLE);
     VkCommandPool cmdPool = pool ? pool : stone_transient_pool();
@@ -551,7 +551,6 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         }
     }
 
-    // Upload handles to staging and copy to SBT buffer
     void* staging = BufferManager::mapStaging(handles.size());
     if (!staging) {
         LOG_FATAL_CAT("PIPELINE", "Staging ring overflow during SBT upload");
@@ -585,7 +584,6 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         0, nullptr
     );
 
-    // End command buffer
     res = vkEndCommandBuffer(uploadCmd);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkEndCommandBuffer failed during SBT upload: {}", string_VkResult(res));
@@ -595,7 +593,6 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         return;
     }
 
-    // Submit
     VkSubmitInfo submit{};
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount   = 1;
@@ -610,15 +607,12 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         return;
     }
 
-    // Wait for completion (startup only — one-time cost)
     vkQueueWaitIdle(queue ? queue : stone_graphics_queue());
 
-    // Clean up command buffer if we own it
     if (ownCmd) {
         vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
     }
 
-    // Finalize SBT regions
     VkDeviceAddress raygenAddr = align_up(sbtAddress, baseAlign);
     VkDeviceAddress missAddr   = align_up(raygenAddr + raygenSize, baseAlign);
     VkDeviceAddress hitAddr    = align_up(missAddr + missSize, baseAlign);
@@ -747,14 +741,13 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
     std::array<VkWriteDescriptorSet, 17> writes{};
     uint32_t writeCount = 0;
 
-    // Lifetime-safe infos (declared at function scope)
     VkWriteDescriptorSetAccelerationStructureKHR accelInfo{};
     VkDescriptorImageInfo outputImageInfo{};
     VkDescriptorImageInfo blueNoiseImageInfo{};
     VkDescriptorImageInfo nexusImageInfo{};
     VkDescriptorBufferInfo uboInfo{};
 
-    // Binding 0: Acceleration structure (always written)
+    // Binding 0: Acceleration structure
     accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
     accelInfo.accelerationStructureCount = 1;
     accelInfo.pAccelerationStructures = &updateInfo.tlas;
@@ -784,10 +777,10 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
         ++writeCount;
     }
 
-    // Binding 2: UBO (camera) — guard + explicit offset/range
+    // Binding 2: UBO (camera)
     if (updateInfo.ubo != VK_NULL_HANDLE && updateInfo.uboSize > 0) {
         uboInfo.buffer = updateInfo.ubo;
-        uboInfo.offset = 0;  // MUST be multiple of minUniformBufferOffsetAlignment (64)
+        uboInfo.offset = 0;
         uboInfo.range  = updateInfo.uboSize;
 
         writes[writeCount] = {};
@@ -801,9 +794,6 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
     } else {
         LOG_WARN_CAT("PIPELINE", "Skipping UBO write — invalid buffer or size");
     }
-
-    // Binding 3: Materials — SKIPPED due to type mismatch (STORAGE_IMAGE in layout)
-    // If you need storage buffer here, change kMainBindings[3] to STORAGE_BUFFER
 
     // Binding 5: Blue noise (optional)
     if (updateInfo.blueNoiseSampler != VK_NULL_HANDLE && updateInfo.blueNoiseView != VK_NULL_HANDLE) {
@@ -823,7 +813,7 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
 
     // Binding 6: Nexus/prev frame (optional)
     if (!updateInfo.nexusScoreViews.empty()) {
-        nexusImageInfo.imageView   = updateInfo.nexusScoreViews[0];  // single set — use first
+        nexusImageInfo.imageView   = updateInfo.nexusScoreViews[0];
         nexusImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         nexusImageInfo.sampler     = VK_NULL_HANDLE;
 
@@ -856,5 +846,5 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.20 — January 23, 2026
+// PipelineManager v30.50 — January 23, 2026
 // =============================================================================

@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — APOCALYPSE FINAL v30.5
-// SWAPCHAIN MANAGER HEADER — HDR | SELF-HEALING
-// JANUARY 23, 2026 — ADDED isReady() & ensureReady()
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.51
+// SWAPCHAIN MANAGER — HDR | SELF-HEALING | NO MID-FRAME RECREATE
+// JANUARY 23, 2026
 // =============================================================================
 
 #pragma once
@@ -36,16 +36,17 @@ public:
     static void recreate(uint32_t width, uint32_t height, std::string_view reason = "") noexcept;
     static void cleanup() noexcept;
 
-    // Ensure swapchain readiness
+    // Ensure swapchain readiness (safe to call frequently — only recreates if needed)
     static void ensureReady(uint32_t width, uint32_t height) noexcept;
     [[nodiscard]] static bool isReady() noexcept;
 
-    // Acquire & present
+    // Acquire & present — return error codes for caller to handle recreate
     [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex,
                                                    VkSemaphore semaphore = VK_NULL_HANDLE,
                                                    VkFence fence = VK_NULL_HANDLE) noexcept;
 
-    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
+    [[nodiscard]] static VkResult presentImage(VkQueue queue, uint32_t imageIndex,
+                                               VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
 
     // Transition helper — static
     static void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
@@ -119,8 +120,9 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// CLEAN HEADER — v30.5 — JANUARY 23, 2026
-// - Added isReady() & ensureReady() — self-healing readiness checks
+// CLEAN HEADER — v30.51 — JANUARY 23, 2026
+// - No mid-frame recreation — acquire/present return error codes for caller
+// - Deferred recreate at start of next frame (renderer handles flag)
 // - transitionImageLayout remains static
 // - Global convenience macros for easy access
 // =============================================================================

@@ -1,14 +1,16 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.49 — January 23, 2026
+// Version 30.52 — January 23, 2026
 // - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT
 // - Fixed ring of pre-allocated transient command buffers — reset before reuse
 // - No per-pew allocation/free — self-disposing via vkResetCommandBuffer
-// - No fences/timeline waits in hot path — submit & present, compositor paces
+// - Descriptor updates only on change (startup + TLAS rebuild)
+// - Deferred swapchain recreate (flag at frame start — no mid-frame)
+// - Present result checked to set recreate flag
+// - Explicit PRESENT_SRC_KHR barrier before end/submit
+// - Acquire semaphores cycled with ring size
 // - HDR optimal tiling only
-// - Swapchain ensured ready before acquire — self-healing on out-of-date
-// - Living world: time-of-day cycle, temperature, humidity, wind
 // - Empire stable — pink photons eternal
 // =============================================================================
 
@@ -120,7 +122,10 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
       last_time_(std::chrono::steady_clock::now()),
       timelineSemaphore_(VK_NULL_HANDLE),
       currentTimelineValue_(0),
-      acquireSemaphores_{},
+      acquireTimelineSemaphore_(VK_NULL_HANDLE),
+      nextAcquireValue_(1),
+      graphicsTimelineSemaphore_(VK_NULL_HANDLE),
+      nextGraphicsValue_(1),
       currentFrame_(0),
       defaultMaterialsHandle_(0),
       cameraUBO_(0),
@@ -132,7 +137,9 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
       hdrOutputMemory_(VK_NULL_HANDLE),
       cmdRing_(),
       currentRingIndex_(0),
-      pipelineManager_(stone_device(), StoneKey::stone_physical())
+      pipelineManager_(stone_device(), StoneKey::stone_physical()),
+      needsDescriptorUpdate_(true),
+      needsSwapchainRecreate_(false)
 {
     LOG_INFO_CAT("RENDERER", "Initializing pure light engine — {}x{}", width, height);
 
@@ -156,7 +163,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
         LOG_SUCCESS_CAT("RENDERER", "Allocated fixed ring of {} command buffers", CMD_RING_SIZE);
     }
 
-    // Timeline semaphore — created but unused in this version (can remove later)
+    // Timeline semaphores for non-blocking tracking
     VkSemaphoreTypeCreateInfo timelineType{};
     timelineType.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
     timelineType.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
@@ -167,8 +174,10 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     semInfo.pNext = &timelineType;
 
     vkCreateSemaphore(stone_device(), &semInfo, nullptr, &timelineSemaphore_);
+    vkCreateSemaphore(stone_device(), &semInfo, nullptr, &acquireTimelineSemaphore_);
+    vkCreateSemaphore(stone_device(), &semInfo, nullptr, &graphicsTimelineSemaphore_);
 
-    // Per-frame acquire semaphores
+    // Per-frame acquire semaphores — binary, cycled
     VkSemaphoreCreateInfo acquireSemCI{};
     acquireSemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     for (auto& s : acquireSemaphores_) {
@@ -279,45 +288,24 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     destroyed_ = true;
     vkDeviceWaitIdle(stone_device());
 
-    if (hdrOutputView_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(stone_device(), hdrOutputView_, nullptr);
-        hdrOutputView_ = VK_NULL_HANDLE;
-    }
+    if (hdrOutputView_ != VK_NULL_HANDLE) vkDestroyImageView(stone_device(), hdrOutputView_, nullptr);
+    if (hdrOutputImage_ != VK_NULL_HANDLE) vkDestroyImage(stone_device(), hdrOutputImage_, nullptr);
+    if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory(stone_device(), hdrOutputMemory_, nullptr);
 
-    if (hdrOutputImage_ != VK_NULL_HANDLE) {
-        vkDestroyImage(stone_device(), hdrOutputImage_, nullptr);
-        hdrOutputImage_ = VK_NULL_HANDLE;
-    }
-
-    if (hdrOutputMemory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(stone_device(), hdrOutputMemory_, nullptr);
-        hdrOutputMemory_ = VK_NULL_HANDLE;
-    }
-
-    if (cameraUBOBuffer_ != VK_NULL_HANDLE) {
-        vkDestroyBuffer(stone_device(), cameraUBOBuffer_, nullptr);
-        cameraUBOBuffer_ = VK_NULL_HANDLE;
-    }
-
-    if (cameraUBOMemory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(stone_device(), cameraUBOMemory_, nullptr);
-        cameraUBOMemory_ = VK_NULL_HANDLE;
-    }
+    if (cameraUBOBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(stone_device(), cameraUBOBuffer_, nullptr);
+    if (cameraUBOMemory_ != VK_NULL_HANDLE) vkFreeMemory(stone_device(), cameraUBOMemory_, nullptr);
 
     BufferManager::destroy(defaultMaterialsHandle_);
 
-    if (timelineSemaphore_ != VK_NULL_HANDLE)
-        vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
+    if (timelineSemaphore_ != VK_NULL_HANDLE) vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
+    if (acquireTimelineSemaphore_ != VK_NULL_HANDLE) vkDestroySemaphore(stone_device(), acquireTimelineSemaphore_, nullptr);
+    if (graphicsTimelineSemaphore_ != VK_NULL_HANDLE) vkDestroySemaphore(stone_device(), graphicsTimelineSemaphore_, nullptr);
 
     for (auto& s : acquireSemaphores_) {
-        if (s != VK_NULL_HANDLE) {
-            vkDestroySemaphore(stone_device(), s, nullptr);
-            s = VK_NULL_HANDLE;
-        }
+        if (s != VK_NULL_HANDLE) vkDestroySemaphore(stone_device(), s, nullptr);
     }
 
-    if (transientCmdPool_ != VK_NULL_HANDLE)
-        vkDestroyCommandPool(stone_device(), transientCmdPool_, nullptr);
+    if (transientCmdPool_ != VK_NULL_HANDLE) vkDestroyCommandPool(stone_device(), transientCmdPool_, nullptr);
 
     LOG_INFO_CAT("RENDERER", "Renderer destroyed");
 }
@@ -330,8 +318,7 @@ void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
 
     VkCommandPoolCreateInfo info{};
     info.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    info.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT 
-                          | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    info.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     info.queueFamilyIndex = StoneKey::stone_graphics_family();
 
     vkCreateCommandPool(stone_device(), &info, nullptr, &transientCmdPool_);
@@ -350,7 +337,7 @@ VkCommandBuffer RTX::VulkanRenderer::getOneTimeCommandBuffer() noexcept {
     allocInfo.commandBufferCount = 1;
 
     if (vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to allocate transient command buffer");
+        LOG_FATAL_CAT("RENDERER", "Failed to allocate one-time command buffer");
         return VK_NULL_HANDLE;
     }
 
@@ -359,7 +346,7 @@ VkCommandBuffer RTX::VulkanRenderer::getOneTimeCommandBuffer() noexcept {
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
     if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "Failed to begin transient command buffer");
+        LOG_FATAL_CAT("RENDERER", "Failed to begin one-time command buffer");
         vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &cmd);
         return VK_NULL_HANDLE;
     }
@@ -507,6 +494,17 @@ void RTX::VulkanRenderer::pew() noexcept {
     totalTime_ += dt;
     g_world.update(dt);
 
+    // Deferred swapchain recreate from previous frame (safe — no recording yet)
+    if (needsSwapchainRecreate_) {
+        SwapchainManager::recreate(width_, height_, "previous frame invalid");
+        needsSwapchainRecreate_ = false;
+        SwapchainManager::ensureReady(width_, height_);
+        if (!SwapchainManager::isReady()) {
+            LOG_WARN_CAT("RENDERER", "Swapchain recreate failed — skipping pew");
+            return;
+        }
+    }
+
     // Ensure swapchain is ready before acquire
     SwapchainManager::ensureReady(width_, height_);
     if (!SwapchainManager::isReady()) {
@@ -515,12 +513,15 @@ void RTX::VulkanRenderer::pew() noexcept {
     }
 
     uint32_t imageIndex = UINT32_MAX;
-    VkSemaphore currentAcquire = acquireSemaphores_[currentFrame_ % acquireSemaphores_.size()];
+    VkSemaphore currentAcquire = acquireSemaphores_[currentFrame_ % ACQUIRE_SEM_COUNT];
     currentFrame_++;
 
-    VkResult res = SwapchainManager::acquireNextImage(&imageIndex, currentAcquire);
-    if (res != VK_SUCCESS) {
-        LOG_WARN_CAT("RENDERER", "Acquire failed: {}", string_VkResult(res));
+    VkResult acquireRes = SwapchainManager::acquireNextImage(&imageIndex, currentAcquire);
+    if (acquireRes != VK_SUCCESS) {
+        LOG_WARN_CAT("RENDERER", "Acquire failed: {}", string_VkResult(acquireRes));
+        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR || acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
+            needsSwapchainRecreate_ = true;
+        }
         return;
     }
 
@@ -528,7 +529,6 @@ void RTX::VulkanRenderer::pew() noexcept {
     VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
     currentRingIndex_ = (currentRingIndex_ + 1) % CMD_RING_SIZE;
 
-    // Reset before recording (disposes previous contents)
     VkResult resetRes = vkResetCommandBuffer(cmd, 0);
     if (resetRes != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkResetCommandBuffer failed in ring");
@@ -544,15 +544,19 @@ void RTX::VulkanRenderer::pew() noexcept {
         return;
     }
 
-    RTDescriptorUpdate update{};
-    update.tlas         = LAS::instance().getTLAS();
-    update.rtOutputView = hdrOutputView_;
-    update.ubo          = cameraUBOBuffer_;
-    update.uboSize      = sizeof(CameraSceneData);
-    update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
-    update.materialsSize   = BufferManager::get(defaultMaterialsHandle_)->size;
+    // Update descriptors only if needed
+    if (needsDescriptorUpdate_) {
+        RTDescriptorUpdate update{};
+        update.tlas         = LAS::instance().getTLAS();
+        update.rtOutputView = hdrOutputView_;
+        update.ubo          = cameraUBOBuffer_;
+        update.uboSize      = sizeof(CameraSceneData);
+        update.materialsBuffer = BufferManager::get_buffer(defaultMaterialsHandle_);
+        update.materialsSize   = BufferManager::get(defaultMaterialsHandle_)->size;
 
-    pipelineManager_.updateRTDescriptorSet(update);
+        pipelineManager_.updateRTDescriptorSet(update);
+        needsDescriptorUpdate_ = false;
+    }
 
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     pipelineManager_.traceRays(cmd, width_, height_);
@@ -573,7 +577,20 @@ void RTX::VulkanRenderer::pew() noexcept {
                    swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
-    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    // Explicit present transition — critical
+    VkImageMemoryBarrier presentBarrier{};
+    presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    presentBarrier.image = swapImg;
+    presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         LOG_FATAL_CAT("RENDERER", "vkEndCommandBuffer failed");
@@ -581,24 +598,35 @@ void RTX::VulkanRenderer::pew() noexcept {
     }
 
     // Submit — no fence
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount   = 1;
-    submitInfo.pCommandBuffers      = &cmd;
-    submitInfo.waitSemaphoreCount   = 1;
-    submitInfo.pWaitSemaphores      = &currentAcquire;
-
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
-    submitInfo.pWaitDstStageMask    = waitStages;
+
+    VkTimelineSemaphoreSubmitInfo timelineSI{};
+    timelineSI.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    timelineSI.signalSemaphoreValueCount = 1;
+    timelineSI.pSignalSemaphoreValues = &nextGraphicsValue_;
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = &timelineSI;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = &currentAcquire;
+    submitInfo.pWaitDstStageMask = waitStages;
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = &graphicsTimelineSemaphore_;
 
     vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
 
-    // Present
-    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, VK_NULL_HANDLE);
+    nextGraphicsValue_++;  // advance for next submission
 
-    // No free — buffer will be reset when reused
+    // Present and check result
+    VkResult presentRes = SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, VK_NULL_HANDLE);
+    if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR || presentRes == VK_ERROR_SURFACE_LOST_KHR) {
+        needsSwapchainRecreate_ = true;
+    }
 }
 
 // =============================================================================
-// VulkanRenderer v30.49 — January 23, 2026
+// VulkanRenderer v30.52 — January 23, 2026
 // =============================================================================

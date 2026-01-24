@@ -1,5 +1,5 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.49
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.52
 // VULKAN RENDERER HEADER — PURE LIGHT | NO FRAMES | PEW FOREVER
 // SINGLE ETERNAL DESCRIPTOR SET • FIXED CMD BUFFER RING (RESET + RE-RECORD)
 // OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR • UBO • HDR STORAGE • WORLD
@@ -51,7 +51,16 @@ private:
     VkSemaphore                     timelineSemaphore_  = VK_NULL_HANDLE;
     uint64_t                        currentTimelineValue_ = 0;
 
-    std::array<VkSemaphore, 3>      acquireSemaphores_{};
+    // Timeline semaphores for fenceless tracking
+    VkSemaphore                     acquireTimelineSemaphore_ = VK_NULL_HANDLE;
+    uint64_t                        nextAcquireValue_ = 1;
+
+    VkSemaphore                     graphicsTimelineSemaphore_ = VK_NULL_HANDLE;
+    uint64_t                        nextGraphicsValue_ = 1;
+
+    // Acquire semaphores — cycle to prevent pending reuse
+    static constexpr size_t         ACQUIRE_SEM_COUNT   = 64;
+    std::array<VkSemaphore, ACQUIRE_SEM_COUNT> acquireSemaphores_{};
     uint32_t                        currentFrame_       = 0;
 
     uint64_t                        defaultMaterialsHandle_ = 0;
@@ -70,7 +79,13 @@ private:
     std::vector<VkCommandBuffer>    cmdRing_;
     size_t                          currentRingIndex_   = 0;
 
-	PipelineManager                 pipelineManager_;
+    PipelineManager                 pipelineManager_;
+
+    // Lazy descriptor update flag
+    bool                            needsDescriptorUpdate_ = true;
+
+    // Deferred swapchain recreate flag (set after present if invalid)
+    bool                            needsSwapchainRecreate_ = false;
 
 private:
     void createTransientCommandPool() noexcept;
@@ -88,7 +103,8 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// VULKAN RENDERER HEADER — v30.49 — JANUARY 23, 2026
+// VULKAN RENDERER HEADER — v30.52 — JANUARY 23, 2026
 // Frame-free • single descriptor set • fixed cmd buffer ring (reset + re-record)
-// Pure light — pew forever — empire stable — pink photons eternal
+// Fenceless with timeline polling • deferred swapchain recreate • pure light
+// Empire stable — pink photons eternal
 // =============================================================================
