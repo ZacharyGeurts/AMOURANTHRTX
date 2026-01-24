@@ -56,7 +56,7 @@ I can eat and I play Minecraft and I have RTX. I want developers to have another
 These are my current iterations and subject to change daily.  
 I trutly have cycled through dozens of zero cost implementations. I mean it, ask Grok about the code.  
 If you use the security method, I cannot prove you used mine to gain 100% horsepower at no computational cost.  
-99.99997 I would at least have something to say maybe... in court.  
+99.99997 I would at least have something to say maybe... in court ... if it wasn't invisible.  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
 
 She steps on RTX and dominates it now.  
@@ -73,7 +73,6 @@ You can copy and paste the whole codebase into Grok long before you run out of q
 Also, welcome to 2026.  
 Really you will want to be using linux.sh and cmake. The shader compiling and incremental build system that is included removes a large part of the headache.  
 Side effect? Native development for my platform too :P X11 Mint  
-Everywhere I look is another afternoon to improve accessibility, you have an afternoon?  
 
 This is your headstart into RTX development. If you do not want to take it, you do not have to.  
 
