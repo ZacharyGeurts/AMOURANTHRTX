@@ -70,7 +70,7 @@ I have anxiety about people compiling on with other compilers. I wish I could he
 You can copy and paste the whole codebase into Grok long before you run out of questions.  
 Also, welcome to 2026.  
 Really you will want to be using linux.sh and cmake. The shader compiling and incremental build system that is included removes a large part of the headache.  
-Side effect? Native development for my platform too :P  
+Side effect? Native development for my platform too :P X11 Mint  
 Everywhere I look is another afternoon to improve accessibility, you have an afternoon?  
 
 This is your headstart into RTX development. If you do not want to take it, you do not have to.  
