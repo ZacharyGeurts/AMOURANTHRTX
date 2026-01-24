@@ -794,8 +794,6 @@ PipelineManager::~PipelineManager()
     sbtBuffer_.reset();
     sbtMemory_.reset();
 
-    BufferManager::purge_all();
-
     LOG_INFO_CAT("PIPELINE", "PipelineManager destroyed");
 }
 
