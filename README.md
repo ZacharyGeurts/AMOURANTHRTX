@@ -15,6 +15,8 @@ You are encouraged to work with code here. Welcome to github.
 The best advice I have for you is to make some money with it first.  
 Cut all operational costs securely and to zero.  
 If you already know you want zero cost and what else you want to do, grab a copy and make it do it with Grok is my advice.  
+Come back and keep up with me. I will not be adding a cycle without ensuring the robot eats an EMP for it.  
+We did not start at zero cost and I will not return to that other costly space.  
 
 SDL3 from github.  
 Vulkan SDK is at LunarG.  
