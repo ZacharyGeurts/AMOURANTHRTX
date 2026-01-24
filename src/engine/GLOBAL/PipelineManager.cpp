@@ -416,7 +416,7 @@ void PipelineManager::createRayTracingPipeline()
 // =============================================================================
 // SBT Creation — Startup only
 // =============================================================================
-void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd)
+void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer providedCmd)
 {
     if (s_eternalSbtForged) return;
 
@@ -446,6 +446,10 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     LOG_INFO_CAT("PIPELINE", "Forging SBT — handleSize={} baseAlign={} recordStride={} totalSize={}",
                  handleSize, baseAlign, recordStride, sbtSize);
 
+    VkBuffer sbtBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
+
+    // Create SBT buffer
     VkBufferCreateInfo bci{};
     bci.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bci.size        = sbtSize;
@@ -454,7 +458,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
                       VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkBuffer sbtBuffer = VK_NULL_HANDLE;
     VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &sbtBuffer);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkCreateBuffer for SBT failed: {}", string_VkResult(res));
@@ -466,8 +469,8 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
 
     uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == ~0u) {
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
         LOG_FATAL_CAT("PIPELINE", "No device-local memory type for SBT buffer");
+        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
         return;
     }
 
@@ -481,19 +484,18 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     allocInfo.allocationSize  = memReq.size;
     allocInfo.memoryTypeIndex = memType;
 
-    VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
     res = vkAllocateMemory(stone_device(), &allocInfo, nullptr, &sbtMemory);
     if (res != VK_SUCCESS) {
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
         LOG_FATAL_CAT("PIPELINE", "vkAllocateMemory for SBT failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
         return;
     }
 
     res = vkBindBufferMemory(stone_device(), sbtBuffer, sbtMemory, 0);
     if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "vkBindBufferMemory for SBT failed: {}", string_VkResult(res));
         vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
         vkFreeMemory(stone_device(), sbtMemory, nullptr);
-        LOG_FATAL_CAT("PIPELINE", "vkBindBufferMemory for SBT failed: {}", string_VkResult(res));
         return;
     }
 
@@ -502,6 +504,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     addrInfo.buffer = sbtBuffer;
     VkDeviceAddress sbtAddress = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
+    // Get shader group handles
     std::vector<uint8_t> handles(totalGroups * handleSize);
     res = g_ext.vkGetRayTracingShaderGroupHandlesKHR(
         stone_device(), rtPipeline_.get(), 0, totalGroups,
@@ -514,18 +517,21 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         return;
     }
 
-    VkCommandBuffer uploadCmd = VK_NULL_HANDLE;
-    bool ownCmd = (cmd == VK_NULL_HANDLE);
+    // Command buffer handling
+    VkCommandBuffer uploadCmd = providedCmd;
+    bool ownCmd = (providedCmd == VK_NULL_HANDLE);
+    VkCommandPool cmdPool = pool ? pool : stone_transient_pool();
 
     if (ownCmd) {
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool        = pool ? pool : stone_transient_pool();
+        allocInfo.commandPool        = cmdPool;
         allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
 
-        if (vkAllocateCommandBuffers(stone_device(), &allocInfo, &uploadCmd) != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "Failed to allocate upload command buffer");
+        res = vkAllocateCommandBuffers(stone_device(), &allocInfo, &uploadCmd);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to allocate upload command buffer: {}", string_VkResult(res));
             vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
             vkFreeMemory(stone_device(), sbtMemory, nullptr);
             return;
@@ -535,21 +541,21 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        if (vkBeginCommandBuffer(uploadCmd, &beginInfo) != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "Failed to begin upload command buffer");
-            vkFreeCommandBuffers(stone_device(), pool ? pool : stone_transient_pool(), 1, &uploadCmd);
+        res = vkBeginCommandBuffer(uploadCmd, &beginInfo);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to begin upload command buffer: {}", string_VkResult(res));
+            vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
             vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
             vkFreeMemory(stone_device(), sbtMemory, nullptr);
             return;
         }
-    } else {
-        uploadCmd = cmd;
     }
 
+    // Upload handles to staging and copy to SBT buffer
     void* staging = BufferManager::mapStaging(handles.size());
     if (!staging) {
         LOG_FATAL_CAT("PIPELINE", "Staging ring overflow during SBT upload");
-        if (ownCmd) vkFreeCommandBuffers(stone_device(), pool ? pool : stone_transient_pool(), 1, &uploadCmd);
+        if (ownCmd) vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
         vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
         vkFreeMemory(stone_device(), sbtMemory, nullptr);
         return;
@@ -561,6 +567,7 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
     copy.srcOffset = BufferManager::g_stagingRing.head - handles.size();
     copy.dstOffset = 0;
     copy.size      = handles.size();
+
     vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtBuffer, 1, &copy);
 
     VkMemoryBarrier memBarrier{};
@@ -578,30 +585,40 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         0, nullptr
     );
 
-    if (ownCmd) {
-        if (vkEndCommandBuffer(uploadCmd) != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "vkEndCommandBuffer failed during SBT upload");
-            vkFreeCommandBuffers(stone_device(), pool ? pool : stone_transient_pool(), 1, &uploadCmd);
-            vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-            vkFreeMemory(stone_device(), sbtMemory, nullptr);
-            return;
-        }
-
-        VkSubmitInfo submit{};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &uploadCmd;
-        if (vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "vkQueueSubmit failed during SBT upload");
-            vkFreeCommandBuffers(stone_device(), pool ? pool : stone_transient_pool(), 1, &uploadCmd);
-            vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-            vkFreeMemory(stone_device(), sbtMemory, nullptr);
-            return;
-        }
-
-        vkQueueWaitIdle(queue ? queue : stone_graphics_queue());  // Wait for upload to finish
+    // End command buffer
+    res = vkEndCommandBuffer(uploadCmd);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "vkEndCommandBuffer failed during SBT upload: {}", string_VkResult(res));
+        if (ownCmd) vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
+        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
+        vkFreeMemory(stone_device(), sbtMemory, nullptr);
+        return;
     }
 
+    // Submit
+    VkSubmitInfo submit{};
+    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount   = 1;
+    submit.pCommandBuffers      = &uploadCmd;
+
+    res = vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "vkQueueSubmit failed during SBT upload: {}", string_VkResult(res));
+        if (ownCmd) vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
+        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
+        vkFreeMemory(stone_device(), sbtMemory, nullptr);
+        return;
+    }
+
+    // Wait for completion (startup only — one-time cost)
+    vkQueueWaitIdle(queue ? queue : stone_graphics_queue());
+
+    // Clean up command buffer if we own it
+    if (ownCmd) {
+        vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
+    }
+
+    // Finalize SBT regions
     VkDeviceAddress raygenAddr = align_up(sbtAddress, baseAlign);
     VkDeviceAddress missAddr   = align_up(raygenAddr + raygenSize, baseAlign);
     VkDeviceAddress hitAddr    = align_up(missAddr + missSize, baseAlign);
