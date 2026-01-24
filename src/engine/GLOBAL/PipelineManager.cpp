@@ -289,6 +289,8 @@ void PipelineManager::dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) 
 
     // Push totalTime (4 bytes) — compute uses it for animation
     vkCmdPushConstants(cmd, stone_pipeline_layout(),
+                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
                        VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(float), &totalTime);
 
@@ -767,7 +769,8 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
 
     vkCmdPushConstants(cmd, stone_pipeline_layout(),
                        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                       VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(float), &time);
 
     VkStridedDeviceAddressRegionKHR raygenRegion   = raygenSbtRegion_;
