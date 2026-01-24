@@ -85,14 +85,14 @@ We do security here. Please respect that.
 If it turns out Tom Brady is amazing at cryptography too, we will update StoneKey.  
 
 Digress. The swapchain picks always best for your platform.  
-"Seriously?" Yeah. It's like 300 lines, so if you do not like it, Grok can write you a whole new one.  
-It gives you HDR and we can sync to exact refresh, unless on x11 like me, but I will never match Wayland.  
-Maybe... Inital results with Plastic Beach were not great at preventing tearing.  
+"Seriously?" Yeah. It's literally 420 lines, and celebrates the Joe and Elon interview.  
+However, if you do not like it, Grok can write you a whole new one.  
+It gives you better than HDR where supported.  
 Grok and I ride Mint till I topple Mailbox and 2! frames in flight.  
 
 Wait... what? o.O  
 Grok.  
-He is your expert. That is where I'm getting my news on what is being updated because I tell him to write it.  
+He is your expert. That is where I'm getting my news on what is being updated anywhere in the world, then I tell him to write it.  
 Ask him about his code. (He preferred him).  
 He broke it? Ctrl-Z and try again. Learn THE code. It is short and read it a few times.  
 There really are not that many files if you want to check a few now on the wiki.  
@@ -104,6 +104,8 @@ To most people? Not much. Developers will either have their own zero cost implme
 If it is uncheckable, same thing to eyeballs.  
 It just means there is a new RTX foundational layer that anyone can take advantage of when implemented.  
 Smaller downloads? Maybe I'm not selling this right.  
+When a security researcher puts together zero cost security, it is invisible to fingerprinting tools.  
+Or he is researching money. Either way, enjoy the code.  
 
 We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
 I'm a nerd. I would love it if you did. You guys can have the issues page for your forum.  
