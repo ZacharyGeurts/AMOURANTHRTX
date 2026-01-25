@@ -1,11 +1,12 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.60
-// SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | AUTOMAGICAL DIRECT WRITE
-// JANUARY 24, 2026
-// - Automagical direct swapchain write detection
-// - Attempts STORAGE_BIT + direct path first
-// - Falls back to safe HDR + blit if unsupported
-// - Logs chosen path clearly
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.70
+// SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT (QUERY FIRST)
+// JANUARY 24, 2026 — "only violate a few laws" edition
+// - Queries support for STORAGE_BIT on swapchain images BEFORE creation
+// - Attempts direct write (STORAGE_BIT) only if viable
+// - No blind fallback recreation — caller must handle !directWriteEnabled
+// - Logs chosen path clearly + why it failed if unsupported
+// - Simplified transitions for direct storage path
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -84,13 +85,13 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
         minimized_ = true;
         LOG_ERROR_CAT("SWAPCHAIN", "Failed to ensure ready after recreation");
     } else {
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain ready — {} images | {}×{} | Direct write: {}",
-                        swapchainImages_.size(), w, h, directWriteEnabled ? "ENABLED" : "fallback (HDR + blit)");
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain ready — {} images | {}×{} | Direct storage write: {}",
+                        swapchainImages_.size(), w, h, directWriteEnabled ? "ENABLED (STORAGE_BIT)" : "DISABLED — use offscreen target");
     }
 }
 
 // =============================================================================
-// transitionImageLayout — extended for direct path support
+// transitionImageLayout — focused on direct storage path
 // =============================================================================
 void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                              VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
@@ -110,41 +111,41 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     VkAccessFlags srcAccess = 0;
     VkAccessFlags dstAccess = 0;
 
-    // Direct path transitions
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
-        srcAccess = 0;
-        dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-        srcAccess = VK_ACCESS_SHADER_WRITE_BIT;
-        dstAccess = VK_ACCESS_MEMORY_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-        dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
-        srcAccess = VK_ACCESS_MEMORY_READ_BIT;
-        dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-    }
-    // Fallback blit path transitions
-    else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        srcAccess = 0;
-        dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-        srcAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-        dstAccess = VK_ACCESS_MEMORY_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        srcAccess = VK_ACCESS_MEMORY_READ_BIT;
-        dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    if (directWriteEnabled) {
+        // Direct storage path
+        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+            srcAccess = 0;
+            dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
+            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+            srcAccess = VK_ACCESS_SHADER_WRITE_BIT;
+            dstAccess = VK_ACCESS_MEMORY_READ_BIT;
+            srcStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+            dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+            srcAccess = VK_ACCESS_MEMORY_READ_BIT;
+            dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
+            srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+            dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+        } else {
+            return;  // unsupported transition for direct path
+        }
     } else {
-        return;
+        // Basic blit/transfer path (for when direct fails, or future tonemap blit)
+        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+            srcAccess = 0;
+            dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+            srcAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+            dstAccess = VK_ACCESS_MEMORY_READ_BIT;
+            srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        } else {
+            return;
+        }
     }
 
     barrier.srcAccessMask = srcAccess;
@@ -154,7 +155,7 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
 }
 
 // =============================================================================
-// createOrRecreateSwapchain — automagical direct write detection
+// createOrRecreateSwapchain — query-first direct storage attempt
 // =============================================================================
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason) noexcept {
     ensureSwapchainExtension();
@@ -249,8 +250,38 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     uint32_t imgCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
 
-    // Automagical direct write attempt
-    directWriteEnabled = false;  // Start assuming fallback
+    // Decide usage: try direct storage only if supported
+    directWriteEnabled = false;
+
+    VkImageUsageFlags imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    bool storageSupportedBySurface = (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
+
+    if (storageSupportedBySurface) {
+        VkImageFormatProperties fmtProps{};
+        VkResult propsRes = vkGetPhysicalDeviceImageFormatProperties(
+            phys,
+            chosenFormat.format,
+            VK_IMAGE_TYPE_2D,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            0,
+            &fmtProps);
+
+        if (propsRes == VK_SUCCESS) {
+            directWriteEnabled = true;
+            imageUsage |= VK_IMAGE_USAGE_STORAGE_BIT;
+            LOG_SUCCESS_CAT("SWAPCHAIN", "Direct storage write SUPPORTED — attempting zero-copy path (STORAGE_BIT enabled)");
+        } else {
+            LOG_WARN_CAT("SWAPCHAIN", "STORAGE_BIT unsupported for format {} in optimal tiling ({}), falling back to standard path",
+                         string_VkFormat(chosenFormat.format), string_VkResult(propsRes));
+        }
+    } else {
+        LOG_WARN_CAT("SWAPCHAIN", "Surface does NOT support VK_IMAGE_USAGE_STORAGE_BIT — direct write impossible");
+    }
+
+    // Always add TRANSFER_DST for potential future blit/tonemap safety
+    imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
     VkSwapchainCreateInfoKHR ci{};
     ci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -266,26 +297,15 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     ci.presentMode      = chosenPM;
     ci.clipped          = VK_TRUE;
     ci.oldSwapchain     = swapchain_.valid() ? swapchain_.get() : VK_NULL_HANDLE;
-
-    // First attempt: direct write (add STORAGE_BIT)
-    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    ci.imageUsage       = imageUsage;
 
     VkSwapchainKHR newSwap = VK_NULL_HANDLE;
     VkResult res = vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
 
-    if (res == VK_SUCCESS) {
-        directWriteEnabled = true;
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Direct swapchain write ENABLED — zero-copy bleed achieved");
-    } else {
-        LOG_WARN_CAT("SWAPCHAIN", "Direct write failed ({}), falling back to HDR + blit path", string_VkResult(res));
-        // Fallback: remove STORAGE_BIT
-        ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        res = vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
-        if (res != VK_SUCCESS) {
-            minimized_ = true;
-            LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed even in fallback: {}", string_VkResult(res));
-            return;
-        }
+    if (res != VK_SUCCESS) {
+        minimized_ = true;
+        LOG_FATAL_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {} (even without forcing extra usage)", string_VkResult(res));
+        return;
     }
 
     swapchain_ = Handle<VkSwapchainKHR>(newSwap, dev, vkDestroySwapchainKHR);
@@ -321,8 +341,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}×{} | Direct write: {}",
-                    count, extent.width, extent.height, directWriteEnabled ? "YES" : "no (fallback)");
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}×{} | Direct storage write: {}",
+                    count, extent.width, extent.height, directWriteEnabled ? "YES (STORAGE_BIT)" : "NO — renderer must use offscreen HDR target");
 }
 
 // =============================================================================
@@ -413,8 +433,9 @@ void SwapchainManager::cleanupImageViews() noexcept {
 } // namespace RTX
 
 // =============================================================================
-// SwapchainManager v30.60 — JANUARY 24, 2026
-// - Automagical direct write: tries STORAGE_BIT first, falls back if unsupported
-// - Global directWriteEnabled flag for renderer to bind correct storage image
-// - Zero-copy bleed when driver allows it
+// SwapchainManager v30.70 — JANUARY 24, 2026
+// - Query-first STORAGE_BIT attempt for direct ray tracing writes
+// - No auto-fallback creation — respect driver reality
+// - Zero-copy when it works (rare), offscreen required otherwise
+// - Tonemap your raw ass later
 // =============================================================================
