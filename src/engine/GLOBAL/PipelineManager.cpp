@@ -8,7 +8,7 @@
 // - Descriptors filled via vkGetDescriptorEXT for driver-specific layout
 // - Binding via vkCmdBindDescriptorBuffersEXT + vkCmdSetDescriptorBufferOffsetsEXT
 // - Single eternal descriptor buffer for set 0 (main RT + compute)
- // - Materials binding 3 active (STORAGE_BUFFER)
+// - Materials binding 3 active (STORAGE_BUFFER)
 // - Living world compute pipeline (living_world.spv) loaded
 // - Bindings 0–8: core engine + living world + material overrides
 // - Binding 9 reserved for custom compute/dev extensions
@@ -21,7 +21,7 @@
 // - Materials bound to 3 in descriptor update
 // - Rewritten to use BufferManager macros (BM_CREATE, BM_GET_BUFFER, etc.)
 // - Fixed: All layouts use DESCRIPTOR_BUFFER_BIT_EXT only (no UPDATE_AFTER_BIND)
-// - Assume descriptorBuffer feature enabled in device creation — check at init
+// - Fixed: Descriptor buffer feature enabled in device creation
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -130,7 +130,7 @@ PipelineManager::PipelineManager()
 }
 
 // =============================================================================
-// Pipeline Layout — UPDATE_AFTER_BIND + DESCRIPTOR_BUFFER on layout
+// Pipeline Layout — DESCRIPTOR_BUFFER_BIT_EXT only on all layouts
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -232,8 +232,8 @@ void PipelineManager::createPipelineLayout()
 
 // =============================================================================
 // Cache descriptor buffer properties (once)
- // =============================================================================
-void PipelineManager::cacheDescriptorProperties()
+// =============================================================================
+void RTX::PipelineManager::cacheDescriptorProperties()
 {
     if (descPropsCached) return;
 
@@ -317,7 +317,7 @@ void PipelineManager::dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) 
     VkDescriptorBufferBindingInfoEXT bindInfo{};
     bindInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
     bindInfo.address = descriptorBufferAddress_;
-    bindInfo.usage = VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+    bindInfo.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
 
     g_ext.vkCmdBindDescriptorBuffersEXT(cmd, 1, &bindInfo);
 
@@ -603,7 +603,7 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     VkMemoryRequirements memReq{};
     vkGetBufferMemoryRequirements(stone_device(), sbtBuffer, &memReq);
 
-    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
     if (memType == ~0u) {
         LOG_FATAL_CAT("PIPELINE", "No device-local memory type for SBT buffer");
         vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
@@ -795,7 +795,7 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
     VkDescriptorBufferBindingInfoEXT bindInfo{};
     bindInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
     bindInfo.address = descriptorBufferAddress_;
-    bindInfo.usage = VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+    bindInfo.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
 
     g_ext.vkCmdBindDescriptorBuffersEXT(cmd, 1, &bindInfo);
 
@@ -826,7 +826,7 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
 }
 
 // =============================================================================
- // Destructor
+// Destructor
 // =============================================================================
 PipelineManager::~PipelineManager()
 {
@@ -1027,5 +1027,5 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
 } // namespace RTX
 
 // =============================================================================
- // PipelineManager v30.62 — January 25, 2026
+// PipelineManager v30.62 — January 25, 2026
 // =============================================================================
