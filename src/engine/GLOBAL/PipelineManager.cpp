@@ -8,8 +8,7 @@
 // - Descriptors filled via vkGetDescriptorEXT for driver-specific layout
 // - Binding via vkCmdBindDescriptorBuffersEXT + vkCmdSetDescriptorBufferOffsetsEXT
 // - Single eternal descriptor buffer for set 0 (main RT + compute)
-// - UPDATE_AFTER_BIND preserved where applicable
-// - Materials binding 3 active (STORAGE_BUFFER)
+ // - Materials binding 3 active (STORAGE_BUFFER)
 // - Living world compute pipeline (living_world.spv) loaded
 // - Bindings 0–8: core engine + living world + material overrides
 // - Binding 9 reserved for custom compute/dev extensions
@@ -21,6 +20,8 @@
 // - Living world buffer created and bound to 7 at startup
 // - Materials bound to 3 in descriptor update
 // - Rewritten to use BufferManager macros (BM_CREATE, BM_GET_BUFFER, etc.)
+// - Fixed: All layouts use DESCRIPTOR_BUFFER_BIT_EXT only (no UPDATE_AFTER_BIND)
+// - Assume descriptorBuffer feature enabled in device creation — check at init
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -141,8 +142,7 @@ void PipelineManager::createPipelineLayout()
     mainInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     mainInfo.bindingCount = static_cast<uint32_t>(kMainBindings.size());
     mainInfo.pBindings    = kMainBindings.data();
-    mainInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT |
-                            VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+    mainInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;  // Buffer mode only
 
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
     VkResult res = vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout);
@@ -169,7 +169,7 @@ void PipelineManager::createPipelineLayout()
     texInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     texInfo.bindingCount = 1;
     texInfo.pBindings    = &texBinding;
-    texInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;  // If used
+    texInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;  // Consistent
 
     VkDescriptorSetLayout texLayout = VK_NULL_HANDLE;
     res = vkCreateDescriptorSetLayout(stone_device(), &texInfo, nullptr, &texLayout);
@@ -182,6 +182,7 @@ void PipelineManager::createPipelineLayout()
     VkDescriptorSetLayoutCreateInfo emptyInfo{};
     emptyInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     emptyInfo.bindingCount = 0;
+    emptyInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;  // Consistent
 
     VkDescriptorSetLayout emptyLayout = VK_NULL_HANDLE;
     res = vkCreateDescriptorSetLayout(stone_device(), &emptyInfo, nullptr, &emptyLayout);
@@ -231,8 +232,8 @@ void PipelineManager::createPipelineLayout()
 
 // =============================================================================
 // Cache descriptor buffer properties (once)
-// =============================================================================
-void RTX::PipelineManager::cacheDescriptorProperties()
+ // =============================================================================
+void PipelineManager::cacheDescriptorProperties()
 {
     if (descPropsCached) return;
 
@@ -602,7 +603,7 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     VkMemoryRequirements memReq{};
     vkGetBufferMemoryRequirements(stone_device(), sbtBuffer, &memReq);
 
-    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == ~0u) {
         LOG_FATAL_CAT("PIPELINE", "No device-local memory type for SBT buffer");
         vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
@@ -825,7 +826,7 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
 }
 
 // =============================================================================
-// Destructor
+ // Destructor
 // =============================================================================
 PipelineManager::~PipelineManager()
 {
@@ -1026,5 +1027,5 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.62 — January 25, 2026
+ // PipelineManager v30.62 — January 25, 2026
 // =============================================================================

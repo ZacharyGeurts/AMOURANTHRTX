@@ -7,6 +7,8 @@
 // - All sealing centralized via StoneKey — idempotent + breach detection
 // - Instance, device, physical, surface, queues, families, pool sealed here
 // - Minimal, production-stable
+// - Added: VK_EXT_descriptor_buffer feature enabled explicitly
+// - Added: VkPhysicalDeviceAccelerationStructureFeaturesKHR::accelerationStructure = VK_TRUE
 // =============================================================================
 
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -198,6 +200,7 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
         });
     }
 
+    // Enable required features — including accelerationStructure
     VkPhysicalDeviceVulkan12Features vk12{};
     vk12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     vk12.timelineSemaphore = VK_TRUE;
@@ -206,17 +209,25 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{};
     accel.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accel.accelerationStructure = VK_TRUE;  // Explicitly enable accelerationStructure feature
     accel.pNext = &vk12;
-    accel.accelerationStructure = VK_TRUE;
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipe{};
     rtPipe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipe.pNext = &accel;
     rtPipe.rayTracingPipeline = VK_TRUE;
+    rtPipe.pNext = &accel;
+
+    // Enable descriptor buffer feature explicitly
+    VkPhysicalDeviceDescriptorBufferFeaturesEXT descBufFeatures{};
+    descBufFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
+    descBufFeatures.descriptorBuffer = VK_TRUE;
+    descBufFeatures.descriptorBufferCaptureReplay = VK_FALSE;
+    descBufFeatures.descriptorBufferImageLayoutIgnored = VK_FALSE;
+    descBufFeatures.pNext = &rtPipe;  // Chain at the beginning
 
     VkDeviceCreateInfo devInfo{};
     devInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    devInfo.pNext                   = &rtPipe;
+    devInfo.pNext                   = &descBufFeatures;  // Start chain with descriptor buffer
     devInfo.queueCreateInfoCount    = static_cast<uint32_t>(qInfos.size());
     devInfo.pQueueCreateInfos       = qInfos.data();
     devInfo.enabledExtensionCount   = static_cast<uint32_t>(requiredDeviceExtensions.size());
@@ -260,7 +271,7 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
     g_ctx().transferFamily = best.transfer.value_or(best.graphics.value());
     g_ctx().computeFamily  = best.graphics.value();
 
-    LOG_SUCCESS_CAT("RTX", "Logical device created — full RTX enabled");
+    LOG_SUCCESS_CAT("RTX", "Logical device created — full RTX + descriptor buffer + acceleration structure enabled");
 
     return dev;
 }
