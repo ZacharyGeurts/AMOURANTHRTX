@@ -356,13 +356,26 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 
 // =============================================================================
 // presentImage — always ensure image in PRESENT_SRC_KHR layout before present
-// Uses lazy ring of transient cmd buffers — safe reset after GPU completion
+// Uses lazy ring of transient cmd buffers — safe async reset after GPU completion
+// NO BLOCKING WAIT-IDLE — timeline ensures safety on ring wrap
+// =============================================================================
+// =============================================================================
+// presentImage — always ensure image in PRESENT_SRC_KHR layout before present
+// Uses lazy ring of transient cmd buffers — safe async reset after GPU completion
+// FULL LOG_AMOURANTH trace on every step — for debugging hangs/stutters
 // =============================================================================
 VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
-    if (minimized_ || !swapchain_.valid()) return VK_ERROR_INITIALIZATION_FAILED;
+    LOG_AMOURANTH("ENTER presentImage: imageIndex={}, waitSem={}, minimized={}, swapchain valid={}",
+                  imageIndex, (void*)waitSem, minimized_, swapchain_.valid());
+
+    if (minimized_ || !swapchain_.valid()) {
+        LOG_AMOURANTH("EARLY EXIT: minimized or invalid swapchain → VK_ERROR_INITIALIZATION_FAILED");
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
 
     VkSwapchainKHR currentSwap = stone_swapchain();
     VkImage currentImage = swapchainImages_[imageIndex];
+    LOG_AMOURANTH("Acquired swapchain={}, current image={} (index {})", (void*)currentSwap, (void*)currentImage, imageIndex);
 
     // Lazy init: transient pool + cmd ring + timeline semaphore
     static VkCommandPool s_transientPool = VK_NULL_HANDLE;
@@ -373,6 +386,8 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
     static constexpr uint32_t RING_SIZE = 4;
 
     if (s_transientPool == VK_NULL_HANDLE) {
+        LOG_AMOURANTH("Lazy init START: creating transient pool + ring + timeline");
+
         VkCommandPoolCreateInfo pci{};
         pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -380,9 +395,10 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
 
         VkResult res = vkCreateCommandPool(stone_device(), &pci, nullptr, &s_transientPool);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("SWAPCHAIN", "Failed to create transient pool: {}", string_VkResult(res));
+            LOG_AMOURANTH("Lazy init FAIL: vkCreateCommandPool → %s", string_VkResult(res));
             return VK_ERROR_INITIALIZATION_FAILED;
         }
+        LOG_AMOURANTH("Pool created: {}", (void*)s_transientPool);
 
         s_cmdRing.resize(RING_SIZE);
         VkCommandBufferAllocateInfo allocInfo{};
@@ -393,11 +409,12 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
 
         res = vkAllocateCommandBuffers(stone_device(), &allocInfo, s_cmdRing.data());
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("SWAPCHAIN", "Failed to allocate cmd ring: {}", string_VkResult(res));
+            LOG_AMOURANTH("Lazy init FAIL: vkAllocateCommandBuffers → %s", string_VkResult(res));
             vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
             s_transientPool = VK_NULL_HANDLE;
             return VK_ERROR_INITIALIZATION_FAILED;
         }
+        LOG_AMOURANTH("Allocated {} cmd buffers in ring", RING_SIZE);
 
         VkSemaphoreTypeCreateInfo typeInfo{};
         typeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
@@ -408,38 +425,61 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         semInfo.pNext = &typeInfo;
 
-        vkCreateSemaphore(stone_device(), &semInfo, nullptr, &s_timelineSem);
+        res = vkCreateSemaphore(stone_device(), &semInfo, nullptr, &s_timelineSem);
+        if (res != VK_SUCCESS) {
+            LOG_AMOURANTH("Lazy init FAIL: vkCreateSemaphore → %s", string_VkResult(res));
+            // Pool still usable, but timeline won't work — continue anyway
+        } else {
+            LOG_AMOURANTH("Timeline semaphore created: {}", (void*)s_timelineSem);
+        }
 
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Lazy-init transient ring: {} cmd buffers + timeline semaphore", RING_SIZE);
+        LOG_AMOURANTH("Lazy init COMPLETE: ring ready, timeline {}",
+                      s_timelineSem != VK_NULL_HANDLE ? "OK" : "FAILED (continuing without)");
     }
 
     VkCommandBuffer cmd = s_cmdRing[s_ringIndex];
+    LOG_AMOURANTH("Using cmd buffer {}/{}: {}", s_ringIndex, RING_SIZE - 1, (void*)cmd);
 
-    // Wait only for this slot's previous work (safe unpending)
+    // Wait only for this slot's previous work (safe unpending on ring wrap)
     uint64_t waitValue = s_nextTimelineValue - RING_SIZE;
-    if (waitValue > 0) {
+    if (waitValue > 0 && s_timelineSem != VK_NULL_HANDLE) {
+        LOG_AMOURANTH("Waiting for previous slot (value {})", waitValue);
+
         VkSemaphoreWaitInfo waitInfo{};
         waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
         waitInfo.semaphoreCount = 1;
         waitInfo.pSemaphores = &s_timelineSem;
         waitInfo.pValues = &waitValue;
-        vkWaitSemaphores(stone_device(), &waitInfo, UINT64_MAX);
+
+        VkResult waitRes = vkWaitSemaphores(stone_device(), &waitInfo, UINT64_MAX);
+        LOG_AMOURANTH("Wait result: %s", string_VkResult(waitRes));
+        if (waitRes != VK_SUCCESS) {
+            LOG_WARN_CAT("SWAPCHAIN", "Timeline wait failed: %s — proceeding (risky)", string_VkResult(waitRes));
+        }
+    } else {
+        LOG_AMOURANTH("No wait needed (first ring cycle or no timeline)");
     }
 
     // Reset & record transition
+    LOG_AMOURANTH("Resetting cmd buffer %p", (void*)cmd);
     vkResetCommandBuffer(cmd, 0);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    LOG_AMOURANTH("Begin cmd buffer");
+    VkResult beginRes = vkBeginCommandBuffer(cmd, &beginInfo);
+    if (beginRes != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "vkBeginCommandBuffer failed: %s", string_VkResult(beginRes));
+    } else {
+        LOG_AMOURANTH("Recording transition: %p → PRESENT_SRC_KHR", (void*)currentImage);
+        transitionImageLayout(cmd, currentImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        LOG_AMOURANTH("End cmd buffer");
+        vkEndCommandBuffer(cmd);
+    }
 
-    transitionImageLayout(cmd, currentImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-    vkEndCommandBuffer(cmd);
-
-    // Submit with timeline signal
+    // Submit with timeline signal — ASYNC, no wait-idle
     VkTimelineSemaphoreSubmitInfo tlSI{};
     tlSI.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
     tlSI.signalSemaphoreValueCount = 1;
@@ -453,26 +493,36 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
     submit.waitSemaphoreCount = waitSem ? 1 : 0;
     submit.pWaitSemaphores = waitSem ? &waitSem : nullptr;
 
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    LOG_AMOURANTH("Submitting transition (timeline signal %llu)", s_nextTimelineValue);
+    VkResult submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    if (submitRes != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "vkQueueSubmit failed: %s", string_VkResult(submitRes));
+    }
 
     s_nextTimelineValue++;
     s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
+    LOG_AMOURANTH("Ring advanced: next index %u, next timeline %llu", s_ringIndex, s_nextTimelineValue);
 
-    // Present
+    // Present immediately — GPU finishes transition before present (queue ordering)
     VkPresentInfoKHR pi{};
     pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount = 1;
     pi.pSwapchains = &currentSwap;
     pi.pImageIndices = &imageIndex;
 
+    LOG_AMOURANTH("Calling vkQueuePresentKHR");
     VkResult presentRes = vkQueuePresentKHR(queue, &pi);
 
     if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR || presentRes == VK_ERROR_SURFACE_LOST_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "Present detected invalid swapchain — flag recreate next frame");
+        LOG_WARN_CAT("SWAPCHAIN", "Present detected invalid swapchain (%s) — flag recreate next frame",
+                     string_VkResult(presentRes));
     } else if (presentRes != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", string_VkResult(presentRes));
+        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: %s", string_VkResult(presentRes));
+    } else {
+        LOG_AMOURANTH("Present succeeded");
     }
 
+    LOG_AMOURANTH("EXIT presentImage → %s", string_VkResult(presentRes));
     return presentRes;
 }
 
