@@ -110,7 +110,6 @@ set(OUTPUT_DIRS
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/scripts
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/raytracing
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/compute
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/graphics
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/fonts
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/textures
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/models
@@ -135,7 +134,6 @@ endif()
 find_program(GLSLC glslc REQUIRED HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
 find_program(SPIRV_VAL spirv-val HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
 
-find_package(TBB REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(glm REQUIRED)
@@ -158,13 +156,6 @@ if(IS_WINDOWS)
     find_library(SDL3_MIXER_LIB NAMES SDL3_mixer PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
 endif()
 
-find_library(ATOMIC_LIB NAMES atomic libatomic atomic.so.1 libatomic.so.1
-    HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib64)
-if(NOT ATOMIC_LIB)
-    message(FATAL_ERROR "libatomic not found")
-endif()
-message(STATUS "Found libatomic: ${ATOMIC_LIB}")
-
 # =============================================================================
 # tinyobjloader
 # =============================================================================
@@ -175,6 +166,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyobjloader)
 set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
+
+# =============================================================================
+# oneTBB (Intel oneAPI Threading Building Blocks)
+# =============================================================================
+FetchContent_Declare(
+    onetbb
+    GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
+    GIT_TAG v2022.0.0
+)
+FetchContent_MakeAvailable(onetbb)
 
 # =============================================================================
 # SOURCE COLLECTION
@@ -207,6 +208,7 @@ target_include_directories(amouranth_engine PRIVATE
     ${tinyobjloader_SOURCE_DIR}
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
+    ${onetbb_SOURCE_DIR}/include
 )
 
 if(IS_LINUX)
@@ -238,10 +240,10 @@ target_link_libraries(amouranth_engine PRIVATE
     TBB::tbb
     OpenMP::OpenMP_CXX
     Freetype::Freetype
-    ${ATOMIC_LIB}
-    dl              # ← Critical for vkGet*ProcAddr on Linux
-    pthread         # ← Safe and often needed
-    m               # ← Math library (for some drivers)
+    atomic          # ← Simplified: always link -latomic (MinGW provides it)
+    dl              # Linux-only, but harmless on Windows
+    pthread         # Linux-only, harmless on Windows
+    m
 )
 
 if(IS_LINUX)
@@ -381,8 +383,8 @@ foreach(MAP ${ASSET_MAP})
     endif()
 endforeach()
 
-set(STONEKEY_SRC "${SHADER_SOURCE_DIR}/StoneKey.glsl")
-set(STONEKEY_DST "${SHADER_BINARY_DIR}/StoneKey.glsl")
+set(STONEKEY_SRC "${CMAKE_CURRENT_SOURCE_DIR}/shaders/StoneKey.glsl")
+set(STONEKEY_DST "${BIN_DIR}/assets/shaders/StoneKey.glsl")
 
 add_custom_command(
     OUTPUT ${STONEKEY_DST}
@@ -392,12 +394,13 @@ add_custom_command(
 )
 
 # =============================================================================
-# LEGENDARY BANNER — NOVEMBER 17 2025 — FINAL FIXED EDITION
+# LEGENDARY BANNER — JANUARY 25 2026 — WINDOWS BUILD FIXED (libatomic)
 # =============================================================================
 message(STATUS "")
 message(STATUS "==================================================================")
-message(STATUS " AMOURANTH RTX — FULLY FIXED + (SDL3+Vulkan)")
+message(STATUS " AMOURANTH RTX — FULLY FIXED + (SDL3+Vulkan+oneTBB)")
 message(STATUS " Target: ${BIN_DIR}/Navigator${EXE_SUFFIX}")
 message(STATUS " Run: ./linux.sh clean")
 message(STATUS " HDR: 10-bit invisible HDR via GBM — works even on Cinnamon/GNOME?")
+message(STATUS " Cross-compile to Windows: cmake -DCMAKE_CROSSCOMPILING=ON ..")
 message(STATUS "==================================================================")
