@@ -6,9 +6,10 @@
 //             Live measurement, zero pre-reserve, take 100% free VRAM
 //             Instant relinquish on explicit command (no auto-purge)
 //             Tiny safety margin for YouTube PiP / browser tabs
-//             JANUARY 26, 2026 — ALL HOST TOGGLES REMOVED (device-local only)
+//             JANUARY 26, 2026 — HOST TOGGLES REMOVED (device-local only)
 //             STAGING RING ONLY HOST-VISIBLE (uploads)
-//             DESCRIPTOR BUFFER SPECIAL PATH (host-visible mapped + device address flag)
+//             DESCRIPTOR BUFFER SPECIAL PATH (host-visible + device address, lazy map)
+//             NO GLOBAL PURGE — explicit BM_DESTROY only
 // =============================================================================
 
 #pragma once
@@ -25,7 +26,6 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 #include <format>
 #include <print>
 #include <cmath>
-#include <optional>
 #include <mutex>
 
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -34,6 +34,7 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
+using StoneKey::stone_graphics_queue;
 using RTX::g_ext;
 
 namespace BufferManager {
@@ -89,7 +90,7 @@ struct VRAMReality {
     VRAMReality reality{};
 
     VkPhysicalDeviceMemoryProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
-    vkGetPhysicalDeviceMemoryProperties2(StoneKey::stone_physical(), &props2);
+    vkGetPhysicalDeviceMemoryProperties2(stone_physical(), &props2);
 
     for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
         if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
@@ -100,7 +101,7 @@ struct VRAMReality {
     VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
     budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
     props2.pNext = &budget;
-    vkGetPhysicalDeviceMemoryProperties2(StoneKey::stone_physical(), &props2);
+    vkGetPhysicalDeviceMemoryProperties2(stone_physical(), &props2);
 
     for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
         if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
@@ -134,7 +135,7 @@ struct VRAMReality {
 
 [[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) noexcept {
     VkPhysicalDeviceMemoryProperties memProps{};
-    vkGetPhysicalDeviceMemoryProperties(StoneKey::stone_physical(), &memProps);
+    vkGetPhysicalDeviceMemoryProperties(stone_physical(), &memProps);
 
     for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
         if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
@@ -158,13 +159,13 @@ struct VRAMReality {
     ci.mipLevels = 1;
     ci.arrayLayers = 1;
     ci.samples = VK_SAMPLE_COUNT_1_BIT;
-    ci.tiling = VK_IMAGE_TILING_OPTIMAL;  // Always optimal — no toggle
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
     ci.usage = usage;
     ci.initialLayout = initialLayout;
     ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkImage image = VK_NULL_HANDLE;
-    if (vkCreateImage(StoneKey::stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
+    if (vkCreateImage(stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "Failed to create image: {}", tag);
         return VK_NULL_HANDLE;
     }
@@ -195,7 +196,7 @@ struct Chunk {
     VkDeviceAddress  baseAddr = 0;
     VkDeviceSize     head     = 0;
     std::string      tag;
-    std::vector<uint64_t> handles;  // Track handles in this chunk for per-chunk purge
+    std::vector<uint64_t> handles;  // Track handles in this chunk
 };
 
 struct StagingRing {
@@ -214,7 +215,7 @@ inline std::unordered_map<uint64_t, BufferInfo> g_buffers;
 inline uint64_t                                 g_nextHandle = 0x00000001ULL;
 inline VkDeviceSize                             g_total_allocated = 0;
 
-// ── MUTEX FOR RUNTIME OPERATIONS (resize, purge)
+// ── MUTEX FOR RUNTIME OPERATIONS
 inline std::mutex g_bufferMutex;
 
 // ── HELPER FUNCTIONS ───────────────────────────────────────────────────────
@@ -239,7 +240,8 @@ inline std::mutex g_bufferMutex;
     return it->second.deviceAddress + it->second.offset;
 }
 
-// ── STAGING RING ───────────────────────────────────────────────────────────
+// ── STAGING RING — only host-visible part (uploads)
+// =============================================================================
 inline void ensureStagingRing() noexcept {
     if (g_stagingRing.ready) return;
 
@@ -252,10 +254,10 @@ inline void ensureStagingRing() noexcept {
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
 
-    VK_CHECK(vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &g_stagingRing.buffer));
+    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRing.buffer));
 
     VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(StoneKey::stone_device(), g_stagingRing.buffer, &req);
+    vkGetBufferMemoryRequirements(stone_device(), g_stagingRing.buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
@@ -271,9 +273,9 @@ inline void ensureStagingRing() noexcept {
         .memoryTypeIndex = memType
     };
 
-    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &g_stagingRing.memory));
-    VK_CHECK(vkBindBufferMemory(StoneKey::stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0));
-    VK_CHECK(vkMapMemory(StoneKey::stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
+    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &g_stagingRing.memory));
+    VK_CHECK(vkBindBufferMemory(stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0));
+    VK_CHECK(vkMapMemory(stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
 
     g_stagingRing.ready = true;
     LOG_SUCCESS_CAT("BufferManager", "Staging ring created and mapped — {}", formatBytes(STAGING_RING_SIZE));
@@ -293,7 +295,7 @@ inline void ensureStagingRing() noexcept {
     return g_stagingRing.buffer;
 }
 
-// ── CHUNK CREATION — take everything left after driver footprint (device-local)
+// ── CHUNK CREATION — device-local only
 // =============================================================================
 [[nodiscard]] inline Chunk* createChunk(VkDeviceSize minSize, VkBufferUsageFlags usage, VkSharingMode sharingMode = VK_SHARING_MODE_EXCLUSIVE) noexcept {
     VRAMReality reality = measureReality();
@@ -312,14 +314,14 @@ inline void ensureStagingRing() noexcept {
     };
 
     VkBuffer buffer = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &buffer));
+    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &buffer));
 
     VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(StoneKey::stone_device(), buffer, &req);
+    vkGetBufferMemoryRequirements(stone_device(), buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == ~0u) {
-        vkDestroyBuffer(StoneKey::stone_device(), buffer, nullptr);
+        vkDestroyBuffer(stone_device(), buffer, nullptr);
         return nullptr;
     }
 
@@ -336,8 +338,8 @@ inline void ensureStagingRing() noexcept {
     };
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &memory));
-    VK_CHECK(vkBindBufferMemory(StoneKey::stone_device(), buffer, memory, 0));
+    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &memory));
+    VK_CHECK(vkBindBufferMemory(stone_device(), buffer, memory, 0));
 
     VkBufferDeviceAddressInfo addrInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
@@ -355,12 +357,11 @@ inline void ensureStagingRing() noexcept {
     return &g_mainChunks.back();
 }
 
-// ── SPECIAL: Eternal descriptor buffer — host-visible mapped (required for vkGetDescriptorEXT writes)
+// ── SPECIAL: Descriptor buffer — host-visible + device address, lazy map
 // =============================================================================
 [[nodiscard]] inline uint64_t createDescriptorBuffer(VkDeviceSize size, std::string_view tag = "EternalDescriptorBuffer") noexcept {
     if (size == 0) {
-        LOG_ERROR_CAT("BufferManager", "Descriptor buffer size 0 — invalid");
-        return 0;
+        size = 4096ULL;  // Minimal starter chunk
     }
 
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
@@ -404,9 +405,6 @@ inline void ensureStagingRing() noexcept {
     VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &memory));
     VK_CHECK(vkBindBufferMemory(stone_device(), buffer, memory, 0));
 
-    void* mapped = nullptr;
-    VK_CHECK(vkMapMemory(stone_device(), memory, 0, size, 0, &mapped));
-
     VkBufferDeviceAddressInfo addrInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .buffer = buffer
@@ -415,15 +413,49 @@ inline void ensureStagingRing() noexcept {
 
     uint64_t handle = ++g_nextHandle;
     g_buffers.emplace(handle, BufferInfo{
-        buffer, memory, size, req.alignment, 0, addr, mapped, usage, std::string(tag)
+        buffer, memory, size, req.alignment, 0, addr,
+        nullptr,  // mapped = nullptr — lazy map on first use
+        usage, std::string(tag)
     });
 
-    LOG_SUCCESS_CAT("BufferManager", "Eternal descriptor buffer created (host-visible mapped) — {} ({})", tag, formatBytes(size));
+    LOG_SUCCESS_CAT("BufferManager", "Descriptor buffer chunk created (lazy map) — {} ({})", tag, formatBytes(size));
 
     return handle;
 }
 
-// ── CREATE BUFFER — general device-local (chunked)
+// ── LAZY MAP FOR DESCRIPTOR BUFFER — call on first write
+// =============================================================================
+[[nodiscard]] inline void* lazyMapDescriptorBuffer(uint64_t handle) noexcept {
+    auto it = g_buffers.find(handle);
+    if (it == g_buffers.end()) {
+        LOG_ERROR_CAT("BufferManager", "Invalid handle for descriptor buffer map");
+        return nullptr;
+    }
+
+    BufferInfo& info = it->second;
+    if ((info.usage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) == 0) {
+        LOG_ERROR_CAT("BufferManager", "Handle is not a descriptor buffer");
+        return nullptr;
+    }
+
+    if (info.mapped != nullptr) {
+        return info.mapped;  // Already mapped
+    }
+
+    void* mapped = nullptr;
+    VkResult res = vkMapMemory(stone_device(), info.memory, 0, info.size, 0, &mapped);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "Failed to lazy-map descriptor buffer: {}", string_VkResult(res));
+        return nullptr;
+    }
+
+    info.mapped = mapped;
+    LOG_SUCCESS_CAT("BufferManager", "Descriptor buffer lazy-mapped ({} bytes)", formatBytes(info.size));
+
+    return mapped;
+}
+
+// ── GENERAL CREATE — routes descriptor buffer to special path
 // =============================================================================
 [[nodiscard]] inline uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage,
                                      std::string_view tag = "") noexcept {
@@ -441,7 +473,6 @@ inline void ensureStagingRing() noexcept {
     }
 
     if (fixedUsage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) {
-        // Special path for descriptor buffer — host-visible required
         return createDescriptorBuffer(size, tag);
     }
 
@@ -461,7 +492,6 @@ inline void ensureStagingRing() noexcept {
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     }
 
-    // Small uniform special path (persistent mapped host-visible via staging ring)
     bool smallUniform = (size <= HOST_VISIBLE_THRESHOLD) &&
                         (fixedUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
@@ -481,7 +511,6 @@ inline void ensureStagingRing() noexcept {
         return handle;
     }
 
-    // Large buffers — chunked device-local
     VkDeviceSize remaining = size;
     uint64_t firstHandle = 0;
 
@@ -557,7 +586,6 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     }
 
     if (info.mapped != nullptr) {
-        // Direct mapped (descriptor buffer or small uniform)
         std::memcpy(info.mapped, data, size);
         return;
     }
@@ -575,7 +603,6 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     if (cmd != VK_NULL_HANDLE) {
         vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
     } else {
-        // One-time submit fallback
         VkCommandPool pool;
         VkCommandPoolCreateInfo pci{
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -610,7 +637,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
             .commandBufferCount = 1,
             .pCommandBuffers = &tcmd
         };
-        VK_CHECK(vkQueueSubmit(StoneKey::stone_graphics_queue(), 1, &si, fence));
+        VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &si, fence));
         VK_CHECK(vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX));
 
         vkDestroyFence(stone_device(), fence, nullptr);
@@ -647,5 +674,6 @@ inline void destroy(uint64_t handle) noexcept {
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
 #define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)   BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)
 #define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
+#define BM_LAZY_MAP_DESCRIPTOR(h)           BufferManager::lazyMapDescriptorBuffer(h)
 
 } // namespace BufferManager

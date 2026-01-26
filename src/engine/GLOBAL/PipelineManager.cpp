@@ -882,9 +882,13 @@ void RTX::PipelineManager::cacheDeviceProperties()
 // =============================================================================
 void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& updateInfo) noexcept
 {
+    // Lazy map on first write attempt — ensure buffer is ready
     if (descriptorMapped_ == nullptr) {
-        LOG_FATAL_CAT("PIPELINE", "Descriptor buffer not mapped — cannot write descriptors");
-        return;
+        descriptorMapped_ = BufferManager::lazyMapDescriptorBuffer(descriptorBufferHandle_);
+        if (descriptorMapped_ == nullptr) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to lazy-map descriptor buffer — empire compromised");
+            return;
+        }
     }
 
     if (updateInfo.tlas == VK_NULL_HANDLE) {
