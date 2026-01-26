@@ -433,7 +433,7 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     VkTimelineSemaphoreSubmitInfo timelineSI{};
     timelineSI.sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineSI.signalSemaphoreValueCount = 1;
+    timelineSI.signalSemaphoreValueCount = 2;
     timelineSI.pSignalSemaphoreValues    = &nextGraphicsValue_;
 
     VkSubmitInfo submitInfo{};
