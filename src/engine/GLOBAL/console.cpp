@@ -147,7 +147,7 @@ void cmd_mem()
     double totalGiB = static_cast<double>(total) / (1024.0 * 1024 * 1024);
     double percent  = (total > 0) ? (100.0 * used / total) : 0.0;
 
-    addLine(std::format("Buffer Memory: {:.2f} / {:.2f} GiB ({:.1f}%)  [{} chunks]",
+    addLine(std::format("Buffer Memory: {} / {} GiB ({}%)  [{} chunks]",
                         usedGiB, totalGiB, percent, BufferManager::g_mainChunks.size()));
 }
 
@@ -160,10 +160,10 @@ void cmd_time()
     double fps_est = (sec > 0.0001) ? 1.0 / sec : INFINITY;
 
     addLine("Lifetime clock (monolith):");
-    addLine(std::format("  {:.6f} seconds", sec));
-    addLine(std::format("  {:.1f} milliseconds", ms));
-    addLine(std::format("  {:.0f} microseconds", us));
-    addLine(std::format("  ~{:.1f} pseudo-FPS (1 / elapsed)", fps_est));
+    addLine(std::format("  {} seconds", sec));
+    addLine(std::format("  {} milliseconds", ms));
+    addLine(std::format("  {} microseconds", us));
+    addLine(std::format("  ~{} pseudo-FPS (1 / elapsed)", fps_est));
     addLine("No real frames exist — time is the only sequencer.");
 }
 
@@ -172,7 +172,7 @@ void cmd_gpu()
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(StoneKey::stone_physical(), &props);
     addLine(std::format("Physical Device: {}", props.deviceName));
-    addLine(std::format("  Vendor ID: 0x{:04X}  Device ID: 0x{:04X}",
+    addLine(std::format("  Vendor ID: 0x{}  Device ID: 0x{}",
                         props.vendorID, props.deviceID));
 }
 
