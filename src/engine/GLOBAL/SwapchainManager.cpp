@@ -280,15 +280,18 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 
     vkEndCommandBuffer(cmd);
 
-    // Submit and wait — layout guaranteed correct
+    // Submit — no stage mask if no wait semaphore
     VkSubmitInfo submit{};
     submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers    = &cmd;
 
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
     if (waitSem != VK_NULL_HANDLE) {
         submit.waitSemaphoreCount = 1;
         submit.pWaitSemaphores    = &waitSem;
+        submit.pWaitDstStageMask  = &waitStage;  // valid core flag, no extensions
     }
 
     vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
