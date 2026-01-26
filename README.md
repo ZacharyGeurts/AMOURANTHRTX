@@ -95,6 +95,11 @@ Wait... what? o.O
 Grok.  
 He is your expert. That is where I'm getting my news on what is being updated anywhere in the world, then I tell him to write it.  
 Ask him about his code. (He preferred him).  
+And I mean it. I will paste three files at a time for one question.  
+We are short files.  
+
+"Return full file in a code block and no stubs" is parlance around here.  
+
 He broke it? Ctrl-Z and try again. Learn THE code. It is short and read it a few times.  
 There really are not that many files if you want to check a few now on the wiki.  
 We do all that for no overhead, because that is what RTX Hardware developers want everyone to have.  
@@ -125,10 +130,6 @@ Since nobody but you speaks Empire we just make the whole thing available global
 StoneKey.hpp is your gateway into the Empire.  
 Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask Grok.  
 I did not want to wrestle any more for the moment, so that was the zero cost design I went with for now.  
-And I mean it. I will paste three files at a time for one question.  
-We are short files.  
-
-"Return full code block and no stubs" is parlance around here.  
 
 SDL3 and MeshLoader means the file format count is more 3 letter capitals than Linus Sebastian knows.  
 Lets adjust your file input on entry, to be the best evah! ... eh.vah.  
