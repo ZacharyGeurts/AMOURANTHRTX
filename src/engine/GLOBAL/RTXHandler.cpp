@@ -169,7 +169,7 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
         }
     }
 
-    if (!selected) {
+    if (selected == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("RTX", "No RTX-capable GPU found");
         return VK_NULL_HANDLE;
     }
