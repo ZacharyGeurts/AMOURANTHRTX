@@ -1,6 +1,7 @@
 [Current over head code view](https://x.com/ZacharyGeurts/status/2015005228794327380)  
 
 We are THE ZERO COST RTX development research page, unless someone beat Amouranth to it.  
+We needed Vulkan 1.4+. I took advantage of Grok.  
 The commit count is stoopid. <3 Gorillaz    
 
 Development and memes https://x.com/ZacharyGeurts
