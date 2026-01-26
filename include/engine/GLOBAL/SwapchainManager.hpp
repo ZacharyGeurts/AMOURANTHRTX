@@ -9,8 +9,8 @@
 // - Simplified transitions for direct storage path
 // - Fixed: Explicit PRESENT_SRC_KHR transition before every present
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
-// - Fixed: Lazy transient command pool creation on first present
-// - No external getOneTimeCommandBuffer — internal one-time cmd for transition
+// - Fixed: Lazy transient command pool + fixed ring for present transitions
+// - No external getOneTimeCommandBuffer — internal ring with safe reset
 // - Cleanup dissolves old cmd buffers safely on shutdown
 // =============================================================================
 
@@ -99,6 +99,14 @@ private:
 
     // Core function — handles both create and recreate
     static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason = "") noexcept;
+
+    // Internal lazy ring state for present transitions (hidden from public API)
+    static VkCommandPool s_transientPool;
+    static VkSemaphore s_timelineSem;
+    static std::vector<VkCommandBuffer> s_cmdRing;
+    static uint32_t s_ringIndex;
+    static uint64_t s_nextTimelineValue;
+    static constexpr uint32_t RING_SIZE = 4;
 };
 
 // Global convenience aliases
@@ -136,5 +144,6 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 // - Deferred recreate at start of next frame (renderer handles flag)
 // - transitionImageLayout remains static
 // - Global convenience macros for easy access
-// - Lazy transient pool for present transitions
+// - Lazy transient pool + fixed ring for present transitions
+// - Internal ring with safe reset — no external dependencies
 // =============================================================================

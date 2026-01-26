@@ -9,8 +9,8 @@
 // - Simplified transitions for direct storage path
 // - Fixed: Explicit PRESENT_SRC_KHR transition before every present
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
-// - Fixed: Lazy transient command pool creation on first present
-// - No external getOneTimeCommandBuffer — internal one-time cmd for transition
+// - Fixed: Lazy transient command pool + fixed ring for present transitions
+// - No external getOneTimeCommandBuffer — internal ring with safe reset
 // - Cleanup dissolves old cmd buffers safely on shutdown
 // =============================================================================
 
@@ -32,7 +32,6 @@ using StoneKey::stone_seal_extent;
 using StoneKey::stone_seal_image_count;
 using StoneKey::stone_seal_images;
 using StoneKey::stone_seal_views;
-using StoneKey::stone_transient_pool;
 
 namespace RTX {
 
@@ -357,56 +356,114 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 
 // =============================================================================
 // presentImage — always ensure image in PRESENT_SRC_KHR layout before present
+// Uses lazy ring of transient cmd buffers — safe reset after GPU completion
 // =============================================================================
 VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
     if (minimized_ || !swapchain_.valid()) return VK_ERROR_INITIALIZATION_FAILED;
 
     VkSwapchainKHR currentSwap = stone_swapchain();
-
     VkImage currentImage = swapchainImages_[imageIndex];
 
-    // Create one-time transient command buffer for transition
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    // Lazy init: transient pool + cmd ring + timeline semaphore
+    static VkCommandPool s_transientPool = VK_NULL_HANDLE;
+    static std::vector<VkCommandBuffer> s_cmdRing;
+    static uint32_t s_ringIndex = 0;
+    static VkSemaphore s_timelineSem = VK_NULL_HANDLE;
+    static uint64_t s_nextTimelineValue = 1;
+    static constexpr uint32_t RING_SIZE = 4;
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = stone_transient_pool();
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+    if (s_transientPool == VK_NULL_HANDLE) {
+        VkCommandPoolCreateInfo pci{};
+        pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
 
-    VkResult res = vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
-    if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "Failed to allocate transient cmd for present transition: {}", string_VkResult(res));
-        // Continue anyway — present may work if image already in correct layout
-    } else {
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        VkResult res = vkCreateCommandPool(stone_device(), &pci, nullptr, &s_transientPool);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("SWAPCHAIN", "Failed to create transient pool: {}", string_VkResult(res));
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
 
-        vkBeginCommandBuffer(cmd, &beginInfo);
+        s_cmdRing.resize(RING_SIZE);
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = s_transientPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = RING_SIZE;
 
-        // Transition to PRESENT_SRC_KHR
-        transitionImageLayout(cmd, currentImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        res = vkAllocateCommandBuffers(stone_device(), &allocInfo, s_cmdRing.data());
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("SWAPCHAIN", "Failed to allocate cmd ring: {}", string_VkResult(res));
+            vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
+            s_transientPool = VK_NULL_HANDLE;
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
 
-        vkEndCommandBuffer(cmd);
+        VkSemaphoreTypeCreateInfo typeInfo{};
+        typeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+        typeInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        typeInfo.initialValue = 0;
 
-        VkSubmitInfo submit{};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &cmd;
-        vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-        vkQueueWaitIdle(queue);
+        VkSemaphoreCreateInfo semInfo{};
+        semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        semInfo.pNext = &typeInfo;
 
-        vkFreeCommandBuffers(stone_device(), stone_transient_pool(), 1, &cmd);
+        vkCreateSemaphore(stone_device(), &semInfo, nullptr, &s_timelineSem);
+
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Lazy-init transient ring: {} cmd buffers + timeline semaphore", RING_SIZE);
     }
 
+    VkCommandBuffer cmd = s_cmdRing[s_ringIndex];
+
+    // Wait only for this slot's previous work (safe unpending)
+    uint64_t waitValue = s_nextTimelineValue - RING_SIZE;
+    if (waitValue > 0) {
+        VkSemaphoreWaitInfo waitInfo{};
+        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+        waitInfo.semaphoreCount = 1;
+        waitInfo.pSemaphores = &s_timelineSem;
+        waitInfo.pValues = &waitValue;
+        vkWaitSemaphores(stone_device(), &waitInfo, UINT64_MAX);
+    }
+
+    // Reset & record transition
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    transitionImageLayout(cmd, currentImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit with timeline signal
+    VkTimelineSemaphoreSubmitInfo tlSI{};
+    tlSI.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    tlSI.signalSemaphoreValueCount = 1;
+    tlSI.pSignalSemaphoreValues = &s_nextTimelineValue;
+
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.pNext = &tlSI;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+    submit.waitSemaphoreCount = waitSem ? 1 : 0;
+    submit.pWaitSemaphores = waitSem ? &waitSem : nullptr;
+
+    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+
+    s_nextTimelineValue++;
+    s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
+
+    // Present
     VkPresentInfoKHR pi{};
-    pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.waitSemaphoreCount = waitSem ? 1 : 0;
-    pi.pWaitSemaphores    = waitSem ? &waitSem : nullptr;
-    pi.swapchainCount     = 1;
-    pi.pSwapchains        = &currentSwap;
-    pi.pImageIndices      = &imageIndex;
+    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &currentSwap;
+    pi.pImageIndices = &imageIndex;
 
     VkResult presentRes = vkQueuePresentKHR(queue, &pi);
 
@@ -442,6 +499,16 @@ void SwapchainManager::cleanup() noexcept {
     LAS::instance().onResize();
     cleanupImageViews();
     cleanupSwapchain();
+
+    // Destroy lazy ring resources
+    if (s_transientPool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
+        s_transientPool = VK_NULL_HANDLE;
+    }
+    if (s_timelineSem != VK_NULL_HANDLE) {
+        vkDestroySemaphore(stone_device(), s_timelineSem, nullptr);
+        s_timelineSem = VK_NULL_HANDLE;
+    }
 }
 
 void SwapchainManager::cleanupSwapchain() noexcept {
@@ -464,7 +531,7 @@ void SwapchainManager::cleanupImageViews() noexcept {
 // - Tonemap your raw ass later
 // - Fixed: Explicit PRESENT_SRC_KHR transition before every present
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present
-// - Fixed: Use transient command pool for one-time transitions
-// - No external getOneTimeCommandBuffer — internal transient cmd creation
+// - Fixed: Lazy transient command pool + fixed ring for present transitions
+// - No external getOneTimeCommandBuffer — internal ring with safe reset
 // - Cleanup dissolves old cmd buffers safely on shutdown
-// =========================================================================nice
+// =============================================================================
