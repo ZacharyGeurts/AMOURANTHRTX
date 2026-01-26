@@ -209,7 +209,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     allocInfoMem.allocationSize  = memReqs.size;
     allocInfoMem.memoryTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits,
-                                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
     vkAllocateMemory(stone_device(), &allocInfoMem, nullptr, &hdrOutputMemory_);
     vkBindImageMemory(stone_device(), hdrOutputImage_, hdrOutputMemory_, 0);

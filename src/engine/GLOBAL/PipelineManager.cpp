@@ -124,7 +124,6 @@ PipelineManager::PipelineManager()
     LOG_SUCCESS_CAT("PIPELINE", "Living world buffer created (64 bytes)");
 
     cacheDescriptorProperties();
-    createDescriptorBuffer();
 
     LOG_SUCCESS_CAT("PIPELINE", "PipelineManager initialized");
 }
@@ -256,57 +255,6 @@ void RTX::PipelineManager::cacheDescriptorProperties()
     descPropsCached = true;
 
     LOG_SUCCESS_CAT("PIPELINE", "Descriptor buffer properties cached");
-}
-
-// =============================================================================
-// Create eternal descriptor buffer
-// =============================================================================
-void RTX::PipelineManager::createDescriptorBuffer()
-{
-    // In pure buffer mode, we don't need a layout size upfront.
-    // Create a minimal initial chunk only if not already done.
-    // Real size grows dynamically on first descriptor write.
-
-    if (descriptorBufferHandle_ != 0) return;
-
-    LOG_INFO_CAT("PIPELINE", "Initializing eternal descriptor buffer (minimal initial chunk)");
-
-    // Start tiny — grow on demand when writing first descriptors
-    // 4 KiB is enough for initial placeholders / alignment
-    constexpr VkDeviceSize INITIAL_MINIMAL_SIZE = 4096ULL;
-
-    BM_CREATE(descriptorBufferHandle_, INITIAL_MINIMAL_SIZE,
-              VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
-              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-              "EternalDescriptorBuffer_Initial");
-
-    if (descriptorBufferHandle_ == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create initial descriptor buffer chunk");
-        throw std::runtime_error("Initial descriptor buffer creation failed");
-    }
-
-    const BufferInfo* info = BM_GET(descriptorBufferHandle_);
-    if (!info || info->memory == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Descriptor buffer chunk has no valid memory");
-        BM_DESTROY(descriptorBufferHandle_);
-        descriptorBufferHandle_ = 0;
-        throw std::runtime_error("Descriptor buffer chunk invalid");
-    }
-
-    VkResult res = vkMapMemory(stone_device(), info->memory, 0, INITIAL_MINIMAL_SIZE, 0, &descriptorMapped_);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to map initial descriptor buffer chunk: {}", string_VkResult(res));
-        BM_DESTROY(descriptorBufferHandle_);
-        descriptorBufferHandle_ = 0;
-        throw std::runtime_error("Initial descriptor buffer map failed");
-    }
-
-    descriptorBufferAddress_ = BM_GET_DEVICE_ADDRESS(descriptorBufferHandle_);
-    currentMappedSize_ = INITIAL_MINIMAL_SIZE;  // Add member: VkDeviceSize currentMappedSize_ = 0;
-    currentWriteOffset_ = 0;                    // Add member: VkDeviceSize currentWriteOffset_ = 0;
-
-    LOG_SUCCESS_CAT("PIPELINE", "Eternal descriptor buffer initialized (minimal {} bytes chunk, growable)",
-                    BufferManager::formatBytes(INITIAL_MINIMAL_SIZE));
 }
 
 // =============================================================================
@@ -654,7 +602,7 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     VkMemoryRequirements memReq{};
     vkGetBufferMemoryRequirements(stone_device(), sbtBuffer, &memReq);
 
-    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
     if (memType == ~0u) {
         LOG_FATAL_CAT("PIPELINE", "No device-local memory type for SBT buffer");
         vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);

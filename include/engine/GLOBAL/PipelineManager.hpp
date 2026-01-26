@@ -158,7 +158,6 @@ private:
     VkAccelerationStructureKHR createDummyTLAS();
 
     void cacheDescriptorProperties();
-    void createDescriptorBuffer();
     void growDescriptorBuffer(VkDeviceSize additionalSize);  // Future: dynamic growth
 };
 
