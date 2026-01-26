@@ -50,7 +50,7 @@ add_compile_options(
     -Wall -Wextra -Wpedantic -Werror    
     -Wno-extra -O3 -march=native -mtune=native
     -flto=auto -ffast-math -Wno-error=unused-but-set-variable
-	-Wno-error=deprecated-declarations
+	-Wno-error=deprecated-declarations -Wno-error=shadow
     -g -ggdb
 )
 

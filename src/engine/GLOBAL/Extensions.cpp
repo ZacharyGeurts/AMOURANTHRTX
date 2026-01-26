@@ -1,4 +1,3 @@
-// src/engine/GLOBAL/Extensions.cpp
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 by Zachary Geurts <gzac5314@gmail.com>
 // =============================================================================
@@ -12,13 +11,17 @@
 // INSTANCE & DEVICE SPLIT — JANUARY 25, 2026
 // ADDED VK_EXT_descriptor_buffer LOADING & LOGGING
 // OPTIONAL EXTENSIONS FAILURE → LOG_INFO (CLEAN LOG)
-// ROBUST, PRODUCTION-READY, NULL-SAFE
+// ROBUST, PRODUCTION-READY, NULL-SAFE, MULTI-PLATFORM
 // =============================================================================
 
 #include "engine/GLOBAL/Extensions.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/logging.hpp"
+
+#ifdef __linux__
+#include <execinfo.h>  // Linux-only: backtrace for debug
+#endif
 
 using StoneKey::stone_physical;
 
@@ -200,10 +203,11 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
 } // namespace RTX
 
 // =============================================================================
-// UPDATED JANUARY 25, 2026 — PINK EMPIRE UPGRADE
-// - Added full VK_EXT_descriptor_buffer loading and logging
-// - Optional extensions still log INFO only on missing
-// - dumpRayTracingSupport now includes descriptor buffer props
-// - Clean, validation-friendly, ready for living world breathing
+// UPDATED JANUARY 26, 2026 — MULTI-PLATFORM CLEAN
+// - execinfo.h guarded for Linux only
+// - Clean compile on Windows (no Linux headers)
+// - Optional extensions still log INFO on missing
+// - dumpRayTracingSupport includes descriptor buffer props
+// - Ready for living world breathing
 // PINK PHOTONS BINDLESS — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================

@@ -24,7 +24,6 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 #include <unordered_map>
 #include <vector>
 #include <format>
-#include <print>
 #include <cmath>
 #include <mutex>
 

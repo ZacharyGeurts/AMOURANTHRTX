@@ -2,9 +2,10 @@
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing + compute pipeline, SBT, descriptor management
 // Version 30.74 — January 26, 2026
-// - Eternal descriptor buffer + BufferManager macros
-// - No masking in transition submit (pure anarchy)
+// - On-demand compute pipeline creation in dispatchLivingWorld
+// - No masking in transition submit
 // - Timing driven by totalTime push only
+// - Eternal descriptor buffer + BufferManager macros
 // - No sets, no vkUpdateDescriptorSets — vkGetDescriptorEXT + memcpy
 // - Bindings: 0=TLAS, 1=output, 2=camera UBO, 3=materials, 7=living world
 // - Living world buffer (64 bytes) bound at startup
@@ -119,7 +120,7 @@ PipelineManager::PipelineManager()
 }
 
 // =============================================================================
-// Pipeline Layout — DESCRIPTOR_BUFFER_BIT_EXT only
+// Pipeline Layout
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -141,7 +142,6 @@ void PipelineManager::createPipelineLayout()
     }
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(mainLayout, stone_device(), vkDestroyDescriptorSetLayout);
 
-    // Cache offsets
     for (uint32_t i = 0; i < kMainBindings.size(); ++i) {
         g_ext.vkGetDescriptorSetLayoutBindingOffsetEXT(stone_device(), mainLayout, i, &bindingOffsets_[i]);
     }
@@ -239,13 +239,15 @@ void PipelineManager::cacheDescriptorProperties()
 }
 
 // =============================================================================
-// Compute Pipeline — living world
+// Compute Pipeline — created on-demand in dispatchLivingWorld
 // =============================================================================
 void PipelineManager::createComputePipeline()
 {
+    if (stone_compute_pipeline() != VK_NULL_HANDLE) return;
+
     LOG_INFO_CAT("PIPELINE", "Creating compute pipeline for living world");
 
-    VkShaderModule compModule = loadShader("assets/shaders/compute/living_world.spv");
+    VkShaderModule compModule = loadShader("compute/living_world.spv");
     if (compModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Failed to load living_world.spv");
         return;
@@ -280,13 +282,17 @@ void PipelineManager::createComputePipeline()
 }
 
 // =============================================================================
-// Dispatch living world — every pew
+// Dispatch living world — creates pipeline if missing
 // =============================================================================
 void PipelineManager::dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) noexcept
 {
+    // One-time creation if not sealed yet
     if (stone_compute_pipeline() == VK_NULL_HANDLE) {
-        LOG_WARN_CAT("PIPELINE", "No compute pipeline — living world skipped");
-        return;
+        createComputePipeline();
+    }
+
+    if (stone_compute_pipeline() == VK_NULL_HANDLE) {
+        return;  // Failed to create — silent skip
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, stone_compute_pipeline());
@@ -381,17 +387,33 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
 }
 
 // =============================================================================
-// Improved shader loading — better logging, size check
+// Shader Loading — improved logging
 // =============================================================================
 VkShaderModule PipelineManager::loadShader(const std::string& relativePath) const
 {
     LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
-    const std::string fullPath = std::format("assets/shaders/{}", relativePath);
-
+    // Try Linux path first (most common dev environment)
+    std::string fullPath = std::format("build/bin/Linux/{}", relativePath);
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
+
+    // If Linux path fails, try Windows path
     if (!file.is_open()) {
-        LOG_FATAL_CAT("PIPELINE", "Shader not found: {}", fullPath);
+        fullPath = std::format("build-windows/bin/Windows/{}", relativePath);
+        file.open(fullPath, std::ios::ate | std::ios::binary);
+    }
+
+    // Final fallback: try plain "assets/shaders/" if both above fail (useful for source tree)
+    if (!file.is_open()) {
+        fullPath = std::format("assets/shaders/{}", relativePath);
+        file.open(fullPath, std::ios::ate | std::ios::binary);
+    }
+
+    if (!file.is_open()) {
+        LOG_FATAL_CAT("PIPELINE", "Shader not found — tried:\n  {}\n  {}\n  {}", 
+                      std::format("build/bin/Linux/{}", relativePath),
+                      std::format("build-windows/bin/Windows/{}", relativePath),
+                      std::format("assets/shaders/{}", relativePath));
         return VK_NULL_HANDLE;
     }
 
@@ -413,11 +435,12 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
     VkShaderModule module = VK_NULL_HANDLE;
     VkResult result = vkCreateShaderModule(stone_device(), &createInfo, nullptr, &module);
     if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create shader module: {} (size {} bytes)", string_VkResult(result), fileSize);
+        LOG_FATAL_CAT("PIPELINE", "Failed to create shader module: {} (size {} bytes) — path: {}", 
+                      string_VkResult(result), fileSize, fullPath);
         return VK_NULL_HANDLE;
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded: {} ({} bytes)", relativePath, fileSize);
+    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded: {} ({} bytes) from {}", relativePath, fileSize, fullPath);
     return module;
 }
 
@@ -516,9 +539,9 @@ void PipelineManager::createRayTracingPipeline()
 }
 
 // =============================================================================
-// SBT Creation — Startup only
+// SBT Creation
 // =============================================================================
-void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer providedCmd)
+void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer providedCmd)
 {
     if (s_eternalSbtForged) return;
 
@@ -603,21 +626,8 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         vkBeginCommandBuffer(uploadCmd, &beginInfo);
     }
 
-    void* staging = BufferManager::mapStaging(handles.size());
-    if (!staging) {
-        if (ownCmd) vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
-        BM_DESTROY(sbtHandle);
-        return;
-    }
-
-    std::memcpy(staging, handles.data(), handles.size());
-
-    VkBufferCopy copy{};
-    copy.srcOffset = BufferManager::g_stagingRing.head - handles.size();
-    copy.dstOffset = 0;
-    copy.size      = handles.size();
-
-    vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtInfo->buffer, 1, &copy);
+    // Clean macro upload — handles staging ring, memcpy, vkCmdCopyBuffer internally
+    BM_UPLOAD_TO_BUFFER(sbtHandle, handles.data(), handles.size(), uploadCmd);
 
     VkMemoryBarrier memBarrier{};
     memBarrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -886,7 +896,7 @@ void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& 
                                  static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[7]);
     }
 
-    // No flush needed (host-coherent memory)
+    // No flush needed (host-coherent)
 }
 
 // =============================================================================
