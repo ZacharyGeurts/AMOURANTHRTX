@@ -325,10 +325,10 @@ void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
     RTDescriptorUpdate update{};
     update.tlas             = tlas;
     update.rtOutputView     = hdrOutputView_;
-    update.ubo              = cameraUBOBuffer_;
+    update.ubo              = cameraUBOBuffer_;  // manual buffer, no macro needed
     update.uboSize          = sizeof(CameraSceneData);
-    update.materialsBuffer  = BufferManager::get_buffer(defaultMaterialsHandle_);
-    update.materialsSize    = BufferManager::get(defaultMaterialsHandle_)->size;
+    update.materialsBuffer  = BM_GET_BUFFER(defaultMaterialsHandle_);
+    update.materialsSize    = BM_GET(defaultMaterialsHandle_)->size;
 
     pipelineManager_.writeRTDescriptorsToBuffer(update);
     needsDescriptorUpdate_ = false;

@@ -583,72 +583,35 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     LOG_INFO_CAT("PIPELINE", "Forging SBT — handleSize={} baseAlign={} recordStride={} totalSize={}",
                  handleSize, baseAlign, recordStride, sbtSize);
 
-    VkBuffer sbtBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory sbtMemory = VK_NULL_HANDLE;
+    uint64_t sbtHandle = 0;
+    BM_CREATE(sbtHandle, sbtSize,
+              VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+              VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+              "EternalSBT");
 
-    VkBufferCreateInfo bci{};
-    bci.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bci.size        = sbtSize;
-    bci.usage       = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &sbtBuffer);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkCreateBuffer for SBT failed: {}", string_VkResult(res));
+    if (sbtHandle == 0) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create SBT buffer via BufferManager");
         return;
     }
 
-    VkMemoryRequirements memReq{};
-    vkGetBufferMemoryRequirements(stone_device(), sbtBuffer, &memReq);
-
-    uint32_t memType = BufferManager::findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    if (memType == ~0u) {
-        LOG_FATAL_CAT("PIPELINE", "No device-local memory type for SBT buffer");
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
+    const BufferInfo* sbtInfo = BM_GET(sbtHandle);
+    if (!sbtInfo) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to get SBT buffer info");
+        BM_DESTROY(sbtHandle);
         return;
     }
 
-    VkMemoryAllocateFlagsInfo flagsInfo{};
-    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.pNext           = &flagsInfo;
-    allocInfo.allocationSize  = memReq.size;
-    allocInfo.memoryTypeIndex = memType;
-
-    res = vkAllocateMemory(stone_device(), &allocInfo, nullptr, &sbtMemory);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkAllocateMemory for SBT failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-        return;
-    }
-
-    res = vkBindBufferMemory(stone_device(), sbtBuffer, sbtMemory, 0);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkBindBufferMemory for SBT failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-        vkFreeMemory(stone_device(), sbtMemory, nullptr);
-        return;
-    }
-
-    VkBufferDeviceAddressInfo addrInfo{};
-    addrInfo.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    addrInfo.buffer = sbtBuffer;
-    VkDeviceAddress sbtAddress = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
+    VkDeviceAddress sbtAddress = BM_GET_DEVICE_ADDRESS(sbtHandle);
 
     std::vector<uint8_t> handles(totalGroups * handleSize);
-    res = g_ext.vkGetRayTracingShaderGroupHandlesKHR(
+    VkResult res = g_ext.vkGetRayTracingShaderGroupHandlesKHR(
         stone_device(), stone_rt_pipeline(), 0, totalGroups,
         handles.size(), handles.data());
 
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-        vkFreeMemory(stone_device(), sbtMemory, nullptr);
+        BM_DESTROY(sbtHandle);
         return;
     }
 
@@ -666,8 +629,7 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         res = vkAllocateCommandBuffers(stone_device(), &allocInfo, &uploadCmd);
         if (res != VK_SUCCESS) {
             LOG_FATAL_CAT("PIPELINE", "Failed to allocate upload command buffer: {}", string_VkResult(res));
-            vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-            vkFreeMemory(stone_device(), sbtMemory, nullptr);
+            BM_DESTROY(sbtHandle);
             return;
         }
 
@@ -679,18 +641,17 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         if (res != VK_SUCCESS) {
             LOG_FATAL_CAT("PIPELINE", "Failed to begin upload command buffer: {}", string_VkResult(res));
             vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
-            vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-            vkFreeMemory(stone_device(), sbtMemory, nullptr);
+            BM_DESTROY(sbtHandle);
             return;
         }
     }
 
+    // Use BufferManager staging for upload
     void* staging = BufferManager::mapStaging(handles.size());
     if (!staging) {
         LOG_FATAL_CAT("PIPELINE", "Staging ring overflow during SBT upload");
         if (ownCmd) vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-        vkFreeMemory(stone_device(), sbtMemory, nullptr);
+        BM_DESTROY(sbtHandle);
         return;
     }
 
@@ -701,7 +662,7 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     copy.dstOffset = 0;
     copy.size      = handles.size();
 
-    vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtBuffer, 1, &copy);
+    vkCmdCopyBuffer(uploadCmd, BufferManager::getStagingBuffer(), sbtInfo->buffer, 1, &copy);
 
     VkMemoryBarrier memBarrier{};
     memBarrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -722,8 +683,7 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkEndCommandBuffer failed during SBT upload: {}", string_VkResult(res));
         if (ownCmd) vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-        vkFreeMemory(stone_device(), sbtMemory, nullptr);
+        BM_DESTROY(sbtHandle);
         return;
     }
 
@@ -736,8 +696,7 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkQueueSubmit failed during SBT upload: {}", string_VkResult(res));
         if (ownCmd) vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
-        vkDestroyBuffer(stone_device(), sbtBuffer, nullptr);
-        vkFreeMemory(stone_device(), sbtMemory, nullptr);
+        BM_DESTROY(sbtHandle);
         return;
     }
 
@@ -747,9 +706,9 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
         vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
     }
 
-    VkDeviceAddress raygenAddr = align_up(sbtAddress, baseAlign);
-    VkDeviceAddress missAddr   = align_up(raygenAddr + raygenSize, baseAlign);
-    VkDeviceAddress hitAddr    = align_up(missAddr + missSize, baseAlign);
+    VkDeviceAddress raygenAddr = align_up(sbtAddress, rtProps.shaderGroupBaseAlignment);
+    VkDeviceAddress missAddr   = align_up(raygenAddr + raygenSize, rtProps.shaderGroupBaseAlignment);
+    VkDeviceAddress hitAddr    = align_up(missAddr + missSize, rtProps.shaderGroupBaseAlignment);
 
     sbtAddress_ = sbtAddress;
     sbtSize_    = sbtSize;
@@ -758,8 +717,8 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
     missSbtRegion_   = {missAddr,   recordStride, missSize};
     hitSbtRegion_    = {hitAddr,    recordStride, hitSize};
 
-    sbtBuffer_ = Handle<VkBuffer>(sbtBuffer, stone_device(), vkDestroyBuffer);
-    sbtMemory_ = Handle<VkDeviceMemory>(sbtMemory, stone_device(), vkFreeMemory);
+    sbtBuffer_ = Handle<VkBuffer>(sbtInfo->buffer, stone_device(), vkDestroyBuffer);
+    sbtMemory_ = Handle<VkDeviceMemory>(sbtInfo->memory, stone_device(), vkFreeMemory);
 
     s_eternalSbtForged = true;
 
