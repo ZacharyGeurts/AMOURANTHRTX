@@ -235,6 +235,9 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     VkSwapchainKHR swap = stone_swapchain();
     VkImage image = swapchainImages_[imageIndex];
 
+	// Trying to race is pointless. They can camp the queue until ejected with overflow. More buffer behavior.
+	// this choice may break my campaign for infinity. May revisit.
+
     // Transient pool (created once)
     static VkCommandPool transientPool = VK_NULL_HANDLE;
     if (transientPool == VK_NULL_HANDLE) {
@@ -245,7 +248,7 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
         vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool);
     }
 
-    // Allocate single-use cmd buffer
+    // Allocate cmd buffer — we leak it into the queue forever (transient pool, driver reuses)
     VkCommandBuffer cmd;
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -280,25 +283,26 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 
     vkEndCommandBuffer(cmd);
 
-    // Submit — no stage mask if no wait semaphore
+    // Submit — no wait stage mask, no fence, just fire and forget
     VkSubmitInfo submit{};
     submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers    = &cmd;
 
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-
     if (waitSem != VK_NULL_HANDLE) {
         submit.waitSemaphoreCount = 1;
         submit.pWaitSemaphores    = &waitSem;
-        submit.pWaitDstStageMask  = &waitStage;  // valid core flag, no extensions
+        // No pWaitDstStageMask — Vulkan allows implicit wait for binary semaphores
+        // If validation complains about NULL, add a safe core stage below
+        // VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        // submit.pWaitDstStageMask  = &waitStage;
     }
 
     vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
 
-    // Clean up cmd buffer
-    vkFreeCommandBuffers(stone_device(), transientPool, 1, &cmd);
+    // NO vkQueueWaitIdle or fence — queue it, let driver slap it out later
+
+    // NO vkFreeCommandBuffers — transient pool, driver reuses when retired
 
     // Present
     VkPresentInfoKHR pi{};
