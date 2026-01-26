@@ -64,6 +64,8 @@ private:
     std::array<VkSemaphore, ACQUIRE_SEM_COUNT> acquireSemaphores_{};
     uint32_t                        currentFrame_       = 0;
 
+	VkSemaphore renderFinishedSemaphore_ = VK_NULL_HANDLE;  // binary, signaled after render
+
     // Persistent resources
     uint64_t                        defaultMaterialsHandle_ = 0;
     uint64_t                        cameraUBO_              = 0;

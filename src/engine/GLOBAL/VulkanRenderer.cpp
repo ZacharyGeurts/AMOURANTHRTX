@@ -1,10 +1,9 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.73 — January 26, 2026 — sync via existing graphics semaphore
+// Version 30.73 — January 26, 2026 — binary semaphore for present sync
 // - Renderer owns present transition barrier (after blit)
-// - presentImage waits on graphicsTimelineSemaphore_ (signaled after transition)
-// - No new semaphores — reuses existing one
+// - Binary renderFinishedSemaphore_ signaled after transition → present waits on it
 // - No logging on VK_NOT_READY — silent status check
 // - One submit per pew: compute → trace → blit → transition → present (waited)
 // - Zero hot-path logging except fatal errors
@@ -124,6 +123,11 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     vkCreateSemaphore(stone_device(), &semInfo, nullptr, &acquireTimelineSemaphore_);
     vkCreateSemaphore(stone_device(), &semInfo, nullptr, &graphicsTimelineSemaphore_);
 
+    // Binary semaphore for vkQueuePresentKHR wait (signaled after render + transition)
+    VkSemaphoreCreateInfo binarySemCI{};
+    binarySemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    vkCreateSemaphore(stone_device(), &binarySemCI, nullptr, &renderFinishedSemaphore_);
+
     VkSemaphoreCreateInfo acquireSemCI{};
     acquireSemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     for (auto& s : acquireSemaphores_) {
@@ -234,6 +238,7 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
     vkDestroySemaphore(stone_device(), acquireTimelineSemaphore_, nullptr);
     vkDestroySemaphore(stone_device(), graphicsTimelineSemaphore_, nullptr);
+    vkDestroySemaphore(stone_device(), renderFinishedSemaphore_, nullptr);
 
     for (auto& s : acquireSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
 
@@ -449,13 +454,16 @@ void RTX::VulkanRenderer::pew() noexcept {
     submitInfo.waitSemaphoreCount   = 1;
     submitInfo.pWaitSemaphores      = &currentAcquire;
     submitInfo.pWaitDstStageMask    = waitStages;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores    = &graphicsTimelineSemaphore_;
+
+    // Signal both: timeline for tracking + binary for present wait
+    VkSemaphore signalSems[2] = {graphicsTimelineSemaphore_, renderFinishedSemaphore_};
+    submitInfo.signalSemaphoreCount = 2;
+    submitInfo.pSignalSemaphores    = signalSems;
 
     vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
 
     nextGraphicsValue_++;
 
-    // Present waits on graphicsTimelineSemaphore_ (signaled after transition barrier)
-    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, graphicsTimelineSemaphore_);
-}
+    // Present waits on binary renderFinishedSemaphore_ (signaled after transition barrier)
+    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, renderFinishedSemaphore_);
+} // nice
