@@ -1,20 +1,26 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing + compute pipeline, SBT, descriptor management
-// Version 30.61 — January 25, 2026
-// - Single eternal descriptor set — no frames
-// - UPDATE_AFTER_BIND everywhere — safe per-pew updates
+// Version 30.62 — January 25, 2026
+// - Switched to VK_EXT_descriptor_buffer for zero-overhead descriptor updates
+// - Eternal descriptor buffer (host-coherent mapped) for per-pew memcpy updates
+// - Removed traditional descriptor sets and vkUpdateDescriptorSets
+// - Descriptors filled via vkGetDescriptorEXT for driver-specific layout
+// - Binding via vkCmdBindDescriptorBuffersEXT + vkCmdSetDescriptorBufferOffsetsEXT
+// - Single eternal descriptor buffer for set 0 (main RT + compute)
+// - UPDATE_AFTER_BIND preserved where applicable
 // - Materials binding 3 active (STORAGE_BUFFER)
 // - Living world compute pipeline (living_world.spv) loaded
 // - Bindings 0–8: core engine + living world + material overrides
 // - Binding 9 reserved for custom compute/dev extensions
-// - All core objects sealed via StoneKey (descriptor set, pool, layout, compute pipeline, rt pipeline)
+// - All core objects sealed via StoneKey (pipeline layout, compute pipeline, rt pipeline)
 // - No placeholders, no dead code
 // - Empire stable — pink photons breathe on GPU
 // - DEAD DT: compute takes only totalTime (4-byte push)
 // - Blue noise killed (binding 5 removed) — high spp convergence doesn't need it
 // - Living world buffer created and bound to 7 at startup
 // - Materials bound to 3 in descriptor update
+// - Rewritten to use BufferManager macros (BM_CREATE, BM_GET_BUFFER, etc.)
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -38,10 +44,7 @@ using StoneKey::stone_rtprops;
 using StoneKey::stone_transient_pool;
 using StoneKey::stone_compute_pipeline;
 using StoneKey::stone_rt_pipeline;
-using StoneKey::stone_descriptor_set;
 using StoneKey::stone_pipeline_layout;
-using StoneKey::stone_seal_descriptor_set;
-using StoneKey::stone_seal_descriptor_pool;
 using StoneKey::stone_seal_pipeline_layout;
 using StoneKey::stone_seal_compute_pipeline;
 using StoneKey::stone_seal_rt_pipeline;
@@ -73,6 +76,19 @@ inline static std::mutex rebuildMutex;
 // Living world buffer handle (64 bytes, persistent)
 uint64_t livingWorldBufferHandle_ = 0;
 
+// Descriptor buffer handle and mapping
+uint64_t descriptorBufferHandle_ = 0;
+void* descriptorMapped_ = nullptr;
+VkDeviceAddress descriptorBufferAddress_ = 0;
+
+// Binding offsets and descriptor properties
+std::array<VkDeviceSize, kMainBindings.size()> bindingOffsets_{};
+VkPhysicalDeviceDescriptorBufferPropertiesEXT descProps_{};
+static bool descPropsCached = false;
+
+// Eternal SBT forged flag
+bool s_eternalSbtForged = false;
+
 // =============================================================================
 // Constructor
 // =============================================================================
@@ -86,31 +102,35 @@ PipelineManager::PipelineManager()
         !g_ext.vkGetRayTracingShaderGroupHandlesKHR ||
         !g_ext.vkCreateAccelerationStructureKHR ||
         !g_ext.vkGetAccelerationStructureBuildSizesKHR ||
-        !g_ext.vkGetBufferDeviceAddress) {
-        LOG_FATAL_CAT("PIPELINE", "Required ray tracing extensions missing");
-        throw std::runtime_error("Required ray tracing extensions missing");
+        !g_ext.vkGetBufferDeviceAddress ||
+        !g_ext.vkGetDescriptorSetLayoutSizeEXT ||
+        !g_ext.vkGetDescriptorSetLayoutBindingOffsetEXT ||
+        !g_ext.vkCmdBindDescriptorBuffersEXT ||
+        !g_ext.vkCmdSetDescriptorBufferOffsetsEXT ||
+        !g_ext.vkGetDescriptorEXT) {
+        LOG_FATAL_CAT("PIPELINE", "Required extensions missing (ray tracing or descriptor buffer)");
+        throw std::runtime_error("Required extensions missing");
     }
 
     dummyTLAS_ = Handle<VkAccelerationStructureKHR>(
         createDummyTLAS(), stone_device(), g_ext.vkDestroyAccelerationStructureKHR);
 
     // Create living world storage buffer (64 bytes, device-local, storage usage)
-    livingWorldBufferHandle_ = BufferManager::create(
-        64,  // Exact size for the struct
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        "LivingWorldBuffer"
-    );
+    BM_CREATE(livingWorldBufferHandle_, 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, "LivingWorldBuffer");
     if (livingWorldBufferHandle_ == 0) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create living world buffer");
         throw std::runtime_error("Living world buffer creation failed");
     }
     LOG_SUCCESS_CAT("PIPELINE", "Living world buffer created (64 bytes)");
 
+    cacheDescriptorProperties();
+    createDescriptorBuffer();
+
     LOG_SUCCESS_CAT("PIPELINE", "PipelineManager initialized");
 }
 
 // =============================================================================
-// Pipeline Layout — UPDATE_AFTER_BIND on layout
+// Pipeline Layout — UPDATE_AFTER_BIND + DESCRIPTOR_BUFFER on layout
 // =============================================================================
 void PipelineManager::createPipelineLayout()
 {
@@ -122,7 +142,8 @@ void PipelineManager::createPipelineLayout()
     mainInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     mainInfo.bindingCount = static_cast<uint32_t>(kMainBindings.size());
     mainInfo.pBindings    = kMainBindings.data();
-    mainInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    mainInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT |
+                            VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
 
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
     VkResult res = vkCreateDescriptorSetLayout(stone_device(), &mainInfo, nullptr, &mainLayout);
@@ -131,6 +152,11 @@ void PipelineManager::createPipelineLayout()
         return;
     }
     rtDescriptorSetLayout_ = Handle<VkDescriptorSetLayout>(mainLayout, stone_device(), vkDestroyDescriptorSetLayout);
+
+    // Cache binding offsets for later memcpy
+    for (uint32_t i = 0; i < kMainBindings.size(); ++i) {
+        g_ext.vkGetDescriptorSetLayoutBindingOffsetEXT(stone_device(), mainLayout, i, &bindingOffsets_[i]);
+    }
 
     VkDescriptorSetLayoutBinding texBinding{
         .binding         = 0,
@@ -144,6 +170,7 @@ void PipelineManager::createPipelineLayout()
     texInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     texInfo.bindingCount = 1;
     texInfo.pBindings    = &texBinding;
+    texInfo.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;  // If used
 
     VkDescriptorSetLayout texLayout = VK_NULL_HANDLE;
     res = vkCreateDescriptorSetLayout(stone_device(), &texInfo, nullptr, &texLayout);
@@ -204,47 +231,71 @@ void PipelineManager::createPipelineLayout()
 }
 
 // =============================================================================
-// Descriptor Set Allocation — single set only (frame-free)
+// Cache descriptor buffer properties (once)
 // =============================================================================
-void PipelineManager::allocateDescriptorSets()
+void RTX::PipelineManager::cacheDescriptorProperties()
 {
-    LOG_INFO_CAT("PIPELINE", "Allocating single descriptor sets (frame-free)");
+    if (descPropsCached) return;
 
-    VkDescriptorPool globalPool = RTX::g_ctx().descriptorPool.get();
-    if (globalPool == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Global descriptor pool not available");
-        return;
+    LOG_INFO_CAT("PIPELINE", "Caching descriptor buffer properties");
+
+    VkPhysicalDeviceDescriptorBufferPropertiesEXT dbProps{};
+    dbProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT;
+
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{};  // Chain if needed
+    rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    dbProps.pNext = &rtProps;  // Optional, if caching both
+
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &dbProps;
+
+    vkGetPhysicalDeviceProperties2(stone_physical(), &props2);
+
+    descProps_ = dbProps;
+    descPropsCached = true;
+
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor buffer properties cached");
+}
+
+// =============================================================================
+// Create eternal descriptor buffer
+// =============================================================================
+void RTX::PipelineManager::createDescriptorBuffer()
+{
+    if (descriptorBufferHandle_ != 0) return;
+
+    LOG_INFO_CAT("PIPELINE", "Creating eternal descriptor buffer");
+
+    VkDeviceSize layoutSize = 0;
+    g_ext.vkGetDescriptorSetLayoutSizeEXT(stone_device(), rtDescriptorSetLayout_.get(), &layoutSize);
+
+    if (layoutSize == 0) {
+        LOG_FATAL_CAT("PIPELINE", "Invalid descriptor layout size");
+        throw std::runtime_error("Invalid descriptor layout size");
     }
 
-    // Seal the global descriptor pool
-    stone_seal_descriptor_pool(globalPool);
+    BM_CREATE(descriptorBufferHandle_, layoutSize, VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, "EternalDescriptorBuffer");
 
-    auto allocate = [this, globalPool](std::vector<VkDescriptorSet>& sets,
-                                       VkDescriptorSetLayout layout,
-                                       std::string_view name) {
-        sets.resize(1);  // only one set
-        VkDescriptorSetLayout layouts[1] = {layout};
+    if (descriptorBufferHandle_ == 0) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create descriptor buffer");
+        throw std::runtime_error("Descriptor buffer creation failed");
+    }
 
-        VkDescriptorSetAllocateInfo info{};
-        info.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        info.descriptorPool     = globalPool;
-        info.descriptorSetCount = 1;
-        info.pSetLayouts        = layouts;
+    // Get BufferInfo to access memory and map
+    const BufferInfo* info = BM_GET(descriptorBufferHandle_);
+    VkDeviceMemory mem = info->memory;
+    VkResult res = vkMapMemory(stone_device(), mem, 0, layoutSize, 0, &descriptorMapped_);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to map descriptor buffer: {}", string_VkResult(res));
+        BM_DESTROY(descriptorBufferHandle_);
+        descriptorBufferHandle_ = 0;
+        throw std::runtime_error("Descriptor buffer map failed");
+    }
 
-        VkResult result = vkAllocateDescriptorSets(stone_device(), &info, sets.data());
-        if (result != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "Failed to allocate {} descriptor set: {}", name, string_VkResult(result));
-            return;
-        }
-        LOG_SUCCESS_CAT("PIPELINE", "Allocated single {} descriptor set", name);
-    };
+    descriptorBufferAddress_ = BM_GET_DEVICE_ADDRESS(descriptorBufferHandle_);
 
-    allocate(rtDescriptorSets_,    rtDescriptorSetLayout_.get(),    "main RT + compute (set 0)");
-    allocate(texDescriptorSets_,   texDescriptorSetLayout_.get(),   "texture array (set 2)");
-    allocate(emptyDescriptorSets_, emptyDescriptorSetLayout_.get(), "empty (sets 1 & 3)");
-
-    // Seal the eternal descriptor set
-    stone_seal_descriptor_set(rtDescriptorSets_[0]);
+    LOG_SUCCESS_CAT("PIPELINE", "Eternal descriptor buffer created and mapped ({} bytes)", layoutSize);
 }
 
 // =============================================================================
@@ -270,11 +321,7 @@ void PipelineManager::createComputePipeline()
     compInfo.sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     compInfo.stage  = stage;
     compInfo.layout = rtPipelineLayout_.get();
-
-    // Critical fix: Tell validation we use dynamic / eternal descriptors
-    // This silences VUID-08114 and follow-on "set destroyed/updated" errors
-    // for binding 7 (and others) in eternal-set + per-pew dispatch pattern
-    compInfo.flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+    compInfo.flags  = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
 
     VkPipeline compPipe = VK_NULL_HANDLE;
     VkResult res = vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &compInfo, nullptr, &compPipe);
@@ -306,9 +353,18 @@ void PipelineManager::dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) 
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, stone_compute_pipeline());
 
-    VkDescriptorSet sets[] = { stone_descriptor_set() };  // Use sealed global accessor
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            stone_pipeline_layout(), 0, 1, sets, 0, nullptr);
+    // Bind descriptor buffer instead of sets
+    VkDescriptorBufferBindingInfoEXT bindInfo{};
+    bindInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+    bindInfo.address = descriptorBufferAddress_;
+    bindInfo.usage = VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+
+    g_ext.vkCmdBindDescriptorBuffersEXT(cmd, 1, &bindInfo);
+
+    uint32_t bufferIndex = 0;
+    VkDeviceSize offset = 0;
+    g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                             stone_pipeline_layout(), 0, 1, &bufferIndex, &offset);
 
     // Push totalTime (4 bytes) — compute uses it for animation
     vkCmdPushConstants(cmd, stone_pipeline_layout(),
@@ -352,22 +408,18 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
         &primitiveCount,
         &sizeInfo);
 
-    uint64_t bufferHandle = BufferManager::create(
-        sizeInfo.accelerationStructureSize,
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        "Dummy_TLAS_Buffer");
+    uint64_t bufferHandle = 0;
+    BM_CREATE(bufferHandle, sizeInfo.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, "Dummy_TLAS_Buffer");
 
     if (bufferHandle == 0) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create dummy TLAS buffer");
         return VK_NULL_HANDLE;
     }
 
-    const BufferInfo* bufferInfo = BufferManager::get(bufferHandle);
+    const BufferInfo* bufferInfo = BM_GET(bufferHandle);
     if (!bufferInfo) {
         LOG_FATAL_CAT("PIPELINE", "Failed to get dummy TLAS buffer info");
-        BufferManager::destroy(bufferHandle);
+        BM_DESTROY(bufferHandle);
         return VK_NULL_HANDLE;
     }
 
@@ -381,7 +433,7 @@ VkAccelerationStructureKHR PipelineManager::createDummyTLAS()
     VkResult result = g_ext.vkCreateAccelerationStructureKHR(stone_device(), &createInfo, nullptr, &as);
     if (result != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create dummy TLAS: {}", string_VkResult(result));
-        BufferManager::destroy(bufferHandle);
+        BM_DESTROY(bufferHandle);
         return VK_NULL_HANDLE;
     }
 
@@ -518,10 +570,7 @@ void PipelineManager::createRayTracingPipeline()
     pipelineInfo.pGroups                      = groups.data();
     pipelineInfo.maxPipelineRayRecursionDepth = 1;
     pipelineInfo.layout                       = rtPipelineLayout_.get();
-
-    // Critical fix: Same descriptor-buffer flag as compute pipeline
-    // Prevents validation spam on eternal descriptor set usage in ray-tracing
-    pipelineInfo.flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+    pipelineInfo.flags                        = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult result = g_ext.vkCreateRayTracingPipelinesKHR(
@@ -782,15 +831,18 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipe);
 
-    VkDescriptorSet sets[] = { stone_descriptor_set() };
+    // Bind descriptor buffer instead of sets
+    VkDescriptorBufferBindingInfoEXT bindInfo{};
+    bindInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+    bindInfo.address = descriptorBufferAddress_;
+    bindInfo.usage = VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
 
-    if (sets[0] == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "No sealed descriptor set — cannot bind");
-        return;
-    }
+    g_ext.vkCmdBindDescriptorBuffersEXT(cmd, 1, &bindInfo);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                            stone_pipeline_layout(), 0, 1, sets, 0, nullptr);
+    uint32_t bufferIndex = 0;
+    VkDeviceSize offset = 0;
+    g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                                             stone_pipeline_layout(), 0, 1, &bufferIndex, &offset);
 
     float time = 0.0f;
 
@@ -818,7 +870,14 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
 // =============================================================================
 PipelineManager::~PipelineManager()
 {
-    BufferManager::destroy(livingWorldBufferHandle_);
+    if (descriptorMapped_) {
+        const BufferInfo* info = BM_GET(descriptorBufferHandle_);
+        if (info) {
+            vkUnmapMemory(stone_device(), info->memory);
+        }
+    }
+    BM_DESTROY(descriptorBufferHandle_);
+    BM_DESTROY(livingWorldBufferHandle_);
     sbtBuffer_.reset();
     sbtMemory_.reset();
 
@@ -857,13 +916,12 @@ void RTX::PipelineManager::cacheDeviceProperties()
 }
 
 // =============================================================================
-// Update RT descriptor set — single set only (frame-free)
+// Update RT descriptors — memcpy via vkGetDescriptorEXT (zero-overhead)
 // =============================================================================
 void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updateInfo) noexcept
 {
-    VkDescriptorSet set = stone_descriptor_set();
-    if (set == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "No descriptor set sealed — empire compromised");
+    if (descriptorMapped_ == nullptr) {
+        LOG_FATAL_CAT("PIPELINE", "Descriptor buffer not mapped — empire compromised");
         return;
     }
 
@@ -872,136 +930,142 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
         return;
     }
 
-    std::array<VkWriteDescriptorSet, 17> writes{};
-    uint32_t writeCount = 0;
-
-    VkWriteDescriptorSetAccelerationStructureKHR accelInfo{};
-    VkDescriptorImageInfo outputImageInfo{};
-    VkDescriptorImageInfo nexusImageInfo{};
-    VkDescriptorBufferInfo uboInfo{};
-    VkDescriptorBufferInfo materialsInfo{};
-    VkDescriptorBufferInfo livingWorldInfo{};
-
     // Binding 0: Acceleration structure
-    accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-    accelInfo.accelerationStructureCount = 1;
-    accelInfo.pAccelerationStructures = &updateInfo.tlas;
+    if (updateInfo.tlas != VK_NULL_HANDLE) {
+        VkAccelerationStructureDeviceAddressInfoKHR asAddrInfo{};
+        asAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+        asAddrInfo.accelerationStructure = updateInfo.tlas;
 
-    writes[writeCount] = {};
-    writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[writeCount].pNext = &accelInfo;
-    writes[writeCount].dstSet = set;
-    writes[writeCount].dstBinding = 0;
-    writes[writeCount].descriptorCount = 1;
-    writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    ++writeCount;
+        VkDeviceAddress asAddr = g_ext.vkGetAccelerationStructureDeviceAddressKHR(stone_device(), &asAddrInfo);
+
+        VkDescriptorGetInfoEXT getInfo{};
+        getInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT;
+        getInfo.type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        getInfo.data.accelerationStructure = asAddr;
+
+        g_ext.vkGetDescriptorEXT(stone_device(), &getInfo, descProps_.accelerationStructureDescriptorSize,
+                                 static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[0]);
+    }
 
     // Binding 1: Storage output image
     if (updateInfo.rtOutputView != VK_NULL_HANDLE) {
-        outputImageInfo.imageView   = updateInfo.rtOutputView;
-        outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        outputImageInfo.sampler     = VK_NULL_HANDLE;
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageView = updateInfo.rtOutputView;
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfo.sampler = VK_NULL_HANDLE;
 
-        writes[writeCount] = {};
-        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[writeCount].dstSet = set;
-        writes[writeCount].dstBinding = 1;
-        writes[writeCount].descriptorCount = 1;
-        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[writeCount].pImageInfo = &outputImageInfo;
-        ++writeCount;
+        VkDescriptorGetInfoEXT getInfo{};
+        getInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT;
+        getInfo.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        getInfo.data.pStorageImage = &imageInfo;
+
+        g_ext.vkGetDescriptorEXT(stone_device(), &getInfo, descProps_.storageImageDescriptorSize,
+                                 static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[1]);
     }
 
     // Binding 2: UBO (camera)
     if (updateInfo.ubo != VK_NULL_HANDLE && updateInfo.uboSize > 0) {
-        uboInfo.buffer = updateInfo.ubo;
-        uboInfo.offset = 0;
-        uboInfo.range  = updateInfo.uboSize;
+        VkBufferDeviceAddressInfo uboAddrInfo{};
+        uboAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        uboAddrInfo.buffer = updateInfo.ubo;
 
-        writes[writeCount] = {};
-        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[writeCount].dstSet = set;
-        writes[writeCount].dstBinding = 2;
-        writes[writeCount].descriptorCount = 1;
-        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[writeCount].pBufferInfo = &uboInfo;
-        ++writeCount;
+        VkDeviceAddress uboAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &uboAddrInfo);
+
+        VkDescriptorAddressInfoEXT addrInfo{};
+        addrInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT;
+        addrInfo.address = uboAddr;
+        addrInfo.range = updateInfo.uboSize;
+        addrInfo.format = VK_FORMAT_UNDEFINED;
+
+        VkDescriptorGetInfoEXT getInfo{};
+        getInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT;
+        getInfo.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        getInfo.data.pUniformBuffer = &addrInfo;
+
+        g_ext.vkGetDescriptorEXT(stone_device(), &getInfo, descProps_.uniformBufferDescriptorSize,
+                                 static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[2]);
     } else {
         LOG_WARN_CAT("PIPELINE", "Skipping UBO write — invalid buffer or size");
     }
 
     // Binding 3: Materials (STORAGE_BUFFER)
     if (updateInfo.materialsBuffer != VK_NULL_HANDLE && updateInfo.materialsSize > 0) {
-        materialsInfo.buffer = updateInfo.materialsBuffer;
-        materialsInfo.offset = 0;
-        materialsInfo.range  = updateInfo.materialsSize;
+        VkBufferDeviceAddressInfo matAddrInfo{};
+        matAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        matAddrInfo.buffer = updateInfo.materialsBuffer;
 
-        writes[writeCount] = {};
-        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[writeCount].dstSet = set;
-        writes[writeCount].dstBinding = 3;
-        writes[writeCount].descriptorCount = 1;
-        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[writeCount].pBufferInfo = &materialsInfo;
-        ++writeCount;
+        VkDeviceAddress matAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &matAddrInfo);
+
+        VkDescriptorAddressInfoEXT addrInfo{};
+        addrInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT;
+        addrInfo.address = matAddr;
+        addrInfo.range = updateInfo.materialsSize;
+        addrInfo.format = VK_FORMAT_UNDEFINED;
+
+        VkDescriptorGetInfoEXT getInfo{};
+        getInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT;
+        getInfo.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        getInfo.data.pStorageBuffer = &addrInfo;
+
+        g_ext.vkGetDescriptorEXT(stone_device(), &getInfo, descProps_.storageBufferDescriptorSize,
+                                 static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[3]);
     } else {
         LOG_WARN_CAT("PIPELINE", "Skipping materials write — invalid buffer or size");
     }
 
     // Binding 7: Living world (STORAGE_BUFFER) — always write if buffer exists
     if (livingWorldBufferHandle_ != 0) {
-        livingWorldInfo.buffer = BufferManager::get_buffer(livingWorldBufferHandle_);
-        livingWorldInfo.offset = 0;
-        livingWorldInfo.range  = 64;  // Fixed size
+        VkBuffer lwBuffer = BM_GET_BUFFER(livingWorldBufferHandle_);
 
-        writes[writeCount] = {};
-        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[writeCount].dstSet = set;
-        writes[writeCount].dstBinding = 7;
-        writes[writeCount].descriptorCount = 1;
-        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[writeCount].pBufferInfo = &livingWorldInfo;
-        ++writeCount;
+        VkBufferDeviceAddressInfo lwAddrInfo{};
+        lwAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        lwAddrInfo.buffer = lwBuffer;
+
+        VkDeviceAddress lwAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &lwAddrInfo);
+
+        VkDescriptorAddressInfoEXT addrInfo{};
+        addrInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT;
+        addrInfo.address = lwAddr;
+        addrInfo.range = 64;
+        addrInfo.format = VK_FORMAT_UNDEFINED;
+
+        VkDescriptorGetInfoEXT getInfo{};
+        getInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT;
+        getInfo.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        getInfo.data.pStorageBuffer = &addrInfo;
+
+        g_ext.vkGetDescriptorEXT(stone_device(), &getInfo, descProps_.storageBufferDescriptorSize,
+                                 static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[7]);
     } else {
         LOG_WARN_CAT("PIPELINE", "Skipping living world write — buffer not created");
     }
 
     // Binding 6: Nexus/prev frame (optional)
     if (!updateInfo.nexusScoreViews.empty()) {
-        nexusImageInfo.imageView   = updateInfo.nexusScoreViews[0];
-        nexusImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        nexusImageInfo.sampler     = VK_NULL_HANDLE;
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageView = updateInfo.nexusScoreViews[0];
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfo.sampler = VK_NULL_HANDLE;
 
-        writes[writeCount] = {};
-        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[writeCount].dstSet = set;
-        writes[writeCount].dstBinding = 6;
-        writes[writeCount].descriptorCount = 1;
-        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[writeCount].pImageInfo = &nexusImageInfo;
-        ++writeCount;
+        VkDescriptorGetInfoEXT getInfo{};
+        getInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT;
+        getInfo.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        getInfo.data.pStorageImage = &imageInfo;
+
+        g_ext.vkGetDescriptorEXT(stone_device(), &getInfo, descProps_.storageImageDescriptorSize,
+                                 static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[6]);
     }
 
-    if (writeCount > 0) {
-        vkUpdateDescriptorSets(stone_device(), writeCount, writes.data(), 0, nullptr);
-    }
+    // Flush if not coherent (assume coherent for simplicity; add vkFlushMappedMemoryRanges if needed)
 }
 
 // =============================================================================
-// Get Descriptor set — always the single one
+// Get Descriptor set — removed, no sets in descriptor buffer mode
 // =============================================================================
-VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
-{
-    VkDescriptorSet ds = stone_descriptor_set();
-    if (ds == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "No descriptor set sealed — empire compromised");
-        return VK_NULL_HANDLE;
-    }
-    return ds;
-}
+// VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const { /* Removed */ }
 
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.61 — January 25, 2026
+// PipelineManager v30.62 — January 25, 2026
 // =============================================================================

@@ -1,8 +1,9 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.52
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.62
 // VULKAN RENDERER HEADER — PURE LIGHT | NO FRAMES | PEW FOREVER
-// SINGLE ETERNAL DESCRIPTOR SET • FIXED CMD BUFFER RING (RESET + RE-RECORD)
-// OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR • UBO • HDR STORAGE • WORLD
+// DESCRIPTOR SETS ARE DEAD — ETERNAL DESCRIPTOR BUFFER EMPIRE
+// FIXED CMD BUFFER RING (RESET + RE-RECORD) • BINDLESS • ZERO-OVERHEAD UPDATES
+// OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR BUFFER • UBO • HDR STORAGE • LIVING WORLD
 // =============================================================================
 
 #pragma once
@@ -37,7 +38,7 @@ public:
     [[nodiscard]] double getLifetimeSeconds() const noexcept { return totalTime_; }
 
 private:
-    // Core members — declaration order MUST match constructor initializer list exactly
+    // Core members — declaration order matches constructor initializer list
     SDL_Window*                     window_             = nullptr;
     int                             width_              = 0;
     int                             height_             = 0;
@@ -48,31 +49,32 @@ private:
     double                          totalTime_          = 0.0;
     std::chrono::steady_clock::time_point last_time_;
 
-    VkSemaphore                     timelineSemaphore_  = VK_NULL_HANDLE;
-    uint64_t                        currentTimelineValue_ = 0;
-
     // Timeline semaphores for fenceless tracking
-    VkSemaphore                     acquireTimelineSemaphore_ = VK_NULL_HANDLE;
-    uint64_t                        nextAcquireValue_ = 1;
+    VkSemaphore                     timelineSemaphore_           = VK_NULL_HANDLE;
+    uint64_t                        currentTimelineValue_        = 0;
 
-    VkSemaphore                     graphicsTimelineSemaphore_ = VK_NULL_HANDLE;
-    uint64_t                        nextGraphicsValue_ = 1;
+    VkSemaphore                     acquireTimelineSemaphore_    = VK_NULL_HANDLE;
+    uint64_t                        nextAcquireValue_            = 1;
 
-    // Acquire semaphores — cycle to prevent pending reuse
+    VkSemaphore                     graphicsTimelineSemaphore_   = VK_NULL_HANDLE;
+    uint64_t                        nextGraphicsValue_           = 1;
+
+    // Acquire semaphores — cycled to avoid pending reuse
     static constexpr size_t         ACQUIRE_SEM_COUNT   = 64;
     std::array<VkSemaphore, ACQUIRE_SEM_COUNT> acquireSemaphores_{};
     uint32_t                        currentFrame_       = 0;
 
+    // Persistent resources
     uint64_t                        defaultMaterialsHandle_ = 0;
-    uint64_t                        cameraUBO_          = 0;
-    VkBuffer                        cameraUBOBuffer_    = VK_NULL_HANDLE;
-    VkDeviceMemory                  cameraUBOMemory_    = VK_NULL_HANDLE;
+    uint64_t                        cameraUBO_              = 0;
+    VkBuffer                        cameraUBOBuffer_        = VK_NULL_HANDLE;
+    VkDeviceMemory                  cameraUBOMemory_        = VK_NULL_HANDLE;
 
-    VkCommandPool                   transientCmdPool_   = VK_NULL_HANDLE;
+    VkCommandPool                   transientCmdPool_       = VK_NULL_HANDLE;
 
-    VkImage                         hdrOutputImage_     = VK_NULL_HANDLE;
-    VkImageView                     hdrOutputView_      = VK_NULL_HANDLE;
-    VkDeviceMemory                  hdrOutputMemory_    = VK_NULL_HANDLE;
+    VkImage                         hdrOutputImage_         = VK_NULL_HANDLE;
+    VkImageView                     hdrOutputView_          = VK_NULL_HANDLE;
+    VkDeviceMemory                  hdrOutputMemory_        = VK_NULL_HANDLE;
 
     // Fixed command buffer ring — self-disposing via reset on reuse
     static constexpr size_t         CMD_RING_SIZE       = 64;
@@ -81,10 +83,8 @@ private:
 
     PipelineManager                 pipelineManager_;
 
-    // Lazy descriptor update flag
-    bool                            needsDescriptorUpdate_ = true;
-
-    // Deferred swapchain recreate flag (set after present if invalid)
+    // Flags
+    bool                            needsDescriptorUpdate_   = true;   // → descriptor buffer memcpy
     bool                            needsSwapchainRecreate_ = false;
 
 private:
@@ -97,14 +97,15 @@ private:
                                VkImageLayout oldLayout,
                                VkImageLayout newLayout) noexcept;
 
-    void updateGlobalDescriptorSet() noexcept;
+    void updateGlobalDescriptorBuffer() noexcept;  // descriptor buffer update (replaces old set update)
 };
 
 } // namespace RTX
 
 // =============================================================================
-// VULKAN RENDERER HEADER — v30.52 — JANUARY 23, 2026
-// Frame-free • single descriptor set • fixed cmd buffer ring (reset + re-record)
-// Fenceless with timeline polling • deferred swapchain recreate • pure light
-// Empire stable — pink photons eternal
+// VULKAN RENDERER HEADER — v30.62 — JANUARY 25, 2026
+// Descriptor sets eliminated • eternal descriptor buffer • bindless empire
+// Frame-free • fixed cmd ring (reset + re-record) • fenceless timeline tracking
+// Deferred swapchain recreate • living world compute dispatched every pew
+// Pure light — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
 // =============================================================================

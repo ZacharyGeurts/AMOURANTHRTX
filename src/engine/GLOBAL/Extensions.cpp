@@ -9,7 +9,8 @@
 //
 // =============================================================================
 // EXTENSIONS — CENTRALIZED LOADING — FULL VULKAN 1.4 COMPLIANCE
-// INSTANCE & DEVICE SPLIT — JANUARY 11, 2026
+// INSTANCE & DEVICE SPLIT — JANUARY 25, 2026
+// ADDED VK_EXT_descriptor_buffer LOADING & LOGGING
 // OPTIONAL EXTENSIONS FAILURE → LOG_INFO (CLEAN LOG)
 // ROBUST, PRODUCTION-READY, NULL-SAFE
 // =============================================================================
@@ -63,7 +64,7 @@ void loadInstanceExtensions(VkInstance instance)
 }
 
 // =============================================================================
-// Load Device-Level Extensions (swapchain, ray tracing, etc.)
+// Load Device-Level Extensions (swapchain, ray tracing, descriptor buffer, etc.)
 // =============================================================================
 void loadDeviceExtensions(VkDevice device)
 {
@@ -72,7 +73,7 @@ void loadDeviceExtensions(VkDevice device)
         return;
     }
 
-    LOG_INFO_CAT("EXT", "Loading device-level extensions for ray tracing, modern features, and swapchain");
+    LOG_INFO_CAT("EXT", "Loading device-level extensions for ray tracing, modern features, swapchain, and descriptor buffer");
 
     auto vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         SDL_Vulkan_GetVkGetInstanceProcAddr());
@@ -105,39 +106,44 @@ void loadDeviceExtensions(VkDevice device)
         } \
     } while(0)
 
-    // All extensions are now optional — clean log, no red herrings
+    // Swapchain & core
     LOAD(vkCreateSwapchainKHR);
     LOAD(vkDestroySwapchainKHR);
     LOAD(vkGetSwapchainImagesKHR);
     LOAD(vkAcquireNextImageKHR);
     LOAD(vkQueuePresentKHR);
 
+    // Ray tracing core
     LOAD(vkCreateRayTracingPipelinesKHR);
     LOAD(vkGetRayTracingShaderGroupHandlesKHR);
     LOAD(vkCmdTraceRaysKHR);
 
+    // Acceleration structures
     LOAD(vkGetAccelerationStructureBuildSizesKHR);
     LOAD(vkCmdBuildAccelerationStructuresKHR);
     LOAD(vkCreateAccelerationStructureKHR);
     LOAD(vkDestroyAccelerationStructureKHR);
     LOAD(vkGetAccelerationStructureDeviceAddressKHR);
 
+    // Buffer device address
     LOAD(vkGetBufferDeviceAddress);
 
+    // Maintenance & reorder
     LOAD(vkCmdCopyAccelerationStructureKHR);
     LOAD(vkCmdWriteAccelerationStructuresPropertiesKHR);
-
     LOAD(vkCmdTraceRaysIndirect2KHR);
 
+    // Modern Vulkan 1.3+
     LOAD(vkCmdBeginRendering);
     LOAD(vkCmdEndRendering);
     LOAD(vkCmdPipelineBarrier2);
-
     LOAD(vkQueueSubmit2KHR);
 
+    // Debug & diagnostics
     LOAD(vkSetDebugUtilsObjectNameEXT);
     LOAD(vkGetDeviceFaultInfoEXT);
 
+    // Promoted EXT → core
     LOAD(vkCopyMemoryToImageEXT);
     LOAD(vkCopyImageToMemoryEXT);
     LOAD(vkCmdDrawMeshTasksEXT);
@@ -147,9 +153,16 @@ void loadDeviceExtensions(VkDevice device)
     LOAD(vkCmdSetColorBlendEquationEXT);
     LOAD(vkCmdSetColorWriteMaskEXT);
 
+    // Descriptor buffer — the new empire core
+    LOAD(vkGetDescriptorSetLayoutSizeEXT);
+    LOAD(vkGetDescriptorSetLayoutBindingOffsetEXT);
+    LOAD(vkCmdBindDescriptorBuffersEXT);
+    LOAD(vkCmdSetDescriptorBufferOffsetsEXT);
+    LOAD(vkGetDescriptorEXT);
+
     #undef LOAD
 
-    LOG_INFO_CAT("EXT", "Device-level extensions loaded successfully — ray tracing, sync2, and swapchain ready");
+    LOG_INFO_CAT("EXT", "Device-level extensions loaded successfully — ray tracing, sync2, swapchain, and descriptor buffer ready");
 }
 
 void dumpRayTracingSupport(VkPhysicalDevice phys)
@@ -162,6 +175,11 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
     };
+    VkPhysicalDeviceDescriptorBufferPropertiesEXT descProps = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT
+    };
+    rtProps.pNext = &descProps;
+
     VkPhysicalDeviceProperties2 props2 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
         .pNext = &rtProps
@@ -182,9 +200,10 @@ void dumpRayTracingSupport(VkPhysicalDevice phys)
 } // namespace RTX
 
 // =============================================================================
-// UPDATED JANUARY 11, 2026 — CLEAN LOG
-// - All extension failures → LOG_INFO (optional only)
-// - Critical extensions still succeed
-// - No red herrings in log
-// PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// UPDATED JANUARY 25, 2026 — PINK EMPIRE UPGRADE
+// - Added full VK_EXT_descriptor_buffer loading and logging
+// - Optional extensions still log INFO only on missing
+// - dumpRayTracingSupport now includes descriptor buffer props
+// - Clean, validation-friendly, ready for living world breathing
+// PINK PHOTONS BINDLESS — EMPIRE UNSTOPPABLE — AMOURANTH FOREVER 💖
 // =============================================================================

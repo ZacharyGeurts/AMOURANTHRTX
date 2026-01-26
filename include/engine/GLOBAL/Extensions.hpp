@@ -8,18 +8,20 @@
 //
 // =============================================================================
 // EXTENSIONS — CENTRALIZED AND CLEAN — FULL VULKAN 1.4 COMPLIANCE
-// SPLIT INSTANCE & DEVICE LOADING — JANUARY 10, 2026
+// SPLIT INSTANCE & DEVICE LOADING — JANUARY 25, 2026
+// ADDED VK_EXT_descriptor_buffer SUPPORT FOR ZERO-OVERHEAD DESCRIPTOR UPDATES
 // FULLY STABLE, NO INSTANCE FUNCTIONS VIA DEVICE PROC ADDR
 // ROBUST, PRODUCTION-READY, NULL-SAFE
 // =============================================================================
 #pragma once
 
-// Enable required KHR extensions for compile-time constants & structs
+// Enable required KHR/EXT extensions for compile-time constants & structs
 // Must be BEFORE any vulkan.h include in the entire project
 #define VK_KHR_acceleration_structure 1
 #define VK_KHR_ray_tracing_pipeline 1
 #define VK_KHR_deferred_host_operations 1
 #define VK_KHR_buffer_device_address 1
+#define VK_EXT_descriptor_buffer 1
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
@@ -83,6 +85,13 @@ struct Extensions {
     PFN_vkCmdSetColorBlendEnableEXT            vkCmdSetColorBlendEnableEXT            = nullptr;
     PFN_vkCmdSetColorBlendEquationEXT          vkCmdSetColorBlendEquationEXT          = nullptr;
     PFN_vkCmdSetColorWriteMaskEXT              vkCmdSetColorWriteMaskEXT              = nullptr;
+
+    // ── Descriptor Buffer (EXT) — Zero-overhead descriptor updates ─────
+    PFN_vkGetDescriptorSetLayoutSizeEXT            vkGetDescriptorSetLayoutSizeEXT            = nullptr;
+    PFN_vkGetDescriptorSetLayoutBindingOffsetEXT  vkGetDescriptorSetLayoutBindingOffsetEXT  = nullptr;
+    PFN_vkCmdBindDescriptorBuffersEXT              vkCmdBindDescriptorBuffersEXT              = nullptr;
+    PFN_vkCmdSetDescriptorBufferOffsetsEXT         vkCmdSetDescriptorBufferOffsetsEXT         = nullptr;
+    PFN_vkGetDescriptorEXT                         vkGetDescriptorEXT                         = nullptr;
 };
 
 // THE ONE TRUE GLOBAL — SEALED IN STONE
@@ -130,8 +139,24 @@ void dumpRayTracingSupport(VkPhysicalDevice physicalDevice);
 #define VK_ACQUIRE_NEXT_IMAGE(...)               RTX::g_ext.vkAcquireNextImageKHR(__VA_ARGS__)
 #define VK_QUEUE_PRESENT(...)                    RTX::g_ext.vkQueuePresentKHR(__VA_ARGS__)
 
+// DESCRIPTOR BUFFER MACROS — CLEAN ACCESS
+#define VK_GET_DESCRIPTOR_SET_LAYOUT_SIZE(layout, size) \
+    RTX::g_ext.vkGetDescriptorSetLayoutSizeEXT(stone_device(), layout, size)
+
+#define VK_GET_DESCRIPTOR_BINDING_OFFSET(layout, binding, offset) \
+    RTX::g_ext.vkGetDescriptorSetLayoutBindingOffsetEXT(stone_device(), layout, binding, offset)
+
+#define VK_CMD_BIND_DESCRIPTOR_BUFFERS(cmd, count, bindingInfos) \
+    RTX::g_ext.vkCmdBindDescriptorBuffersEXT(cmd, count, bindingInfos)
+
+#define VK_CMD_SET_DESCRIPTOR_BUFFER_OFFSETS(cmd, bindPoint, layout, firstSet, count, indices, offsets) \
+    RTX::g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, bindPoint, layout, firstSet, count, indices, offsets)
+
+#define VK_GET_DESCRIPTOR(device, getInfo, size, outDescriptor) \
+    RTX::g_ext.vkGetDescriptorEXT(device, getInfo, size, outDescriptor)
+
 // =============================================================================
 // ALL EXTENSIONS NOW LIVE IN THIS FILE — NO MORE SCATTERED DECLARATIONS
 // INSTANCE & DEVICE SPLIT — FULLY STABLE & VALIDATION CLEAN
-// JANUARY 10, 2026 — SWAPCHAIN AUTOMAGIC CONVERGENCE ACHIEVED
+// JANUARY 25, 2026 — VK_EXT_descriptor_buffer ADDED FOR LIVING WORLD EMPIRE
 // =============================================================================

@@ -1,12 +1,13 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.7
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.8
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
 // PHILOSOPHY: Datacenter domination + desktop coexistence
 //             Live measurement, zero pre-reserve, take 100% free VRAM
 //             Instant relinquish on explicit command (no auto-purge)
 //             Tiny safety margin for YouTube PiP / browser tabs
-//             JANUARY 22, 2026 — BIT-LEVEL LOGGING, UNIVERSAL SCALE
+//             JANUARY 26, 2026 — FIXED get_device_address TO TAKE uint64_t HANDLE
+//             BIT-LEVEL LOGGING, UNIVERSAL SCALE
 //             NEW: Toggleable linear tiling for images (via OptionsMenu)
 //             FUTURE COMPLETE: Runtime chunk resize, per-chunk purge, multi-queue sharing, dedicated host-visible pool
 // =============================================================================
@@ -274,6 +275,11 @@ inline std::mutex g_bufferMutex;
 [[nodiscard]] inline VkBuffer get_buffer(uint64_t handle) noexcept {
     auto it = g_buffers.find(handle);
     return it != g_buffers.end() ? it->second.buffer : VK_NULL_HANDLE;
+}
+
+[[nodiscard]] inline VkDeviceMemory get_memory(uint64_t handle) noexcept {
+    auto it = g_buffers.find(handle);
+    return it != g_buffers.end() ? it->second.memory : VK_NULL_HANDLE;
 }
 
 [[nodiscard]] inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
@@ -792,6 +798,8 @@ template<typename... Args>
             chunk->baseAddr + chunk->head, nullptr, fixedUsage, std::string(tag) + "_chunk"
         });
 
+        chunk->handles.push_back(chunkHandle);
+
         if (firstHandle == 0) firstHandle = chunkHandle;
 
         remaining -= chunkSize;
@@ -857,6 +865,7 @@ inline void* mapHostVisible(VkDeviceSize size) noexcept {
 #define BM_DESTROY(h)                       BufferManager::destroy(h)
 #define BM_GET(h)                           BufferManager::get(h)
 #define BM_GET_BUFFER(h)                    BufferManager::get_buffer(h)
+#define BM_GET_MEMORY(h)                    BufferManager::get_memory(h)
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
 #define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)   BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)
 #define BM_PURGE_ALL()                      BufferManager::purge_all()

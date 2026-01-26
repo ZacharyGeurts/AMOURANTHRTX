@@ -1,8 +1,8 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.60
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.62
 // PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX + COMPUTE EDITION
-// SINGLE ETERNAL DESCRIPTOR SET | NO FRAMES | FRAME-FREE TRACE & UPDATE
-// UPDATE_AFTER_BIND ENABLED | PERSISTENT COMMAND BUFFERS COMPATIBLE | ETERNAL SBT
+// VK_EXT_DESCRIPTOR_BUFFER MODE | NO DESCRIPTOR SETS | MEMCPY UPDATES
+// SINGLE ETERNAL DESCRIPTOR BUFFER | FRAME-FREE TRACE & UPDATE
 // LIVING WORLD COMPUTE SUPPORT (living_world.spv) | MATERIALS ACTIVE
 // PUSH CONSTANT: 4 BYTES ONLY (time float) | NO DT | MAX DRIVER FRIENDLINESS
 // =============================================================================
@@ -59,7 +59,6 @@ public:
     void createRayTracingPipeline();
     void createComputePipeline();  // living world breathing
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
-    void allocateDescriptorSets();
     void updateRTDescriptorSet(const RTDescriptorUpdate& updateInfo) noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd);
 
@@ -74,7 +73,6 @@ public:
     static std::atomic<bool>     g_pipelineNeedsRebuild;
 
     // Accessors
-    [[nodiscard]] VkDescriptorSet getDescriptorSet() const;  // single eternal set
     [[nodiscard]] VkPipeline       getPipeline() const;
     [[nodiscard]] VkPipelineLayout getPipelineLayout() const;
 
@@ -83,8 +81,6 @@ public:
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& missRegion() const noexcept { return missSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& hitRegion() const noexcept { return hitSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& callableRegion() const noexcept { return callableSbtRegion_; }
-
-    [[nodiscard]] std::span<const VkDescriptorSet> rtDescriptorSets() const noexcept { return rtDescriptorSets_; }
 
     [[nodiscard]] VkAccelerationStructureKHR dummyTLAS() const noexcept { return dummyTLAS_.get(); }
 
@@ -104,7 +100,7 @@ public:
     VkStridedDeviceAddressRegionKHR callableSbtRegion_{};
 
 private:
-    static constexpr std::array<VkDescriptorSetLayoutBinding, 10> kMainBindings{{
+    static constexpr std::array<VkDescriptorSetLayoutBinding, 9> kMainBindings{{
         {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
@@ -116,14 +112,13 @@ private:
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // Materials — active
         {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
-        {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR},
         {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
         {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
          VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // LivingWorldBuffer
         {8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
          VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // MaterialOverrides
         {9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR} // Reserved for custom/dev compute
+         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR} // Reserved
     }};
 
     Handle<VkDescriptorSetLayout> rtDescriptorSetLayout_;
@@ -141,19 +136,26 @@ private:
     VkDeviceSize                  sbtSize_{0};
 
     std::vector<Handle<VkShaderModule>> shaderModules_;
-    std::vector<VkDescriptorSet>        rtDescriptorSets_;      // size 1 now
-    std::vector<VkDescriptorSet>        texDescriptorSets_;     // size 1 now
-    std::vector<VkDescriptorSet>        emptyDescriptorSets_;   // size 1 now
 
     uint32_t raygenGroupCount_{1};
     uint32_t missGroupCount_{1};
-    uint32_t hitGroupCount_{0};
+    uint32_t hitGroupCount_{1};
 
     Handle<VkBuffer>                  dummyAccelBuffer_;
     Handle<VkDeviceMemory>            dummyAccelMemory_;
     Handle<VkAccelerationStructureKHR> dummyTLAS_;
 
+    // Descriptor buffer members (eternal, mapped)
+    uint64_t descriptorBufferHandle_ = 0;
+    void* descriptorMapped_ = nullptr;
+    VkDeviceAddress descriptorBufferAddress_ = 0;
+    std::array<VkDeviceSize, kMainBindings.size()> bindingOffsets_{};
+    VkPhysicalDeviceDescriptorBufferPropertiesEXT descProps_{};
+
     VkAccelerationStructureKHR createDummyTLAS();
+
+    void cacheDescriptorProperties();
+    void createDescriptorBuffer();
 };
 
 [[nodiscard]] inline PipelineManager& pipeline() noexcept {
@@ -163,14 +165,12 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// FINAL HEADER — JANUARY 23, 2026
-// - Frame-free: single descriptor set, no frameIndex, no MAX_FRAMES_IN_FLIGHT
-// - UPDATE_AFTER_BIND enabled — safe to update every frame
-// - traceRays, updateRTDescriptorSet, getDescriptorSet simplified
-// - Manual SBT cleanup with sbtMemory_ Handle
-// - Direct call from persistent command buffer in VulkanRenderer
-// - Compute pipeline added for living world breathing
+// HEADER — JANUARY 25, 2026
+// - Switched to VK_EXT_descriptor_buffer: no sets, memcpy updates via vkGetDescriptorEXT
+// - Eternal descriptor buffer (host-coherent mapped) for zero CPU overhead
+// - Removed descriptor set allocation / binding / accessors
+// - Binding via vkCmdBindDescriptorBuffersEXT + offsets
+// - Living world at 7, materials at 3 — updated via direct writes
 // - Push constant: 4 bytes only (time float) — dt killed
-// - Zero-cost RTX preserved — validation clean
-// Empire complete — pink photons scream across the screen — AMOURANTH FOREVER 💖
+// Empire upgraded — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
 // =============================================================================
