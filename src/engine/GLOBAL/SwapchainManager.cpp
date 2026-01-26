@@ -362,22 +362,39 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
 
     VkSwapchainKHR currentSwap = stone_swapchain();
 
-    // Get the current image from swapchain
     VkImage currentImage = swapchainImages_[imageIndex];
 
-    // Create one-time transient command buffer for transition
+    // Lazy-create transient command pool if not exists
+    VkCommandPool transientPool = stone_transient_pool();
+    if (transientPool == VK_NULL_HANDLE) {
+        VkCommandPoolCreateInfo pci{};
+        pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
+
+        VkResult res = vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool);
+        if (res != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Failed to lazy-create transient pool for present transition: {}", string_VkResult(res));
+            // Continue — present may work if image already in correct layout
+        } else {
+            StoneKey::stone_seal_transient_pool(transientPool);  // Seal if created
+            LOG_INFO_CAT("SWAPCHAIN", "Lazy-created transient command pool for present transition");
+        }
+    }
+
+    // One-time cmd buffer for transition
     VkCommandBuffer cmd = VK_NULL_HANDLE;
 
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = stone_transient_pool();  // Use global transient pool
+    allocInfo.commandPool        = transientPool;
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
 
     VkResult res = vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
     if (res != VK_SUCCESS) {
         LOG_ERROR_CAT("SWAPCHAIN", "Failed to allocate transient cmd for present transition: {}", string_VkResult(res));
-        // Continue anyway — present may still work if already in correct layout
+        // Continue anyway
     } else {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -397,7 +414,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
         vkQueueWaitIdle(queue);
 
-        vkFreeCommandBuffers(stone_device(), stone_transient_pool(), 1, &cmd);
+        vkFreeCommandBuffers(stone_device(), transientPool, 1, &cmd);
     }
 
     VkPresentInfoKHR pi{};
