@@ -61,7 +61,7 @@ private:
     uint64_t                        nextGraphicsValue_           = 1;
 
     // Per-image binary semaphores — indexed by acquired imageIndex
-    // One per swapchain image, resized on recreate, safe reuse after re-acquire
+    // Safe reuse: signaled only when that image is rendered, waited only when presented
     std::vector<VkSemaphore>        renderFinishedSemaphores_;
 
     // Acquire semaphores — cycled to avoid pending reuse
