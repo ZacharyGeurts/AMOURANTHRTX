@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer Header
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.74 — January 26, 2026 — per-image binary semaphores for present sync
+// Version 30.74 — January 26, 2026 — BufferManager macro integration + per-image binary semaphores
 // DESCRIPTOR SETS ARE DEAD — ETERNAL DESCRIPTOR BUFFER EMPIRE
 // FIXED CMD BUFFER RING (RESET + RE-RECORD) • BINDLESS • ZERO-OVERHEAD UPDATES
 // OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR BUFFER • UBO • HDR STORAGE • LIVING WORLD
@@ -69,10 +69,10 @@ private:
     std::array<VkSemaphore, ACQUIRE_SEM_COUNT> acquireSemaphores_{};
     uint32_t                        currentFrame_       = 0;
 
-    // Persistent resources
-    uint64_t                        defaultMaterialsHandle_ = 0;
-    uint64_t                        cameraUBO_              = 0;
-    VkBuffer                        cameraUBOBuffer_        = VK_NULL_HANDLE;
+    // Persistent resources (BufferManager handles + raw Vulkan caches)
+    uint64_t                        defaultMaterialsHandle_ = 0;   // BufferManager descriptor buffer handle
+    uint64_t                        cameraUBOHandle_        = 0;   // BufferManager UBO handle
+    VkBuffer                        cameraUBOBuffer_        = VK_NULL_HANDLE;  // raw VkBuffer cache
     VkDeviceMemory                  cameraUBOMemory_        = VK_NULL_HANDLE;
 
     VkCommandPool                   transientCmdPool_       = VK_NULL_HANDLE;
@@ -110,7 +110,7 @@ private:
 // VULKAN RENDERER HEADER — v30.74 — JANUARY 26, 2026
 // Descriptor sets eliminated • eternal descriptor buffer • bindless empire
 // Frame-free • fixed cmd ring (reset + re-record) • fenceless timeline tracking
-// Per-image binary semaphores (vector indexed by imageIndex) for present wait
+// BufferManager macros for all buffers • per-image binary semaphores for present wait
 // Deferred swapchain recreate • living world compute dispatched every pew
 // Pure light — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
 // =============================================================================

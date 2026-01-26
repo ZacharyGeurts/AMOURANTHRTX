@@ -82,8 +82,8 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
       nextGraphicsValue_(1),
       currentFrame_(0),
       defaultMaterialsHandle_(0),
-      cameraUBO_(0),
-      cameraUBOBuffer_(VK_NULL_HANDLE),
+      cameraUBOHandle_(0),  // BufferManager handle
+      cameraUBOBuffer_(VK_NULL_HANDLE),  // raw VkBuffer cache
       cameraUBOMemory_(VK_NULL_HANDLE),
       transientCmdPool_(VK_NULL_HANDLE),
       hdrOutputImage_(VK_NULL_HANDLE),
@@ -132,11 +132,13 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     }
 
     // Camera UBO via BufferManager macro
-    BM_CREATE(cameraUBO_, sizeof(CameraSceneData),
+    BM_CREATE(cameraUBOHandle_, sizeof(CameraSceneData),
               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
               "CameraUBO");
+
+    cameraUBOBuffer_ = BM_GET_BUFFER(cameraUBOHandle_);  // cache raw buffer
 
     // Default materials via descriptor buffer macro
     std::array<Material, 1> defaultMats{};
@@ -213,7 +215,7 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     vkDestroyImage(stone_device(), hdrOutputImage_, nullptr);
     vkFreeMemory(stone_device(), hdrOutputMemory_, nullptr);
 
-    BM_DESTROY(cameraUBO_);
+    BM_DESTROY(cameraUBOHandle_);
     BM_DESTROY(defaultMaterialsHandle_);
 
     vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
@@ -325,7 +327,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
     RTDescriptorUpdate update{};
     update.tlas             = tlas;
     update.rtOutputView     = hdrOutputView_;
-    update.ubo              = cameraUBOBuffer_;  // manual buffer, no macro needed
+    update.ubo              = BM_GET_BUFFER(cameraUBOHandle_);  // correct buffer from BM handle
     update.uboSize          = sizeof(CameraSceneData);
     update.materialsBuffer  = BM_GET_BUFFER(defaultMaterialsHandle_);
     update.materialsSize    = BM_GET(defaultMaterialsHandle_)->size;
@@ -433,7 +435,7 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     VkTimelineSemaphoreSubmitInfo timelineSI{};
     timelineSI.sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineSI.signalSemaphoreValueCount = 2;
+    timelineSI.signalSemaphoreValueCount = 1;
     timelineSI.pSignalSemaphoreValues    = &nextGraphicsValue_;
 
     VkSubmitInfo submitInfo{};

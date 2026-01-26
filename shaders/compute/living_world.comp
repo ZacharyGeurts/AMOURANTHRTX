@@ -5,40 +5,41 @@
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
 // ────────────────────────────────────────────────────────────────
-// Single small persistent storage buffer — written once per frame
-// 64 bytes total — nicely aligned, scalar layout
+// Persistent 64-byte storage block — scalar layout, write-once-per-frame
+// Matches your Material struct philosophy (albedo/emissive used downstream)
 // ────────────────────────────────────────────────────────────────
 layout(set = 0, binding = 7, scalar) buffer restrict writeonly LivingWorldBuffer
 {
-    vec4  sunDirAndIntensity;     // .xyz = normalized direction, .w = intensity (~0..1.7)
-    vec4  windDirAndSpeed;        // .xyz = normalized direction, .w = speed (~1..13 m/s)
-    float temperature;            // °C, roughly 0..35
-    float humidity;               // 0..1
-    uint  frameSeed;              // simple LCG seed for other shaders
-    uint  padding;                // keep block 64 bytes / 16 floats
+    // 16 floats / 64 bytes total — tightly packed
+    vec4  sunDirAndIntensity;     // .xyz = normalized direction, .w = intensity (0.0–1.7)
+    vec4  windDirAndSpeed;        // .xyz = normalized direction, .w = speed m/s (2.0–14.0)
+    float temperature;            // °C, realistic outdoor range ~ -10..40
+    float humidity;               // 0.0..1.0
+    float airPressure;            // hPa, subtle influence on sky color
+    float cloudDensity;           // 0.0..1.0, drives sky scattering
+    uint  frameSeed;              // LCG seed for shaders needing noise
+    uint  padding;                // force 64-byte alignment
 } world;
 
 // ────────────────────────────────────────────────────────────────
-// Push constant: only absolute total time (no deltaTime anywhere)
+// Push constant — only totalTime (matches your 4-byte push)
 // ────────────────────────────────────────────────────────────────
-layout(push_constant) uniform Push
+layout(push_constant) uniform PushConstants
 {
-    float totalTime;
+    float totalTime;              // absolute time in seconds (no delta)
 } pc;
-
 
 void main()
 {
     float t = pc.totalTime;
 
-    // ── Day fraction [0,1) ────────────────────────────────────────
-    float dayFrac = fract(t / 86400.0);           // 86400 = 24*60*60 — real seconds
+    // ── Day/night cycle (realistic 24h period) ───────────────────────
+    float dayFrac = fract(t / 86400.0);                   // [0,1) = one day
+    float sunTime = dayFrac * 6.283185307179586;          // 2π radians
 
-    // ── Sun ───────────────────────────────────────────────────────
-    // Noon at dayFrac ≈ 0.5 → elevation = 90° at noon
-    float sunTime   = dayFrac * 6.283185307179586; // 2π
-    float elevation = sin(sunTime - 1.5707963267948966); // peak at noon
-    float azimuth   = sunTime * 0.25;              // one full rotation per day
+    // Sun elevation: -90° (midnight) → 90° (noon) → -90° (midnight)
+    float elevation = sin(sunTime - 1.5707963267948966);  // peak at noon
+    float azimuth   = sunTime * 0.25;                     // one rotation/day
 
     vec3 sunDir = normalize(vec3(
         cos(elevation) * sin(azimuth),
@@ -46,44 +47,46 @@ void main()
         cos(elevation) * cos(azimuth)
     ));
 
-    // Intensity: ~0 at night, ~1.7 at noon, smooth
-    float sunIntensity = max(0.0, elevation) * 1.5 + 0.2;
+    // Intensity: smooth falloff at horizon, ~0 at night, ~1.7 at noon
+    float sunIntensity = max(0.0, elevation) * 1.5 + 0.2 * (1.0 + sin(sunTime * 2.0) * 0.1);
 
     world.sunDirAndIntensity = vec4(sunDir, sunIntensity);
 
-
-    // ── Wind ──────────────────────────────────────────────────────
-    // Low-frequency base + faster turbulence
-    float windTurbulence = t * 0.007;
-    float windBase       = t * 0.0008;
+    // ── Wind system — multi-layer turbulence ──────────────────────────
+    float windSlow = t * 0.0008;
+    float windFast = t * 0.007;
+    float windChaos = t * 0.013;
 
     vec3 windDir = normalize(vec3(
-        sin(windBase * 1.3) * 0.7 + cos(windTurbulence * 2.1) * 0.3,
+        sin(windSlow * 1.3) * 0.7 + cos(windFast * 2.1) * 0.3 + sin(windChaos * 3.4) * 0.1,
         0.0,
-        cos(windBase * 1.1) * 0.7 + sin(windTurbulence * 1.7) * 0.3
+        cos(windSlow * 1.1) * 0.7 + sin(windFast * 1.7) * 0.3 + cos(windChaos * 2.9) * 0.1
     ));
 
-    // Speed 2–14 m/s, natural variation
-    float windSpeed = 5.0 + 
-                      sin(t * 0.0009) * 4.0 + 
-                      sin(t * 0.0042 + 1.7) * 3.0 +
-                      cos(t * 0.013) * 2.0;
+    // Speed: 2–14 m/s, gusts, seasonal variation
+    float windBase = 5.0 + sin(t * 0.0009) * 4.0 + cos(t * 0.0042) * 3.0;
+    float windGust = sin(t * 0.13 + sin(t * 0.031)) * 4.0;
+    float windSpeed = windBase + windGust;
 
     world.windDirAndSpeed = vec4(windDir, windSpeed);
 
+    // ── Temperature & humidity — realistic diurnal cycle ──────────────
+    float tempOffset = sin(sunTime - 0.4) * 13.5;         // afternoon peak bias
+    world.temperature = 18.5 + tempOffset + sin(t * 0.00005) * 5.0;  // seasonal drift
 
-    // ── Temperature & Humidity ────────────────────────────────────
-    // Temperature: 5–32 °C, peaks in afternoon
-    float tempFactor = sin(sunTime - 0.4);           // slight afternoon bias
-    world.temperature = 18.5 + tempFactor * 13.5;    // ~5–32 °C
+    // Humidity inverse to temperature + random fog/rain influence
+    float humidityBase = 0.45 + (1.0 - abs(tempOffset / 13.5)) * 0.45;
+    float rainChance = fract(sin(t * 0.00017) * 43758.5453);
+    world.humidity = clamp(humidityBase + rainChance * 0.4 - 0.2, 0.0, 1.0);
 
-    // Humidity: inverse to temperature (simplified)
-    world.humidity = 0.45 + (1.0 - abs(tempFactor)) * 0.45;  // 0.45–0.9
+    // ── Air pressure — subtle sky color / scattering influence ────────
+    world.airPressure = 1013.25 + sin(t * 0.00021) * 15.0 + sin(t * 0.0013) * 3.0;
 
+    // ── Cloud density — drives sky procedural clouds ──────────────────
+    world.cloudDensity = 0.3 + sin(t * 0.00009) * 0.2 + sin(t * 0.00047) * 0.3;
 
-    // ── Simple LCG seed for other shaders ─────────────────────────
-    // Good enough for blue-noise offset, dither, etc.
-    uint seed = uint(t * 54321.0);                   // arbitrary large multiplier
-    seed      = seed * 1664525u + 1013904223u;       // classic LCG
+    // ── Simple LCG frame seed — for dither, noise offset in other shaders ─
+    uint seed = uint(t * 54321.0);
+    seed = seed * 1664525u + 1013904223u;
     world.frameSeed = seed;
 }

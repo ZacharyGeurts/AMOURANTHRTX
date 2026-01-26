@@ -1,51 +1,69 @@
-// assets/shaders/raytracing/raygen.glsl
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_scalar_block_layout : require
 
 layout(location = 0) rayPayloadEXT vec3 hitValue;
+layout(location = 1) rayPayloadEXT bool shadowHit;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
-layout(set = 0, binding = 2) uniform CameraBuffer {
+
+layout(set = 0, binding = 2) uniform CameraUBO {
     mat4 viewInverse;
     mat4 projInverse;
-    vec3 cameraPos;
-    float time;
-    uint frame;
-    uint spp;
-    uint seedOffset;
+    vec4 cameraPos;
+    vec4 prevCameraPos;
+    float exposure;
+    float totalTime;
+    uint randomSeed;
+    uint maxDepth;
 } camera;
 
+layout(set = 0, binding = 3) readonly buffer Materials {
+    vec4 albedo;
+    vec4 emissive;
+    vec4 metallicRoughness;  // .x = metallic, .y = roughness
+    vec4 padding;
+} materials[];
+
 layout(push_constant) uniform PushConstants {
-    float time;
+    float totalTime;
 } pc;
 
-void main()
-{
+vec3 randomHemisphere(vec3 normal, uint seed) {
+    uint s = seed ^ uint(pc.totalTime * 1e6);
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    float r1 = fract(sin(float(s)) * 43758.5453123);
+    float r2 = fract(sin(float(s + 1)) * 43758.5453123);
+    float theta = 2.0 * 3.141592653589793 * r1;
+    float phi = acos(1.0 - 2.0 * r2);
+    vec3 dir = vec3(sin(phi) * cos(theta), sin(phi) * sin(theta), cos(phi));
+    vec3 tangent = normalize(cross(normal, vec3(0,1,0)));
+    vec3 bitangent = cross(normal, tangent);
+    return normalize(tangent * dir.x + bitangent * dir.y + normal * dir.z);
+}
+
+void main() {
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
-    vec4 origin = camera.viewInverse * vec4(0, 0, 0, 1);
+    vec4 origin = camera.viewInverse * vec4(0,0,0,1);
     vec4 target = camera.projInverse * vec4(d.x, d.y, 1, 1);
     vec4 direction = camera.viewInverse * vec4(normalize(target.xyz), 0);
 
     uint rayFlags = gl_RayFlagsOpaqueEXT;
     uint cullMask = 0xff;
-    float tMin = 0.001;
-    float tMax = 10000.0;
+    float tmin = 0.001;
+    float tmax = 10000.0;
 
-    traceRayEXT(topLevelAS,
-                rayFlags,
-                cullMask,
-                0, // sbtRecordOffset
-                0, // sbtRecordStride
-                0, // missIndex
-                origin.xyz,
-                tMin,
-                direction.xyz,
-                tMax,
-                0);
+    traceRayEXT(topLevelAS, rayFlags, cullMask, 0, 0, 1,
+                origin.xyz, tmin, direction.xyz, tmax, 0);
 
-    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
+    vec3 finalColor = hitValue * camera.exposure;
+    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(finalColor, 1.0));
 }
