@@ -10,8 +10,9 @@
 // - Fixed: Explicit PRESENT_SRC_KHR transition before every present
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
 // - Fixed: Lazy transient command pool + fixed ring for present transitions
-// - No external getOneTimeCommandBuffer — internal ring with safe reset
+// - GPU-owned ring tracker buffer (host-visible coherent) for non-blocking reuse
 // - Cleanup dissolves old cmd buffers safely on shutdown
+// - Full LOG_AMOURANTH trace on every step for debugging
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -19,9 +20,11 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"  // for findMemoryType
 
 #include <algorithm>
 #include <format>
+#include <cstring>  // for std::memset
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -116,7 +119,6 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     VkAccessFlags srcAccess = 0;
     VkAccessFlags dstAccess = 0;
 
-    // Critical: always transition to PRESENT_SRC_KHR before present
     if (newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED || oldLayout == VK_IMAGE_LAYOUT_GENERAL ||
             oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
@@ -131,7 +133,7 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
         srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
     } else {
-        return;  // unsupported transition
+        return;
     }
 
     barrier.srcAccessMask = srcAccess;
@@ -266,7 +268,6 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         LOG_WARN_CAT("SWAPCHAIN", "Surface does NOT support VK_IMAGE_USAGE_STORAGE_BIT — direct write impossible");
     }
 
-    // Always add TRANSFER_DST for potential future blit/tonemap safety
     imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
     VkSwapchainCreateInfoKHR ci{};
@@ -356,154 +357,154 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 
 // =============================================================================
 // presentImage — always ensure image in PRESENT_SRC_KHR layout before present
-// Uses lazy ring of transient cmd buffers — safe async reset after GPU completion
-// NO BLOCKING WAIT-IDLE — timeline ensures safety on ring wrap
-// =============================================================================
-// =============================================================================
-// presentImage — always ensure image in PRESENT_SRC_KHR layout before present
-// Uses lazy ring of transient cmd buffers — safe async reset after GPU completion
-// FULL LOG_AMOURANTH trace on every step — for debugging hangs/stutters
+// Uses lazy ring of transient cmd buffers + GPU tracker buffer — fully non-blocking
 // =============================================================================
 VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
     LOG_AMOURANTH("ENTER presentImage: imageIndex={}, waitSem={}, minimized={}, swapchain valid={}",
                   imageIndex, (void*)waitSem, minimized_, swapchain_.valid());
 
     if (minimized_ || !swapchain_.valid()) {
-        LOG_AMOURANTH("EARLY EXIT: minimized or invalid swapchain → VK_ERROR_INITIALIZATION_FAILED");
+        LOG_AMOURANTH("EARLY EXIT: minimized or invalid swapchain");
         return VK_ERROR_INITIALIZATION_FAILED;
     }
 
     VkSwapchainKHR currentSwap = stone_swapchain();
     VkImage currentImage = swapchainImages_[imageIndex];
-    LOG_AMOURANTH("Acquired swapchain={}, current image={} (index {})", (void*)currentSwap, (void*)currentImage, imageIndex);
+    LOG_AMOURANTH("Current image={} (index {})", (void*)currentImage, imageIndex);
 
-    // Lazy init: transient pool + cmd ring + timeline semaphore
-    static VkCommandPool s_transientPool = VK_NULL_HANDLE;
-    static std::vector<VkCommandBuffer> s_cmdRing;
-    static uint32_t s_ringIndex = 0;
-    static VkSemaphore s_timelineSem = VK_NULL_HANDLE;
-    static uint64_t s_nextTimelineValue = 1;
-    static constexpr uint32_t RING_SIZE = 4;
-
+    // Lazy init: transient pool + cmd ring + timeline + GPU tracker buffer
     if (s_transientPool == VK_NULL_HANDLE) {
-        LOG_AMOURANTH("Lazy init START: creating transient pool + ring + timeline");
+        LOG_AMOURANTH("Lazy init START");
 
+        // Pool
         VkCommandPoolCreateInfo pci{};
         pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         pci.queueFamilyIndex = StoneKey::stone_graphics_family();
-
         VkResult res = vkCreateCommandPool(stone_device(), &pci, nullptr, &s_transientPool);
         if (res != VK_SUCCESS) {
-            LOG_AMOURANTH("Lazy init FAIL: vkCreateCommandPool → %s", string_VkResult(res));
+            LOG_AMOURANTH("FAIL: vkCreateCommandPool → %s", string_VkResult(res));
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        LOG_AMOURANTH("Pool created: {}", (void*)s_transientPool);
 
+        // Ring
         s_cmdRing.resize(RING_SIZE);
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = s_transientPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = RING_SIZE;
-
         res = vkAllocateCommandBuffers(stone_device(), &allocInfo, s_cmdRing.data());
         if (res != VK_SUCCESS) {
-            LOG_AMOURANTH("Lazy init FAIL: vkAllocateCommandBuffers → %s", string_VkResult(res));
+            LOG_AMOURANTH("FAIL: vkAllocateCommandBuffers → %s", string_VkResult(res));
             vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
             s_transientPool = VK_NULL_HANDLE;
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        LOG_AMOURANTH("Allocated {} cmd buffers in ring", RING_SIZE);
 
+        // Timeline semaphore
         VkSemaphoreTypeCreateInfo typeInfo{};
         typeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
         typeInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
         typeInfo.initialValue = 0;
-
         VkSemaphoreCreateInfo semInfo{};
         semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         semInfo.pNext = &typeInfo;
+        vkCreateSemaphore(stone_device(), &semInfo, nullptr, &s_timelineSem);
 
-        res = vkCreateSemaphore(stone_device(), &semInfo, nullptr, &s_timelineSem);
+        // GPU tracker buffer
+        VkBufferCreateInfo trackerCI{};
+        trackerCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        trackerCI.size = 32;
+        trackerCI.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        res = vkCreateBuffer(stone_device(), &trackerCI, nullptr, &s_ringTrackerBuffer);
         if (res != VK_SUCCESS) {
-            LOG_AMOURANTH("Lazy init FAIL: vkCreateSemaphore → %s", string_VkResult(res));
-            // Pool still usable, but timeline won't work — continue anyway
-        } else {
-            LOG_AMOURANTH("Timeline semaphore created: {}", (void*)s_timelineSem);
+            LOG_AMOURANTH("FAIL: vkCreateBuffer (tracker) → %s", string_VkResult(res));
+            // Cleanup partial init if needed
         }
 
-        LOG_AMOURANTH("Lazy init COMPLETE: ring ready, timeline {}",
-                      s_timelineSem != VK_NULL_HANDLE ? "OK" : "FAILED (continuing without)");
+        VkMemoryRequirements req{};
+        vkGetBufferMemoryRequirements(stone_device(), s_ringTrackerBuffer, &req);
+
+        uint32_t memType = BufferManager::findMemoryType(req.memoryTypeBits,
+                                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VkMemoryAllocateFlagsInfo flags{};
+        flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+        flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+
+        VkMemoryAllocateInfo mai{};
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.pNext = &flags;
+        mai.allocationSize = req.size;
+        mai.memoryTypeIndex = memType;
+        vkAllocateMemory(stone_device(), &mai, nullptr, &s_ringTrackerMemory);
+        vkBindBufferMemory(stone_device(), s_ringTrackerBuffer, s_ringTrackerMemory, 0);
+
+        vkMapMemory(stone_device(), s_ringTrackerMemory, 0, VK_WHOLE_SIZE, 0, &s_ringTrackerMapped);
+        std::memset(s_ringTrackerMapped, 0, 32);
+
+        VkBufferDeviceAddressInfo addrInfo{};
+        addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        addrInfo.buffer = s_ringTrackerBuffer;
+        s_ringTrackerDeviceAddr = vkGetBufferDeviceAddress(stone_device(), &addrInfo);
+
+        LOG_AMOURANTH("Lazy init COMPLETE: pool=%p, ring=%zu, timeline=%p, tracker=%p (addr=0x%llx)",
+                      (void*)s_transientPool, s_cmdRing.size(), (void*)s_timelineSem,
+                      (void*)s_ringTrackerBuffer, s_ringTrackerDeviceAddr);
     }
+
+    // Read current ring state from GPU memory (host-visible)
+    uint32_t currentSlot = *reinterpret_cast<uint32_t*>(s_ringTrackerMapped);
+    uint64_t lastCompleted = *reinterpret_cast<uint64_t*>(static_cast<uint8_t*>(s_ringTrackerMapped) + 8);
+    LOG_AMOURANTH("GPU ring state: slot={}, lastCompleted={}, my next={}", currentSlot, lastCompleted, s_nextTimelineValue);
 
     VkCommandBuffer cmd = s_cmdRing[s_ringIndex];
-    LOG_AMOURANTH("Using cmd buffer {}/{}: {}", s_ringIndex, RING_SIZE - 1, (void*)cmd);
 
-    // Wait only for this slot's previous work (safe unpending on ring wrap)
-    uint64_t waitValue = s_nextTimelineValue - RING_SIZE;
-    if (waitValue > 0 && s_timelineSem != VK_NULL_HANDLE) {
-        LOG_AMOURANTH("Waiting for previous slot (value {})", waitValue);
+    // Decide: safe to reuse this slot?
+    bool safeToReuse = (lastCompleted >= s_nextTimelineValue - RING_SIZE);
+    if (safeToReuse) {
+        LOG_AMOURANTH("Safe to reuse slot {} — resetting & recording transition", s_ringIndex);
 
-        VkSemaphoreWaitInfo waitInfo{};
-        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-        waitInfo.semaphoreCount = 1;
-        waitInfo.pSemaphores = &s_timelineSem;
-        waitInfo.pValues = &waitValue;
+        vkResetCommandBuffer(cmd, 0);
 
-        VkResult waitRes = vkWaitSemaphores(stone_device(), &waitInfo, UINT64_MAX);
-        LOG_AMOURANTH("Wait result: %s", string_VkResult(waitRes));
-        if (waitRes != VK_SUCCESS) {
-            LOG_WARN_CAT("SWAPCHAIN", "Timeline wait failed: %s — proceeding (risky)", string_VkResult(waitRes));
-        }
-    } else {
-        LOG_AMOURANTH("No wait needed (first ring cycle or no timeline)");
-    }
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    // Reset & record transition
-    LOG_AMOURANTH("Resetting cmd buffer %p", (void*)cmd);
-    vkResetCommandBuffer(cmd, 0);
+        vkBeginCommandBuffer(cmd, &beginInfo);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    LOG_AMOURANTH("Begin cmd buffer");
-    VkResult beginRes = vkBeginCommandBuffer(cmd, &beginInfo);
-    if (beginRes != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "vkBeginCommandBuffer failed: %s", string_VkResult(beginRes));
-    } else {
-        LOG_AMOURANTH("Recording transition: %p → PRESENT_SRC_KHR", (void*)currentImage);
         transitionImageLayout(cmd, currentImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-        LOG_AMOURANTH("End cmd buffer");
+
         vkEndCommandBuffer(cmd);
-    }
 
-    // Submit with timeline signal — ASYNC, no wait-idle
-    VkTimelineSemaphoreSubmitInfo tlSI{};
-    tlSI.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    tlSI.signalSemaphoreValueCount = 1;
-    tlSI.pSignalSemaphoreValues = &s_nextTimelineValue;
+        VkTimelineSemaphoreSubmitInfo tlSI{};
+        tlSI.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        tlSI.signalSemaphoreValueCount = 1;
+        tlSI.pSignalSemaphoreValues = &s_nextTimelineValue;
 
-    VkSubmitInfo submit{};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.pNext = &tlSI;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
-    submit.waitSemaphoreCount = waitSem ? 1 : 0;
-    submit.pWaitSemaphores = waitSem ? &waitSem : nullptr;
+        VkSubmitInfo submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.pNext = &tlSI;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &cmd;
+        submit.waitSemaphoreCount = waitSem ? 1 : 0;
+        submit.pWaitSemaphores = waitSem ? &waitSem : nullptr;
 
-    LOG_AMOURANTH("Submitting transition (timeline signal %llu)", s_nextTimelineValue);
-    VkResult submitRes = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    if (submitRes != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "vkQueueSubmit failed: %s", string_VkResult(submitRes));
+        vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+
+        // Update GPU tracker
+        *reinterpret_cast<uint32_t*>(s_ringTrackerMapped) = (currentSlot + 1) % RING_SIZE;
+        *reinterpret_cast<uint64_t*>(static_cast<uint8_t*>(s_ringTrackerMapped) + 8) = s_nextTimelineValue;
+    } else {
+        LOG_AMOURANTH("Slot {} not safe yet — skipping transition this frame", s_ringIndex);
     }
 
     s_nextTimelineValue++;
     s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
-    LOG_AMOURANTH("Ring advanced: next index %u, next timeline %llu", s_ringIndex, s_nextTimelineValue);
+    LOG_AMOURANTH("Ring advanced: next slot {}, next timeline {}", s_ringIndex, s_nextTimelineValue);
 
-    // Present immediately — GPU finishes transition before present (queue ordering)
+    // Present
     VkPresentInfoKHR pi{};
     pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount = 1;
@@ -514,15 +515,14 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
     VkResult presentRes = vkQueuePresentKHR(queue, &pi);
 
     if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR || presentRes == VK_ERROR_SURFACE_LOST_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "Present detected invalid swapchain (%s) — flag recreate next frame",
-                     string_VkResult(presentRes));
+        LOG_WARN_CAT("SWAPCHAIN", "Present detected invalid swapchain (%s) — flag recreate", string_VkResult(presentRes));
     } else if (presentRes != VK_SUCCESS) {
         LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: %s", string_VkResult(presentRes));
     } else {
         LOG_AMOURANTH("Present succeeded");
     }
 
-    LOG_AMOURANTH("EXIT presentImage → %s", string_VkResult(presentRes));
+    LOG_AMOURANTH("EXIT presentImage → {}", string_VkResult(presentRes));
     return presentRes;
 }
 
@@ -551,14 +551,24 @@ void SwapchainManager::cleanup() noexcept {
     cleanupSwapchain();
 
     // Destroy lazy ring resources
-    if (s_transientPool != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
-        s_transientPool = VK_NULL_HANDLE;
-    }
     if (s_timelineSem != VK_NULL_HANDLE) {
         vkDestroySemaphore(stone_device(), s_timelineSem, nullptr);
         s_timelineSem = VK_NULL_HANDLE;
     }
+    if (s_transientPool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
+        s_transientPool = VK_NULL_HANDLE;
+    }
+    if (s_ringTrackerBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(stone_device(), s_ringTrackerBuffer, nullptr);
+        s_ringTrackerBuffer = VK_NULL_HANDLE;
+    }
+    if (s_ringTrackerMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(stone_device(), s_ringTrackerMemory, nullptr);
+        s_ringTrackerMemory = VK_NULL_HANDLE;
+    }
+    s_ringTrackerMapped = nullptr;
+    s_ringTrackerDeviceAddr = 0;
 }
 
 void SwapchainManager::cleanupSwapchain() noexcept {
@@ -571,6 +581,18 @@ void SwapchainManager::cleanupImageViews() noexcept {
     swapchainImageViews_.clear();
 }
 
+// Static member definitions — must be outside namespace
+VkCommandPool SwapchainManager::s_transientPool = VK_NULL_HANDLE;
+VkSemaphore SwapchainManager::s_timelineSem = VK_NULL_HANDLE;
+std::vector<VkCommandBuffer> SwapchainManager::s_cmdRing;
+uint32_t SwapchainManager::s_ringIndex = 0;
+uint64_t SwapchainManager::s_nextTimelineValue = 1;
+
+VkBuffer SwapchainManager::s_ringTrackerBuffer = VK_NULL_HANDLE;
+VkDeviceMemory SwapchainManager::s_ringTrackerMemory = VK_NULL_HANDLE;
+void* SwapchainManager::s_ringTrackerMapped = nullptr;
+VkDeviceAddress SwapchainManager::s_ringTrackerDeviceAddr = 0;
+
 } // namespace RTX
 
 // =============================================================================
@@ -582,6 +604,6 @@ void SwapchainManager::cleanupImageViews() noexcept {
 // - Fixed: Explicit PRESENT_SRC_KHR transition before every present
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present
 // - Fixed: Lazy transient command pool + fixed ring for present transitions
-// - No external getOneTimeCommandBuffer — internal ring with safe reset
+// - GPU-owned ring tracker buffer for non-blocking reuse
 // - Cleanup dissolves old cmd buffers safely on shutdown
-// =============================================================================
+// =========================================================================nice

@@ -10,8 +10,14 @@
 // - Fixed: Explicit PRESENT_SRC_KHR transition before every present
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
 // - Fixed: Lazy transient command pool + fixed ring for present transitions
-// - No external getOneTimeCommandBuffer — internal ring with safe reset
+// - GPU-owned ring tracker buffer (host-visible coherent) for non-blocking reuse
 // - Cleanup dissolves old cmd buffers safely on shutdown
+// 
+// Known validation/linker issues (tracked in cpp):
+//   - VUID-vkFreeCommandBuffers-pCommandBuffers-00047: cmd buffer in use / pending state
+//   - VUID-VkPresentInfoKHR-pImageIndices-01430: image in VK_IMAGE_LAYOUT_UNDEFINED on present
+//   - UNASSIGNED-GeneralParameterError-RequiredHandle: vkAllocateCommandBuffers with null commandPool
+//   - VUID-VkCommandBufferAllocateInfo-commandPool-parameter: invalid VkCommandPool object 0x0
 // =============================================================================
 
 #pragma once
@@ -107,6 +113,12 @@ private:
     static uint32_t s_ringIndex;
     static uint64_t s_nextTimelineValue;
     static constexpr uint32_t RING_SIZE = 4;
+
+    // GPU-owned ring tracker (host-visible coherent storage buffer)
+    static VkBuffer s_ringTrackerBuffer;
+    static VkDeviceMemory s_ringTrackerMemory;
+    static void* s_ringTrackerMapped;
+    static VkDeviceAddress s_ringTrackerDeviceAddr;
 };
 
 // Global convenience aliases
@@ -145,5 +157,5 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 // - transitionImageLayout remains static
 // - Global convenience macros for easy access
 // - Lazy transient pool + fixed ring for present transitions
-// - Internal ring with safe reset — no external dependencies
+// - GPU-owned ring tracker buffer (host-visible coherent) for non-blocking reuse
 // =============================================================================
