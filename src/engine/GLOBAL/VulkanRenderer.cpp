@@ -147,7 +147,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
         vkCreateSemaphore(stone_device(), &acquireSemCI, nullptr, &s);
     }
 
-    // Camera UBO — manual
+    // Camera UBO — manual, host-visible, device address
     VkBufferCreateInfo uboCI{};
     uboCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     uboCI.size        = sizeof(CameraSceneData);
@@ -164,8 +164,19 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
+    if (memType == ~0u) {
+        LOG_FATAL_CAT("RENDERER", "No host-visible coherent memory for camera UBO");
+        throw std::runtime_error("Camera UBO memory type not found");
+    }
+
+    // Explicit device address allocation flag — required for VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+    VkMemoryAllocateFlagsInfo allocFlags{};
+    allocFlags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    allocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+
     VkMemoryAllocateInfo allocInfoMem{};
     allocInfoMem.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfoMem.pNext           = &allocFlags;  // Fixes VUID-vkBindBufferMemory-bufferDeviceAddress-03339
     allocInfoMem.allocationSize  = memReqs.size;
     allocInfoMem.memoryTypeIndex = memType;
 
@@ -209,8 +220,9 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     allocInfoMem.allocationSize  = memReqs.size;
     allocInfoMem.memoryTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits,
-                                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+                                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
+    // HDR does not need device address — no flags needed
     vkAllocateMemory(stone_device(), &allocInfoMem, nullptr, &hdrOutputMemory_);
     vkBindImageMemory(stone_device(), hdrOutputImage_, hdrOutputMemory_, 0);
 
