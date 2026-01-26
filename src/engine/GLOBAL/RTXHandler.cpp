@@ -26,60 +26,6 @@ namespace RTX {
 Context g_context_instance{};
 
 // =============================================================================
-// Global Descriptor Pool — delayed creation + sealing
-// =============================================================================
-void createGlobalDescriptorPool() noexcept {
-    VkDevice dev = StoneKey::stone_device();
-    if (dev == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("RTX", "Cannot create pool — device is NULL");
-        return;
-    }
-
-    if (g_ctx().descriptorPool.valid()) {
-        LOG_INFO_CAT("RTX", "Global descriptor pool already exists");
-        return;
-    }
-
-    LOG_INFO_CAT("RTX", "Creating global descriptor pool");
-
-    constexpr uint32_t MAX_SETS = 200'000;
-
-    const std::array poolSizes = {
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,              50'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,              100'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,               100'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,      200'000},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,  50'000},
-    };
-
-    VkDescriptorPoolCreateInfo info{};
-    info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    info.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT |
-                         VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
-    info.maxSets       = MAX_SETS;
-    info.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    info.pPoolSizes    = poolSizes.data();
-
-    VkDescriptorPool pool = VK_NULL_HANDLE;
-    VkResult result = vkCreateDescriptorPool(dev, &info, nullptr, &pool);
-    if (result != VK_SUCCESS) {
-        LOG_FATAL_CAT("RTX", "vkCreateDescriptorPool failed: {}", string_VkResult(result));
-        return;
-    }
-
-    g_ctx().descriptorPool = Handle<VkDescriptorPool>(
-        pool,
-        dev,
-        vkDestroyDescriptorPool
-    );
-
-    // Seal the global descriptor pool
-    StoneKey::stone_seal_descriptor_pool(pool);
-
-    LOG_SUCCESS_CAT("RTX", "Global descriptor pool created — capacity: {} sets", MAX_SETS);
-}
-
-// =============================================================================
 // Queue Family Indices
 // =============================================================================
 struct QueueFamilyIndices {

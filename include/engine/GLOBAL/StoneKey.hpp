@@ -1,17 +1,15 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.60 — JANUARY 23, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.8
 // STONEKEY v∞ — UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE
 // FULLY HEADER-ONLY | NO .CPP | ZERO OVERHEAD | ETERNAL INTEGRITY
-// NOW IDEMPOTENT: All seal functions are safe against re-sealing
-// - Re-seal with same value → no-op
-// - Re-seal with different value → fatal breach detection
+// IDEMPOTENT: All seal functions safe against re-sealing
+// - Re-seal same value → no-op
+// - Re-seal different value → fatal breach detection
 // - Single global sealed flag for final tamper protection
-// - Restored missing stone_mesh_* members
-// - NEW: stone_compute_pipeline — sealed compute pipeline accessor
-// - NEW: stone_descriptor_set — eternal descriptor set
-// - NEW: stone_descriptor_pool — global descriptor pool
-// - NEW: stone_pipeline_layout — eternal pipeline layout
-// - NEW: stone_rt_pipeline — sealed ray-tracing pipeline accessor
+// DESCRIPTOR SETS & POOLS ARE DEAD — REMOVED FOR DESCRIPTOR BUFFER EMPIRE
+// - Kept: stone_pipeline_layout (still required)
+// - Kept: stone_compute_pipeline, stone_rt_pipeline
+// - Restored stone_mesh_* members
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -152,9 +150,7 @@ struct Empire final {
     // Ray-tracing pipeline — core light path
     static inline Obfuscated<VkPipeline> rtPipeline;
 
-    // Eternal descriptor set + pool + layout
-    static inline Obfuscated<VkDescriptorSet> descriptorSet;
-    static inline Obfuscated<VkDescriptorPool> descriptorPool;
+    // Eternal pipeline layout (still required — descriptor buffer compatible)
     static inline Obfuscated<VkPipelineLayout> pipelineLayout;
 
     // Restored missing stone_mesh members
@@ -196,15 +192,13 @@ struct Empire final {
 [[nodiscard]] inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR& stone_rtprops() noexcept { return Empire::rtProps; }
 [[nodiscard]] inline VkCommandPool stone_transient_pool() noexcept { return Empire::transient_pool.decrypt(); }
 
-// NEW: Compute pipeline accessor
+// Compute pipeline accessor
 [[nodiscard]] inline VkPipeline stone_compute_pipeline() noexcept { return Empire::computePipeline.decrypt(); }
 
-// NEW: Ray-tracing pipeline accessor
+// Ray-tracing pipeline accessor
 [[nodiscard]] inline VkPipeline stone_rt_pipeline() noexcept { return Empire::rtPipeline.decrypt(); }
 
-// NEW: Eternal descriptor set + pool + layout
-[[nodiscard]] inline VkDescriptorSet stone_descriptor_set() noexcept { return Empire::descriptorSet.decrypt(); }
-[[nodiscard]] inline VkDescriptorPool stone_descriptor_pool() noexcept { return Empire::descriptorPool.decrypt(); }
+// Eternal pipeline layout accessor
 [[nodiscard]] inline VkPipelineLayout stone_pipeline_layout() noexcept { return Empire::pipelineLayout.decrypt(); }
 
 struct StoneMesh {
@@ -448,7 +442,7 @@ inline void stone_seal_transient_pool(VkCommandPool pool) noexcept {
     sealed = true;
 }
 
-// NEW: Seal compute pipeline
+// Seal compute pipeline
 inline void stone_seal_compute_pipeline(VkPipeline p) noexcept {
     static bool sealed = false;
     if (sealed) {
@@ -462,7 +456,7 @@ inline void stone_seal_compute_pipeline(VkPipeline p) noexcept {
     sealed = true;
 }
 
-// NEW: Seal ray-tracing pipeline
+// Seal ray-tracing pipeline
 inline void stone_seal_rt_pipeline(VkPipeline p) noexcept {
     static bool sealed = false;
     if (sealed) {
@@ -476,35 +470,7 @@ inline void stone_seal_rt_pipeline(VkPipeline p) noexcept {
     sealed = true;
 }
 
-// NEW: Seal eternal descriptor set
-inline void stone_seal_descriptor_set(VkDescriptorSet ds) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (ds != Empire::descriptorSet.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal descriptor set with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::descriptorSet = ds;
-    sealed = true;
-}
-
-// NEW: Seal global descriptor pool
-inline void stone_seal_descriptor_pool(VkDescriptorPool pool) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (pool != Empire::descriptorPool.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal descriptor pool with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::descriptorPool = pool;
-    sealed = true;
-}
-
-// NEW: Seal eternal pipeline layout
+// Seal eternal pipeline layout
 inline void stone_seal_pipeline_layout(VkPipelineLayout layout) noexcept {
     static bool sealed = false;
     if (sealed) {
@@ -530,8 +496,8 @@ inline void stone_seal_final() noexcept
 } // namespace StoneKey
 
 // =============================================================================
-// STONEKEY v∞ — IDEMPOTENT, UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 23, 2026
-// All seal functions now idempotent with breach detection
-// Safe against multiple calls
-// NEW: stone_compute_pipeline, stone_rt_pipeline, stone_descriptor_set, stone_descriptor_pool, stone_pipeline_layout sealed
+// STONEKEY v∞ — IDEMPOTENT, UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 26, 2026
+// Descriptor sets & pools eliminated — descriptor buffer empire complete
+// All seal functions idempotent with breach detection
+// Kept: stone_pipeline_layout, stone_compute_pipeline, stone_rt_pipeline
 // =============================================================================

@@ -238,9 +238,6 @@ int main(int, char**) {
     RTX::loadDeviceExtensions(device);
     RTX::g_ctx().init();
 
-    // Global descriptor pool before renderer
-    RTX::createGlobalDescriptorPool();
-
     RTX::SwapchainManager::create(window, pixelW, pixelH);
 
     // Renderer — owns LAS, pipeline, SBT
