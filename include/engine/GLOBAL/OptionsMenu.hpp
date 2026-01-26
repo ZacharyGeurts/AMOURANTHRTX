@@ -20,9 +20,6 @@ namespace Rendering {
     inline bool    ACCUMULATION              = true;      // Temporal reprojection + accumulation
     inline bool    ADAPTIVE_SAMPLING         = true;      // Reduce samples in stable areas
     inline uint32_t MAX_RAY_RECURSION        = 12;        // Bounce limit — higher = more noise but realism
-    inline bool    USE_LINEAR_TILING         = false;     // Default OFF — optimal tiling for gains
-                                                          // Turn on for row-major memory / CPU readback
-	inline bool    USE_DEDICATED_HOST_VISIBLE_POOL = false; // nobody changes this ever?
 }
 
 // ── WINDOW & DISPLAY (SDL3 handles DPI/HDR — we just set sane defaults)
