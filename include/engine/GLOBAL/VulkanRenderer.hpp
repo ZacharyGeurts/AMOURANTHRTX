@@ -1,6 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.62
-// VULKAN RENDERER HEADER — PURE LIGHT | NO FRAMES | PEW FOREVER
+// AMOURANTH RTX Engine - Vulkan Renderer
+// Pure light ray tracing core — no frames, no state, pew forever
+// Version 30.73 — January 26, 2026 — binary semaphore for present sync
 // DESCRIPTOR SETS ARE DEAD — ETERNAL DESCRIPTOR BUFFER EMPIRE
 // FIXED CMD BUFFER RING (RESET + RE-RECORD) • BINDLESS • ZERO-OVERHEAD UPDATES
 // OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR BUFFER • UBO • HDR STORAGE • LIVING WORLD
@@ -59,12 +60,14 @@ private:
     VkSemaphore                     graphicsTimelineSemaphore_   = VK_NULL_HANDLE;
     uint64_t                        nextGraphicsValue_           = 1;
 
+    // Binary semaphore — signaled after render (including present transition)
+    // Used exclusively by vkQueuePresentKHR wait
+    VkSemaphore                     renderFinishedSemaphore_     = VK_NULL_HANDLE;
+
     // Acquire semaphores — cycled to avoid pending reuse
     static constexpr size_t         ACQUIRE_SEM_COUNT   = 64;
     std::array<VkSemaphore, ACQUIRE_SEM_COUNT> acquireSemaphores_{};
     uint32_t                        currentFrame_       = 0;
-
-	VkSemaphore renderFinishedSemaphore_ = VK_NULL_HANDLE;  // binary, signaled after render
 
     // Persistent resources
     uint64_t                        defaultMaterialsHandle_ = 0;
@@ -105,9 +108,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// VULKAN RENDERER HEADER — v30.62 — JANUARY 25, 2026
+// VULKAN RENDERER HEADER — v30.73 — JANUARY 26, 2026
 // Descriptor sets eliminated • eternal descriptor buffer • bindless empire
 // Frame-free • fixed cmd ring (reset + re-record) • fenceless timeline tracking
+// Binary render-finished semaphore for present wait (fixes VUID-03267)
 // Deferred swapchain recreate • living world compute dispatched every pew
 // Pure light — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
 // =============================================================================
