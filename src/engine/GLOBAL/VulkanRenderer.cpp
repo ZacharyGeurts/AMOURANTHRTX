@@ -1,13 +1,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.74 — January 26, 2026 — per-image binary semaphores (indexed by imageIndex)
+// Version 30.74 — January 26, 2026 — BufferManager macros + per-image binary semaphores
+// - All buffers/images created via BM_CREATE / BM_CREATE_DESCRIPTOR
+// - Uploads via BM_UPLOAD_TO_BUFFER
+// - Destruction via BM_DESTROY
 // - Renderer owns present transition barrier (after blit)
 // - Binary semaphores vector indexed by acquired imageIndex
 // - Present waits on per-image binary semaphore (signaled after transition)
 // - No logging on VK_NOT_READY — silent status check
-// - One submit per pew: compute → trace → blit → transition → present (waited)
-// - Zero hot-path logging except fatal errors
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -130,46 +131,25 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
         vkCreateSemaphore(stone_device(), &acquireSemCI, nullptr, &s);
     }
 
-    VkBufferCreateInfo uboCI{};
-    uboCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    uboCI.size        = sizeof(CameraSceneData);
-    uboCI.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    // Camera UBO via BufferManager macro
+    BM_CREATE(cameraUBO_, sizeof(CameraSceneData),
+              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+              VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+              "CameraUBO");
 
-    vkCreateBuffer(stone_device(), &uboCI, nullptr, &cameraUBOBuffer_);
-
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(stone_device(), cameraUBOBuffer_, &memReqs);
-
-    uint32_t memType = BufferManager::findMemoryType(memReqs.memoryTypeBits,
-                                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    VkMemoryAllocateFlagsInfo allocFlags{};
-    allocFlags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-    allocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-
-    VkMemoryAllocateInfo mai{};
-    mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mai.pNext           = &allocFlags;
-    mai.allocationSize  = memReqs.size;
-    mai.memoryTypeIndex = memType;
-
-    vkAllocateMemory(stone_device(), &mai, nullptr, &cameraUBOMemory_);
-    vkBindBufferMemory(stone_device(), cameraUBOBuffer_, cameraUBOMemory_, 0);
-
+    // Default materials via descriptor buffer macro
     std::array<Material, 1> defaultMats{};
     defaultMats[0].albedo = glm::vec4(1.0f);
     defaultMats[0].emissive = glm::vec4(0.0f);
 
-    defaultMaterialsHandle_ = BufferManager::create(
-        sizeof(defaultMats),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "DefaultMaterials"
-    );
-    BufferManager::uploadToBuffer(defaultMaterialsHandle_, defaultMats.data(), sizeof(defaultMats));
+    defaultMaterialsHandle_ = BufferManager::createDescriptorBuffer(sizeof(defaultMats), "DefaultMaterials");
+    void* mapped = BufferManager::lazyMapDescriptorBuffer(defaultMaterialsHandle_);
+    if (mapped) {
+        std::memcpy(mapped, defaultMats.data(), sizeof(defaultMats));
+    }
 
+    // HDR output image — still manual (not buffer), but could be wrapped later
     VkImageCreateInfo hdrInfo{};
     hdrInfo.sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     hdrInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -184,9 +164,16 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     vkCreateImage(stone_device(), &hdrInfo, nullptr, &hdrOutputImage_);
 
+    VkMemoryRequirements memReqs;
     vkGetImageMemoryRequirements(stone_device(), hdrOutputImage_, &memReqs);
+
+    uint32_t memType = BufferManager::findMemoryType(memReqs.memoryTypeBits,
+                                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VkMemoryAllocateInfo mai{};
+    mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize  = memReqs.size;
-    mai.memoryTypeIndex = BufferManager::findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    mai.memoryTypeIndex = memType;
 
     vkAllocateMemory(stone_device(), &mai, nullptr, &hdrOutputMemory_);
     vkBindImageMemory(stone_device(), hdrOutputImage_, hdrOutputMemory_, 0);
@@ -226,10 +213,8 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     vkDestroyImage(stone_device(), hdrOutputImage_, nullptr);
     vkFreeMemory(stone_device(), hdrOutputMemory_, nullptr);
 
-    vkDestroyBuffer(stone_device(), cameraUBOBuffer_, nullptr);
-    vkFreeMemory(stone_device(), cameraUBOMemory_, nullptr);
-
-    BufferManager::destroy(defaultMaterialsHandle_);
+    BM_DESTROY(cameraUBO_);
+    BM_DESTROY(defaultMaterialsHandle_);
 
     vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
     vkDestroySemaphore(stone_device(), acquireTimelineSemaphore_, nullptr);
@@ -440,20 +425,7 @@ void RTX::VulkanRenderer::pew() noexcept {
                    swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
-    // Present transition — renderer owns this
-    VkImageMemoryBarrier presentBarrier{};
-    presentBarrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    presentBarrier.oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    presentBarrier.newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    presentBarrier.srcAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT;
-    presentBarrier.dstAccessMask    = VK_ACCESS_MEMORY_READ_BIT;
-    presentBarrier.image            = swapImg;
-    presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+    // NO PRESENT_SRC_KHR barrier here anymore — SwapchainManager owns the final transition
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) return;
 
@@ -461,9 +433,8 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     VkTimelineSemaphoreSubmitInfo timelineSI{};
     timelineSI.sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineSI.signalSemaphoreValueCount = 2;
-    uint64_t signalValues[2] = {nextGraphicsValue_, 0ULL};  // dummy for binary
-    timelineSI.pSignalSemaphoreValues    = signalValues;
+    timelineSI.signalSemaphoreValueCount = 1;
+    timelineSI.pSignalSemaphoreValues    = &nextGraphicsValue_;
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -474,6 +445,7 @@ void RTX::VulkanRenderer::pew() noexcept {
     submitInfo.pWaitSemaphores      = &currentAcquire;
     submitInfo.pWaitDstStageMask    = waitStages;
 
+    // Signal timeline + per-image binary
     VkSemaphore signalSems[2] = {graphicsTimelineSemaphore_, renderFinishedSemaphores_[imageIndex]};
     submitInfo.signalSemaphoreCount = 2;
     submitInfo.pSignalSemaphores    = signalSems;
@@ -482,5 +454,6 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     nextGraphicsValue_++;
 
+    // Present waits on per-image binary semaphore — safe reuse after re-acquire
     SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, renderFinishedSemaphores_[imageIndex]);
-} // SX 20 2MB RAM EasyData. My first rig.
+}
