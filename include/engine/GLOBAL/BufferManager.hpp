@@ -6,10 +6,9 @@
 //             Live measurement, zero pre-reserve, take 100% free VRAM
 //             Instant relinquish on explicit command (no auto-purge)
 //             Tiny safety margin for YouTube PiP / browser tabs
-//             JANUARY 26, 2026 — FIXED get_device_address TO TAKE uint64_t HANDLE
-//             BIT-LEVEL LOGGING, UNIVERSAL SCALE
-//             NEW: Toggleable linear tiling for images (via OptionsMenu)
-//             FUTURE COMPLETE: Runtime chunk resize, per-chunk purge, multi-queue sharing, dedicated host-visible pool
+//             JANUARY 26, 2026 — HOST TOGGLES REMOVED (no linear tiling, no dedicated host pool)
+//             ALL GPU BUFFERS DEVICE-LOCAL ONLY — staging ring for uploads
+//             DESCRIPTOR BUFFER HANDLED SEPARATELY (host-visible required)
 // =============================================================================
 
 #pragma once
@@ -32,7 +31,6 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"  // for USE_LINEAR_TILING toggle
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -61,20 +59,6 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
     VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
-
-// ── TILING TOGGLE — controlled by OptionsMenu
-// Default: false (optimal tiling — fast)
-// Set true in menu for predictable row-major (linear tiling)
-[[nodiscard]] inline bool useLinearTiling() noexcept {
-    return Options::Rendering::USE_LINEAR_TILING;
-}
-
-// ── DEDICATED HOST-VISIBLE POOL TOGGLE — via OptionsMenu
-// Default: false (use device-local for everything)
-// Set true for dedicated host-visible pool (small allocs only)
-inline bool useDedicatedHostVisiblePool() noexcept {
-    return Options::Rendering::USE_DEDICATED_HOST_VISIBLE_POOL;  // Assume added to Options
-}
 
 // ── UNIVERSAL SCALE PRINT HELPER ───────────────────────────────────────────
 inline std::string formatBytes(VkDeviceSize bytes) noexcept {
@@ -177,7 +161,7 @@ struct VRAMReality {
     return ~0u;
 }
 
-// ── NEW: Centralized image creation with tiling toggle
+// ── Centralized image creation — always optimal tiling
 // =============================================================================
 [[nodiscard]] inline VkImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,
                                          VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -190,7 +174,7 @@ struct VRAMReality {
     ci.mipLevels = 1;
     ci.arrayLayers = 1;
     ci.samples = VK_SAMPLE_COUNT_1_BIT;
-    ci.tiling = useLinearTiling() ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;  // Always optimal — no toggle
     ci.usage = usage;
     ci.initialLayout = initialLayout;
     ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -201,25 +185,8 @@ struct VRAMReality {
         return VK_NULL_HANDLE;
     }
 
-    // Safety check for linear tiling support
-    if (useLinearTiling()) {
-        VkFormatProperties props{};
-        vkGetPhysicalDeviceFormatProperties(StoneKey::stone_physical(), format, &props);
-        VkFormatFeatureFlags req = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
-        if ((props.linearTilingFeatures & req) != req) {
-            LOG_ERROR_CAT("BufferManager", "LINEAR tiling unsupported for format {} — fallback to OPTIMAL", string_VkFormat(format));
-            vkDestroyImage(StoneKey::stone_device(), image, nullptr);
-            ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-            if (vkCreateImage(StoneKey::stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
-                LOG_FATAL_CAT("BufferManager", "Fallback optimal image creation failed");
-                return VK_NULL_HANDLE;
-            }
-        }
-    }
-
-    LOG_INFO_CAT("BufferManager", "Image created — {} | {}×{}×{} | {} | {}", tag,
-                 extent.width, extent.height, extent.depth, string_VkFormat(format),
-                 useLinearTiling() ? "LINEAR" : "OPTIMAL");
+    LOG_INFO_CAT("BufferManager", "Image created — {} | {}×{}×{} | {} | OPTIMAL", tag,
+                 extent.width, extent.height, extent.depth, string_VkFormat(format));
 
     return image;
 }
@@ -443,7 +410,7 @@ inline void ensureStagingRing() noexcept {
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     }
 
-    // Small uniform special path (persistent mapped host-visible)
+    // Small uniform special path (persistent mapped host-visible via staging ring)
     bool smallUniform = (size <= HOST_VISIBLE_THRESHOLD) &&
                         (fixedUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
@@ -463,7 +430,7 @@ inline void ensureStagingRing() noexcept {
         return handle;
     }
 
-    // Large buffers — chunked automatically
+    // Large buffers — chunked automatically (device-local only)
     VkDeviceSize remaining = size;
     uint64_t firstHandle = 0;
 
@@ -607,258 +574,6 @@ inline void destroy(uint64_t handle) noexcept {
     g_buffers.erase(handle);
 }
 
-// ── RUNTIME CHUNK RESIZE — grow/shrink explicit
-// =============================================================================
-inline bool resizeChunk(uint64_t handle, VkDeviceSize newSize) noexcept {
-    std::lock_guard<std::mutex> lock(g_bufferMutex);
-    auto it = g_buffers.find(handle);
-    if (it == g_buffers.end()) return false;
-
-    BufferInfo& info = it->second;
-
-    VkDeviceSize oldSize = info.size;
-
-    if (newSize == oldSize) return true;
-
-    VkBuffer newBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory newMemory = VK_NULL_HANDLE;
-
-    VkBufferCreateInfo bci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = newSize,
-        .usage = info.usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
-
-    if (vkCreateBuffer(StoneKey::stone_device(), &bci, nullptr, &newBuffer) != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Resize failed — cannot create new buffer");
-        return false;
-    }
-
-    VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(StoneKey::stone_device(), newBuffer, &req);
-
-    uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (memType == ~0u) {
-        vkDestroyBuffer(StoneKey::stone_device(), newBuffer, nullptr);
-        LOG_ERROR_CAT("BufferManager", "Resize failed — no suitable memory type");
-        return false;
-    }
-
-    VkMemoryAllocateFlagsInfo flags{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
-    };
-
-    VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = &flags,
-        .allocationSize = req.size,
-        .memoryTypeIndex = memType
-    };
-
-    if (vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &newMemory) != VK_SUCCESS) {
-        vkDestroyBuffer(StoneKey::stone_device(), newBuffer, nullptr);
-        LOG_ERROR_CAT("BufferManager", "Resize failed — cannot allocate new memory");
-        return false;
-    }
-
-    if (vkBindBufferMemory(StoneKey::stone_device(), newBuffer, newMemory, 0) != VK_SUCCESS) {
-        vkDestroyBuffer(StoneKey::stone_device(), newBuffer, nullptr);
-        vkFreeMemory(StoneKey::stone_device(), newMemory, nullptr);
-        LOG_ERROR_CAT("BufferManager", "Resize failed — bind error");
-        return false;
-    }
-
-    VkBufferDeviceAddressInfo addrInfo{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = newBuffer
-    };
-    VkDeviceAddress newBaseAddr = RTX::g_ext.vkGetBufferDeviceAddress(StoneKey::stone_device(), &addrInfo);
-
-    if (newSize > oldSize) {
-        // Grow — copy old data to new
-        uploadToBuffer(handle, nullptr, oldSize);  // Use upload to copy (null data means no new data, but copy old)
-    } else {
-        // Shrink — no copy needed, just truncate
-    }
-
-    // Swap
-    vkDestroyBuffer(StoneKey::stone_device(), info.buffer, nullptr);
-    vkFreeMemory(StoneKey::stone_device(), info.memory, nullptr);
-
-    info.buffer = newBuffer;
-    info.memory = newMemory;
-    info.size = newSize;
-    info.aligned = req.alignment;
-    info.deviceAddress = newBaseAddr;
-
-    g_total_allocated += (newSize - oldSize);
-
-    LOG_INFO_CAT("BufferManager", "Chunk resized: {} → {} ({})", formatBytes(oldSize), formatBytes(newSize), info.tag);
-
-    return true;
-}
-
-// ── PER-CHUNK PURGE — explicit by tag
-// =============================================================================
-inline void purgeChunk(std::string_view tag) noexcept {
-    std::lock_guard<std::mutex> lock(g_bufferMutex);
-
-    for (auto it = g_mainChunks.begin(); it != g_mainChunks.end(); ++it) {
-        if (it->tag == tag) {
-            for (uint64_t h : it->handles) {
-                g_buffers.erase(h);
-            }
-
-            vkDestroyBuffer(StoneKey::stone_device(), it->buffer, nullptr);
-            vkFreeMemory(StoneKey::stone_device(), it->memory, nullptr);
-            g_total_allocated -= it->size;
-
-            LOG_INFO_CAT("BufferManager", "Purged chunk by tag: {} ({})", tag, formatBytes(it->size));
-
-            g_mainChunks.erase(it);
-            break;
-        }
-    }
-}
-
-// ── MULTI-QUEUE SHARING — explicit in create
-// =============================================================================
-// Usage: BM_CREATE(handle, size, usage, tag, VK_SHARING_MODE_CONCURRENT, queueFamilies);
-// Where queueFamilies is std::vector<uint32_t> {graphics, compute, etc.}
-
-template<typename... Args>
-[[nodiscard]] inline uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage,
-                                     std::string_view tag = "") noexcept {
-    if (size == 0) return 0;
-
-    VkBufferUsageFlags fixedUsage = usage;
-
-    if (fixedUsage & (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                      VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR)) {
-        fixedUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    }
-
-    bool isPureStaging = (usage == VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-    if (!isPureStaging) {
-        fixedUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    }
-
-    bool isSBT = (fixedUsage & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) ||
-                 (tag.find("SBT") != std::string_view::npos);
-
-    if (isSBT) {
-        size = std::max(size, SBT_MINIMUM_SIZE);
-        size = align_up(size, SBT_ALIGNMENT);
-        fixedUsage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                     VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    }
-
-    // Small uniform special path (persistent mapped host-visible)
-    bool smallUniform = (size <= HOST_VISIBLE_THRESHOLD) &&
-                        (fixedUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-
-    if (smallUniform) {
-        ensureStagingRing();
-        VkDeviceSize offset = g_stagingRing.head;
-        g_stagingRing.head = (g_stagingRing.head + size) % g_stagingRing.size;
-
-        uint64_t handle = ++g_nextHandle;
-        g_buffers.emplace(handle, BufferInfo{
-            g_stagingRing.buffer, g_stagingRing.memory,
-            size, size, offset,
-            0, static_cast<std::byte*>(g_stagingRing.mapped) + offset,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            std::string(tag)
-        });
-        return handle;
-    }
-
-    // Large buffers — chunked automatically
-    VkDeviceSize remaining = size;
-    uint64_t firstHandle = 0;
-
-    while (remaining > 0) {
-        VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, remaining);
-        Chunk* chunk = createChunk(chunkSize, fixedUsage);
-        if (!chunk) {
-            LOG_FATAL_CAT("BufferManager", "Failed to create chunk for size {}", formatBytes(size));
-            return 0;
-        }
-
-        uint64_t chunkHandle = ++g_nextHandle;
-        g_buffers.emplace(chunkHandle, BufferInfo{
-            chunk->buffer, chunk->memory, chunkSize, chunk->size, chunk->head,
-            chunk->baseAddr + chunk->head, nullptr, fixedUsage, std::string(tag) + "_chunk"
-        });
-
-        chunk->handles.push_back(chunkHandle);
-
-        if (firstHandle == 0) firstHandle = chunkHandle;
-
-        remaining -= chunkSize;
-    }
-
-    return firstHandle;
-}
-
-// ── DEDICATED HOST-VISIBLE POOL — toggleable
-// =============================================================================
-inline VkDeviceMemory g_hostVisiblePool = VK_NULL_HANDLE;
-inline VkDeviceSize g_hostVisiblePoolSize = 0;
-inline VkDeviceSize g_hostVisibleHead = 0;
-
-inline void ensureHostVisiblePool() noexcept {
-    if (g_hostVisiblePool != VK_NULL_HANDLE) return;
-
-    VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = 512ULL << 20,  // 512 MiB dedicated pool
-        .memoryTypeIndex = findMemoryType(~0u, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-    };
-
-    if (vkAllocateMemory(StoneKey::stone_device(), &mai, nullptr, &g_hostVisiblePool) != VK_SUCCESS) {
-        LOG_FATAL_CAT("BufferManager", "Failed to allocate dedicated host-visible pool");
-    }
-
-    g_hostVisiblePoolSize = mai.allocationSize;
-    LOG_SUCCESS_CAT("BufferManager", "Dedicated host-visible pool created — {}", formatBytes(g_hostVisiblePoolSize));
-}
-
-inline void* mapHostVisible(VkDeviceSize size) noexcept {
-    ensureHostVisiblePool();
-    if (g_hostVisibleHead + size > g_hostVisiblePoolSize) {
-        LOG_ERROR_CAT("BufferManager", "Host-visible pool overflow — {} requested, {} available", formatBytes(size), formatBytes(g_hostVisiblePoolSize - g_hostVisibleHead));
-        return nullptr;
-    }
-
-    VkDeviceSize offset = g_hostVisibleHead;
-    g_hostVisibleHead += size;
-
-    void* mapped = nullptr;
-    if (vkMapMemory(StoneKey::stone_device(), g_hostVisiblePool, offset, size, 0, &mapped) != VK_SUCCESS) {
-        LOG_ERROR_CAT("BufferManager", "Failed to map host-visible pool");
-        return nullptr;
-    }
-
-    return mapped;
-}
-
-// Update smallUniform path to use dedicated pool if toggle on
-// In create() smallUniform block:
-// if (useDedicatedHostVisiblePool()) {
-//     void* mapped = mapHostVisible(size);
-//     // Create separate buffer bound to pool memory at offset
-// } else {
-//     // Current staging ring path
-// }
-
 // ── MACROS — ZERO-COST, PRINT-FRIENDLY
 // =============================================================================
 #define BM_CREATE(h, s, u, ...)             h = BufferManager::create(s, u, ##__VA_ARGS__)
@@ -868,9 +583,6 @@ inline void* mapHostVisible(VkDeviceSize size) noexcept {
 #define BM_GET_MEMORY(h)                    BufferManager::get_memory(h)
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
 #define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)   BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)
-#define BM_PURGE_ALL()                      BufferManager::purge_all()
 #define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
-#define BM_RESIZE(h, ns)                    BufferManager::resizeChunk(h, ns)
-#define BM_PURGE_CHUNK(t)                   BufferManager::purgeChunk(t)
 
 } // namespace BufferManager
