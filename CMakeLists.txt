@@ -383,9 +383,6 @@ foreach(MAP ${ASSET_MAP})
     endif()
 endforeach()
 
-set(STONEKEY_SRC "${CMAKE_CURRENT_SOURCE_DIR}/shaders/StoneKey.glsl")
-set(STONEKEY_DST "${BIN_DIR}/assets/shaders/StoneKey.glsl")
-
 add_custom_command(
     OUTPUT ${STONEKEY_DST}
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${STONEKEY_SRC} ${STONEKEY_DST}
