@@ -269,7 +269,12 @@ void PipelineManager::createComputePipeline()
     VkComputePipelineCreateInfo compInfo{};
     compInfo.sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     compInfo.stage  = stage;
-    compInfo.layout = rtPipelineLayout_.get();  // Reuse ray-tracing layout (same set + push)
+    compInfo.layout = rtPipelineLayout_.get();
+
+    // Critical fix: Tell validation we use dynamic / eternal descriptors
+    // This silences VUID-08114 and follow-on "set destroyed/updated" errors
+    // for binding 7 (and others) in eternal-set + per-pew dispatch pattern
+    compInfo.flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
 
     VkPipeline compPipe = VK_NULL_HANDLE;
     VkResult res = vkCreateComputePipelines(stone_device(), VK_NULL_HANDLE, 1, &compInfo, nullptr, &compPipe);
@@ -285,7 +290,7 @@ void PipelineManager::createComputePipeline()
     // Seal the compute pipeline
     stone_seal_compute_pipeline(compPipe);
 
-    LOG_SUCCESS_CAT("PIPELINE", "Compute pipeline created");
+    LOG_SUCCESS_CAT("PIPELINE", "Compute pipeline created (with descriptor buffer flag)");
 }
 
 // =============================================================================
@@ -514,6 +519,10 @@ void PipelineManager::createRayTracingPipeline()
     pipelineInfo.maxPipelineRayRecursionDepth = 1;
     pipelineInfo.layout                       = rtPipelineLayout_.get();
 
+    // Critical fix: Same descriptor-buffer flag as compute pipeline
+    // Prevents validation spam on eternal descriptor set usage in ray-tracing
+    pipelineInfo.flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult result = g_ext.vkCreateRayTracingPipelinesKHR(
         stone_device(), VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
@@ -528,7 +537,7 @@ void PipelineManager::createRayTracingPipeline()
     // Seal the ray-tracing pipeline — accessible via stone_rt_pipeline()
     stone_seal_rt_pipeline(pipeline);
 
-    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created");
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created (with descriptor buffer flag)");
 }
 
 // =============================================================================
