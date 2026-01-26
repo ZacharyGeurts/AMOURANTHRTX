@@ -289,8 +289,6 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     if (waitSem != VK_NULL_HANDLE) {
         submit.waitSemaphoreCount = 1;
         submit.pWaitSemaphores    = &waitSem;
-        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        submit.pWaitDstStageMask  = &waitStage;
     }
 
     vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
