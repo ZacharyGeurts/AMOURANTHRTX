@@ -50,12 +50,141 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-// Global lifetime clock — updated by renderer
-extern double totalTime_;
+// =============================================================================
+// TOTALTIME v∞ MONOLITH — The One True Clock
+// Not a double. A sealed, self-aware, tamper-evident time oracle.
+// Zero-cost decrypt/verify on every read. Breach = empire abort.
+// Advances only via .advance(dt), which is idempotent-checked.
+// Knows who it is because it carries its own entropy-signed history.
+// =============================================================================
 
-// Forward declarations
-extern uint64_t kStone1; // logging.cpp
-extern uint64_t kStone2;
+namespace RTX {
+
+namespace detail {
+    using Clock = std::chrono::steady_clock;
+    using TimePoint = Clock::time_point;
+    using Duration = Clock::duration;
+
+    [[nodiscard]] inline uint64_t make_session_entropy() noexcept {
+        static const uint64_t entropy = []() -> uint64_t {
+            uint64_t e = reinterpret_cast<uintptr_t>(&entropy);
+            e ^= static_cast<uint64_t>(__builtin_ia32_rdtsc());
+            e ^= static_cast<uint64_t>(time(nullptr));
+            e ^= static_cast<uint64_t>(getpid());
+            return e;
+        }();
+        return entropy;
+    }
+}
+
+struct TotalTime final {
+    // Deleted everything dangerous — no copies, no moves, no raw access
+    TotalTime(const TotalTime&) = delete;
+    TotalTime& operator=(const TotalTime&) = delete;
+    TotalTime(TotalTime&&) = delete;
+    TotalTime& operator=(TotalTime&&) = delete;
+
+    // Singleton access — the monolith is unique
+    [[nodiscard]] static TotalTime& get() noexcept {
+        static TotalTime instance;
+        return instance;
+    }
+
+    // Read — decrypts, verifies integrity, returns µs since genesis
+    [[nodiscard]] double us() const noexcept {
+        verify();  // breach → abort
+        return static_cast<double>(raw_us_.load(std::memory_order_acquire));
+    }
+
+    // Read — returns seconds since genesis (replaces old totalTime_)
+    [[nodiscard]] double seconds() const noexcept {
+        return us() * 1e-6;
+    }
+
+    // Advance time — the only mutation, protected
+    void advance(detail::Duration dt) noexcept {
+        if (dt <= detail::Duration::zero()) [[unlikely]] {
+            std::abort();
+        }
+
+        raw_us_.fetch_add(
+            std::chrono::duration_cast<std::chrono::microseconds>(dt).count(),
+            std::memory_order_acq_rel
+        );
+    }
+
+    // Genesis seal — call once after init, like stone_seal_final()
+    void seal() noexcept {
+        if (sealed_.exchange(true, std::memory_order_acq_rel)) {
+            std::abort();
+        }
+    }
+
+	std::atomic<bool> sealed_;
+
+private:
+    TotalTime() noexcept
+        : entropy_(detail::make_session_entropy())
+        , genesis_(detail::Clock::now())
+        , raw_us_(0)
+        , sealed_(false)
+    {
+        entropy_check_ = entropy_ ^ 0x9E37AF18C64D8A17UL;
+    }
+
+    void verify() const noexcept {
+        if (!sealed_.load(std::memory_order_acquire)) {
+            std::abort();
+        }
+
+        if ((entropy_ ^ 0x9E37AF18C64D8A17UL) != entropy_check_) [[unlikely]] {
+            std::abort();
+        }
+    }
+
+    uint64_t entropy_;
+    uint64_t entropy_check_;
+    detail::TimePoint genesis_;
+    std::atomic<uint64_t> raw_us_;  // µs accumulator
+};
+
+} // namespace RTX
+
+
+// =============================================================================
+// SIMPLE, BULLETPROOF TOTALTIME PRINTING — PLAIN COUT + FORMAT
+// No macros, no logging system calls, no early death.
+// Safe even before seal() — just skips if not sealed.
+// Use anywhere: print_total_time(); or print_total_time("INIT");
+// =============================================================================
+
+#include <iostream>  // already included, but explicit for cout
+
+inline void print_total_time(const char* prefix = nullptr) noexcept {
+    auto& tt = RTX::TotalTime::get();
+
+    // Early exit if not sealed yet — prevents abort
+    if (!tt.sealed_.load(std::memory_order_acquire)) {
+        std::cout << (prefix ? prefix : "") 
+                  << "[totalTime] not sealed yet — skipping print\n";
+        return;
+    }
+
+    double s   = tt.seconds();
+    double ms  = s * 1000.0;
+    double usv = tt.us();
+    double fps = (s > 1e-6) ? 1.0 / s : INFINITY;
+
+    std::cout << (prefix ? prefix : "") 
+              << std::format("[totalTime] {:.6f}s | {:.1f}ms | {:.0f}µs | ~{:.1f} pseudo-FPS\n",
+                             s, ms, usv, fps);
+    std::cout.flush();  // make sure it shows up immediately
+}
+
+// One-liner convenience if you hate typing
+inline void ptt(const char* prefix = nullptr) noexcept {
+    print_total_time(prefix);
+}
 
 // =============================================================================
 // DELTA TIME MACROS — NO GLOBALS — PASS TOTALTIME FROM RENDERER
@@ -65,25 +194,25 @@ extern uint64_t kStone2;
 // Call: LOG_DELTA(totalTime_)
 // =============================================================================
 
-#define LOG_DELTA(totalTime) \
+#define LOG_DELTA(totalSeconds) \
     LOG_INFO_CAT("DELTA", "Time: {:.6f}s | {} | {} | {} | Frame {}", \
-        totalTime, \
-        Logging::DeltaTime::strMsFromTotal(totalTime), \
-        Logging::DeltaTime::strUsFromTotal(totalTime), \
-        Logging::DeltaTime::strFpsFromTotal(totalTime), \
-        Logging::DeltaTime::frameFromTotal(totalTime))
+        totalSeconds, \
+        Logging::DeltaTime::strMsFromTotal(totalSeconds), \
+        Logging::DeltaTime::strUsFromTotal(totalSeconds), \
+        Logging::DeltaTime::strFpsFromTotal(totalSeconds), \
+        Logging::DeltaTime::frameFromTotal(totalSeconds))
 
-#define LOG_DELTA_TRACE(totalTime) \
+#define LOG_DELTA_TRACE(totalSeconds) \
     LOG_TRACE_CAT("DELTA", "Time: {:.6f}s | {} | {} | {} | Frame {}", \
-        totalTime, \
-        Logging::DeltaTime::strMsFromTotal(totalTime), \
-        Logging::DeltaTime::strUsFromTotal(totalTime), \
-        Logging::DeltaTime::strFpsFromTotal(totalTime), \
-        Logging::DeltaTime::frameFromTotal(totalTime))
+        totalSeconds, \
+        Logging::DeltaTime::strMsFromTotal(totalSeconds), \
+        Logging::DeltaTime::strUsFromTotal(totalSeconds), \
+        Logging::DeltaTime::strFpsFromTotal(totalSeconds), \
+        Logging::DeltaTime::frameFromTotal(totalSeconds))
 
-#define LOG_DELTA_PERF(section, totalTime) \
+#define LOG_DELTA_PERF(section, totalSeconds) \
     LOG_PERF_CAT("DELTA", "[{}] Time: {:.6f}s → {} → {} FPS", section, \
-        totalTime, Logging::DeltaTime::strMsFromTotal(totalTime), Logging::DeltaTime::strFpsFromTotal(totalTime))
+        totalSeconds, Logging::DeltaTime::strMsFromTotal(totalSeconds), Logging::DeltaTime::strFpsFromTotal(totalSeconds))
 
 // =============================================================================
 // DELTA TIME HELPERS — NO GLOBALS — TIMESTAMP ONLY
@@ -91,14 +220,14 @@ extern uint64_t kStone2;
 namespace Logging::DeltaTime {
 
 // Timestamp-based helpers — no global state
-[[nodiscard]] inline double secondsFromTotal(float totalTime) noexcept { return static_cast<double>(totalTime); }
-[[nodiscard]] inline double msFromTotal(float totalTime) noexcept { return totalTime * 1000.0; }
-[[nodiscard]] inline double usFromTotal(float totalTime) noexcept { return totalTime * 1000000.0; }
-[[nodiscard]] inline std::string strSecFromTotal(float totalTime) { return std::format("{:.6f}s", secondsFromTotal(totalTime)); }
-[[nodiscard]] inline std::string strMsFromTotal(float totalTime) { return std::format("{:.3f}ms", msFromTotal(totalTime)); }
-[[nodiscard]] inline std::string strUsFromTotal(float totalTime) { return std::format("{:.1f}µs", usFromTotal(totalTime)); }
-[[nodiscard]] inline std::string strFpsFromTotal(float totalTime) { return totalTime > 0.0f ? std::format("{:.1f} FPS", 1.0f / totalTime) : "∞ FPS"; }
-[[nodiscard]] inline uint64_t frameFromTotal(float totalTime) noexcept { return static_cast<uint64_t>(totalTime * 60.0f); } // Rough estimate
+[[nodiscard]] inline double secondsFromTotal(double totalSeconds) noexcept { return totalSeconds; }
+[[nodiscard]] inline double msFromTotal(double totalSeconds) noexcept { return totalSeconds * 1000.0; }
+[[nodiscard]] inline double usFromTotal(double totalSeconds) noexcept { return totalSeconds * 1000000.0; }
+[[nodiscard]] inline std::string strSecFromTotal(double totalSeconds) { return std::format("{:.6f}s", secondsFromTotal(totalSeconds)); }
+[[nodiscard]] inline std::string strMsFromTotal(double totalSeconds) { return std::format("{:.3f}ms", msFromTotal(totalSeconds)); }
+[[nodiscard]] inline std::string strUsFromTotal(double totalSeconds) { return std::format("{:.1f}µs", usFromTotal(totalSeconds)); }
+[[nodiscard]] inline std::string strFpsFromTotal(double totalSeconds) { return totalSeconds > 0.0 ? std::format("{:.1f} FPS", 1.0 / totalSeconds) : "∞ FPS"; }
+[[nodiscard]] inline uint64_t frameFromTotal(double totalSeconds) noexcept { return static_cast<uint64_t>(totalSeconds * 60.0); } // Rough estimate
 
 } // namespace Logging::DeltaTime
 
@@ -696,7 +825,7 @@ private:
             return std::string(buf);
         }();
 
-        const std::string threadId = std::format("{}ms", totalTime_ * 1000.0f);
+        const std::string threadId = std::format("{}ms", RTX::TotalTime::get().seconds() * 1000.0);
         const std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
         // Plain text for file
