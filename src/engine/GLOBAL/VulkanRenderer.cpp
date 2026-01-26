@@ -4,7 +4,7 @@
 // Version 30.62 — January 25, 2026
 // - Descriptor sets are DEAD — full VK_EXT_descriptor_buffer transition
 // - Eternal descriptor buffer: zero-overhead memcpy updates, no vkUpdateDescriptorSets
-// - Frame-free: no MAX_FRAMES_IN_FLIGHT, ring of 128 transient cmd buffers
+// - Frame-free: no MAX_FRAMES_IN_FLIGHT, ring of 64 transient cmd buffers
 // - Cmd buffers self-dispose via vkResetCommandBuffer before reuse
 // - Descriptor updates via vkGetDescriptorEXT only on change (startup + TLAS rebuild)
 // - Deferred swapchain recreate (flag at pew start — no mid-frame death)
