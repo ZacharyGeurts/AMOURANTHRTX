@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.71
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.72
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 26, 2026 — "no more UNDEFINED on present" edition
+// JANUARY 26, 2026 — "debug: always submit transition + waitIdle for now" edition
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -108,20 +108,15 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     barrier.image                   = image;
     barrier.subresourceRange        = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    // The safest, most compatible transition from UNDEFINED → PRESENT_SRC_KHR
-    // Many drivers/drivers+validation hate TOP_OF_PIPE + 0 access → use ALL_COMMANDS + proper access
-    VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-    VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    VkAccessFlags        srcAccess    = VK_ACCESS_MEMORY_WRITE_BIT;   // conservative
-    VkAccessFlags        dstAccess    = VK_ACCESS_MEMORY_READ_BIT;
-
-    barrier.srcAccessMask = srcAccess;
-    barrier.dstAccessMask = dstAccess;
+    // Minimal & safe transition from UNDEFINED → PRESENT_SRC_KHR
+    // No src access needed (UNDEFINED discards previous content)
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
     vkCmdPipelineBarrier(cmd,
-                         srcStageMask,
-                         dstStageMask,
-                         0,               // no dependency flags
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0,
                          0, nullptr,
                          0, nullptr,
                          1, &barrier);
@@ -185,20 +180,13 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         if (it != formats.end()) { chosenFormat = *it; break; }
     }
 
-    // Present mode
+    // Present mode — force FIFO for stability during debug
     uint32_t pmCount = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(pmCount);
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, presentModes.data());
 
-    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
-    const VkPresentModeKHR pmPrefs[] = {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_FIFO_RELAXED_KHR,
-                                        VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR};
-    for (auto pref : pmPrefs) {
-        if (std::find(presentModes.begin(), presentModes.end(), pref) != presentModes.end()) {
-            chosenPM = pref; break;
-        }
-    }
+    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;  // Forced for debug
 
     uint32_t imgCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
@@ -337,7 +325,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
 
         VkBufferCreateInfo bci{};
         bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bci.size  = 16; // uint64_t safe value
+        bci.size  = 16;
         bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &s_ringTrackerBuffer), "Create tracker buffer");
 
@@ -373,64 +361,72 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
                       (uintptr_t)s_ringTrackerBuffer, s_ringTrackerDeviceAddr);
     }
 
-    uint64_t gpuSafeValue = *static_cast<uint64_t*>(s_ringTrackerMapped);
     VkCommandBuffer cmd = s_cmdRing[s_ringIndex];
-
-    bool slotSafe = (gpuSafeValue >= s_nextTimelineValue - RING_SIZE) || (s_nextTimelineValue <= RING_SIZE + 2);
 
     vkResetCommandBuffer(cmd, 0);
 
     VkCommandBufferBeginInfo bbi{};
     bbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &bbi));
 
-    // Always transition — acquired images start in UNDEFINED
-    transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    if (slotSafe) {
-        VkTimelineSemaphoreSubmitInfo tsi{};
-        tsi.sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-        tsi.signalSemaphoreValueCount = 1;
-        tsi.pSignalSemaphoreValues    = &s_nextTimelineValue;
-
-        VkSubmitInfo si{};
-        si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        si.pNext                = &tsi;
-        si.commandBufferCount   = 1;
-        si.pCommandBuffers      = &cmd;
-        si.waitSemaphoreCount   = waitSem ? 1 : 0;
-        si.pWaitSemaphores      = waitSem ? &waitSem : nullptr;
-
-        VK_CHECK(vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE));
-
-        *static_cast<uint64_t*>(s_ringTrackerMapped) = s_nextTimelineValue;
-    } else {
-        LOG_AMOURANTH("Slot {} not yet safe (gpu={} < need={}) — using previous transition (risky but rare)",
-                      s_ringIndex, gpuSafeValue, s_nextTimelineValue - RING_SIZE);
-        // In production consider vkQueueWaitIdle or larger ring here
+    if (VkResult r = vkBeginCommandBuffer(cmd, &bbi); r != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "vkBeginCommandBuffer failed: {}", string_VkResult(r));
+        return r;
     }
 
-    s_nextTimelineValue++;
-    s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
+    transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
+    if (VkResult r = vkEndCommandBuffer(cmd); r != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "vkEndCommandBuffer failed: {}", string_VkResult(r));
+        return r;
+    }
+
+    // Temporary debug: always submit synchronously + wait idle
+    VkSubmitInfo si{};
+    si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount   = 1;
+    si.pCommandBuffers      = &cmd;
+    si.waitSemaphoreCount   = (waitSem != VK_NULL_HANDLE) ? 1 : 0;
+    si.pWaitSemaphores      = (waitSem != VK_NULL_HANDLE) ? &waitSem : nullptr;
+
+    LOG_AMOURANTH("DEBUG: Submitting transition for image index {} (waitSem={})", imageIndex, (waitSem != VK_NULL_HANDLE));
+
+    VkResult submitRes = vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
+    if (submitRes != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "vkQueueSubmit (transition) FAILED: {}", string_VkResult(submitRes));
+        return submitRes;
+    }
+
+    LOG_AMOURANTH("DEBUG: vkQueueSubmit OK → calling vkQueueWaitIdle");
+    VkResult waitRes = vkQueueWaitIdle(queue);
+    if (waitRes != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "vkQueueWaitIdle after transition FAILED: {}", string_VkResult(waitRes));
+        return waitRes;
+    }
+
+    LOG_AMOURANTH("DEBUG: Transition submit + waitIdle completed successfully");
+
+    // Present
     VkPresentInfoKHR pi{};
     pi.sType         = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount = 1;
     pi.pSwapchains   = &swap;
     pi.pImageIndices = &imageIndex;
 
-    VkResult res = vkQueuePresentKHR(queue, &pi);
+    VkResult presentRes = vkQueuePresentKHR(queue, &pi);
 
-    if (res >= VK_SUBOPTIMAL_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "Present returned {} — recreate recommended", string_VkResult(res));
-    } else if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", string_VkResult(res));
+    if (presentRes == VK_ERROR_DEVICE_LOST) {
+        LOG_FATAL_CAT("SWAPCHAIN", "vkQueuePresentKHR returned VK_ERROR_DEVICE_LOST");
+    } else if (presentRes >= VK_SUBOPTIMAL_KHR) {
+        LOG_WARN_CAT("SWAPCHAIN", "Present returned {} — recreate recommended", string_VkResult(presentRes));
+    } else if (presentRes != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", string_VkResult(presentRes));
     }
 
-    return res;
+    // Cycle ring index (even though we don't use timeline for now)
+    s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
+
+    return presentRes;
 }
 
 void SwapchainManager::recreate(uint32_t width, uint32_t height, std::string_view reason) noexcept {
