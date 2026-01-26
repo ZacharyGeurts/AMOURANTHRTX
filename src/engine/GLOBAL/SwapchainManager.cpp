@@ -9,8 +9,9 @@
 // - Simplified transitions for direct storage path
 // - Fixed: Explicit PRESENT_SRC_KHR transition before every present
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
-// - Fixed: Use transient command pool for one-time transitions
-// - No external getOneTimeCommandBuffer — internal transient cmd creation
+// - Fixed: Lazy transient command pool creation on first present
+// - No external getOneTimeCommandBuffer — internal one-time cmd for transition
+// - Cleanup dissolves old cmd buffers safely on shutdown
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -364,37 +365,19 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
 
     VkImage currentImage = swapchainImages_[imageIndex];
 
-    // Lazy-create transient command pool if not exists
-    VkCommandPool transientPool = stone_transient_pool();
-    if (transientPool == VK_NULL_HANDLE) {
-        VkCommandPoolCreateInfo pci{};
-        pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
-
-        VkResult res = vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Failed to lazy-create transient pool for present transition: {}", string_VkResult(res));
-            // Continue — present may work if image already in correct layout
-        } else {
-            StoneKey::stone_seal_transient_pool(transientPool);  // Seal if created
-            LOG_INFO_CAT("SWAPCHAIN", "Lazy-created transient command pool for present transition");
-        }
-    }
-
-    // One-time cmd buffer for transition
+    // Create one-time transient command buffer for transition
     VkCommandBuffer cmd = VK_NULL_HANDLE;
 
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = transientPool;
+    allocInfo.commandPool        = stone_transient_pool();
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
 
     VkResult res = vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
     if (res != VK_SUCCESS) {
         LOG_ERROR_CAT("SWAPCHAIN", "Failed to allocate transient cmd for present transition: {}", string_VkResult(res));
-        // Continue anyway
+        // Continue anyway — present may work if image already in correct layout
     } else {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -414,7 +397,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
         vkQueueWaitIdle(queue);
 
-        vkFreeCommandBuffers(stone_device(), transientPool, 1, &cmd);
+        vkFreeCommandBuffers(stone_device(), stone_transient_pool(), 1, &cmd);
     }
 
     VkPresentInfoKHR pi{};
@@ -483,5 +466,5 @@ void SwapchainManager::cleanupImageViews() noexcept {
 // - No more VK_IMAGE_LAYOUT_UNDEFINED on present
 // - Fixed: Use transient command pool for one-time transitions
 // - No external getOneTimeCommandBuffer — internal transient cmd creation
-// Celebrated 420 lines. Joe Rogan and Elon Musk interview says I can smoke in public if it is legal. You saw it.
-// =============================================================================
+// - Cleanup dissolves old cmd buffers safely on shutdown
+// =========================================================================nice

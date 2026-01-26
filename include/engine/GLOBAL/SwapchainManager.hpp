@@ -1,7 +1,17 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.51
-// SWAPCHAIN MANAGER — HDR | SELF-HEALING | NO MID-FRAME RECREATE
-// JANUARY 23, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.70
+// SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT (QUERY FIRST)
+// JANUARY 24, 2026 — "only violate a few laws" edition
+// - Queries support for STORAGE_BIT on swapchain images BEFORE creation
+// - Attempts direct write (STORAGE_BIT) only if viable
+// - No blind fallback recreation — caller must handle !directWriteEnabled
+// - Logs chosen path clearly + why it failed if unsupported
+// - Simplified transitions for direct storage path
+// - Fixed: Explicit PRESENT_SRC_KHR transition before every present
+// - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
+// - Fixed: Lazy transient command pool creation on first present
+// - No external getOneTimeCommandBuffer — internal one-time cmd for transition
+// - Cleanup dissolves old cmd buffers safely on shutdown
 // =============================================================================
 
 #pragma once
@@ -81,7 +91,7 @@ public:
     inline static std::vector<VkImageView>         swapchainImageViews_;
 
     inline static bool minimized_ = false;
-	inline static bool directWriteEnabled = false;
+    inline static bool directWriteEnabled = false;
 
 private:
     static void cleanupImageViews() noexcept;
@@ -121,9 +131,10 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// CLEAN HEADER — v30.51 — JANUARY 23, 2026
+// CLEAN HEADER — v30.70 — JANUARY 24, 2026
 // - No mid-frame recreation — acquire/present return error codes for caller
 // - Deferred recreate at start of next frame (renderer handles flag)
 // - transitionImageLayout remains static
 // - Global convenience macros for easy access
+// - Lazy transient pool for present transitions
 // =============================================================================
