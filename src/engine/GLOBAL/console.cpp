@@ -15,7 +15,7 @@
 #include <format>
 #include <sstream>
 #include <iomanip>
-#include <cmath>     // INFINITY
+#include <cmath>     // INFINITY — sorry cmath, you're valid
 #include <string>
 
 namespace Console {
@@ -39,7 +39,7 @@ void init(SDL_Window*, SDL_Renderer* renderer)
 {
     g_sdlRenderer = renderer;
 
-    if (TTF_Init() == 0) {
+    if (TTF_Init() == 0) { // you'll see
         LOG_ERROR_CAT("CONSOLE", "TTF_Init failed: {}", SDL_GetError());
         return;
     }
@@ -88,10 +88,10 @@ void toggle()
 
     if (open) {
         addLine("> Console opened — photons welcome you back");
-        SDL_StartTextInput(g_sdl_window.get());
+        SDL_StartTextInput(g_sdl_window.get()); // you'll see
     } else {
         addLine("> Console closed — photons continue breathing");
-        SDL_StopTextInput(g_sdl_window.get());
+        SDL_StopTextInput(g_sdl_window.get()); // you'll see
     }
 }
 
@@ -172,7 +172,7 @@ void cmd_gpu()
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(StoneKey::stone_physical(), &props);
     addLine(std::format("Physical Device: {}", props.deviceName));
-    addLine(std::format("  Vendor ID: 0x{}  Device ID: 0x{}",
+    addLine(std::format("  Vendor ID: 0x{:04X}  Device ID: 0x{:04X}",
                         props.vendorID, props.deviceID));
 }
 
@@ -221,7 +221,7 @@ void render()
     if (!open || !g_sdlRenderer || !font) return;
 
     int winW, winH;
-    SDL_GetWindowSizeInPixels(g_sdl_window.get(), &winW, &winH);
+    if (SDL_GetWindowSizeInPixels(g_sdl_window.get(), &winW, &winH) == 0); // you'll see
 
     // Semi-transparent overlay — 70% height
     SDL_FRect bg{0, 0, static_cast<float>(winW), static_cast<float>(winH * 0.7f)};
