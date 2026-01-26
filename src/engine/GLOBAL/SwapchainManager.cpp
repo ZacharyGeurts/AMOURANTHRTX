@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.73
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 26, 2026 — "minimal ring, no waitIdle, renderer owns transition" edition
+// JANUARY 26, 2026 — "renderer owns present transition — no separate ring" edition
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -26,13 +26,6 @@ using StoneKey::stone_seal_images;
 using StoneKey::stone_seal_views;
 
 namespace RTX {
-
-constexpr uint32_t RING_SIZE = 8;
-
-// Static members (minimal — we don't need timeline or tracker anymore)
-VkCommandPool                SwapchainManager::s_transientPool = VK_NULL_HANDLE;
-std::vector<VkCommandBuffer> SwapchainManager::s_cmdRing;
-uint32_t                     SwapchainManager::s_ringIndex     = 0;
 
 static void ensureSwapchainExtension() noexcept {
     if (!g_ext.vkCreateSwapchainKHR) {
@@ -63,9 +56,7 @@ bool SwapchainManager::isReady() noexcept {
 }
 
 void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
-    if (isReady() && swapchainExtent_.width == w && swapchainExtent_.height == h) {
-        return;
-    }
+    if (isReady() && swapchainExtent_.width == w && swapchainExtent_.height == h) return;
 
     if (minimized_ || w == 0 || h == 0) {
         minimized_ = true;
@@ -74,9 +65,7 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
     }
 
     LOG_INFO_CAT("SWAPCHAIN", "Ensuring swapchain ready — {}×{}", w, h);
-
     vkDeviceWaitIdle(stone_device());
-
     createOrRecreateSwapchain(w, h, true, "ensureReady");
 
     if (!isReady()) {
@@ -87,27 +76,6 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
                         swapchainImages_.size(), w, h,
                         directWriteEnabled ? "ENABLED (STORAGE_BIT)" : "DISABLED");
     }
-}
-
-void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
-                                             VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
-    if (cmd == VK_NULL_HANDLE || image == VK_NULL_HANDLE || oldLayout == newLayout) return;
-
-    VkImageMemoryBarrier barrier{};
-    barrier.sType                   = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout               = oldLayout;
-    barrier.newLayout               = newLayout;
-    barrier.srcQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image                   = image;
-    barrier.subresourceRange        = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    barrier.srcAccessMask           = 0;  // UNDEFINED discards content
-    barrier.dstAccessMask           = VK_ACCESS_MEMORY_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason) noexcept {
@@ -244,14 +212,12 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}x{} | Direct storage: {}",
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}×{} | Direct storage: {}",
                     count, extent.width, extent.height, directWriteEnabled ? "YES" : "NO");
 }
 
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept {
-    if (minimized_ || !swapchain_.valid()) {
-        return VK_NOT_READY;
-    }
+    if (minimized_ || !swapchain_.valid()) return VK_NOT_READY;
 
     VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(), UINT64_MAX, semaphore, fence, pImageIndex);
 
@@ -262,91 +228,32 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
     return res;
 }
 
-VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
-    if (minimized_ || !swapchain_.valid() || !stone_device()) {
-        LOG_AMOURANTH("Present early exit: minimized, invalid swapchain or NO DEVICE");
-        return VK_ERROR_INITIALIZATION_FAILED;
-    }
+void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) {
 
     VkSwapchainKHR swap = stone_swapchain();
-    VkImage image = swapchainImages_[imageIndex];
-
-    // Lazy init — only pool + ring (no timeline, no tracker)
-    if (s_transientPool == VK_NULL_HANDLE) {
-        LOG_AMOURANTH("Lazy transition pool init START");
-
-        VkCommandPoolCreateInfo pci{};
-        pci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        pci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
-        VK_CHECK(vkCreateCommandPool(stone_device(), &pci, nullptr, &s_transientPool));
-
-        s_cmdRing.resize(RING_SIZE);
-        VkCommandBufferAllocateInfo ai{};
-        ai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        ai.commandPool        = s_transientPool;
-        ai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        ai.commandBufferCount = RING_SIZE;
-        VK_CHECK(vkAllocateCommandBuffers(stone_device(), &ai, s_cmdRing.data()));
-
-        LOG_AMOURANTH("Lazy init COMPLETE: pool=0x{} ring={}", (uintptr_t)s_transientPool, RING_SIZE);
-    }
-
-    VkCommandBuffer cmd = s_cmdRing[s_ringIndex];
-
-    vkResetCommandBuffer(cmd, 0);
-
-    VkCommandBufferBeginInfo bbi{};
-    bbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    if (VkResult r = vkBeginCommandBuffer(cmd, &bbi); r != VK_SUCCESS) {
-        LOG_FATAL_CAT("SWAPCHAIN", "vkBeginCommandBuffer failed: {}", string_VkResult(r));
-        return r;
-    }
-
-    transitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-    if (VkResult r = vkEndCommandBuffer(cmd); r != VK_SUCCESS) {
-        LOG_FATAL_CAT("SWAPCHAIN", "vkEndCommandBuffer failed: {}", string_VkResult(r));
-        return r;
-    }
-
-    VkSubmitInfo si{};
-    si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    si.commandBufferCount   = 1;
-    si.pCommandBuffers      = &cmd;
-    si.waitSemaphoreCount   = (waitSem != VK_NULL_HANDLE) ? 1 : 0;
-    si.pWaitSemaphores      = (waitSem != VK_NULL_HANDLE) ? &waitSem : nullptr;
-
-    VkResult submitRes = vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
-    if (submitRes != VK_SUCCESS) {
-        LOG_FATAL_CAT("SWAPCHAIN", "vkQueueSubmit (transition) FAILED: {}", string_VkResult(submitRes));
-        return submitRes;
-    }
-
-    // No waitIdle — let the renderer handle synchronization via pew() submit
-    // The renderer should wait on graphicsTimelineSemaphore or use fences if needed
-
-    s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
 
     VkPresentInfoKHR pi{};
-    pi.sType         = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.swapchainCount = 1;
-    pi.pSwapchains   = &swap;
-    pi.pImageIndices = &imageIndex;
+    pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.swapchainCount     = 1;
+    pi.pSwapchains        = &swap;
+    pi.pImageIndices      = &imageIndex;
 
-    VkResult presentRes = vkQueuePresentKHR(queue, &pi);
-
-    if (presentRes == VK_ERROR_DEVICE_LOST) {
-        LOG_FATAL_CAT("SWAPCHAIN", "vkQueuePresentKHR returned VK_ERROR_DEVICE_LOST");
-    } else if (presentRes >= VK_SUBOPTIMAL_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "Present returned {} — recreate recommended", string_VkResult(presentRes));
-    } else if (presentRes != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", string_VkResult(presentRes));
+    // Wait on render-finished semaphore (includes the present transition barrier)
+    if (waitSem != VK_NULL_HANDLE) {
+        pi.waitSemaphoreCount = 1;
+        pi.pWaitSemaphores    = &waitSem;
     }
 
-    return presentRes;
+    VkResult res = vkQueuePresentKHR(queue, &pi);
+
+    if (res == VK_ERROR_DEVICE_LOST) {
+        LOG_FATAL_CAT("SWAPCHAIN", "vkQueuePresentKHR → DEVICE LOST");
+        // Optionally set globalDeviceLost = true;
+    } else if (res >= VK_SUBOPTIMAL_KHR) {
+        LOG_WARN_CAT("SWAPCHAIN", "Present returned {} — recreate soon", string_VkResult(res));
+    } else if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", string_VkResult(res));
+    }
 }
 
 void SwapchainManager::recreate(uint32_t width, uint32_t height, std::string_view reason) noexcept {
@@ -364,13 +271,6 @@ void SwapchainManager::cleanup() noexcept {
     LAS::instance().onResize();
     cleanupImageViews();
     cleanupSwapchain();
-
-    if (s_transientPool != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
-        s_transientPool = VK_NULL_HANDLE;
-    }
-    s_cmdRing.clear();
-    s_ringIndex = 0;
 }
 
 void SwapchainManager::cleanupSwapchain() noexcept {

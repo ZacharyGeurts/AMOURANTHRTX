@@ -61,8 +61,7 @@ public:
                                                    VkSemaphore semaphore = VK_NULL_HANDLE,
                                                    VkFence fence = VK_NULL_HANDLE) noexcept;
 
-    [[nodiscard]] static VkResult presentImage(VkQueue queue, uint32_t imageIndex,
-                                               VkSemaphore waitSemaphore = VK_NULL_HANDLE) noexcept;
+    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE);
 
     // Transition helper — static
     static void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
