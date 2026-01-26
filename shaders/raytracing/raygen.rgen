@@ -5,8 +5,9 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 #extension GL_EXT_scalar_block_layout : require
 
+// No layout(local_size_*) here — this is NOT a compute shader!
+
 layout(location = 0) rayPayloadEXT vec3 hitValue;
-layout(location = 1) rayPayloadEXT bool shadowHit;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
@@ -25,7 +26,7 @@ layout(set = 0, binding = 2) uniform CameraUBO {
 layout(set = 0, binding = 3) readonly buffer Materials {
     vec4 albedo;
     vec4 emissive;
-    vec4 metallicRoughness;  // .x = metallic, .y = roughness
+    vec4 metallicRoughness;     // .x = metallic, .y = roughness
     vec4 padding;
 } materials[];
 
@@ -33,26 +34,26 @@ layout(push_constant) uniform PushConstants {
     float totalTime;
 } pc;
 
-vec3 randomHemisphere(vec3 normal, uint seed) {
-    uint s = seed ^ uint(pc.totalTime * 1e6);
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    float r1 = fract(sin(float(s)) * 43758.5453123);
-    float r2 = fract(sin(float(s + 1)) * 43758.5453123);
-    float theta = 2.0 * 3.141592653589793 * r1;
-    float phi = acos(1.0 - 2.0 * r2);
-    vec3 dir = vec3(sin(phi) * cos(theta), sin(phi) * sin(theta), cos(phi));
-    vec3 tangent = normalize(cross(normal, vec3(0,1,0)));
-    vec3 bitangent = cross(normal, tangent);
-    return normalize(tangent * dir.x + bitangent * dir.y + normal * dir.z);
+// Simple RNG using totalTime + pixel coordinates
+uint rngState = uint(gl_LaunchIDEXT.x * 73856093u ^ gl_LaunchIDEXT.y * 19349663u ^ uint(pc.totalTime * 1000000.0));
+uint rng() {
+    rngState ^= rngState << 13;
+    rngState ^= rngState >> 17;
+    rngState ^= rngState << 5;
+    return rngState;
 }
 
-void main() {
+float rand() {
+    return float(rng()) / 4294967295.0;
+}
+
+void main()
+{
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+
     vec2 d = inUV * 2.0 - 1.0;
-    vec4 origin = camera.viewInverse * vec4(0,0,0,1);
+    vec4 origin = camera.viewInverse * vec4(0, 0, 0, 1);
     vec4 target = camera.projInverse * vec4(d.x, d.y, 1, 1);
     vec4 direction = camera.viewInverse * vec4(normalize(target.xyz), 0);
 
@@ -61,7 +62,8 @@ void main() {
     float tmin = 0.001;
     float tmax = 10000.0;
 
-    traceRayEXT(topLevelAS, rayFlags, cullMask, 0, 0, 1,
+    traceRayEXT(topLevelAS, rayFlags, cullMask,
+                0 /* sbtRecordOffset */, 0 /* sbtRecordStride */, 1 /* missIndex */,
                 origin.xyz, tmin, direction.xyz, tmax, 0);
 
     vec3 finalColor = hitValue * camera.exposure;
