@@ -3,6 +3,7 @@
 // RTX HANDLER — GLOBAL VULKAN CONTEXT | MODERN C++23 | RTX-FIRST | MINIMAL STATE
 // FULL RTX FEATURES | DESCRIPTOR INDEXING | TIMELINE SEMAPHORES | BUFFER DEVICE ADDRESS
 // NO FRAMES | NO BLOAT | EXTERNAL SEALING | POOL DELAYED | VALIDATION TOGGLEABLE
+// UPDATED: Added VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME to required extensions
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -79,15 +80,16 @@ private:
 };
 
 // =============================================================================
-// Required Device Extensions — RTX minimum set
+// Required Device Extensions — RTX minimum set + descriptor buffer empire
 // =============================================================================
-inline constexpr std::array<const char*, 6> requiredDeviceExtensions = {{
+inline constexpr std::array<const char*, 7> requiredDeviceExtensions = {{
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
     VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
     VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
     VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+    VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME  // Required for eternal descriptor buffer (zero-overhead memcpy updates)
 }};
 
 // =============================================================================
