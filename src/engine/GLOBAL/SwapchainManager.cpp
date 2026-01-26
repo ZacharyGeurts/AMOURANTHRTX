@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.72
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 26, 2026 — "debug: always submit transition + waitIdle for now" edition
+// JANUARY 26, 2026 — "sync debug + minimal barrier + FIFO forced" edition
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -108,8 +108,8 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     barrier.image                   = image;
     barrier.subresourceRange        = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    // Minimal & safe transition from UNDEFINED → PRESENT_SRC_KHR
-    // No src access needed (UNDEFINED discards previous content)
+    // Minimal safe transition: UNDEFINED → PRESENT_SRC_KHR
+    // No src access required (content discarded)
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
@@ -180,13 +180,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         if (it != formats.end()) { chosenFormat = *it; break; }
     }
 
-    // Present mode — force FIFO for stability during debug
-    uint32_t pmCount = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, nullptr);
-    std::vector<VkPresentModeKHR> presentModes(pmCount);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, presentModes.data());
-
-    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;  // Forced for debug
+    // Present mode — forced FIFO to reduce potential driver stress during debug
+    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
 
     uint32_t imgCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
@@ -277,10 +272,6 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
         return res;
-    }
-
-    if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", string_VkResult(res));
     }
 
     return res;
@@ -381,7 +372,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         return r;
     }
 
-    // Temporary debug: always submit synchronously + wait idle
+    // Debug mode: synchronous submit + wait idle
     VkSubmitInfo si{};
     si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount   = 1;
@@ -389,7 +380,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
     si.waitSemaphoreCount   = (waitSem != VK_NULL_HANDLE) ? 1 : 0;
     si.pWaitSemaphores      = (waitSem != VK_NULL_HANDLE) ? &waitSem : nullptr;
 
-    LOG_AMOURANTH("DEBUG: Submitting transition for image index {} (waitSem={})", imageIndex, (waitSem != VK_NULL_HANDLE));
+    LOG_AMOURANTH("DEBUG: Submitting transition barrier for image index {}", imageIndex);
 
     VkResult submitRes = vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
     if (submitRes != VK_SUCCESS) {
@@ -397,16 +388,15 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         return submitRes;
     }
 
-    LOG_AMOURANTH("DEBUG: vkQueueSubmit OK → calling vkQueueWaitIdle");
+    LOG_AMOURANTH("DEBUG: Submit OK → vkQueueWaitIdle");
     VkResult waitRes = vkQueueWaitIdle(queue);
     if (waitRes != VK_SUCCESS) {
-        LOG_FATAL_CAT("SWAPCHAIN", "vkQueueWaitIdle after transition FAILED: {}", string_VkResult(waitRes));
+        LOG_FATAL_CAT("SWAPCHAIN", "vkQueueWaitIdle FAILED after transition: {}", string_VkResult(waitRes));
         return waitRes;
     }
 
-    LOG_AMOURANTH("DEBUG: Transition submit + waitIdle completed successfully");
+    LOG_AMOURANTH("DEBUG: Transition completed synchronously — now presenting");
 
-    // Present
     VkPresentInfoKHR pi{};
     pi.sType         = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount = 1;
@@ -423,7 +413,6 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", string_VkResult(presentRes));
     }
 
-    // Cycle ring index (even though we don't use timeline for now)
     s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
 
     return presentRes;

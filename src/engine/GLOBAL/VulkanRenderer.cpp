@@ -456,7 +456,6 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     VkResult acquireRes = SwapchainManager::acquireNextImage(&imageIndex, currentAcquire);
     if (acquireRes != VK_SUCCESS) {
-        LOG_WARN_CAT("RENDERER", "Acquire failed: {}", string_VkResult(acquireRes));
         if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR || acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
             needsSwapchainRecreate_ = true;
         }
