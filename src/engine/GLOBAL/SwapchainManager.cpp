@@ -244,7 +244,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     stone_seal_images(swapchainImages_);
     stone_seal_views(swapchainImageViews_);
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}×{} | Direct storage: {}",
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}x{} | Direct storage: {}",
                     count, extent.width, extent.height, directWriteEnabled ? "YES" : "NO");
 }
 
@@ -289,7 +289,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         ai.commandBufferCount = RING_SIZE;
         VK_CHECK(vkAllocateCommandBuffers(stone_device(), &ai, s_cmdRing.data()));
 
-        LOG_AMOURANTH("Lazy init COMPLETE: pool=0x{:x} ring={}", (uintptr_t)s_transientPool, RING_SIZE);
+        LOG_AMOURANTH("Lazy init COMPLETE: pool=0x{} ring={}", (uintptr_t)s_transientPool, RING_SIZE);
     }
 
     VkCommandBuffer cmd = s_cmdRing[s_ringIndex];
@@ -386,35 +386,3 @@ void SwapchainManager::cleanupImageViews() noexcept {
 }
 
 } // namespace RTX
-// necessary padding
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//
