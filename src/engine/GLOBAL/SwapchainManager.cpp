@@ -228,7 +228,7 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
     return res;
 }
 
-// Synchronous transition right before present — guarantees no undefined layout
+// Synchronous transition right before present — guarantees no undefined layout ever
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) {
     if (minimized_ || !swapchain_.valid() || !stone_device()) return;
 
@@ -289,8 +289,8 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     if (waitSem != VK_NULL_HANDLE) {
         submit.waitSemaphoreCount = 1;
         submit.pWaitSemaphores    = &waitSem;
-        VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        submit.pWaitDstStageMask  = &stage;
+        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        submit.pWaitDstStageMask  = &waitStage;
     }
 
     vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
@@ -333,7 +333,7 @@ void SwapchainManager::cleanup() noexcept {
     cleanupImageViews();
     cleanupSwapchain();
 
-    // Destroy transient pool if created
+    // Destroy transient pool
     static VkCommandPool transientPool = VK_NULL_HANDLE;
     if (transientPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(stone_device(), transientPool, nullptr);
