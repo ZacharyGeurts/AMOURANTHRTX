@@ -145,10 +145,13 @@ private:
     Handle<VkDeviceMemory>            dummyAccelMemory_;
     Handle<VkAccelerationStructureKHR> dummyTLAS_;
 
-    // Descriptor buffer members (eternal, mapped)
+    // Descriptor buffer members (eternal, mapped, growable)
     uint64_t descriptorBufferHandle_ = 0;
     void* descriptorMapped_ = nullptr;
     VkDeviceAddress descriptorBufferAddress_ = 0;
+    VkDeviceSize currentMappedSize_ = 0;      // Current total mapped bytes
+    VkDeviceSize currentWriteOffset_ = 0;     // Next write position
+
     std::array<VkDeviceSize, kMainBindings.size()> bindingOffsets_{};
     VkPhysicalDeviceDescriptorBufferPropertiesEXT descProps_{};
 
@@ -156,6 +159,7 @@ private:
 
     void cacheDescriptorProperties();
     void createDescriptorBuffer();
+    void growDescriptorBuffer(VkDeviceSize additionalSize);  // Future: dynamic growth
 };
 
 [[nodiscard]] inline PipelineManager& pipeline() noexcept {
@@ -172,5 +176,6 @@ private:
 // - Binding via vkCmdBindDescriptorBuffersEXT + offsets
 // - Living world at 7, materials at 3 — updated via direct writes
 // - Push constant: 4 bytes only (time float) — dt killed
+// - Descriptor buffer now minimal/growable — no layout size query (trashed sets)
 // Empire upgraded — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
 // =============================================================================
