@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine - Vulkan Renderer
+// AMOURANTH RTX Engine - Vulkan Renderer Header
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.74 — January 26, 2026 — per-image binary semaphores (indexed by imageIndex)
+// Version 30.74 — January 26, 2026 — per-image binary semaphores for present sync
 // DESCRIPTOR SETS ARE DEAD — ETERNAL DESCRIPTOR BUFFER EMPIRE
 // FIXED CMD BUFFER RING (RESET + RE-RECORD) • BINDLESS • ZERO-OVERHEAD UPDATES
 // OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR BUFFER • UBO • HDR STORAGE • LIVING WORLD
@@ -95,7 +95,6 @@ private:
 private:
     void createTransientCommandPool() noexcept;
     [[nodiscard]] VkCommandBuffer getOneTimeCommandBuffer() noexcept;
-    [[nodiscard]] VkResult submitAndWaitOneTime(VkCommandBuffer cmd) noexcept;
 
     void transitionImageLayout(VkCommandBuffer cmd,
                                VkImage image,

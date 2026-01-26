@@ -1,7 +1,7 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.73
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.74
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 26, 2026 — "renderer owns present transition — no separate ring" edition
+// JANUARY 26, 2026 — "synchronous transition in present — never undefined" edition
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -228,27 +228,88 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
     return res;
 }
 
+// Synchronous transition right before present — guarantees no undefined layout
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) {
+    if (minimized_ || !swapchain_.valid() || !stone_device()) return;
 
     VkSwapchainKHR swap = stone_swapchain();
+    VkImage image = swapchainImages_[imageIndex];
 
+    // Transient pool (created once)
+    static VkCommandPool transientPool = VK_NULL_HANDLE;
+    if (transientPool == VK_NULL_HANDLE) {
+        VkCommandPoolCreateInfo pci{};
+        pci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
+        vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool);
+    }
+
+    // Allocate single-use cmd buffer
+    VkCommandBuffer cmd;
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool        = transientPool;
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    // Transition UNDEFINED → PRESENT_SRC_KHR
+    VkImageMemoryBarrier barrier{};
+    barrier.sType                   = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout               = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout               = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.srcQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image                   = image;
+    barrier.subresourceRange        = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.srcAccessMask           = 0;
+    barrier.dstAccessMask           = VK_ACCESS_MEMORY_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    vkEndCommandBuffer(cmd);
+
+    // Submit and wait — layout guaranteed correct
+    VkSubmitInfo submit{};
+    submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers    = &cmd;
+
+    if (waitSem != VK_NULL_HANDLE) {
+        submit.waitSemaphoreCount = 1;
+        submit.pWaitSemaphores    = &waitSem;
+        VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        submit.pWaitDstStageMask  = &stage;
+    }
+
+    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+
+    // Clean up cmd buffer
+    vkFreeCommandBuffers(stone_device(), transientPool, 1, &cmd);
+
+    // Present
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount     = 1;
     pi.pSwapchains        = &swap;
     pi.pImageIndices      = &imageIndex;
 
-    // Wait on render-finished semaphore (includes the present transition barrier)
-    if (waitSem != VK_NULL_HANDLE) {
-        pi.waitSemaphoreCount = 1;
-        pi.pWaitSemaphores    = &waitSem;
-    }
-
     VkResult res = vkQueuePresentKHR(queue, &pi);
 
     if (res == VK_ERROR_DEVICE_LOST) {
         LOG_FATAL_CAT("SWAPCHAIN", "vkQueuePresentKHR → DEVICE LOST");
-        // Optionally set globalDeviceLost = true;
     } else if (res >= VK_SUBOPTIMAL_KHR) {
         LOG_WARN_CAT("SWAPCHAIN", "Present returned {} — recreate soon", string_VkResult(res));
     } else if (res != VK_SUCCESS) {
@@ -271,6 +332,13 @@ void SwapchainManager::cleanup() noexcept {
     LAS::instance().onResize();
     cleanupImageViews();
     cleanupSwapchain();
+
+    // Destroy transient pool if created
+    static VkCommandPool transientPool = VK_NULL_HANDLE;
+    if (transientPool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
+        transientPool = VK_NULL_HANDLE;
+    }
 }
 
 void SwapchainManager::cleanupSwapchain() noexcept {

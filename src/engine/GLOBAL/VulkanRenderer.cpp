@@ -462,7 +462,8 @@ void RTX::VulkanRenderer::pew() noexcept {
     VkTimelineSemaphoreSubmitInfo timelineSI{};
     timelineSI.sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
     timelineSI.signalSemaphoreValueCount = 2;
-    timelineSI.pSignalSemaphoreValues    = &nextGraphicsValue_;
+    uint64_t signalValues[2] = {nextGraphicsValue_, 0ULL};  // dummy for binary
+    timelineSI.pSignalSemaphoreValues    = signalValues;
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -473,7 +474,6 @@ void RTX::VulkanRenderer::pew() noexcept {
     submitInfo.pWaitSemaphores      = &currentAcquire;
     submitInfo.pWaitDstStageMask    = waitStages;
 
-    // Signal timeline + per-image binary
     VkSemaphore signalSems[2] = {graphicsTimelineSemaphore_, renderFinishedSemaphores_[imageIndex]};
     submitInfo.signalSemaphoreCount = 2;
     submitInfo.pSignalSemaphores    = signalSems;
@@ -482,6 +482,5 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     nextGraphicsValue_++;
 
-    // Present waits on per-image binary semaphore — safe reuse after re-acquire
     SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, renderFinishedSemaphores_[imageIndex]);
-}
+} // SX 20 2MB RAM EasyData. My first rig.
