@@ -220,24 +220,35 @@ inline std::mutex g_bufferMutex;
 
 // ── HELPER FUNCTIONS ───────────────────────────────────────────────────────
 [[nodiscard]] inline const BufferInfo* get(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
-    return it != g_buffers.end() ? &it->second : nullptr;
+    std::unordered_map<uint64_t, BufferInfo>::iterator it = g_buffers.find(handle);
+    if (it == g_buffers.end()) {
+        return nullptr;
+    }
+    return &it->second;
 }
 
 [[nodiscard]] inline VkBuffer get_buffer(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
-    return it != g_buffers.end() ? it->second.buffer : VK_NULL_HANDLE;
+    const BufferInfo* info = get(handle);
+    if (info == nullptr) {
+        return VK_NULL_HANDLE;
+    }
+    return info->buffer;
 }
 
 [[nodiscard]] inline VkDeviceMemory get_memory(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
-    return it != g_buffers.end() ? it->second.memory : VK_NULL_HANDLE;
+    const BufferInfo* info = get(handle);
+    if (info == nullptr) {
+        return VK_NULL_HANDLE;
+    }
+    return info->memory;
 }
 
 [[nodiscard]] inline VkDeviceAddress get_device_address(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
-    if (it == g_buffers.end()) return 0;
-    return it->second.deviceAddress + it->second.offset;
+    const BufferInfo* info = get(handle);
+    if (info == nullptr) {
+        return 0;
+    }
+    return info->deviceAddress + info->offset;
 }
 
 // ── STAGING RING — only host-visible part (uploads)
@@ -247,16 +258,19 @@ inline void ensureStagingRing() noexcept {
 
     LOG_INFO_CAT("BufferManager", "Creating 1 GiB staging ring");
 
-    VkBufferCreateInfo bci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = STAGING_RING_SIZE,
-        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
+    VkBufferCreateInfo bci = {};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size = STAGING_RING_SIZE;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRing.buffer));
+    VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRing.buffer);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkCreateBuffer for staging ring failed: {}", string_VkResult(res));
+        return;
+    }
 
-    VkMemoryRequirements req{};
+    VkMemoryRequirements req = {};
     vkGetBufferMemoryRequirements(stone_device(), g_stagingRing.buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits,
@@ -264,18 +278,37 @@ inline void ensureStagingRing() noexcept {
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (memType == ~0u) {
         LOG_FATAL_CAT("BufferManager", "No host-visible coherent memory for staging ring");
+        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
         return;
     }
 
-    VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = req.size,
-        .memoryTypeIndex = memType
-    };
+    VkMemoryAllocateInfo mai = {};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = memType;
 
-    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &g_stagingRing.memory));
-    VK_CHECK(vkBindBufferMemory(stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0));
-    VK_CHECK(vkMapMemory(stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped));
+    res = vkAllocateMemory(stone_device(), &mai, nullptr, &g_stagingRing.memory);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkAllocateMemory for staging ring failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
+        return;
+    }
+
+    res = vkBindBufferMemory(stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkBindBufferMemory for staging ring failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
+        vkFreeMemory(stone_device(), g_stagingRing.memory, nullptr);
+        return;
+    }
+
+    res = vkMapMemory(stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkMapMemory for staging ring failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
+        vkFreeMemory(stone_device(), g_stagingRing.memory, nullptr);
+        return;
+    }
 
     g_stagingRing.ready = true;
     LOG_SUCCESS_CAT("BufferManager", "Staging ring created and mapped — {}", formatBytes(STAGING_RING_SIZE));
@@ -306,17 +339,20 @@ inline void ensureStagingRing() noexcept {
         return nullptr;
     }
 
-    VkBufferCreateInfo bci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = chunkSize,
-        .usage = CHUNK_USAGE_FLAGS | usage,
-        .sharingMode = sharingMode
-    };
+    VkBufferCreateInfo bci = {};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size = chunkSize;
+    bci.usage = CHUNK_USAGE_FLAGS | usage;
+    bci.sharingMode = sharingMode;
 
     VkBuffer buffer = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &buffer));
+    VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &buffer);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkCreateBuffer for chunk failed: {}", string_VkResult(res));
+        return nullptr;
+    }
 
-    VkMemoryRequirements req{};
+    VkMemoryRequirements req = {};
     vkGetBufferMemoryRequirements(stone_device(), buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -325,26 +361,35 @@ inline void ensureStagingRing() noexcept {
         return nullptr;
     }
 
-    VkMemoryAllocateFlagsInfo flags{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
-    };
+    VkMemoryAllocateFlagsInfo flags = {};
+    flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
-    VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = &flags,
-        .allocationSize = req.size,
-        .memoryTypeIndex = memType
-    };
+    VkMemoryAllocateInfo mai = {};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.pNext = &flags;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = memType;
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &memory));
-    VK_CHECK(vkBindBufferMemory(stone_device(), buffer, memory, 0));
+    res = vkAllocateMemory(stone_device(), &mai, nullptr, &memory);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkAllocateMemory for chunk failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        return nullptr;
+    }
 
-    VkBufferDeviceAddressInfo addrInfo{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = buffer
-    };
+    res = vkBindBufferMemory(stone_device(), buffer, memory, 0);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkBindBufferMemory for chunk failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        vkFreeMemory(stone_device(), memory, nullptr);
+        return nullptr;
+    }
+
+    VkBufferDeviceAddressInfo addrInfo = {};
+    addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addrInfo.buffer = buffer;
     VkDeviceAddress baseAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
     g_mainChunks.push_back({buffer, memory, chunkSize, baseAddr, 0,
@@ -367,17 +412,20 @@ inline void ensureStagingRing() noexcept {
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
-    VkBufferCreateInfo bci{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
+    VkBufferCreateInfo bci = {};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size = size;
+    bci.usage = usage;
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer buffer = VK_NULL_HANDLE;
-    VK_CHECK(vkCreateBuffer(stone_device(), &bci, nullptr, &buffer));
+    VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &buffer);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkCreateBuffer for descriptor buffer failed: {}", string_VkResult(res));
+        return 0;
+    }
 
-    VkMemoryRequirements req{};
+    VkMemoryRequirements req = {};
     vkGetBufferMemoryRequirements(stone_device(), buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits,
@@ -389,26 +437,35 @@ inline void ensureStagingRing() noexcept {
         return 0;
     }
 
-    VkMemoryAllocateFlagsInfo flags{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
-    };
+    VkMemoryAllocateFlagsInfo flags = {};
+    flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
-    VkMemoryAllocateInfo mai{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = &flags,
-        .allocationSize = req.size,
-        .memoryTypeIndex = memType
-    };
+    VkMemoryAllocateInfo mai = {};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.pNext = &flags;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = memType;
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    VK_CHECK(vkAllocateMemory(stone_device(), &mai, nullptr, &memory));
-    VK_CHECK(vkBindBufferMemory(stone_device(), buffer, memory, 0));
+    res = vkAllocateMemory(stone_device(), &mai, nullptr, &memory);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkAllocateMemory for descriptor buffer failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        return 0;
+    }
 
-    VkBufferDeviceAddressInfo addrInfo{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = buffer
-    };
+    res = vkBindBufferMemory(stone_device(), buffer, memory, 0);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkBindBufferMemory for descriptor buffer failed: {}", string_VkResult(res));
+        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        vkFreeMemory(stone_device(), memory, nullptr);
+        return 0;
+    }
+
+    VkBufferDeviceAddressInfo addrInfo = {};
+    addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addrInfo.buffer = buffer;
     VkDeviceAddress addr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
     uint64_t handle = ++g_nextHandle;
@@ -426,7 +483,7 @@ inline void ensureStagingRing() noexcept {
 // ── LAZY MAP FOR DESCRIPTOR BUFFER — call on first write
 // =============================================================================
 [[nodiscard]] inline void* lazyMapDescriptorBuffer(uint64_t handle) noexcept {
-    auto it = g_buffers.find(handle);
+    std::unordered_map<uint64_t, BufferInfo>::iterator it = g_buffers.find(handle);
     if (it == g_buffers.end()) {
         LOG_ERROR_CAT("BufferManager", "Invalid handle for descriptor buffer map");
         return nullptr;
@@ -572,7 +629,7 @@ inline void ensureStagingRing() noexcept {
 // =============================================================================
 inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
                            VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
-    auto it = g_buffers.find(handle);
+    std::unordered_map<uint64_t, BufferInfo>::iterator it = g_buffers.find(handle);
     if (it == g_buffers.end() || size > it->second.size) {
         LOG_ERROR_CAT("BufferManager", "Invalid upload: handle {} or size too large ({})", handle, formatBytes(size));
         return;
@@ -594,49 +651,45 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     if (!staging) return;
     std::memcpy(staging, data, size);
 
-    VkBufferCopy copy{
-        .srcOffset = static_cast<VkDeviceSize>(reinterpret_cast<std::uintptr_t>(staging) - reinterpret_cast<std::uintptr_t>(g_stagingRing.mapped)),
-        .dstOffset = info.offset,
-        .size = size
-    };
+    VkBufferCopy copy = {};
+    copy.srcOffset = static_cast<VkDeviceSize>(reinterpret_cast<std::uintptr_t>(staging) - reinterpret_cast<std::uintptr_t>(g_stagingRing.mapped));
+    copy.dstOffset = info.offset;
+    copy.size = size;
 
     if (cmd != VK_NULL_HANDLE) {
         vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
     } else {
-        VkCommandPool pool;
-        VkCommandPoolCreateInfo pci{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-            .queueFamilyIndex = StoneKey::stone_graphics_family()
-        };
+        VkCommandPool pool = {};
+        VkCommandPoolCreateInfo pci = {};
+        pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
         VK_CHECK(vkCreateCommandPool(stone_device(), &pci, nullptr, &pool));
 
-        VkCommandBuffer tcmd;
-        VkCommandBufferAllocateInfo ai{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = pool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1
-        };
+        VkCommandBuffer tcmd = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo ai = {};
+        ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        ai.commandPool = pool;
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 1;
         VK_CHECK(vkAllocateCommandBuffers(stone_device(), &ai, &tcmd));
 
-        VkCommandBufferBeginInfo bi{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-        };
+        VkCommandBufferBeginInfo bi = {};
+        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         VK_CHECK(vkBeginCommandBuffer(tcmd, &bi));
         vkCmdCopyBuffer(tcmd, g_stagingRing.buffer, info.buffer, 1, &copy);
         VK_CHECK(vkEndCommandBuffer(tcmd));
 
-        VkFence fence;
-        VkFenceCreateInfo fci{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fci = {};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         VK_CHECK(vkCreateFence(stone_device(), &fci, nullptr, &fence));
 
-        VkSubmitInfo si{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &tcmd
-        };
+        VkSubmitInfo si = {};
+        si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &tcmd;
         VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &si, fence));
         VK_CHECK(vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX));
 
@@ -650,7 +703,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 // =============================================================================
 inline void destroy(uint64_t handle) noexcept {
     std::lock_guard<std::mutex> lock(g_bufferMutex);
-    auto it = g_buffers.find(handle);
+    std::unordered_map<uint64_t, BufferInfo>::iterator it = g_buffers.find(handle);
     if (it == g_buffers.end()) return;
 
     BufferInfo& info = it->second;

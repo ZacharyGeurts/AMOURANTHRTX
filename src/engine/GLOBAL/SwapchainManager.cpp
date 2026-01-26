@@ -7,6 +7,10 @@
 // - No blind fallback recreation — caller must handle !directWriteEnabled
 // - Logs chosen path clearly + why it failed if unsupported
 // - Simplified transitions for direct storage path
+// - Fixed: Explicit PRESENT_SRC_KHR transition before every present
+// - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
+// - Fixed: Use transient command pool for one-time transitions
+// - No external getOneTimeCommandBuffer — internal transient cmd creation
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -27,6 +31,7 @@ using StoneKey::stone_seal_extent;
 using StoneKey::stone_seal_image_count;
 using StoneKey::stone_seal_images;
 using StoneKey::stone_seal_views;
+using StoneKey::stone_transient_pool;
 
 namespace RTX {
 
@@ -91,7 +96,7 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
 }
 
 // =============================================================================
-// transitionImageLayout — focused on direct storage path
+// transitionImageLayout — focused on present path
 // =============================================================================
 void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                              VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
@@ -111,41 +116,22 @@ void SwapchainManager::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     VkAccessFlags srcAccess = 0;
     VkAccessFlags dstAccess = 0;
 
-    if (directWriteEnabled) {
-        // Direct storage path
-        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
-            srcAccess = 0;
-            dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
-            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-        } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-            srcAccess = VK_ACCESS_SHADER_WRITE_BIT;
+    // Critical: always transition to PRESENT_SRC_KHR before present
+    if (newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED || oldLayout == VK_IMAGE_LAYOUT_GENERAL ||
+            oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+            srcAccess = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
             dstAccess = VK_ACCESS_MEMORY_READ_BIT;
-            srcStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+            srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
             dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
-            srcAccess = VK_ACCESS_MEMORY_READ_BIT;
-            dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
-            srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-            dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
-        } else {
-            return;  // unsupported transition for direct path
         }
+    } else if (newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+        srcAccess = VK_ACCESS_MEMORY_READ_BIT;
+        dstAccess = VK_ACCESS_SHADER_WRITE_BIT;
+        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        dstStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
     } else {
-        // Basic blit/transfer path (for when direct fails, or future tonemap blit)
-        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-            srcAccess = 0;
-            dstAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-            srcAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
-            dstAccess = VK_ACCESS_MEMORY_READ_BIT;
-            srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-            dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        } else {
-            return;
-        }
+        return;  // unsupported transition
     }
 
     barrier.srcAccessMask = srcAccess;
@@ -369,12 +355,50 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 }
 
 // =============================================================================
-// presentImage — return result for caller to flag recreate
+// presentImage — always ensure image in PRESENT_SRC_KHR layout before present
 // =============================================================================
 VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
     if (minimized_ || !swapchain_.valid()) return VK_ERROR_INITIALIZATION_FAILED;
 
     VkSwapchainKHR currentSwap = stone_swapchain();
+
+    // Get the current image from swapchain
+    VkImage currentImage = swapchainImages_[imageIndex];
+
+    // Create one-time transient command buffer for transition
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool        = stone_transient_pool();  // Use global transient pool
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    VkResult res = vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd);
+    if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "Failed to allocate transient cmd for present transition: {}", string_VkResult(res));
+        // Continue anyway — present may still work if already in correct layout
+    } else {
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(cmd, &beginInfo);
+
+        // Transition to PRESENT_SRC_KHR
+        transitionImageLayout(cmd, currentImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+        vkEndCommandBuffer(cmd);
+
+        VkSubmitInfo submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &cmd;
+        vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+        vkQueueWaitIdle(queue);
+
+        vkFreeCommandBuffers(stone_device(), stone_transient_pool(), 1, &cmd);
+    }
 
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -384,15 +408,15 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
     pi.pSwapchains        = &currentSwap;
     pi.pImageIndices      = &imageIndex;
 
-    VkResult res = vkQueuePresentKHR(queue, &pi);
+    VkResult presentRes = vkQueuePresentKHR(queue, &pi);
 
-    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
+    if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR || presentRes == VK_ERROR_SURFACE_LOST_KHR) {
         LOG_WARN_CAT("SWAPCHAIN", "Present detected invalid swapchain — flag recreate next frame");
-    } else if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", string_VkResult(res));
+    } else if (presentRes != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", string_VkResult(presentRes));
     }
 
-    return res;
+    return presentRes;
 }
 
 // =============================================================================
@@ -438,4 +462,9 @@ void SwapchainManager::cleanupImageViews() noexcept {
 // - No auto-fallback creation — respect driver reality
 // - Zero-copy when it works (rare), offscreen required otherwise
 // - Tonemap your raw ass later
+// - Fixed: Explicit PRESENT_SRC_KHR transition before every present
+// - No more VK_IMAGE_LAYOUT_UNDEFINED on present
+// - Fixed: Use transient command pool for one-time transitions
+// - No external getOneTimeCommandBuffer — internal transient cmd creation
+// Celebrated 420 lines. Joe Rogan and Elon Musk interview says I can smoke in public if it is legal. You saw it.
 // =============================================================================

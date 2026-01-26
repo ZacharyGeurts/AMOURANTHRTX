@@ -882,11 +882,22 @@ void RTX::PipelineManager::cacheDeviceProperties()
 // =============================================================================
 void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& updateInfo) noexcept
 {
-    // Lazy map on first write attempt — ensure buffer is ready
+    // Ultra-lazy: create & map buffer if it doesn't exist yet
+    if (descriptorBufferHandle_ == 0) {
+        constexpr VkDeviceSize INITIAL_SIZE = 4096ULL;  // Minimal starter chunk
+        descriptorBufferHandle_ = BufferManager::createDescriptorBuffer(INITIAL_SIZE, "EternalDescriptorBuffer");
+        if (descriptorBufferHandle_ == 0) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to create descriptor buffer on first write");
+            return;
+        }
+        descriptorBufferAddress_ = BM_GET_DEVICE_ADDRESS(descriptorBufferHandle_);
+    }
+
+    // Now safe — force lazy map if somehow still null
     if (descriptorMapped_ == nullptr) {
-        descriptorMapped_ = BufferManager::lazyMapDescriptorBuffer(descriptorBufferHandle_);
+        descriptorMapped_ = BM_LAZY_MAP_DESCRIPTOR(descriptorBufferHandle_);
         if (descriptorMapped_ == nullptr) {
-            LOG_FATAL_CAT("PIPELINE", "Failed to lazy-map descriptor buffer — empire compromised");
+            LOG_FATAL_CAT("PIPELINE", "Failed to map descriptor buffer on write");
             return;
         }
     }
@@ -1023,7 +1034,6 @@ void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& 
     }
 
     // No flush needed if memory is HOST_COHERENT (most host-visible allocations are)
-    // If not coherent, add vkFlushMappedMemoryRanges here
 }
 
 // =============================================================================
