@@ -360,8 +360,6 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 // Uses lazy ring of transient cmd buffers + GPU tracker buffer — fully non-blocking
 // =============================================================================
 VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) noexcept {
-    LOG_AMOURANTH("ENTER presentImage: imageIndex={}, waitSem={}, minimized={}, swapchain valid={}",
-                  imageIndex, (void*)waitSem, minimized_, swapchain_.valid());
 
     if (minimized_ || !swapchain_.valid()) {
         LOG_AMOURANTH("EARLY EXIT: minimized or invalid swapchain");
@@ -370,7 +368,6 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
 
     VkSwapchainKHR currentSwap = stone_swapchain();
     VkImage currentImage = swapchainImages_[imageIndex];
-    LOG_AMOURANTH("Current image={} (index {})", (void*)currentImage, imageIndex);
 
     // Lazy init: transient pool + cmd ring + timeline + GPU tracker buffer
     if (s_transientPool == VK_NULL_HANDLE) {
@@ -383,7 +380,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         pci.queueFamilyIndex = StoneKey::stone_graphics_family();
         VkResult res = vkCreateCommandPool(stone_device(), &pci, nullptr, &s_transientPool);
         if (res != VK_SUCCESS) {
-            LOG_AMOURANTH("FAIL: vkCreateCommandPool → %s", string_VkResult(res));
+            LOG_AMOURANTH("FAIL: vkCreateCommandPool → {}", string_VkResult(res));
             return VK_ERROR_INITIALIZATION_FAILED;
         }
 
@@ -449,7 +446,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
         addrInfo.buffer = s_ringTrackerBuffer;
         s_ringTrackerDeviceAddr = vkGetBufferDeviceAddress(stone_device(), &addrInfo);
 
-        LOG_AMOURANTH("Lazy init COMPLETE: pool=%p, ring=%zu, timeline=%p, tracker=%p (addr=0x%llx)",
+        LOG_AMOURANTH("Lazy init COMPLETE: pool={}, ring={}, timeline={}, tracker={} (addr=0x{})",
                       (void*)s_transientPool, s_cmdRing.size(), (void*)s_timelineSem,
                       (void*)s_ringTrackerBuffer, s_ringTrackerDeviceAddr);
     }
@@ -457,14 +454,12 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
     // Read current ring state from GPU memory (host-visible)
     uint32_t currentSlot = *reinterpret_cast<uint32_t*>(s_ringTrackerMapped);
     uint64_t lastCompleted = *reinterpret_cast<uint64_t*>(static_cast<uint8_t*>(s_ringTrackerMapped) + 8);
-    LOG_AMOURANTH("GPU ring state: slot={}, lastCompleted={}, my next={}", currentSlot, lastCompleted, s_nextTimelineValue);
 
     VkCommandBuffer cmd = s_cmdRing[s_ringIndex];
 
     // Decide: safe to reuse this slot?
     bool safeToReuse = (lastCompleted >= s_nextTimelineValue - RING_SIZE);
     if (safeToReuse) {
-        LOG_AMOURANTH("Safe to reuse slot {} — resetting & recording transition", s_ringIndex);
 
         vkResetCommandBuffer(cmd, 0);
 
@@ -502,8 +497,7 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
 
     s_nextTimelineValue++;
     s_ringIndex = (s_ringIndex + 1) % RING_SIZE;
-    LOG_AMOURANTH("Ring advanced: next slot {}, next timeline {}", s_ringIndex, s_nextTimelineValue);
-
+	
     // Present
     VkPresentInfoKHR pi{};
     pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -511,18 +505,14 @@ VkResult SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSe
     pi.pSwapchains = &currentSwap;
     pi.pImageIndices = &imageIndex;
 
-    LOG_AMOURANTH("Calling vkQueuePresentKHR");
     VkResult presentRes = vkQueuePresentKHR(queue, &pi);
 
     if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR || presentRes == VK_ERROR_SURFACE_LOST_KHR) {
-        LOG_WARN_CAT("SWAPCHAIN", "Present detected invalid swapchain (%s) — flag recreate", string_VkResult(presentRes));
+        LOG_WARN_CAT("SWAPCHAIN", "Present detected invalid swapchain ({}) — flag recreate", string_VkResult(presentRes));
     } else if (presentRes != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: %s", string_VkResult(presentRes));
-    } else {
-        LOG_AMOURANTH("Present succeeded");
+        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", string_VkResult(presentRes));
     }
 
-    LOG_AMOURANTH("EXIT presentImage → {}", string_VkResult(presentRes));
     return presentRes;
 }
 
@@ -606,4 +596,4 @@ VkDeviceAddress SwapchainManager::s_ringTrackerDeviceAddr = 0;
 // - Fixed: Lazy transient command pool + fixed ring for present transitions
 // - GPU-owned ring tracker buffer for non-blocking reuse
 // - Cleanup dissolves old cmd buffers safely on shutdown
-// =========================================================================nice
+// =============================================================================
