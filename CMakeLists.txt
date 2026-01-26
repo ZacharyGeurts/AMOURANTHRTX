@@ -383,13 +383,6 @@ foreach(MAP ${ASSET_MAP})
     endif()
 endforeach()
 
-add_custom_command(
-    OUTPUT ${STONEKEY_DST}
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${STONEKEY_SRC} ${STONEKEY_DST}
-    DEPENDS ${STONEKEY_SRC}
-    COMMENT "Deploying StoneKey.glsl (include-only)"
-)
-
 # =============================================================================
 # LEGENDARY BANNER — JANUARY 25 2026 — WINDOWS BUILD FIXED (libatomic)
 # =============================================================================
