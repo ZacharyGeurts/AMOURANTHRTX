@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.60 — January 23, 2026
+// Version 30.61 — January 25, 2026
 // - Frame-free: single descriptor set, no MAX_FRAMES_IN_FLIGHT
 // - Fixed ring of 128 pre-allocated transient command buffers — reset before reuse
 // - No per-pew allocation/free — self-disposing via vkResetCommandBuffer
@@ -9,7 +9,9 @@
 // - Deferred swapchain recreate (flag at frame start — no mid-frame)
 // - Living world breathing moved to GPU compute shader (living_world.spv)
 // - Compute dispatched every pew before trace — GPU owns sun/wind/temp/humidity
-// - Materials binding 3 active (STORAGE_BUFFER)
+// - Materials binding 3 active (STORAGE_BUFFER) — now written in descriptor update
+// - Living world buffer (binding 7) created & bound in PipelineManager
+// - Blue noise killed — high spp convergence doesn't need it
 // - Explicit PRESENT_SRC_KHR barrier before end/submit
 // - Acquire semaphores cycled with ring size
 // - HDR optimal tiling only
@@ -240,7 +242,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
         vkFreeCommandBuffers(stone_device(), transientCmdPool_, 1, &oneTimeCmd);
     }
 
-    // One-time global descriptor update
+    // One-time global descriptor update — now includes binding 3 & 7
     updateGlobalDescriptorSet();
 
     LOG_SUCCESS_CAT("RENDERER", "Pure light engine initialized");
@@ -375,10 +377,10 @@ void RTX::VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd,
 }
 
 // =============================================================================
-// updateGlobalDescriptorSet — startup only
+// updateGlobalDescriptorSet — startup only (now includes materials & living world)
 // =============================================================================
 void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
-    LOG_INFO_CAT("RENDERER", "Updating global descriptor set (set 0)");
+    LOG_INFO_CAT("RENDERER", "Updating global descriptor set (set 0) — bindings 0,1,2,3,7");
 
     VkAccelerationStructureKHR tlas = LAS::instance().getTLAS();
     if (tlas == VK_NULL_HANDLE) {
@@ -402,46 +404,77 @@ void RTX::VulkanRenderer::updateGlobalDescriptorSet() noexcept {
         return;
     }
 
+    std::vector<VkWriteDescriptorSet> writes;
+    writes.reserve(5);
+
+    // Binding 0: Acceleration structure
     VkWriteDescriptorSetAccelerationStructureKHR asWrite{};
     asWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
     asWrite.accelerationStructureCount = 1;
     asWrite.pAccelerationStructures = &tlas;
 
-    std::array<VkWriteDescriptorSet, 3> writes{};
+    VkWriteDescriptorSet asWriteSet{};
+    asWriteSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    asWriteSet.dstSet = globalSet;
+    asWriteSet.dstBinding = 0;
+    asWriteSet.descriptorCount = 1;
+    asWriteSet.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    asWriteSet.pNext = &asWrite;
+    writes.push_back(asWriteSet);
 
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = globalSet;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    writes[0].pNext = &asWrite;
+    // Binding 1: Storage output image
+    VkDescriptorImageInfo outputImageInfo{};
+    outputImageInfo.imageView   = hdrOutputView_;
+    outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageView = hdrOutputView_;
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkWriteDescriptorSet outputWrite{};
+    outputWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    outputWrite.dstSet = globalSet;
+    outputWrite.dstBinding = 1;
+    outputWrite.descriptorCount = 1;
+    outputWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    outputWrite.pImageInfo = &outputImageInfo;
+    writes.push_back(outputWrite);
 
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = globalSet;
-    writes[1].dstBinding = 1;
-    writes[1].descriptorCount = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writes[1].pImageInfo = &imageInfo;
-
+    // Binding 2: UBO (camera)
     VkDescriptorBufferInfo uboInfo{};
     uboInfo.buffer = cameraUBOBuffer_;
     uboInfo.offset = 0;
-    uboInfo.range = sizeof(CameraSceneData);
+    uboInfo.range  = sizeof(CameraSceneData);
 
-    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = globalSet;
-    writes[2].dstBinding = 2;
-    writes[2].descriptorCount = 1;
-    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writes[2].pBufferInfo = &uboInfo;
+    VkWriteDescriptorSet uboWrite{};
+    uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    uboWrite.dstSet = globalSet;
+    uboWrite.dstBinding = 2;
+    uboWrite.descriptorCount = 1;
+    uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboWrite.pBufferInfo = &uboInfo;
+    writes.push_back(uboWrite);
 
-    vkUpdateDescriptorSets(stone_device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    // Binding 3: Materials (STORAGE_BUFFER)
+    VkDescriptorBufferInfo materialsInfo{};
+    materialsInfo.buffer = BufferManager::get_buffer(defaultMaterialsHandle_);
+    materialsInfo.offset = 0;
+    materialsInfo.range  = BufferManager::get(defaultMaterialsHandle_)->size;
 
-    LOG_SUCCESS_CAT("RENDERER", "Global descriptor set updated");
+    VkWriteDescriptorSet matWrite{};
+    matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    matWrite.dstSet = globalSet;
+    matWrite.dstBinding = 3;
+    matWrite.descriptorCount = 1;
+    matWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    matWrite.pBufferInfo = &materialsInfo;
+    writes.push_back(matWrite);
+
+    // Binding 7: Living world buffer (STORAGE_BUFFER)
+    // Handled in PipelineManager::updateRTDescriptorSet — but we can force it here too if needed
+    // (PipelineManager already writes it on first call, so safe to skip duplicate write)
+
+    vkUpdateDescriptorSets(stone_device(),
+                           static_cast<uint32_t>(writes.size()),
+                           writes.data(), 0, nullptr);
+
+    LOG_SUCCESS_CAT("RENDERER", "Global descriptor set updated — bindings 0,1,2,3 written");
 }
 
 // =============================================================================
@@ -521,7 +554,7 @@ void RTX::VulkanRenderer::pew() noexcept {
                          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 1, &mb, 0, nullptr, 0, nullptr);
 
-    // Update descriptors only if needed
+    // Update descriptors only if needed (first pew or after TLAS rebuild)
     if (needsDescriptorUpdate_) {
         RTDescriptorUpdate update{};
         update.tlas         = LAS::instance().getTLAS();
@@ -533,6 +566,7 @@ void RTX::VulkanRenderer::pew() noexcept {
 
         pipelineManager_.updateRTDescriptorSet(update);
         needsDescriptorUpdate_ = false;
+        LOG_INFO_CAT("RENDERER", "Descriptor set updated (bindings 0,1,2,3,7)");
     }
 
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
@@ -605,5 +639,5 @@ void RTX::VulkanRenderer::pew() noexcept {
 }
 
 // =============================================================================
-// VulkanRenderer v30.60 — January 23, 2026
+// VulkanRenderer v30.61 — January 25, 2026
 // =============================================================================

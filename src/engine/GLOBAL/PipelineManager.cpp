@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing + compute pipeline, SBT, descriptor management
-// Version 30.60 — January 23, 2026
+// Version 30.61 — January 25, 2026
 // - Single eternal descriptor set — no frames
 // - UPDATE_AFTER_BIND everywhere — safe per-pew updates
 // - Materials binding 3 active (STORAGE_BUFFER)
@@ -12,6 +12,9 @@
 // - No placeholders, no dead code
 // - Empire stable — pink photons breathe on GPU
 // - DEAD DT: compute takes only totalTime (4-byte push)
+// - Blue noise killed (binding 5 removed) — high spp convergence doesn't need it
+// - Living world buffer created and bound to 7 at startup
+// - Materials bound to 3 in descriptor update
 // =============================================================================
 
 #include "engine/GLOBAL/PipelineManager.hpp"
@@ -50,13 +53,13 @@ using BufferManager::align_up;
 std::atomic<bool> RTX::PipelineManager::g_pipelineNeedsRebuild{false};
 
 // Updated bindings — materials 3 STORAGE_BUFFER, + living world 7 & 8, 9 reserved
-static constexpr std::array<VkDescriptorSetLayoutBinding, 10> kMainBindings = {{
+// Blue noise (old 5) removed — high spp doesn't need it
+static constexpr std::array<VkDescriptorSetLayoutBinding, 9> kMainBindings = {{
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
     {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
     {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // Materials — active
     {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
-    {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,     1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR},
     {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
     {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // LivingWorldBuffer
     {8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // MaterialOverrides
@@ -66,6 +69,9 @@ static constexpr std::array<VkDescriptorSetLayoutBinding, 10> kMainBindings = {{
 namespace RTX {
 
 inline static std::mutex rebuildMutex;
+
+// Living world buffer handle (64 bytes, persistent)
+uint64_t livingWorldBufferHandle_ = 0;
 
 // =============================================================================
 // Constructor
@@ -87,6 +93,18 @@ PipelineManager::PipelineManager()
 
     dummyTLAS_ = Handle<VkAccelerationStructureKHR>(
         createDummyTLAS(), stone_device(), g_ext.vkDestroyAccelerationStructureKHR);
+
+    // Create living world storage buffer (64 bytes, device-local, storage usage)
+    livingWorldBufferHandle_ = BufferManager::create(
+        64,  // Exact size for the struct
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "LivingWorldBuffer"
+    );
+    if (livingWorldBufferHandle_ == 0) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create living world buffer");
+        throw std::runtime_error("Living world buffer creation failed");
+    }
+    LOG_SUCCESS_CAT("PIPELINE", "Living world buffer created (64 bytes)");
 
     LOG_SUCCESS_CAT("PIPELINE", "PipelineManager initialized");
 }
@@ -791,6 +809,7 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
 // =============================================================================
 PipelineManager::~PipelineManager()
 {
+    BufferManager::destroy(livingWorldBufferHandle_);
     sbtBuffer_.reset();
     sbtMemory_.reset();
 
@@ -849,9 +868,10 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
 
     VkWriteDescriptorSetAccelerationStructureKHR accelInfo{};
     VkDescriptorImageInfo outputImageInfo{};
-    VkDescriptorImageInfo blueNoiseImageInfo{};
     VkDescriptorImageInfo nexusImageInfo{};
     VkDescriptorBufferInfo uboInfo{};
+    VkDescriptorBufferInfo materialsInfo{};
+    VkDescriptorBufferInfo livingWorldInfo{};
 
     // Binding 0: Acceleration structure
     accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
@@ -901,20 +921,40 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
         LOG_WARN_CAT("PIPELINE", "Skipping UBO write — invalid buffer or size");
     }
 
-    // Binding 5: Blue noise (optional)
-    if (updateInfo.blueNoiseSampler != VK_NULL_HANDLE && updateInfo.blueNoiseView != VK_NULL_HANDLE) {
-        blueNoiseImageInfo.sampler     = updateInfo.blueNoiseSampler;
-        blueNoiseImageInfo.imageView   = updateInfo.blueNoiseView;
-        blueNoiseImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    // Binding 3: Materials (STORAGE_BUFFER)
+    if (updateInfo.materialsBuffer != VK_NULL_HANDLE && updateInfo.materialsSize > 0) {
+        materialsInfo.buffer = updateInfo.materialsBuffer;
+        materialsInfo.offset = 0;
+        materialsInfo.range  = updateInfo.materialsSize;
 
         writes[writeCount] = {};
         writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[writeCount].dstSet = set;
-        writes[writeCount].dstBinding = 5;
+        writes[writeCount].dstBinding = 3;
         writes[writeCount].descriptorCount = 1;
-        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[writeCount].pImageInfo = &blueNoiseImageInfo;
+        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[writeCount].pBufferInfo = &materialsInfo;
         ++writeCount;
+    } else {
+        LOG_WARN_CAT("PIPELINE", "Skipping materials write — invalid buffer or size");
+    }
+
+    // Binding 7: Living world (STORAGE_BUFFER) — always write if buffer exists
+    if (livingWorldBufferHandle_ != 0) {
+        livingWorldInfo.buffer = BufferManager::get_buffer(livingWorldBufferHandle_);
+        livingWorldInfo.offset = 0;
+        livingWorldInfo.range  = 64;  // Fixed size
+
+        writes[writeCount] = {};
+        writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[writeCount].dstSet = set;
+        writes[writeCount].dstBinding = 7;
+        writes[writeCount].descriptorCount = 1;
+        writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[writeCount].pBufferInfo = &livingWorldInfo;
+        ++writeCount;
+    } else {
+        LOG_WARN_CAT("PIPELINE", "Skipping living world write — buffer not created");
     }
 
     // Binding 6: Nexus/prev frame (optional)
@@ -954,5 +994,5 @@ VkDescriptorSet RTX::PipelineManager::getDescriptorSet() const
 } // namespace RTX
 
 // =============================================================================
-// PipelineManager v30.60 — January 23, 2026
+// PipelineManager v30.61 — January 25, 2026
 // =============================================================================
