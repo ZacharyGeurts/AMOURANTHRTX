@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.73 — January 26, 2026 — binary semaphore for present sync
+// Version 30.74 — January 26, 2026 — per-image binary semaphores (indexed by imageIndex)
 // DESCRIPTOR SETS ARE DEAD — ETERNAL DESCRIPTOR BUFFER EMPIRE
 // FIXED CMD BUFFER RING (RESET + RE-RECORD) • BINDLESS • ZERO-OVERHEAD UPDATES
 // OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR BUFFER • UBO • HDR STORAGE • LIVING WORLD
@@ -60,9 +60,9 @@ private:
     VkSemaphore                     graphicsTimelineSemaphore_   = VK_NULL_HANDLE;
     uint64_t                        nextGraphicsValue_           = 1;
 
-    // Binary semaphore — signaled after render (including present transition)
-    // Used exclusively by vkQueuePresentKHR wait
-    VkSemaphore                     renderFinishedSemaphore_     = VK_NULL_HANDLE;
+    // Per-image binary semaphores — indexed by acquired imageIndex
+    // One per swapchain image, resized on recreate, safe reuse after re-acquire
+    std::vector<VkSemaphore>        renderFinishedSemaphores_;
 
     // Acquire semaphores — cycled to avoid pending reuse
     static constexpr size_t         ACQUIRE_SEM_COUNT   = 64;
@@ -108,10 +108,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// VULKAN RENDERER HEADER — v30.73 — JANUARY 26, 2026
+// VULKAN RENDERER HEADER — v30.74 — JANUARY 26, 2026
 // Descriptor sets eliminated • eternal descriptor buffer • bindless empire
 // Frame-free • fixed cmd ring (reset + re-record) • fenceless timeline tracking
-// Binary render-finished semaphore for present wait (fixes VUID-03267)
+// Per-image binary semaphores (vector indexed by imageIndex) for present wait
 // Deferred swapchain recreate • living world compute dispatched every pew
 // Pure light — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
 // =============================================================================

@@ -1,9 +1,10 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.73 — January 26, 2026 — binary semaphore for present sync
+// Version 30.74 — January 26, 2026 — per-image binary semaphores (indexed by imageIndex)
 // - Renderer owns present transition barrier (after blit)
-// - Binary renderFinishedSemaphore_ signaled after transition → present waits on it
+// - Binary semaphores vector indexed by acquired imageIndex
+// - Present waits on per-image binary semaphore (signaled after transition)
 // - No logging on VK_NOT_READY — silent status check
 // - One submit per pew: compute → trace → blit → transition → present (waited)
 // - Zero hot-path logging except fatal errors
@@ -123,11 +124,6 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     vkCreateSemaphore(stone_device(), &semInfo, nullptr, &acquireTimelineSemaphore_);
     vkCreateSemaphore(stone_device(), &semInfo, nullptr, &graphicsTimelineSemaphore_);
 
-    // Binary semaphore for vkQueuePresentKHR wait (signaled after render + transition)
-    VkSemaphoreCreateInfo binarySemCI{};
-    binarySemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    vkCreateSemaphore(stone_device(), &binarySemCI, nullptr, &renderFinishedSemaphore_);
-
     VkSemaphoreCreateInfo acquireSemCI{};
     acquireSemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     for (auto& s : acquireSemaphores_) {
@@ -238,7 +234,12 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
     vkDestroySemaphore(stone_device(), acquireTimelineSemaphore_, nullptr);
     vkDestroySemaphore(stone_device(), graphicsTimelineSemaphore_, nullptr);
-    vkDestroySemaphore(stone_device(), renderFinishedSemaphore_, nullptr);
+
+    // Destroy per-image binary semaphores
+    for (auto sem : renderFinishedSemaphores_) {
+        vkDestroySemaphore(stone_device(), sem, nullptr);
+    }
+    renderFinishedSemaphores_.clear();
 
     for (auto& s : acquireSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
 
@@ -366,6 +367,23 @@ void RTX::VulkanRenderer::pew() noexcept {
     SwapchainManager::ensureReady(width_, height_);
     if (!SwapchainManager::isReady()) return;
 
+    // Resize per-image binary semaphores to match current swapchain
+    size_t currentImageCount = SwapchainManager::imageCount();
+    if (renderFinishedSemaphores_.size() != currentImageCount) {
+        // Destroy old ones
+        for (auto sem : renderFinishedSemaphores_) {
+            vkDestroySemaphore(stone_device(), sem, nullptr);
+        }
+        renderFinishedSemaphores_.clear();
+
+        renderFinishedSemaphores_.resize(currentImageCount);
+        VkSemaphoreCreateInfo binaryCI{};
+        binaryCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        for (auto& sem : renderFinishedSemaphores_) {
+            vkCreateSemaphore(stone_device(), &binaryCI, nullptr, &sem);
+        }
+    }
+
     uint32_t imageIndex;
     VkSemaphore currentAcquire = acquireSemaphores_[currentFrame_ % ACQUIRE_SEM_COUNT];
     currentFrame_++;
@@ -443,7 +461,7 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     VkTimelineSemaphoreSubmitInfo timelineSI{};
     timelineSI.sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineSI.signalSemaphoreValueCount = 2;
+    timelineSI.signalSemaphoreValueCount = 1;
     timelineSI.pSignalSemaphoreValues    = &nextGraphicsValue_;
 
     VkSubmitInfo submitInfo{};
@@ -455,8 +473,8 @@ void RTX::VulkanRenderer::pew() noexcept {
     submitInfo.pWaitSemaphores      = &currentAcquire;
     submitInfo.pWaitDstStageMask    = waitStages;
 
-    // Signal both: timeline for tracking + binary for present wait
-    VkSemaphore signalSems[2] = {graphicsTimelineSemaphore_, renderFinishedSemaphore_};
+    // Signal timeline + per-image binary
+    VkSemaphore signalSems[2] = {graphicsTimelineSemaphore_, renderFinishedSemaphores_[imageIndex]};
     submitInfo.signalSemaphoreCount = 2;
     submitInfo.pSignalSemaphores    = signalSems;
 
@@ -464,6 +482,6 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     nextGraphicsValue_++;
 
-    // Present waits on binary renderFinishedSemaphore_ (signaled after transition barrier)
-    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, renderFinishedSemaphore_);
-} // nice
+    // Present waits on per-image binary semaphore — safe reuse after re-acquire
+    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, renderFinishedSemaphores_[imageIndex]);
+}
