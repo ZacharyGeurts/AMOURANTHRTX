@@ -59,7 +59,7 @@ public:
     void createRayTracingPipeline();
     void createComputePipeline();  // living world breathing
     void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
-    void updateRTDescriptorSet(const RTDescriptorUpdate& updateInfo) noexcept;
+    void writeRTDescriptorsToBuffer(const RTDescriptorUpdate& updateInfo) noexcept;
     void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd);
 
     // Dispatch living world compute — called every pew before trace

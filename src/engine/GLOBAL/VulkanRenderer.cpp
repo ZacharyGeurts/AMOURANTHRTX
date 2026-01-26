@@ -415,7 +415,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
     update.materialsSize   = BufferManager::get(defaultMaterialsHandle_)->size;
 
     // PipelineManager handles all memcpy via vkGetDescriptorEXT
-    pipelineManager_.updateRTDescriptorSet(update);
+    pipelineManager_.writeRTDescriptorsToBuffer(update);
 
     needsDescriptorUpdate_ = false;
     LOG_SUCCESS_CAT("RENDERER", "Eternal descriptor buffer updated (bindings 0,1,2,3,7)");

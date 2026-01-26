@@ -876,22 +876,24 @@ void RTX::PipelineManager::cacheDeviceProperties()
 }
 
 // =============================================================================
-// Update RT descriptors — memcpy via vkGetDescriptorEXT (zero-overhead)
+// Write RT descriptors directly into eternal buffer via vkGetDescriptorEXT
+// Zero-overhead memcpy-style updates — no sets, no vkUpdateDescriptorSets
+// Called on startup, TLAS rebuild, or material change
 // =============================================================================
-void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updateInfo) noexcept
+void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& updateInfo) noexcept
 {
     if (descriptorMapped_ == nullptr) {
-        LOG_FATAL_CAT("PIPELINE", "Descriptor buffer not mapped — empire compromised");
+        LOG_FATAL_CAT("PIPELINE", "Descriptor buffer not mapped — cannot write descriptors");
         return;
     }
 
     if (updateInfo.tlas == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "TLAS is NULL — skipping descriptor update");
+        LOG_FATAL_CAT("PIPELINE", "TLAS is NULL — skipping descriptor writes");
         return;
     }
 
-    // Binding 0: Acceleration structure
-    if (updateInfo.tlas != VK_NULL_HANDLE) {
+    // Binding 0: Acceleration structure (device address)
+    {
         VkAccelerationStructureDeviceAddressInfoKHR asAddrInfo{};
         asAddrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
         asAddrInfo.accelerationStructure = updateInfo.tlas;
@@ -923,7 +925,7 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
                                  static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[1]);
     }
 
-    // Binding 2: UBO (camera)
+    // Binding 2: UBO (camera) — device address
     if (updateInfo.ubo != VK_NULL_HANDLE && updateInfo.uboSize > 0) {
         VkBufferDeviceAddressInfo uboAddrInfo{};
         uboAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -948,7 +950,7 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
         LOG_WARN_CAT("PIPELINE", "Skipping UBO write — invalid buffer or size");
     }
 
-    // Binding 3: Materials (STORAGE_BUFFER)
+    // Binding 3: Materials (STORAGE_BUFFER) — device address
     if (updateInfo.materialsBuffer != VK_NULL_HANDLE && updateInfo.materialsSize > 0) {
         VkBufferDeviceAddressInfo matAddrInfo{};
         matAddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -1000,7 +1002,7 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
         LOG_WARN_CAT("PIPELINE", "Skipping living world write — buffer not created");
     }
 
-    // Binding 6: Nexus/prev frame (optional)
+    // Binding 6: Nexus/prev frame (optional storage image)
     if (!updateInfo.nexusScoreViews.empty()) {
         VkDescriptorImageInfo imageInfo{};
         imageInfo.imageView = updateInfo.nexusScoreViews[0];
@@ -1016,7 +1018,8 @@ void RTX::PipelineManager::updateRTDescriptorSet(const RTDescriptorUpdate& updat
                                  static_cast<uint8_t*>(descriptorMapped_) + bindingOffsets_[6]);
     }
 
-    // Flush if not coherent (assume coherent for simplicity; add vkFlushMappedMemoryRanges if needed)
+    // No flush needed if memory is HOST_COHERENT (most host-visible allocations are)
+    // If not coherent, add vkFlushMappedMemoryRanges here
 }
 
 // =============================================================================
