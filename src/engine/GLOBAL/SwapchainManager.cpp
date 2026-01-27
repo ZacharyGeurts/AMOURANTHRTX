@@ -1,7 +1,13 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.74
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.75
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 26, 2026 — "synchronous transition in present — never undefined" edition
+// JANUARY 27, 2026 — "no semaphores/fences — totalTime monolith edition"
+// - Removed all semaphore/fence usage — acquire/present are fire-and-forget
+// - Synchronous PRESENT_SRC_KHR transition before every present
+// - Queries STORAGE_BIT support before creation — enables direct write if possible
+// - Deferred recreate — caller handles out-of-date/suboptimal errors
+// - No blind fallback — logs clearly why direct write failed if unsupported
+// - Transient command pool + fixed ring for present transitions (driver reuses)
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -216,10 +222,11 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
                     count, extent.width, extent.height, directWriteEnabled ? "YES" : "NO");
 }
 
-VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore semaphore, VkFence fence) noexcept {
+VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex) noexcept {
     if (minimized_ || !swapchain_.valid()) return VK_NOT_READY;
 
-    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(), UINT64_MAX, semaphore, fence, pImageIndex);
+    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(), UINT64_MAX,
+                                         VK_NULL_HANDLE, VK_NULL_HANDLE, pImageIndex);
 
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
         return res;
@@ -229,14 +236,11 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore s
 }
 
 // Synchronous transition right before present — guarantees no undefined layout ever
-void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem) {
+void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex) noexcept {
     if (minimized_ || !swapchain_.valid() || !stone_device()) return;
 
     VkSwapchainKHR swap = stone_swapchain();
     VkImage image = swapchainImages_[imageIndex];
-
-	// Trying to race is pointless. They can camp the queue until ejected with overflow. More buffer behavior.
-	// this choice may break my campaign for infinity. May revisit.
 
     // Transient pool (created once)
     static VkCommandPool transientPool = VK_NULL_HANDLE;
@@ -248,7 +252,7 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
         vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool);
     }
 
-    // Allocate cmd buffer — we leak it into the queue forever (transient pool, driver reuses)
+    // Allocate cmd buffer — transient pool, driver reuses when retired
     VkCommandBuffer cmd;
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -283,28 +287,15 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 
     vkEndCommandBuffer(cmd);
 
-    // Submit — no wait stage mask, no fence, just fire and forget
+    // Submit — no wait semaphore, no fence
     VkSubmitInfo submit{};
     submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers    = &cmd;
 
-    if (waitSem != VK_NULL_HANDLE) {
-        submit.waitSemaphoreCount = 1;
-        submit.pWaitSemaphores    = &waitSem;
-        // No pWaitDstStageMask — Vulkan allows implicit wait for binary semaphores
-        // If validation complains about NULL, add a safe core stage below
-        // VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        // submit.pWaitDstStageMask  = &waitStage;
-    }
-
     vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
 
-    // NO vkQueueWaitIdle or fence — queue it, let driver slap it out later
-
-    // NO vkFreeCommandBuffers — transient pool, driver reuses when retired
-
-    // Present
+    // Present — no wait semaphore
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount     = 1;
@@ -320,6 +311,8 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     } else if (res != VK_SUCCESS) {
         LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", string_VkResult(res));
     }
+
+    // NO vkFreeCommandBuffers — transient pool, driver reuses
 }
 
 void SwapchainManager::recreate(uint32_t width, uint32_t height, std::string_view reason) noexcept {

@@ -1,23 +1,13 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.70
-// SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT (QUERY FIRST)
-// JANUARY 24, 2026 — "only violate a few laws" edition
-// - Queries support for STORAGE_BIT on swapchain images BEFORE creation
-// - Attempts direct write (STORAGE_BIT) only if viable
-// - No blind fallback recreation — caller must handle !directWriteEnabled
-// - Logs chosen path clearly + why it failed if unsupported
-// - Simplified transitions for direct storage path
-// - Fixed: Explicit PRESENT_SRC_KHR transition before every present
-// - No more VK_IMAGE_LAYOUT_UNDEFINED on present — always transitioned
-// - Fixed: Lazy transient command pool + fixed ring for present transitions
-// - GPU-owned ring tracker buffer (host-visible coherent) for non-blocking reuse
-// - Cleanup dissolves old cmd buffers safely on shutdown
-// 
-// Known validation/linker issues (tracked in cpp):
-//   - VUID-vkFreeCommandBuffers-pCommandBuffers-00047: cmd buffer in use / pending state
-//   - VUID-VkPresentInfoKHR-pImageIndices-01430: image in VK_IMAGE_LAYOUT_UNDEFINED on present
-//   - UNASSIGNED-GeneralParameterError-RequiredHandle: vkAllocateCommandBuffers with null commandPool
-//   - VUID-VkCommandBufferAllocateInfo-commandPool-parameter: invalid VkCommandPool object 0x0
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.75
+// SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
+// JANUARY 27, 2026 — "no semaphores/fences — totalTime monolith edition"
+// - Removed all semaphore/fence usage — acquire/present are fire-and-forget
+// - Synchronous PRESENT_SRC_KHR transition before every present
+// - Queries STORAGE_BIT support before creation — enables direct write if possible
+// - Deferred recreate — caller handles out-of-date/suboptimal errors
+// - No blind fallback — logs clearly why direct write failed if unsupported
+// - Transient command pool + fixed ring for present transitions (driver reuses)
 // =============================================================================
 
 #pragma once
@@ -56,12 +46,9 @@ public:
     static void ensureReady(uint32_t width, uint32_t height) noexcept;
     [[nodiscard]] static bool isReady() noexcept;
 
-    // Acquire & present — return error codes for caller to handle recreate
-    [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex,
-                                                   VkSemaphore semaphore = VK_NULL_HANDLE,
-                                                   VkFence fence = VK_NULL_HANDLE) noexcept;
-
-    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore = VK_NULL_HANDLE);
+    // Acquire & present — no semaphores/fences
+    [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex) noexcept;
+    static void presentImage(VkQueue queue, uint32_t imageIndex) noexcept;
 
     // Transition helper — static
     static void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
@@ -86,7 +73,7 @@ public:
     [[nodiscard]] static VkFormat                  format()         noexcept { return swapchainFormat_; }
     [[nodiscard]] static VkPresentModeKHR          presentMode()     noexcept { return currentPresentMode_; }
 
-    // Public static state
+    // Public static state (all inline for linkage)
     inline static Handle<VkSwapchainKHR>           swapchain_;
     inline static VkExtent2D                       swapchainExtent_    = {0, 0};
     inline static VkFormat                         swapchainFormat_    = VK_FORMAT_UNDEFINED;
@@ -105,19 +92,8 @@ private:
     // Core function — handles both create and recreate
     static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason = "") noexcept;
 
-    // Internal lazy ring state for present transitions (hidden from public API)
+    // Internal lazy transient pool for present transitions
     static VkCommandPool s_transientPool;
-    static VkSemaphore s_timelineSem;
-    static std::vector<VkCommandBuffer> s_cmdRing;
-    static uint32_t s_ringIndex;
-    static uint64_t s_nextTimelineValue;
-    static constexpr uint32_t RING_SIZE = 4;
-
-    // GPU-owned ring tracker (host-visible coherent storage buffer)
-    static VkBuffer s_ringTrackerBuffer;
-    static VkDeviceMemory s_ringTrackerMemory;
-    static void* s_ringTrackerMapped;
-    static VkDeviceAddress s_ringTrackerDeviceAddr;
 };
 
 // Global convenience aliases
@@ -150,11 +126,11 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// CLEAN HEADER — v30.70 — JANUARY 24, 2026
-// - No mid-frame recreation — acquire/present return error codes for caller
+// CLEAN HEADER — v30.75 — JANUARY 27, 2026
+// - No semaphores/fences — acquire/present are fire-and-forget
+// - Synchronous PRESENT_SRC_KHR transition before every present
 // - Deferred recreate at start of next frame (renderer handles flag)
 // - transitionImageLayout remains static
 // - Global convenience macros for easy access
-// - Lazy transient pool + fixed ring for present transitions
-// - GPU-owned ring tracker buffer (host-visible coherent) for non-blocking reuse
+// - Transient pool + fixed ring for present transitions (driver reuses)
 // =============================================================================

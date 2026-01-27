@@ -114,7 +114,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     cameraUBOBuffer_ = BM_GET_BUFFER(cameraUBOHandle_);  // cache raw buffer
 
-    // Default materials via Descriptor buffer macro
+    // Default materials via descriptor buffer macro
     std::array<Material, 1> defaultMats{};
     defaultMats[0].albedo = glm::vec4(1.0f);
     defaultMats[0].emissive = glm::vec4(0.0f);
@@ -301,7 +301,7 @@ void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
 void RTX::VulkanRenderer::pew() noexcept {
     if (minimized_ || destroyed_) return;
 
-    // Use global totalTime monolith — no manual dt
+    // Use global totalTime monolith — no manual dt accumulation
     totalTime_ = RTX::TotalTime::get().seconds();
 
     if (needsSwapchainRecreate_) {
@@ -315,7 +315,7 @@ void RTX::VulkanRenderer::pew() noexcept {
     if (!SwapchainManager::isReady()) return;
 
     uint32_t imageIndex;
-    VkResult acquireRes = SwapchainManager::acquireNextImage(&imageIndex, VK_NULL_HANDLE);  // no semaphore
+    VkResult acquireRes = SwapchainManager::acquireNextImage(&imageIndex);
     if (acquireRes != VK_SUCCESS) {
         if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR || acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
             needsSwapchainRecreate_ = true;
@@ -367,8 +367,6 @@ void RTX::VulkanRenderer::pew() noexcept {
                    swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
-    // NO PRESENT_SRC_KHR barrier here anymore — SwapchainManager owns the final transition
-
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) return;
 
     VkSubmitInfo submitInfo{};
@@ -377,8 +375,10 @@ void RTX::VulkanRenderer::pew() noexcept {
     submitInfo.pCommandBuffers      = &cmd;
 
     vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(stone_graphics_queue());  // block until done — simple for no-sync mode
+
+    // Optional: wait idle for simplicity/debug — remove later for async
+    vkQueueWaitIdle(stone_graphics_queue());
 
     // Present with no wait semaphore
-    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, VK_NULL_HANDLE);
+    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex);
 }
