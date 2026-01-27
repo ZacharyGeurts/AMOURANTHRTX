@@ -2,13 +2,15 @@
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
 // Singleton with lazy, synchronous rebuilds — main-thread only, no threading
-// Version 30.19 — January 23, 2026
+// Version 30.20 — January 27, 2026
 // - Removed async thread completely — synchronous rebuilds only
 // - Full D&D dice support (AABB approximations)
 // - Geometry hot-reload for meshes
 // - Instance transforms per-object
 // - No Woop — hardware wins
 // - On-demand scratch, StoneKey sealed, default scene
+// - No fences/semaphores — vkQueueWaitIdle for sync
+// - totalTime integration if needed (none here)
 // Empire stays predictable, debuggable, main-thread pure.
 // =============================================================================
 
@@ -52,7 +54,7 @@ RTX::LAS& RTX::LAS::instance() {
 
 // Constructor — minimal, no thread
 RTX::LAS::LAS() {
-    LOG_INFO_CAT("LAS", "v30.19 initialized — synchronous rebuilds only, no threading, no Woop");
+    LOG_INFO_CAT("LAS", "v30.20 initialized — synchronous rebuilds only, no threading, no Woop");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
@@ -210,29 +212,20 @@ void RTX::LAS::ensureReady() {
         success = false;
     }
 
-    VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fenceCI{};
-    fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    if (vkCreateFence(stone_device(), &fenceCI, nullptr, &fence) != VK_SUCCESS) {
-        LOG_FATAL_CAT("LAS", "Failed to create fence for rebuild");
-        success = false;
-    }
-
     VkSubmitInfo submit{};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
 
-    if (success && vkQueueSubmit(stone_graphics_queue(), 1, &submit, fence) != VK_SUCCESS) {
+    if (success && vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
         LOG_FATAL_CAT("LAS", "vkQueueSubmit failed during rebuild");
         success = false;
     }
 
     if (success) {
-        vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX);
+        vkQueueWaitIdle(stone_graphics_queue());
     }
 
-    vkDestroyFence(stone_device(), fence, nullptr);
     vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
     vkDestroyCommandPool(stone_device(), pool, nullptr);
 
