@@ -1,10 +1,10 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing + compute pipeline, SBT, descriptor management
-// Version 30.74 — January 26, 2026
+// Version 30.75 — January 27, 2026
 // - On-demand compute pipeline creation in dispatchLivingWorld
 // - No masking in transition submit
-// - Timing driven by totalTime push only
+// - Timing driven by totalTime push only — no semaphores/fences
 // - Eternal descriptor buffer + BufferManager macros
 // - No sets, no vkUpdateDescriptorSets — vkGetDescriptorEXT + memcpy
 // - Bindings: 0=TLAS, 1=output, 2=camera UBO, 3=materials, 7=living world
@@ -21,6 +21,7 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/LAS.hpp"
+#include "engine/GLOBAL/logging.hpp"
 
 #include <algorithm>
 #include <array>
@@ -498,16 +499,25 @@ void PipelineManager::createRayTracingPipeline()
 
     groups[0] = {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
                  .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-                 .generalShader = 0};
+                 .generalShader = 0,
+                 .closestHitShader = VK_SHADER_UNUSED_KHR,
+                 .anyHitShader = VK_SHADER_UNUSED_KHR,
+                 .intersectionShader = VK_SHADER_UNUSED_KHR};
 
     groups[1] = {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
                  .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
-                 .generalShader = 1};
+                 .generalShader = 1,
+                 .closestHitShader = VK_SHADER_UNUSED_KHR,
+                 .anyHitShader = VK_SHADER_UNUSED_KHR,
+                 .intersectionShader = VK_SHADER_UNUSED_KHR};
 
     groups[2] = {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
                  .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
-                 .closestHitShader = 2,
-                 .anyHitShader = 3};
+                 .generalShader = VK_SHADER_UNUSED_KHR,				 
+				 .closestHitShader = 2,
+                 .anyHitShader = 3,                 
+				 .intersectionShader = VK_SHADER_UNUSED_KHR};
+                 
 
     raygenGroupCount_ = 1;
     missGroupCount_   = 1;
@@ -708,12 +718,12 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
     g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                                              stone_pipeline_layout(), 0, 1, &bufferIndex, &offset);
 
-    float time = 0.0f;
+    float totalTime = static_cast<float>(RTX::TotalTime::get().seconds());
 
     vkCmdPushConstants(cmd, stone_pipeline_layout(),
                        VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
                        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
-                       0, sizeof(float), &time);
+                       0, sizeof(float), &totalTime);
 
     VkStridedDeviceAddressRegionKHR raygenRegion   = raygenSbtRegion_;
     VkStridedDeviceAddressRegionKHR missRegion     = missSbtRegion_;
