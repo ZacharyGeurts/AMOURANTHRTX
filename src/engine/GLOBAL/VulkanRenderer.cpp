@@ -1,13 +1,12 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.74 — January 26, 2026 — BufferManager macros + per-image binary semaphores
+// Version 30.75 — January 27, 2026 — No semaphores/fences + totalTime driven
 // - All buffers/images created via BM_CREATE / BM_CREATE_DESCRIPTOR
 // - Uploads via BM_UPLOAD_TO_BUFFER
 // - Destruction via BM_DESTROY
 // - Renderer owns present transition barrier (after blit)
-// - Binary semaphores vector indexed by acquired imageIndex
-// - Present waits on per-image binary semaphore (signaled after transition)
+// - No semaphores/fences — totalTime monolith drives all timing
 // - No logging on VK_NOT_READY — silent status check
 // =============================================================================
 
@@ -74,12 +73,6 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
       destroyed_(false),
       totalTime_(0.0),
       last_time_(std::chrono::steady_clock::now()),
-      timelineSemaphore_(VK_NULL_HANDLE),
-      currentTimelineValue_(0),
-      acquireTimelineSemaphore_(VK_NULL_HANDLE),
-      nextAcquireValue_(1),
-      graphicsTimelineSemaphore_(VK_NULL_HANDLE),
-      nextGraphicsValue_(1),
       currentFrame_(0),
       defaultMaterialsHandle_(0),
       cameraUBOHandle_(0),  // BufferManager handle
@@ -112,25 +105,6 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
         LOG_FATAL_CAT("RENDERER", "Failed to allocate cmd ring");
     }
 
-    VkSemaphoreTypeCreateInfo timelineType{};
-    timelineType.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-    timelineType.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-    timelineType.initialValue = 0;
-
-    VkSemaphoreCreateInfo semInfo{};
-    semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semInfo.pNext = &timelineType;
-
-    vkCreateSemaphore(stone_device(), &semInfo, nullptr, &timelineSemaphore_);
-    vkCreateSemaphore(stone_device(), &semInfo, nullptr, &acquireTimelineSemaphore_);
-    vkCreateSemaphore(stone_device(), &semInfo, nullptr, &graphicsTimelineSemaphore_);
-
-    VkSemaphoreCreateInfo acquireSemCI{};
-    acquireSemCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    for (auto& s : acquireSemaphores_) {
-        vkCreateSemaphore(stone_device(), &acquireSemCI, nullptr, &s);
-    }
-
     // Camera UBO via BufferManager macro
     BM_CREATE(cameraUBOHandle_, sizeof(CameraSceneData),
               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
@@ -140,7 +114,7 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     cameraUBOBuffer_ = BM_GET_BUFFER(cameraUBOHandle_);  // cache raw buffer
 
-    // Default materials via descriptor buffer macro
+    // Default materials via Descriptor buffer macro
     std::array<Material, 1> defaultMats{};
     defaultMats[0].albedo = glm::vec4(1.0f);
     defaultMats[0].emissive = glm::vec4(0.0f);
@@ -217,18 +191,6 @@ RTX::VulkanRenderer::~VulkanRenderer() {
 
     BM_DESTROY(cameraUBOHandle_);
     BM_DESTROY(defaultMaterialsHandle_);
-
-    vkDestroySemaphore(stone_device(), timelineSemaphore_, nullptr);
-    vkDestroySemaphore(stone_device(), acquireTimelineSemaphore_, nullptr);
-    vkDestroySemaphore(stone_device(), graphicsTimelineSemaphore_, nullptr);
-
-    // Destroy per-image binary semaphores
-    for (auto sem : renderFinishedSemaphores_) {
-        vkDestroySemaphore(stone_device(), sem, nullptr);
-    }
-    renderFinishedSemaphores_.clear();
-
-    for (auto& s : acquireSemaphores_) vkDestroySemaphore(stone_device(), s, nullptr);
 
     vkDestroyCommandPool(stone_device(), transientCmdPool_, nullptr);
 }
@@ -339,10 +301,8 @@ void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
 void RTX::VulkanRenderer::pew() noexcept {
     if (minimized_ || destroyed_) return;
 
-    auto now = std::chrono::steady_clock::now();
-    double dt = std::chrono::duration<double>(now - last_time_).count();
-    last_time_ = now;
-    totalTime_ += dt;
+    // Use global totalTime monolith — no manual dt
+    totalTime_ = RTX::TotalTime::get().seconds();
 
     if (needsSwapchainRecreate_) {
         SwapchainManager::recreate(width_, height_, "previous pew invalid");
@@ -354,28 +314,8 @@ void RTX::VulkanRenderer::pew() noexcept {
     SwapchainManager::ensureReady(width_, height_);
     if (!SwapchainManager::isReady()) return;
 
-    // Resize per-image binary semaphores to match current swapchain
-    size_t currentImageCount = SwapchainManager::imageCount();
-    if (renderFinishedSemaphores_.size() != currentImageCount) {
-        // Destroy old ones
-        for (auto sem : renderFinishedSemaphores_) {
-            vkDestroySemaphore(stone_device(), sem, nullptr);
-        }
-        renderFinishedSemaphores_.clear();
-
-        renderFinishedSemaphores_.resize(currentImageCount);
-        VkSemaphoreCreateInfo binaryCI{};
-        binaryCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        for (auto& sem : renderFinishedSemaphores_) {
-            vkCreateSemaphore(stone_device(), &binaryCI, nullptr, &sem);
-        }
-    }
-
     uint32_t imageIndex;
-    VkSemaphore currentAcquire = acquireSemaphores_[currentFrame_ % ACQUIRE_SEM_COUNT];
-    currentFrame_++;
-
-    VkResult acquireRes = SwapchainManager::acquireNextImage(&imageIndex, currentAcquire);
+    VkResult acquireRes = SwapchainManager::acquireNextImage(&imageIndex, VK_NULL_HANDLE);  // no semaphore
     if (acquireRes != VK_SUCCESS) {
         if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR || acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
             needsSwapchainRecreate_ = true;
@@ -431,31 +371,14 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) return;
 
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_TRANSFER_BIT};
-
-    VkTimelineSemaphoreSubmitInfo timelineSI{};
-    timelineSI.sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineSI.signalSemaphoreValueCount = 1;
-    timelineSI.pSignalSemaphoreValues    = &nextGraphicsValue_;
-
     VkSubmitInfo submitInfo{};
     submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext                = &timelineSI;
     submitInfo.commandBufferCount   = 1;
     submitInfo.pCommandBuffers      = &cmd;
-    submitInfo.waitSemaphoreCount   = 1;
-    submitInfo.pWaitSemaphores      = &currentAcquire;
-    submitInfo.pWaitDstStageMask    = waitStages;
-
-    // Signal timeline + per-image binary
-    VkSemaphore signalSems[2] = {graphicsTimelineSemaphore_, renderFinishedSemaphores_[imageIndex]};
-    submitInfo.signalSemaphoreCount = 2;
-    submitInfo.pSignalSemaphores    = signalSems;
 
     vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(stone_graphics_queue());  // block until done — simple for no-sync mode
 
-    nextGraphicsValue_++;
-
-    // Present waits on per-image binary semaphore — safe reuse after re-acquire
-    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, renderFinishedSemaphores_[imageIndex]);
+    // Present with no wait semaphore
+    SwapchainManager::presentImage(stone_graphics_queue(), imageIndex, VK_NULL_HANDLE);
 }
