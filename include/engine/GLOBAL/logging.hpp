@@ -120,6 +120,12 @@ struct TotalTime final {
         }
     }
 
+	// judge dredd
+    uint64_t entropy_;
+    uint64_t entropy_check_;
+    detail::TimePoint genesis_;
+    std::atomic<uint64_t> raw_us_;  // µs accumulator
+
 	std::atomic<bool> sealed_;
 
 private:
@@ -141,11 +147,6 @@ private:
             std::abort();
         }
     }
-
-    uint64_t entropy_;
-    uint64_t entropy_check_;
-    detail::TimePoint genesis_;
-    std::atomic<uint64_t> raw_us_;  // µs accumulator
 };
 
 } // namespace RTX
