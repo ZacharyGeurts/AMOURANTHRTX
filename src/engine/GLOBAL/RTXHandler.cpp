@@ -1,14 +1,16 @@
 // =============================================================================
 // AMOURANTH RTX Engine - RTX Handler Implementation
 // Global Vulkan context, instance, device, queues
-// RTX feature enablement | Descriptor indexing | Timeline semaphores
-// Version 30.60 — January 23, 2026
+// RTX feature enablement | Descriptor indexing | totalTime driven
+// Version 30.75 — January 27, 2026
+// - Removed timeline semaphores completely — totalTime monolith drives timing
 // - Descriptor pool delayed (called externally after first AS build)
 // - All sealing centralized via StoneKey — idempotent + breach detection
-// - Instance, device, physical, surface, queues, families, pool sealed here
+// - Instance, device, physical, surface, queues, families sealed here
 // - Minimal, production-stable
-// - Added: VK_EXT_descriptor_buffer feature enabled explicitly
-// - Added: VkPhysicalDeviceAccelerationStructureFeaturesKHR::accelerationStructure = VK_TRUE
+// - VK_EXT_descriptor_buffer enabled explicitly
+// - VkPhysicalDeviceAccelerationStructureFeaturesKHR::accelerationStructure = VK_TRUE
+// - No fences/semaphores — fire-and-forget submits + totalTime progression
 // =============================================================================
 
 #include "engine/GLOBAL/RTXHandler.hpp"
@@ -200,16 +202,16 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
         });
     }
 
-    // Enable required features — including accelerationStructure
+    // Enable required features — acceleration structure + descriptor buffer
     VkPhysicalDeviceVulkan12Features vk12{};
     vk12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12.timelineSemaphore = VK_TRUE;
     vk12.bufferDeviceAddress = VK_TRUE;
     vk12.descriptorIndexing = VK_TRUE;
+    vk12.runtimeDescriptorArray = VK_TRUE;  // required for materials[] etc.
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{};
     accel.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accel.accelerationStructure = VK_TRUE;  // Explicitly enable accelerationStructure feature
+    accel.accelerationStructure = VK_TRUE;
     accel.pNext = &vk12;
 
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipe{};
@@ -223,11 +225,11 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
     descBufFeatures.descriptorBuffer = VK_TRUE;
     descBufFeatures.descriptorBufferCaptureReplay = VK_FALSE;
     descBufFeatures.descriptorBufferImageLayoutIgnored = VK_FALSE;
-    descBufFeatures.pNext = &rtPipe;  // Chain at the beginning
+    descBufFeatures.pNext = &rtPipe;
 
     VkDeviceCreateInfo devInfo{};
     devInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    devInfo.pNext                   = &descBufFeatures;  // Start chain with descriptor buffer
+    devInfo.pNext                   = &descBufFeatures;
     devInfo.queueCreateInfoCount    = static_cast<uint32_t>(qInfos.size());
     devInfo.pQueueCreateInfos       = qInfos.data();
     devInfo.enabledExtensionCount   = static_cast<uint32_t>(requiredDeviceExtensions.size());
@@ -246,7 +248,7 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
     VkQueue graphicsQ, presentQ, computeQ, transferQ;
     vkGetDeviceQueue(dev, best.graphics.value(), 0, &graphicsQ);
     vkGetDeviceQueue(dev, best.present.value(), 0, &presentQ);
-    computeQ = graphicsQ;  // compute on graphics for now
+    computeQ = graphicsQ;  // compute on graphics for simplicity
     transferQ = best.transfer.has_value() ? [&](){ VkQueue q; vkGetDeviceQueue(dev, best.transfer.value(), 0, &q); return q; }() : graphicsQ;
 
     // Seal queues

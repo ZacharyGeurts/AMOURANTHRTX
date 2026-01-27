@@ -6,10 +6,11 @@
 //             Live measurement, zero pre-reserve, take 100% free VRAM
 //             Instant relinquish on explicit command (no auto-purge)
 //             Tiny safety margin for YouTube PiP / browser tabs
-//             JANUARY 26, 2026 — HOST TOGGLES REMOVED (device-local only)
+//             JANUARY 27, 2026 — HOST TOGGLES REMOVED (device-local only)
 //             STAGING RING ONLY HOST-VISIBLE (uploads)
 //             DESCRIPTOR BUFFER SPECIAL PATH (host-visible + device address, lazy map)
 //             NO GLOBAL PURGE — explicit BM_DESTROY only
+//             totalTime compatible — no fences/semaphores, fire-and-forget where possible
 // =============================================================================
 
 #pragma once
@@ -680,19 +681,15 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         vkCmdCopyBuffer(tcmd, g_stagingRing.buffer, info.buffer, 1, &copy);
         VK_CHECK(vkEndCommandBuffer(tcmd));
 
-        VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fci = {};
-        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        VK_CHECK(vkCreateFence(stone_device(), &fci, nullptr, &fence));
-
         VkSubmitInfo si = {};
         si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         si.commandBufferCount = 1;
         si.pCommandBuffers = &tcmd;
-        VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &si, fence));
-        VK_CHECK(vkWaitForFences(stone_device(), 1, &fence, VK_TRUE, UINT64_MAX));
+        VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &si, VK_NULL_HANDLE));
 
-        vkDestroyFence(stone_device(), fence, nullptr);
+        // No fence — wait idle for safety in fallback path
+        vkQueueWaitIdle(stone_graphics_queue());
+
         vkFreeCommandBuffers(stone_device(), pool, 1, &tcmd);
         vkDestroyCommandPool(stone_device(), pool, nullptr);
     }
