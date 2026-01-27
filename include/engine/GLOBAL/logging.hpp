@@ -61,9 +61,9 @@
 namespace RTX {
 
 namespace detail {
-    using Clock = std::chrono::steady_clock;
+    using Clock    = std::chrono::steady_clock;
     using TimePoint = Clock::time_point;
-    using Duration = Clock::duration;
+    using Duration  = Clock::duration;
 
     [[nodiscard]] inline uint64_t make_session_entropy() noexcept {
         static const uint64_t entropy = []() -> uint64_t {
@@ -78,34 +78,45 @@ namespace detail {
 }
 
 struct TotalTime final {
-    // Deleted everything dangerous — no copies, no moves, no raw access
+    // No copies, no moves — true singleton
     TotalTime(const TotalTime&) = delete;
     TotalTime& operator=(const TotalTime&) = delete;
     TotalTime(TotalTime&&) = delete;
     TotalTime& operator=(TotalTime&&) = delete;
 
-    // Singleton access — the monolith is unique
+    // Singleton access
     [[nodiscard]] static TotalTime& get() noexcept {
         static TotalTime instance;
         return instance;
     }
 
-    // Read — decrypts, verifies integrity, returns µs since genesis
+    // Public query: is the monolith sealed and ready for paranoid reads?
+    [[nodiscard]] bool is_sealed() const noexcept {
+        return sealed_.load(std::memory_order_acquire);
+    }
+
+    // Read — verifies integrity, returns microseconds since genesis
     [[nodiscard]] double us() const noexcept {
-        verify();  // breach → abort
+        if (!sealed_.load(std::memory_order_acquire)) {
+            const_cast<TotalTime*>(this)->seal();  // lazy auto-seal on first read
+        }
+        verify();   // entropy check — tamper → abort
         return static_cast<double>(raw_us_.load(std::memory_order_acquire));
     }
 
-    // Read — returns seconds since genesis (replaces old totalTime_)
+    // Read — seconds since genesis
     [[nodiscard]] double seconds() const noexcept {
         return us() * 1e-6;
     }
 
-    // Advance time — the only mutation, protected
+    // Advance time — the only allowed mutation
     void advance(detail::Duration dt) noexcept {
         if (dt <= detail::Duration::zero()) [[unlikely]] {
             std::abort();
         }
+
+        // Optional: you could also lazy-seal here if you want advance to trigger seal
+        // if (!sealed_.load(std::memory_order_acquire)) seal();
 
         raw_us_.fetch_add(
             std::chrono::duration_cast<std::chrono::microseconds>(dt).count(),
@@ -113,22 +124,24 @@ struct TotalTime final {
         );
     }
 
-    // Genesis seal — call once after init, like stone_seal_final()
+    // Seal — now idempotent (multiple calls are safe)
     void seal() noexcept {
-        if (sealed_.exchange(true, std::memory_order_acq_rel)) {
-            std::abort();
-        }
+        // Use compare_exchange to make it exactly-once in theory,
+        // but store(true) is simpler and fine for this use case
+        sealed_.store(true, std::memory_order_release);
+        // Alternative (exactly-once semantics):
+        // bool expected = false;
+        // sealed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
     }
 
-	// judge dredd
+private:
+    // ── Judge Dredd section ────────────────────────────────────────────────
     uint64_t entropy_;
     uint64_t entropy_check_;
     detail::TimePoint genesis_;
-    std::atomic<uint64_t> raw_us_;  // µs accumulator
+    std::atomic<uint64_t> raw_us_{0};     // µs accumulator
+    std::atomic<bool>     sealed_{false};
 
-	std::atomic<bool> sealed_;
-
-private:
     TotalTime() noexcept
         : entropy_(detail::make_session_entropy())
         , genesis_(detail::Clock::now())
@@ -139,13 +152,13 @@ private:
     }
 
     void verify() const noexcept {
-        if (!sealed_.load(std::memory_order_acquire)) {
-            std::abort();
-        }
-
+        // Entropy tamper check — always active after construction
         if ((entropy_ ^ 0x9E37AF18C64D8A17UL) != entropy_check_) [[unlikely]] {
             std::abort();
         }
+
+        // We no longer abort if !sealed_ — because we auto-seal on first read
+        // The tamper protection now lives entirely in the entropy XOR check
     }
 };
 
@@ -153,36 +166,31 @@ private:
 
 
 // =============================================================================
-// SIMPLE, BULLETPROOF TOTALTIME PRINTING — PLAIN COUT + FORMAT
-// No macros, no logging system calls, no early death.
-// Safe even before seal() — just skips if not sealed.
-// Use anywhere: print_total_time(); or print_total_time("INIT");
+// SIMPLE TOTALTIME PRINTING — safe before/after seal
+// No crash even during earliest init — just skips time info if not yet sealed
 // =============================================================================
 
-#include <iostream>  // already included, but explicit for cout
-
 inline void print_total_time(const char* prefix = nullptr) noexcept {
-    auto& tt = RTX::TotalTime::get();
+    const auto& tt = RTX::TotalTime::get();
 
-    // Early exit if not sealed yet — prevents abort
-    if (!tt.sealed_.load(std::memory_order_acquire)) {
-        std::cout << (prefix ? prefix : "") 
-                  << "[totalTime] not sealed yet — skipping print\n";
-        return;
+    // Optional: show something during very early phase
+    if (!tt.is_sealed()) {
+        // std::cout << (prefix ? prefix : "") << "[totalTime] auto-sealing on first use...\n";
+        // return;   // or continue to print 0.0 if you prefer
     }
 
     double s   = tt.seconds();
     double ms  = s * 1000.0;
     double usv = tt.us();
-    double fps = (s > 1e-6) ? 1.0 / s : INFINITY;
+    double fps = (s > 1e-10) ? 1.0 / s : std::numeric_limits<double>::infinity();
 
-    std::cout << (prefix ? prefix : "") 
-              << std::format("[totalTime] {:.6f}s | {:.1f}ms | {:.0f}µs | ~{:.1f} pseudo-FPS\n",
+    std::cout << (prefix ? prefix : "")
+              << std::format("[totalTime] {:9.6f} s | {:7.1f} ms | {:8.0f} µs | ~{:7.1f} pseudo-fps\n",
                              s, ms, usv, fps);
-    std::cout.flush();  // make sure it shows up immediately
+    std::cout.flush();
 }
 
-// One-liner convenience if you hate typing
+// Short alias
 inline void ptt(const char* prefix = nullptr) noexcept {
     print_total_time(prefix);
 }

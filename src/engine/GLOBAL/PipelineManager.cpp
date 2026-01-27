@@ -247,7 +247,7 @@ void PipelineManager::createComputePipeline()
 
     LOG_INFO_CAT("PIPELINE", "Creating compute pipeline for living world");
 
-    VkShaderModule compModule = loadShader("compute/living_world.spv");
+    VkShaderModule compModule = loadShader("assets/shaders/compute/living_world.spv");
     if (compModule == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Failed to load living_world.spv");
         return;
@@ -394,12 +394,12 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
     LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
     // Try Linux path first (most common dev environment)
-    std::string fullPath = std::format("build/bin/Linux/{}", relativePath);
+    std::string fullPath = std::format("build/bin/Linux/assets/shaders/{}", relativePath);
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 
     // If Linux path fails, try Windows path
     if (!file.is_open()) {
-        fullPath = std::format("build-windows/bin/Windows/{}", relativePath);
+        fullPath = std::format("build-windows/bin/Windows/assets/shaders/{}", relativePath);
         file.open(fullPath, std::ios::ate | std::ios::binary);
     }
 
