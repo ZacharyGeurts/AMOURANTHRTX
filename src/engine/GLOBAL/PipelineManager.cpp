@@ -394,12 +394,12 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
     LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
     // Try Linux path first (most common dev environment)
-    std::string fullPath = std::format("build/bin/Linux/assets/shaders/{}", relativePath);
+    std::string fullPath = std::format("build/bin/Linux/{}", relativePath);
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 
     // If Linux path fails, try Windows path
     if (!file.is_open()) {
-        fullPath = std::format("build-windows/bin/Windows/assets/shaders/{}", relativePath);
+        fullPath = std::format("build-windows/bin/Windows/{}", relativePath);
         file.open(fullPath, std::ios::ate | std::ios::binary);
     }
 
@@ -457,10 +457,10 @@ void PipelineManager::createRayTracingPipeline()
         return loadShader(std::string(path));
     };
 
-    VkShaderModule raygen = load("raytracing/raygen.spv");
-    VkShaderModule miss   = load("raytracing/miss.spv");
-    VkShaderModule chit   = load("raytracing/closest_hit.spv");
-    VkShaderModule ahit   = load("raytracing/anyhit.spv");
+    VkShaderModule raygen = load("assets/shaders/raytracing/raygen.spv");
+    VkShaderModule miss   = load("assets/shaders/raytracing/miss.spv");
+    VkShaderModule chit   = load("assets/shaders/raytracing/closest_hit.spv");
+    VkShaderModule ahit   = load("assets/shaders/raytracing/anyhit.spv");
 
     if (!raygen || !miss || !chit || !ahit) {
         LOG_FATAL_CAT("PIPELINE", "Shader load failed");
