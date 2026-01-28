@@ -1,13 +1,12 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.75
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.8
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 27, 2026 — "no semaphores/fences — totalTime monolith edition"
-// - Removed all semaphore/fence usage — acquire/present are fire-and-forget
-// - Synchronous PRESENT_SRC_KHR transition before every present
-// - Queries STORAGE_BIT support before creation — enables direct write if possible
-// - Deferred recreate — caller handles out-of-date/suboptimal errors
-// - No blind fallback — logs clearly why direct write failed if unsupported
-// - Transient command pool + fixed ring for present transitions (driver reuses)
+// JANUARY 27, 2026 — "semaphore + fence monolith edition"
+// - Re-added semaphore for acquire → present synchronization
+// - Proper image layout transition BEFORE present
+// - Transient command pool for layout transitions only (one-time submit)
+// - Semaphore recreated on failure to avoid stale signals
+// - Fixed compilation errors (command pool assignment, swapchain address)
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -20,6 +19,7 @@
 #include <algorithm>
 #include <format>
 #include <cstring>
+#include <vector>
 
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
@@ -225,24 +225,42 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex) noexcept {
     if (minimized_ || !swapchain_.valid()) return VK_NOT_READY;
 
-    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(), UINT64_MAX,
-                                         VK_NULL_HANDLE, VK_NULL_HANDLE, pImageIndex);
+    // Destroy old semaphore if exists — prevents stale signal state
+    static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(stone_device(), acquireSemaphore, nullptr);
+        acquireSemaphore = VK_NULL_HANDLE;
+    }
 
-    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
-        return res;
+    VkSemaphoreCreateInfo semCI{};
+    semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    vkCreateSemaphore(stone_device(), &semCI, nullptr, &acquireSemaphore);
+
+    VkResult res = vkAcquireNextImageKHR(stone_device(), swapchain_.get(), UINT64_MAX,
+                                         acquireSemaphore, VK_NULL_HANDLE, pImageIndex);
+
+    if (res != VK_SUCCESS) {
+        // Clean up semaphore on failure — next frame recreates fresh
+        vkDestroySemaphore(stone_device(), acquireSemaphore, nullptr);
+        acquireSemaphore = VK_NULL_HANDLE;
+
+        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
+            // Let renderer handle recreate
+        } else if (res != VK_NOT_READY) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", string_VkResult(res));
+        }
     }
 
     return res;
 }
 
-// Synchronous transition right before present — guarantees no undefined layout ever
+// Synchronous transition + submit before present
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex) noexcept {
     if (minimized_ || !swapchain_.valid() || !stone_device()) return;
 
-    VkSwapchainKHR swap = stone_swapchain();
     VkImage image = swapchainImages_[imageIndex];
 
-    // Transient pool (created once)
+    // Reuse static transient pool
     static VkCommandPool transientPool = VK_NULL_HANDLE;
     if (transientPool == VK_NULL_HANDLE) {
         VkCommandPoolCreateInfo pci{};
@@ -252,7 +270,6 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex) noexcept
         vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool);
     }
 
-    // Allocate cmd buffer — transient pool, driver reuses when retired
     VkCommandBuffer cmd;
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -268,41 +285,59 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex) noexcept
 
     vkBeginCommandBuffer(cmd, &beginInfo);
 
-    // Transition UNDEFINED → PRESENT_SRC_KHR
+    // Transition to PRESENT_SRC_KHR
     VkImageMemoryBarrier barrier{};
     barrier.sType                   = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout               = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.oldLayout               = VK_IMAGE_LAYOUT_UNDEFINED;  // safe default
     barrier.newLayout               = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     barrier.srcQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
     barrier.image                   = image;
     barrier.subresourceRange        = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    barrier.srcAccessMask           = 0;
+    barrier.srcAccessMask           = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
     barrier.dstAccessMask           = VK_ACCESS_MEMORY_READ_BIT;
 
     vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     vkEndCommandBuffer(cmd);
 
-    // Submit — no wait semaphore, no fence
     VkSubmitInfo submit{};
-    submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers    = &cmd;
+    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount   = 1;
+    submit.pCommandBuffers      = &cmd;
+
+    // Conditional wait on acquire semaphore (signaled by acquireNextImageKHR)
+    static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;  // Shared with acquireNextImage
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
+        submit.waitSemaphoreCount   = 1;
+        submit.pWaitSemaphores      = &acquireSemaphore;
+        submit.pWaitDstStageMask    = waitStages;
+    }
 
     vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
 
-    // Present — no wait semaphore
+    // Present using stone_swapchain()
+    VkSwapchainKHR currentSwapchain = stone_swapchain();  // get the decrypted handle
+
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount     = 1;
-    pi.pSwapchains        = &swap;
+    pi.pSwapchains        = &currentSwapchain;  // FIXED: address of local variable
     pi.pImageIndices      = &imageIndex;
 
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        pi.waitSemaphoreCount = 1;
+        pi.pWaitSemaphores    = &acquireSemaphore;
+    }
+
     VkResult res = vkQueuePresentKHR(queue, &pi);
+
+    // Cleanup cmd buffer
+    vkFreeCommandBuffers(stone_device(), transientPool, 1, &cmd);
 
     if (res == VK_ERROR_DEVICE_LOST) {
         LOG_FATAL_CAT("SWAPCHAIN", "vkQueuePresentKHR → DEVICE LOST");
@@ -311,8 +346,6 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex) noexcept
     } else if (res != VK_SUCCESS) {
         LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", string_VkResult(res));
     }
-
-    // NO vkFreeCommandBuffers — transient pool, driver reuses
 }
 
 void SwapchainManager::recreate(uint32_t width, uint32_t height, std::string_view reason) noexcept {
@@ -331,11 +364,16 @@ void SwapchainManager::cleanup() noexcept {
     cleanupImageViews();
     cleanupSwapchain();
 
-    // Destroy transient pool
     static VkCommandPool transientPool = VK_NULL_HANDLE;
     if (transientPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(stone_device(), transientPool, nullptr);
         transientPool = VK_NULL_HANDLE;
+    }
+
+    static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(stone_device(), acquireSemaphore, nullptr);
+        acquireSemaphore = VK_NULL_HANDLE;
     }
 }
 

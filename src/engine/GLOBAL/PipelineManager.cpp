@@ -1,7 +1,9 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing + compute pipeline, SBT, descriptor management
-// Version 30.75 — January 27, 2026
+// Version 30.8 — January 27, 2026
+// - Fixed push constant stageFlags to match layout range (fixes VUID-01796)
+// - Full mask used on every vkCmdPushConstants call
 // - On-demand compute pipeline creation in dispatchLivingWorld
 // - No masking in transition submit
 // - Timing driven by totalTime push only — no semaphores/fences
@@ -80,6 +82,14 @@ static bool descPropsCached = false;
 
 // Eternal SBT forged flag
 bool s_eternalSbtForged = false;
+
+// Full push constant stage mask (must match layout range)
+static constexpr VkShaderStageFlags FULL_PUSH_MASK =
+    VK_SHADER_STAGE_COMPUTE_BIT |
+    VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+    VK_SHADER_STAGE_MISS_BIT_KHR |
+    VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+    VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
 
 // =============================================================================
 // Constructor
@@ -189,9 +199,7 @@ void PipelineManager::createPipelineLayout()
     };
 
     VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                      VK_SHADER_STAGE_COMPUTE_BIT;
+    push.stageFlags = FULL_PUSH_MASK;  // Matches the full mask we now use everywhere
     push.offset     = 0;
     push.size       = sizeof(float);  // totalTime only
 
@@ -310,8 +318,9 @@ void PipelineManager::dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) 
     g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                              stone_pipeline_layout(), 0, 1, &bufferIndex, &offset);
 
+    // FIXED: Use full stage mask to match the layout's push constant range
     vkCmdPushConstants(cmd, stone_pipeline_layout(),
-                       VK_SHADER_STAGE_COMPUTE_BIT,
+                       FULL_PUSH_MASK,
                        0, sizeof(float), &totalTime);
 
     vkCmdDispatch(cmd, 1, 1, 1);
@@ -514,10 +523,9 @@ void PipelineManager::createRayTracingPipeline()
     groups[2] = {.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
                  .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
                  .generalShader = VK_SHADER_UNUSED_KHR,				 
-				 .closestHitShader = 2,
+                 .closestHitShader = 2,
                  .anyHitShader = 3,                 
-				 .intersectionShader = VK_SHADER_UNUSED_KHR};
-                 
+                 .intersectionShader = VK_SHADER_UNUSED_KHR};
 
     raygenGroupCount_ = 1;
     missGroupCount_   = 1;
@@ -720,9 +728,9 @@ void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t he
 
     float totalTime = static_cast<float>(RTX::TotalTime::get().seconds());
 
+    // FIXED: Use full stage mask to match the layout's push constant range
     vkCmdPushConstants(cmd, stone_pipeline_layout(),
-                       VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+                       FULL_PUSH_MASK,
                        0, sizeof(float), &totalTime);
 
     VkStridedDeviceAddressRegionKHR raygenRegion   = raygenSbtRegion_;
@@ -908,9 +916,5 @@ void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& 
 
     // No flush needed (host-coherent)
 }
-
-// =============================================================================
-// Get Descriptor set — removed
-// =============================================================================
 
 } // namespace RTX

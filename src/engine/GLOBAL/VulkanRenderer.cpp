@@ -301,14 +301,20 @@ void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
 void RTX::VulkanRenderer::pew() noexcept {
     if (minimized_ || destroyed_) return;
 
-    // Use global totalTime monolith — no manual dt accumulation
     totalTime_ = RTX::TotalTime::get().seconds();
+
+    // Very light throttle only if we're insanely fast (protects driver/monitor)
+    static auto lastPew = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration<double>(now - lastPew).count();
+    if (elapsed < 0.0005) {  // ~2000 fps cap — adjust or remove
+        return;
+    }
+    lastPew = now;
 
     if (needsSwapchainRecreate_) {
         SwapchainManager::recreate(width_, height_, "previous pew invalid");
         needsSwapchainRecreate_ = false;
-        SwapchainManager::ensureReady(width_, height_);
-        if (!SwapchainManager::isReady()) return;
     }
 
     SwapchainManager::ensureReady(width_, height_);
@@ -316,33 +322,40 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     uint32_t imageIndex;
     VkResult acquireRes = SwapchainManager::acquireNextImage(&imageIndex);
+
+    if (acquireRes == VK_NOT_READY) {
+        // Display can't eat yet — silently skip, try again next loop
+        return;
+    }
     if (acquireRes != VK_SUCCESS) {
-        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR || acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
+        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR ||
+            acquireRes == VK_SUBOPTIMAL_KHR ||
+            acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
             needsSwapchainRecreate_ = true;
         }
         return;
     }
 
+    // Pick next ring slot (round-robin)
     VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
     currentRingIndex_ = (currentRingIndex_ + 1) % CMD_RING_SIZE;
 
+    // Reset without waiting — assuming ring is large enough that old cmds are retired
     vkResetCommandBuffer(cmd, 0);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin);
 
-    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) return;
-
+    // ── Your rendering ────────────────────────────────────────
     pipelineManager_.dispatchLivingWorld(cmd, static_cast<float>(totalTime_));
 
     VkMemoryBarrier mb{};
     mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 1, &mb, 0, nullptr, 0, nullptr);
 
@@ -367,18 +380,29 @@ void RTX::VulkanRenderer::pew() noexcept {
                    swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) return;
+    // Final transition to present — in same cmd buffer!
+    transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount   = 1;
-    submitInfo.pCommandBuffers      = &cmd;
+    vkEndCommandBuffer(cmd);
 
-    vkQueueSubmit(stone_graphics_queue(), 1, &submitInfo, VK_NULL_HANDLE);
+    // Submit — no fence, wait on acquire semaphore if it exists
+    VkSubmitInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
 
-    // Optional: wait idle for simplicity/debug — remove later for async
-    vkQueueWaitIdle(stone_graphics_queue());
+    // Conditional wait on acquire semaphore (signaled by acquireNextImageKHR)
+    static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;  // Shared with SwapchainManager
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
+        si.waitSemaphoreCount = 1;
+        si.pWaitSemaphores = &acquireSemaphore;
+        si.pWaitDstStageMask = waitStages;
+    }
 
-    // Present with no wait semaphore
+    vkQueueSubmit(stone_graphics_queue(), 1, &si, VK_NULL_HANDLE);
+
+    // Present — also wait on the same semaphore
     SwapchainManager::presentImage(stone_graphics_queue(), imageIndex);
 }

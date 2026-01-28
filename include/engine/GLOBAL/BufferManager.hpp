@@ -153,6 +153,7 @@ struct StagingRing {
     void*          mapped = nullptr;
     VkDeviceSize   head   = 0;
     bool           ready  = false;
+    VkDeviceAddress baseAddr = 0;
 };
 
 // ── GLOBAL STATE — defined after structs
@@ -259,7 +260,11 @@ inline void ensureStagingRing() noexcept {
     VkBufferCreateInfo bci{};
     bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bci.size = STAGING_RING_SIZE;
-    bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRing.buffer);
@@ -280,8 +285,13 @@ inline void ensureStagingRing() noexcept {
         return;
     }
 
+    VkMemoryAllocateFlagsInfo flags{};
+    flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+
     VkMemoryAllocateInfo mai{};
     mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.pNext = &flags;
     mai.allocationSize = req.size;
     mai.memoryTypeIndex = memType;
 
@@ -300,6 +310,11 @@ inline void ensureStagingRing() noexcept {
         return;
     }
 
+    VkBufferDeviceAddressInfo addrInfo{};
+    addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addrInfo.buffer = g_stagingRing.buffer;
+    g_stagingRing.baseAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
+
     res = vkMapMemory(stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkMapMemory for staging ring failed: {}", string_VkResult(res));
@@ -309,7 +324,7 @@ inline void ensureStagingRing() noexcept {
     }
 
     g_stagingRing.ready = true;
-    LOG_SUCCESS_CAT("BufferManager", "Staging ring created and mapped — {}", formatBytes(STAGING_RING_SIZE));
+    LOG_SUCCESS_CAT("BufferManager", "Staging ring created and mapped — {} (device address acquired)", formatBytes(STAGING_RING_SIZE));
 }
 
 // ── MAP STAGING ────────────────────────────────────────────────────────────
@@ -545,15 +560,18 @@ inline void ensureStagingRing() noexcept {
 
     if (smallUniform) {
         ensureStagingRing();
+
+        VkDeviceSize alignedSize = align_up(size, 256);
         VkDeviceSize offset = g_stagingRing.head;
-        g_stagingRing.head = (g_stagingRing.head + size) % g_stagingRing.size;
+        g_stagingRing.head = (g_stagingRing.head + alignedSize) % g_stagingRing.size;
 
         uint64_t handle = ++g_nextHandle;
         g_buffers.emplace(handle, BufferInfo{
             g_stagingRing.buffer, g_stagingRing.memory,
-            size, size, offset,
-            0, static_cast<std::byte*>(g_stagingRing.mapped) + offset,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            size, alignedSize, offset,
+            g_stagingRing.baseAddr,
+            static_cast<std::byte*>(g_stagingRing.mapped) + offset,
+            fixedUsage,
             std::string(tag)
         });
         return handle;
