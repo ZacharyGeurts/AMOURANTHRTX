@@ -1,12 +1,12 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.8
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.77
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
 // PHILOSOPHY: We only take what we need — but we always know exactly how much is available to take
 //             Live measurement on every allocation — no pre-reserve beyond safety margin
 //             Instant relinquish on explicit BM_DESTROY — no auto-purge, no surprises
 //             Tiny safety margin for background apps (YouTube PiP / browser tabs)
-//             JANUARY 27, 2026 — Device-local priority, staging ring for uploads only
+//             JANUARY 29, 2026 — Fixed g_ext namespace + removed unused caches
 //             Descriptor buffer special path (host-visible + device address, lazy map)
 //             totalTime compatible — no fences/semaphores, fire-and-forget uploads
 // =============================================================================
@@ -33,7 +33,6 @@ constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATC
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
 using StoneKey::stone_graphics_queue;
-using RTX::g_ext;
 
 namespace BufferManager {
 
@@ -81,8 +80,10 @@ inline std::string formatBytes(VkDeviceSize bytes) noexcept {
 }
 
 [[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) noexcept {
+    VkPhysicalDevice phys = stone_physical();
+
     VkPhysicalDeviceMemoryProperties memProps{};
-    vkGetPhysicalDeviceMemoryProperties(stone_physical(), &memProps);
+    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
 
     for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
         if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
@@ -98,6 +99,8 @@ inline std::string formatBytes(VkDeviceSize bytes) noexcept {
 [[nodiscard]] inline VkImage createImage(VkExtent3D extent, VkFormat format, VkImageUsageFlags usage,
                                          VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
                                          std::string_view tag = "Image") noexcept {
+    VkDevice dev = stone_device();
+
     VkImageCreateInfo ci{};
     ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ci.imageType = VK_IMAGE_TYPE_2D;
@@ -112,7 +115,7 @@ inline std::string formatBytes(VkDeviceSize bytes) noexcept {
     ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkImage image = VK_NULL_HANDLE;
-    if (vkCreateImage(stone_device(), &ci, nullptr, &image) != VK_SUCCESS) {
+    if (vkCreateImage(dev, &ci, nullptr, &image) != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "Failed to create image: {}", tag);
         return VK_NULL_HANDLE;
     }
@@ -180,8 +183,10 @@ struct VRAMReality {
 [[nodiscard]] inline VRAMReality measureReality() noexcept {
     VRAMReality reality{};
 
+    VkPhysicalDevice phys = stone_physical();
+
     VkPhysicalDeviceMemoryProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
-    vkGetPhysicalDeviceMemoryProperties2(stone_physical(), &props2);
+    vkGetPhysicalDeviceMemoryProperties2(phys, &props2);
 
     for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
         if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
@@ -192,7 +197,7 @@ struct VRAMReality {
     VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
     budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
     props2.pNext = &budget;
-    vkGetPhysicalDeviceMemoryProperties2(stone_physical(), &props2);
+    vkGetPhysicalDeviceMemoryProperties2(phys, &props2);
 
     for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
         if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
@@ -255,6 +260,8 @@ struct VRAMReality {
 inline void ensureStagingRing() noexcept {
     if (g_stagingRing.ready) return;
 
+    VkDevice dev = stone_device();
+
     LOG_INFO_CAT("BufferManager", "Creating 1 GiB staging ring");
 
     VkBufferCreateInfo bci{};
@@ -267,21 +274,21 @@ inline void ensureStagingRing() noexcept {
                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &g_stagingRing.buffer);
+    VkResult res = vkCreateBuffer(dev, &bci, nullptr, &g_stagingRing.buffer);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkCreateBuffer for staging ring failed: {}", string_VkResult(res));
         return;
     }
 
     VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(stone_device(), g_stagingRing.buffer, &req);
+    vkGetBufferMemoryRequirements(dev, g_stagingRing.buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (memType == ~0u) {
         LOG_FATAL_CAT("BufferManager", "No host-visible coherent memory for staging ring");
-        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
+        vkDestroyBuffer(dev, g_stagingRing.buffer, nullptr);
         return;
     }
 
@@ -295,31 +302,31 @@ inline void ensureStagingRing() noexcept {
     mai.allocationSize = req.size;
     mai.memoryTypeIndex = memType;
 
-    res = vkAllocateMemory(stone_device(), &mai, nullptr, &g_stagingRing.memory);
+    res = vkAllocateMemory(dev, &mai, nullptr, &g_stagingRing.memory);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkAllocateMemory for staging ring failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
+        vkDestroyBuffer(dev, g_stagingRing.buffer, nullptr);
         return;
     }
 
-    res = vkBindBufferMemory(stone_device(), g_stagingRing.buffer, g_stagingRing.memory, 0);
+    res = vkBindBufferMemory(dev, g_stagingRing.buffer, g_stagingRing.memory, 0);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkBindBufferMemory for staging ring failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
-        vkFreeMemory(stone_device(), g_stagingRing.memory, nullptr);
+        vkDestroyBuffer(dev, g_stagingRing.buffer, nullptr);
+        vkFreeMemory(dev, g_stagingRing.memory, nullptr);
         return;
     }
 
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = g_stagingRing.buffer;
-    g_stagingRing.baseAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
+    g_stagingRing.baseAddr = RTX::g_ext.vkGetBufferDeviceAddress(dev, &addrInfo);
 
-    res = vkMapMemory(stone_device(), g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped);
+    res = vkMapMemory(dev, g_stagingRing.memory, 0, VK_WHOLE_SIZE, 0, &g_stagingRing.mapped);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkMapMemory for staging ring failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), g_stagingRing.buffer, nullptr);
-        vkFreeMemory(stone_device(), g_stagingRing.memory, nullptr);
+        vkDestroyBuffer(dev, g_stagingRing.buffer, nullptr);
+        vkFreeMemory(dev, g_stagingRing.memory, nullptr);
         return;
     }
 
@@ -344,6 +351,8 @@ inline void ensureStagingRing() noexcept {
 // ── CHUNK CREATION — device-local only, on-demand
 // =============================================================================
 [[nodiscard]] inline Chunk* createChunk(VkDeviceSize minSize, VkBufferUsageFlags usage, VkSharingMode sharingMode = VK_SHARING_MODE_EXCLUSIVE) noexcept {
+    VkDevice dev = stone_device();
+
     VRAMReality reality = measureReality();
     VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, minSize);
 
@@ -359,18 +368,18 @@ inline void ensureStagingRing() noexcept {
     bci.sharingMode = sharingMode;
 
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &buffer);
+    VkResult res = vkCreateBuffer(dev, &bci, nullptr, &buffer);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkCreateBuffer for chunk failed: {}", string_VkResult(res));
         return nullptr;
     }
 
     VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(stone_device(), buffer, &req);
+    vkGetBufferMemoryRequirements(dev, buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (memType == ~0u) {
-        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        vkDestroyBuffer(dev, buffer, nullptr);
         return nullptr;
     }
 
@@ -385,25 +394,25 @@ inline void ensureStagingRing() noexcept {
     mai.memoryTypeIndex = memType;
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    res = vkAllocateMemory(stone_device(), &mai, nullptr, &memory);
+    res = vkAllocateMemory(dev, &mai, nullptr, &memory);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkAllocateMemory for chunk failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        vkDestroyBuffer(dev, buffer, nullptr);
         return nullptr;
     }
 
-    res = vkBindBufferMemory(stone_device(), buffer, memory, 0);
+    res = vkBindBufferMemory(dev, buffer, memory, 0);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkBindBufferMemory for chunk failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), buffer, nullptr);
-        vkFreeMemory(stone_device(), memory, nullptr);
+        vkDestroyBuffer(dev, buffer, nullptr);
+        vkFreeMemory(dev, memory, nullptr);
         return nullptr;
     }
 
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = buffer;
-    VkDeviceAddress baseAddr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
+    VkDeviceAddress baseAddr = RTX::g_ext.vkGetBufferDeviceAddress(dev, &addrInfo);
 
     g_mainChunks.push_back({buffer, memory, chunkSize, baseAddr, 0,
                             std::format("Chunk_{}_{}", g_mainChunks.size(), formatBytes(chunkSize)), {}});
@@ -420,6 +429,8 @@ inline void ensureStagingRing() noexcept {
 [[nodiscard]] inline uint64_t createDescriptorBuffer(VkDeviceSize size, std::string_view tag = "EternalDescriptorBuffer") noexcept {
     if (size == 0) size = 4096ULL;
 
+    VkDevice dev = stone_device();
+
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
@@ -430,20 +441,20 @@ inline void ensureStagingRing() noexcept {
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkResult res = vkCreateBuffer(stone_device(), &bci, nullptr, &buffer);
+    VkResult res = vkCreateBuffer(dev, &bci, nullptr, &buffer);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkCreateBuffer for descriptor buffer failed: {}", string_VkResult(res));
         return 0;
     }
 
     VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(stone_device(), buffer, &req);
+    vkGetBufferMemoryRequirements(dev, buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (memType == ~0u) {
-        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        vkDestroyBuffer(dev, buffer, nullptr);
         LOG_FATAL_CAT("BufferManager", "No host-visible coherent memory for descriptor buffer");
         return 0;
     }
@@ -459,25 +470,25 @@ inline void ensureStagingRing() noexcept {
     mai.memoryTypeIndex = memType;
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    res = vkAllocateMemory(stone_device(), &mai, nullptr, &memory);
+    res = vkAllocateMemory(dev, &mai, nullptr, &memory);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkAllocateMemory for descriptor buffer failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), buffer, nullptr);
+        vkDestroyBuffer(dev, buffer, nullptr);
         return 0;
     }
 
-    res = vkBindBufferMemory(stone_device(), buffer, memory, 0);
+    res = vkBindBufferMemory(dev, buffer, memory, 0);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "vkBindBufferMemory for descriptor buffer failed: {}", string_VkResult(res));
-        vkDestroyBuffer(stone_device(), buffer, nullptr);
-        vkFreeMemory(stone_device(), memory, nullptr);
+        vkDestroyBuffer(dev, buffer, nullptr);
+        vkFreeMemory(dev, memory, nullptr);
         return 0;
     }
 
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     addrInfo.buffer = buffer;
-    VkDeviceAddress addr = g_ext.vkGetBufferDeviceAddress(stone_device(), &addrInfo);
+    VkDeviceAddress addr = RTX::g_ext.vkGetBufferDeviceAddress(dev, &addrInfo);
 
     uint64_t handle = ++g_nextHandle;
     g_buffers.emplace(handle, BufferInfo{
@@ -507,8 +518,10 @@ inline void ensureStagingRing() noexcept {
 
     if (info.mapped != nullptr) return info.mapped;
 
+    VkDevice dev = stone_device();
+
     void* mapped = nullptr;
-    VkResult res = vkMapMemory(stone_device(), info.memory, 0, info.size, 0, &mapped);
+    VkResult res = vkMapMemory(dev, info.memory, 0, info.size, 0, &mapped);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("BufferManager", "Failed to lazy-map descriptor buffer: {}", string_VkResult(res));
         return nullptr;
@@ -607,6 +620,7 @@ inline void ensureStagingRing() noexcept {
 // ── ALLOCATE SCRATCH — on-demand for AS builds
 // =============================================================================
 [[nodiscard]] inline VkDeviceAddress allocateScratch(VkDeviceSize requiredSize) noexcept {
+
     VkDeviceSize total = 0;
     VkDeviceAddress baseAddr = 0;
 
@@ -665,6 +679,9 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     copy.dstOffset = info.offset;
     copy.size = size;
 
+    VkDevice dev = stone_device();
+    VkQueue queue = stone_graphics_queue();
+
     if (cmd != VK_NULL_HANDLE) {
         vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
     } else {
@@ -673,7 +690,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
         pci.queueFamilyIndex = StoneKey::stone_graphics_family();
-        VK_CHECK(vkCreateCommandPool(stone_device(), &pci, nullptr, &pool));
+        VK_CHECK(vkCreateCommandPool(dev, &pci, nullptr, &pool));
 
         VkCommandBuffer tcmd = VK_NULL_HANDLE;
         VkCommandBufferAllocateInfo ai{};
@@ -681,7 +698,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         ai.commandPool = pool;
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ai.commandBufferCount = 1;
-        VK_CHECK(vkAllocateCommandBuffers(stone_device(), &ai, &tcmd));
+        VK_CHECK(vkAllocateCommandBuffers(dev, &ai, &tcmd));
 
         VkCommandBufferBeginInfo bi{};
         bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -694,12 +711,12 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         si.commandBufferCount = 1;
         si.pCommandBuffers = &tcmd;
-        VK_CHECK(vkQueueSubmit(stone_graphics_queue(), 1, &si, VK_NULL_HANDLE));
+        VK_CHECK(vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE));
 
-        vkQueueWaitIdle(stone_graphics_queue());
+        vkQueueWaitIdle(queue);
 
-        vkFreeCommandBuffers(stone_device(), pool, 1, &tcmd);
-        vkDestroyCommandPool(stone_device(), pool, nullptr);
+        vkFreeCommandBuffers(dev, pool, 1, &tcmd);
+        vkDestroyCommandPool(dev, pool, nullptr);
     }
 }
 
@@ -711,11 +728,13 @@ inline void destroy(uint64_t handle) noexcept {
     if (it == g_buffers.end()) return;
 
     BufferInfo& info = it->second;
+    VkDevice dev = stone_device();
+
     if (info.mapped != nullptr) {
-        vkUnmapMemory(stone_device(), info.memory);
+        vkUnmapMemory(dev, info.memory);
     }
-    vkDestroyBuffer(stone_device(), info.buffer, nullptr);
-    vkFreeMemory(stone_device(), info.memory, nullptr);
+    vkDestroyBuffer(dev, info.buffer, nullptr);
+    vkFreeMemory(dev, info.memory, nullptr);
 
     g_buffers.erase(it);
 }
