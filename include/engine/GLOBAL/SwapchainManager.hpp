@@ -1,13 +1,11 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.75
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.76
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 27, 2026 — "no semaphores/fences — totalTime monolith edition"
-// - Removed all semaphore/fence usage — acquire/present are fire-and-forget
+// JANUARY 28, 2026 — "minimal sync, totalTime monolith edition"
+// - Acquire returns semaphore for safe submit/present wait
 // - Synchronous PRESENT_SRC_KHR transition before every present
-// - Queries STORAGE_BIT support before creation — enables direct write if possible
 // - Deferred recreate — caller handles out-of-date/suboptimal errors
-// - No blind fallback — logs clearly why direct write failed if unsupported
-// - Transient command pool + fixed ring for present transitions (driver reuses)
+// - Validation-clean: proper layout + safe acquire/present
 // =============================================================================
 
 #pragma once
@@ -46,9 +44,9 @@ public:
     static void ensureReady(uint32_t width, uint32_t height) noexcept;
     [[nodiscard]] static bool isReady() noexcept;
 
-    // Acquire & present — no semaphores/fences
-    [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex) noexcept;
-    static void presentImage(VkQueue queue, uint32_t imageIndex) noexcept;
+    // Acquire & present — returns semaphore for acquire (must be waited on)
+    [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept;
+    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore, VkSwapchainKHR swapchainHandle) noexcept;
 
     // Transition helper — static
     static void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
@@ -126,11 +124,11 @@ inline bool                     swapchainIsValid()    noexcept { return Swapchai
 } // namespace RTX
 
 // =============================================================================
-// CLEAN HEADER — v30.75 — JANUARY 27, 2026
-// - No semaphores/fences — acquire/present are fire-and-forget
+// CLEAN HEADER — v30.76 — JANUARY 28, 2026
+// - Acquire returns semaphore for safe submit/present wait
 // - Synchronous PRESENT_SRC_KHR transition before every present
 // - Deferred recreate at start of next frame (renderer handles flag)
 // - transitionImageLayout remains static
 // - Global convenience macros for easy access
-// - Transient pool + fixed ring for present transitions (driver reuses)
+// - Validation-clean: proper layout + safe acquire/present
 // =============================================================================

@@ -559,7 +559,7 @@ void PipelineManager::createRayTracingPipeline()
 // =============================================================================
 // SBT Creation
 // =============================================================================
-void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer providedCmd)
+void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer providedCmd)
 {
     if (s_eternalSbtForged) return;
 
@@ -696,57 +696,6 @@ void RTX::PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue 
 }
 
 // =============================================================================
-// Trace Rays — Silent hot path
-// =============================================================================
-void PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t height)
-{
-    std::lock_guard<std::mutex> lock(rebuildMutex);
-
-    if (g_pipelineNeedsRebuild.load(std::memory_order_acquire)) {
-        createRayTracingPipeline();
-        g_pipelineNeedsRebuild.store(false, std::memory_order_release);
-    }
-
-    if (cmd == VK_NULL_HANDLE) return;
-
-    VkPipeline rtPipe = stone_rt_pipeline();
-    if (rtPipe == VK_NULL_HANDLE) return;
-
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipe);
-
-    VkDescriptorBufferBindingInfoEXT bindInfo{};
-    bindInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
-    bindInfo.address = descriptorBufferAddress_;
-    bindInfo.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
-
-    g_ext.vkCmdBindDescriptorBuffersEXT(cmd, 1, &bindInfo);
-
-    uint32_t bufferIndex = 0;
-    VkDeviceSize offset = 0;
-    g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                                             stone_pipeline_layout(), 0, 1, &bufferIndex, &offset);
-
-    float totalTime = static_cast<float>(RTX::TotalTime::get().seconds());
-
-    // FIXED: Use full stage mask to match the layout's push constant range
-    vkCmdPushConstants(cmd, stone_pipeline_layout(),
-                       FULL_PUSH_MASK,
-                       0, sizeof(float), &totalTime);
-
-    VkStridedDeviceAddressRegionKHR raygenRegion   = raygenSbtRegion_;
-    VkStridedDeviceAddressRegionKHR missRegion     = missSbtRegion_;
-    VkStridedDeviceAddressRegionKHR hitRegion      = hitSbtRegion_;
-    VkStridedDeviceAddressRegionKHR callableRegion = {};
-
-    g_ext.vkCmdTraceRaysKHR(cmd,
-                            &raygenRegion,
-                            &missRegion,
-                            &hitRegion,
-                            &callableRegion,
-                            width, height, 1);
-}
-
-// =============================================================================
 // Destructor
 // =============================================================================
 PipelineManager::~PipelineManager()
@@ -793,6 +742,45 @@ void RTX::PipelineManager::cacheDeviceProperties()
     cached = true;
 
     LOG_SUCCESS_CAT("PIPELINE", "Ray tracing properties cached");
+}
+
+void RTX::PipelineManager::traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t height) {
+    if (cmd == VK_NULL_HANDLE) return;
+
+    VkPipeline rtPipe = stone_rt_pipeline();
+    if (rtPipe == VK_NULL_HANDLE) return;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipe);
+
+    VkDescriptorBufferBindingInfoEXT bindInfo{};
+    bindInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+    bindInfo.address = descriptorBufferAddress_;
+    bindInfo.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
+
+    g_ext.vkCmdBindDescriptorBuffersEXT(cmd, 1, &bindInfo);
+
+    uint32_t bufferIndex = 0;
+    VkDeviceSize offset = 0;
+    g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                                             stone_pipeline_layout(), 0, 1, &bufferIndex, &offset);
+
+    float totalTime = static_cast<float>(RTX::TotalTime::get().seconds());
+
+    vkCmdPushConstants(cmd, stone_pipeline_layout(),
+                       FULL_PUSH_MASK,
+                       0, sizeof(float), &totalTime);
+
+    VkStridedDeviceAddressRegionKHR raygenRegion   = raygenSbtRegion_;
+    VkStridedDeviceAddressRegionKHR missRegion     = missSbtRegion_;
+    VkStridedDeviceAddressRegionKHR hitRegion      = hitSbtRegion_;
+    VkStridedDeviceAddressRegionKHR callableRegion = {};
+
+    g_ext.vkCmdTraceRaysKHR(cmd,
+                            &raygenRegion,
+                            &missRegion,
+                            &hitRegion,
+                            &callableRegion,
+                            width, height, 1);
 }
 
 // =============================================================================
@@ -917,4 +905,4 @@ void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& 
     // No flush needed (host-coherent)
 }
 
-} // namespace RTX
+} // namespace RTX nice

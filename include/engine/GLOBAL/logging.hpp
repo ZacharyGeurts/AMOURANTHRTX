@@ -90,16 +90,13 @@ struct TotalTime final {
         return instance;
     }
 
-    // Public query: is the monolith sealed and ready for paranoid reads?
+    // Public query: is the monolith sealed and ready?
     [[nodiscard]] bool is_sealed() const noexcept {
         return sealed_.load(std::memory_order_acquire);
     }
 
     // Read — verifies integrity, returns microseconds since genesis
     [[nodiscard]] double us() const noexcept {
-        if (!sealed_.load(std::memory_order_acquire)) {
-            const_cast<TotalTime*>(this)->seal();  // lazy auto-seal on first read
-        }
         verify();   // entropy check — tamper → abort
         return static_cast<double>(raw_us_.load(std::memory_order_acquire));
     }
@@ -115,32 +112,23 @@ struct TotalTime final {
             std::abort();
         }
 
-        // Optional: you could also lazy-seal here if you want advance to trigger seal
-        // if (!sealed_.load(std::memory_order_acquire)) seal();
-
         raw_us_.fetch_add(
             std::chrono::duration_cast<std::chrono::microseconds>(dt).count(),
             std::memory_order_acq_rel
         );
     }
 
-    // Seal — now idempotent (multiple calls are safe)
+    // Seal — idempotent
     void seal() noexcept {
-        // Use compare_exchange to make it exactly-once in theory,
-        // but store(true) is simpler and fine for this use case
         sealed_.store(true, std::memory_order_release);
-        // Alternative (exactly-once semantics):
-        // bool expected = false;
-        // sealed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
     }
 
 private:
-    // ── Judge Dredd section ────────────────────────────────────────────────
     uint64_t entropy_;
     uint64_t entropy_check_;
     detail::TimePoint genesis_;
     std::atomic<uint64_t> raw_us_{0};     // µs accumulator
-    std::atomic<bool>     sealed_{false};
+    std::atomic<bool> sealed_{false};
 
     TotalTime() noexcept
         : entropy_(detail::make_session_entropy())
@@ -152,40 +140,36 @@ private:
     }
 
     void verify() const noexcept {
-        // Entropy tamper check — always active after construction
         if ((entropy_ ^ 0x9E37AF18C64D8A17UL) != entropy_check_) [[unlikely]] {
             std::abort();
         }
-
-        // We no longer abort if !sealed_ — because we auto-seal on first read
-        // The tamper protection now lives entirely in the entropy XOR check
     }
 };
 
 } // namespace RTX
 
-
 // =============================================================================
 // SIMPLE TOTALTIME PRINTING — safe before/after seal
-// No crash even during earliest init — just skips time info if not yet sealed
+// Uses plain cout + format — no logging system dependency
+// Skips if not sealed — no crash
 // =============================================================================
 
 inline void print_total_time(const char* prefix = nullptr) noexcept {
     const auto& tt = RTX::TotalTime::get();
 
-    // Optional: show something during very early phase
     if (!tt.is_sealed()) {
-        // std::cout << (prefix ? prefix : "") << "[totalTime] auto-sealing on first use...\n";
-        // return;   // or continue to print 0.0 if you prefer
+        std::cout << (prefix ? prefix : "") << "[totalTime] not sealed yet — skipping print\n";
+        std::cout.flush();
+        return;
     }
 
     double s   = tt.seconds();
     double ms  = s * 1000.0;
     double usv = tt.us();
-    double fps = (s > 1e-10) ? 1.0 / s : std::numeric_limits<double>::infinity();
+    double fps = (s > 1e-6) ? 1.0 / s : INFINITY;
 
     std::cout << (prefix ? prefix : "")
-              << std::format("[totalTime] {:9.6f} s | {:7.1f} ms | {:8.0f} µs | ~{:7.1f} pseudo-fps\n",
+              << std::format("[totalTime] {:.6f}s | {:.1f}ms | {:.0f}µs | ~{:.1f} pseudo-FPS\n",
                              s, ms, usv, fps);
     std::cout.flush();
 }

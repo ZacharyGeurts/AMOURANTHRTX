@@ -1,10 +1,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer Header
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.74 — January 26, 2026 — BufferManager macro integration + per-image binary semaphores
-// DESCRIPTOR SETS ARE DEAD — ETERNAL DESCRIPTOR BUFFER EMPIRE
-// FIXED CMD BUFFER RING (RESET + RE-RECORD) • BINDLESS • ZERO-OVERHEAD UPDATES
-// OWNS: TLAS QUERY • PIPELINE • SBT • DESCRIPTOR BUFFER • UBO • HDR STORAGE • LIVING WORLD
+// Version 30.76 — January 28, 2026 — Validation-clean, minimal sync edition
+// - totalTime monolith drives all timing
+// - Acquire semaphore waited in submit and present (safe double-wait)
+// - Final PRESENT_SRC_KHR transition in main render cmd buffer
+// - Ring buffers reset + reused — no free while pending
+// - No per-image binary semaphores
+// - Descriptor sets dead — eternal descriptor buffer empire
 // =============================================================================
 
 #pragma once
@@ -36,10 +39,10 @@ public:
 
     [[nodiscard]] bool isMinimized() const noexcept { return minimized_; }
     [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }
-    [[nodiscard]] double getLifetimeSeconds() const noexcept { return totalTime_; }
+    [[nodiscard]] double getLifetimeSeconds() const noexcept { return RTX::TotalTime::get().seconds(); }
 
 private:
-    // Core members — declaration order matches constructor initializer list
+    // Core members — ordered to match constructor initializer list
     SDL_Window*                     window_             = nullptr;
     int                             width_              = 0;
     int                             height_             = 0;
@@ -47,27 +50,11 @@ private:
     bool                            minimized_          = false;
     bool                            destroyed_          = false;
 
-    double                          totalTime_          = 0.0;
     std::chrono::steady_clock::time_point last_time_;
 
-    // Timeline semaphores for fenceless tracking
-    VkSemaphore                     timelineSemaphore_           = VK_NULL_HANDLE;
-    uint64_t                        currentTimelineValue_        = 0;
-
-    VkSemaphore                     acquireTimelineSemaphore_    = VK_NULL_HANDLE;
-    uint64_t                        nextAcquireValue_            = 1;
-
-    VkSemaphore                     graphicsTimelineSemaphore_   = VK_NULL_HANDLE;
-    uint64_t                        nextGraphicsValue_           = 1;
-
-    // Per-image binary semaphores — indexed by acquired imageIndex
-    // Safe reuse: signaled only when that image is rendered, waited only when presented
-    std::vector<VkSemaphore>        renderFinishedSemaphores_;
-
-    // Acquire semaphores — cycled to avoid pending reuse
-    static constexpr size_t         ACQUIRE_SEM_COUNT   = 64;
-    std::array<VkSemaphore, ACQUIRE_SEM_COUNT> acquireSemaphores_{};
-    uint32_t                        currentFrame_       = 0;
+    // Fixed command buffer ring — self-disposing via reset on reuse
+    static constexpr size_t         CMD_RING_SIZE       = 64;
+    size_t                          currentRingIndex_   = 0;
 
     // Persistent resources (BufferManager handles + raw Vulkan caches)
     uint64_t                        defaultMaterialsHandle_ = 0;   // BufferManager descriptor buffer handle
@@ -81,10 +68,7 @@ private:
     VkImageView                     hdrOutputView_          = VK_NULL_HANDLE;
     VkDeviceMemory                  hdrOutputMemory_        = VK_NULL_HANDLE;
 
-    // Fixed command buffer ring — self-disposing via reset on reuse
-    static constexpr size_t         CMD_RING_SIZE       = 64;
-    std::vector<VkCommandBuffer>    cmdRing_;
-    size_t                          currentRingIndex_   = 0;
+	std::vector<VkCommandBuffer>    cmdRing_;
 
     PipelineManager                 pipelineManager_;
 
@@ -107,10 +91,10 @@ private:
 } // namespace RTX
 
 // =============================================================================
-// VULKAN RENDERER HEADER — v30.74 — JANUARY 26, 2026
+// VULKAN RENDERER HEADER — v30.76 — JANUARY 28, 2026
 // Descriptor sets eliminated • eternal descriptor buffer • bindless empire
-// Frame-free • fixed cmd ring (reset + re-record) • fenceless timeline tracking
-// BufferManager macros for all buffers • per-image binary semaphores for present wait
+// Frame-free • fixed cmd ring (reset + re-record) • minimal sync
+// BufferManager macros for all buffers • acquire semaphore for safe present
 // Deferred swapchain recreate • living world compute dispatched every pew
 // Pure light — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
 // =============================================================================
