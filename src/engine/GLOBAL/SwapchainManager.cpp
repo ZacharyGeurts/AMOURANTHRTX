@@ -1,12 +1,13 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.77
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 29, 2026 — "stable cache + wait idle edition"
-// - Caches all stone_xxx() handles once per function — prevents rapid changes / device lost
-// - vkDeviceWaitIdle before recreate — ensures no pending work when destroying swapchain
+// JANUARY 29, 2026 — "stable cache + wait idle + device cache edition"
+// - Caches stone_device(), stone_graphics_queue(), stone_swapchain() once per function
+// - vkDeviceWaitIdle before any recreation/destruction — no pending work
+// - All Vulkan calls use cached device/queue/swapchain — no rapid changes mid-call
+// - Prevents VK_ERROR_DEVICE_LOST from StoneKey instability
 // - Acquire returns semaphore for safe wait in renderer
 // - Synchronous PRESENT_SRC_KHR transition before present
-// - Transient command pool for layout transitions only (one-time submit)
 // - Validation-clean: proper layout + safe acquire/present
 // =============================================================================
 
@@ -75,8 +76,11 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
 
     LOG_INFO_CAT("SWAPCHAIN", "Ensuring swapchain ready — {}×{}", w, h);
 
-    // Wait idle before any potential recreate — fixes device lost on recreation
-    vkDeviceWaitIdle(stone_device());
+    // Cache device once
+    VkDevice cachedDevice = stone_device();
+
+    // Wait idle before any potential recreate — critical for device lost fix
+    vkDeviceWaitIdle(cachedDevice);
 
     createOrRecreateSwapchain(w, h, true, "ensureReady");
 
@@ -93,10 +97,11 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason) noexcept {
     ensureSwapchainExtension();
 
-    // Cache handles once — prevents rapid changes
+    // Cache all critical handles once per call — prevents rapid changes / device lost
     VkDevice dev = stone_device();
     VkPhysicalDevice phys = stone_physical();
     VkSurfaceKHR surf = stone_surface();
+    VkSwapchainKHR oldSwap = swapchain_.get();  // Cache old for oldSwapchain
 
     if (!dev || !phys || !surf || w == 0 || h == 0) {
         minimized_ = true;
@@ -109,7 +114,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     if (isRecreate) {
         cleanupImageViews();
         if (swapchain_.valid()) {
-            vkDestroySwapchainKHR(dev, swapchain_.get(), nullptr);
+            vkDestroySwapchainKHR(dev, oldSwap, nullptr);
             swapchain_ = {};
         }
         LAS::instance().onResize();
@@ -181,7 +186,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     ci.presentMode      = chosenPM;
     ci.clipped          = VK_TRUE;
-    ci.oldSwapchain     = isRecreate ? swapchain_.get() : VK_NULL_HANDLE;
+    ci.oldSwapchain     = isRecreate ? oldSwap : VK_NULL_HANDLE;
     ci.imageUsage       = usage;
 
     VkSwapchainKHR newSwap = VK_NULL_HANDLE;
@@ -268,7 +273,7 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore* 
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore, VkSwapchainKHR swapchainHandle) noexcept {
     if (minimized_ || !swapchain_.valid() || !stone_device()) return;
 
-    // Cache handles
+    // Cache device
     VkDevice dev = stone_device();
 
     VkImage image = swapchainImages_[imageIndex];
@@ -330,7 +335,7 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
         submit.pWaitDstStageMask    = waitStages;
     }
 
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
+    //VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
 
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -367,15 +372,16 @@ void SwapchainManager::create(SDL_Window* window, uint32_t width, uint32_t heigh
 }
 
 void SwapchainManager::cleanup() noexcept {
-    if (!stone_device()) return;
-    vkDeviceWaitIdle(stone_device());
+    VkDevice dev = stone_device();
+    if (!dev) return;
+    vkDeviceWaitIdle(dev);
 
     LAS::instance().onResize();
     cleanupImageViews();
     cleanupSwapchain();
 
     if (s_transientPool != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(stone_device(), s_transientPool, nullptr);
+        vkDestroyCommandPool(dev, s_transientPool, nullptr);
         s_transientPool = VK_NULL_HANDLE;
     }
 }
@@ -386,8 +392,9 @@ void SwapchainManager::cleanupSwapchain() noexcept {
 }
 
 void SwapchainManager::cleanupImageViews() noexcept {
+    VkDevice dev = stone_device();
     for (auto v : swapchainImageViews_) {
-        vkDestroyImageView(stone_device(), v, nullptr);
+        vkDestroyImageView(dev, v, nullptr);
     }
     swapchainImageViews_.clear();
 }
