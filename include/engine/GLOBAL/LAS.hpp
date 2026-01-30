@@ -1,13 +1,16 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
-// Singleton with async rebuild thread — zero stalls after initial sync
-// Version 30.18 — January 23, 2026
-// FULLY IMPLEMENTED: Async rebuild, geometry hot-reload, instance transforms
-//                    Expanded procedurals (sphere, cylinder, cone, full D&D dice)
-//                    No Woop — hardware wins
-//                    On-demand scratch, StoneKey sealed, default scene
-// Empire delivers maximum performance without compromise.
+// Singleton with lazy, synchronous rebuilds — main-thread only, no threading
+// Version 30.22 — January 30, 2026
+// - Removed async rebuild thread — synchronous rebuilds only
+// - Fixed uploadToBuffer calls — always pass command buffer
+// - Temporary one-time cmd buffers for initial/hot-reload uploads
+// - Full D&D dice support (AABB approximations)
+// - Geometry hot-reload for meshes
+// - Instance transforms per-object
+// - No fences/semaphores — vkQueueWaitIdle for sync
+// Empire stays predictable, debuggable, main-thread pure.
 // =============================================================================
 
 #pragma once
@@ -17,10 +20,6 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
-#include <thread>
-#include <atomic>
-#include <mutex>
-#include <condition_variable>
 
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
@@ -116,7 +115,6 @@ public:
     void destroyPrimitive(size_t index, float amount = 1.0f);
 
     void onResize();
-    void requestRebuild();
 
 private:
     LAS();
@@ -127,7 +125,6 @@ private:
     bool buildHybridTLAS(VkCommandBuffer cmd);
     void clearTLAS();
     void createDefaultHybridScene();
-    void asyncRebuildLoop();
 
     void insertASBuildToTraceBarrier(VkCommandBuffer cmd);
     void insertASBuildToBuildBarrier(VkCommandBuffer cmd);
@@ -147,13 +144,6 @@ private:
     bool pendingBlasBuilds = true;
     bool proceduralDirty   = true;
     bool initialized       = false;
-
-    // Async rebuild support
-    std::thread asyncRebuildThread;
-    std::mutex mutex;
-    std::condition_variable cv;
-    std::atomic<bool> running;
-    std::atomic<bool> rebuildRequested;
 
     static constexpr uint32_t MAX_INSTANCES   = 131072;
     static constexpr uint32_t MAX_PROCEDURALS = 131072;

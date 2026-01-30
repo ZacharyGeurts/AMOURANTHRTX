@@ -2,10 +2,10 @@
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
 // Singleton with lazy, synchronous rebuilds — main-thread only, no threading
-// Version 30.21 — January 30, 2026
+// Version 30.22 — January 30, 2026
+// - Synchronous rebuilds only — brief stalls during scene edits, zero threading complexity
 // - Fixed uploadToBuffer calls — always pass command buffer
 // - Temporary one-time cmd buffers for initial/hot-reload uploads
-// - Synchronous rebuilds only, no async, no Woop
 // - Full D&D dice support (AABB approximations)
 // - Geometry hot-reload for meshes
 // - Instance transforms per-object
@@ -53,7 +53,7 @@ RTX::LAS& RTX::LAS::instance() {
 
 // Constructor — minimal, no thread
 RTX::LAS::LAS() {
-    LOG_INFO_CAT("LAS", "v30.21 initialized — synchronous rebuilds only, no threading, no Woop");
+    LOG_INFO_CAT("LAS", "v30.22 initialized — synchronous rebuilds only, no threading");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
@@ -154,7 +154,7 @@ void RTX::LAS::ensureReady() {
         return;
     }
 
-    LOG_INFO_CAT("LAS", "Rebuild triggered — synchronous");
+    LOG_INFO_CAT("LAS", "Rebuild triggered — synchronous (brief stall expected)");
 
     if (!initialized) {
         createDefaultHybridScene();
@@ -197,30 +197,32 @@ void RTX::LAS::ensureReady() {
 
     // BLAS phase
     if (pendingBlasBuilds || proceduralDirty) {
-        batchBuildAndCompactBLAS(cmd);
-        insertASBuildToBuildBarrier(cmd);
+        success &= batchBuildAndCompactBLAS(cmd);
+        if (success) insertASBuildToBuildBarrier(cmd);
     }
 
     // TLAS phase
     if (tlasDirty) {
         clearTLAS();
         success &= buildHybridTLAS(cmd);
-        insertASBuildToTraceBarrier(cmd);
+        if (success) insertASBuildToTraceBarrier(cmd);
     }
 
-    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-        LOG_FATAL_CAT("LAS", "vkEndCommandBuffer failed during rebuild");
+    if (!success || vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Rebuild recording failed");
         success = false;
     }
 
-    VkSubmitInfo submit{};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
+    if (success) {
+        VkSubmitInfo submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &cmd;
 
-    if (success && vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
-        LOG_FATAL_CAT("LAS", "vkQueueSubmit failed during rebuild");
-        success = false;
+        if (vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "vkQueueSubmit failed during rebuild");
+            success = false;
+        }
     }
 
     if (success) {

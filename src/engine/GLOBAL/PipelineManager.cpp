@@ -3,9 +3,7 @@
 // Ray tracing + compute pipeline, SBT, descriptor management
 // Version 30.8 — January 27, 2026
 // - Fixed push constant stageFlags to match layout range (fixes VUID-01796)
-// - Full mask used on every vkCmdPushConstants call
 // - On-demand compute pipeline creation in dispatchLivingWorld
-// - No masking in transition submit
 // - Timing driven by totalTime push only — no semaphores/fences
 // - Eternal descriptor buffer + BufferManager macros
 // - No sets, no vkUpdateDescriptorSets — vkGetDescriptorEXT + memcpy
@@ -83,7 +81,7 @@ static bool descPropsCached = false;
 // Eternal SBT forged flag
 bool s_eternalSbtForged = false;
 
-// Full push constant stage mask (must match layout range)
+// Full push constant stage (must match layout range)
 static constexpr VkShaderStageFlags FULL_PUSH_MASK =
     VK_SHADER_STAGE_COMPUTE_BIT |
     VK_SHADER_STAGE_RAYGEN_BIT_KHR |

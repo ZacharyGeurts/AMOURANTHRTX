@@ -122,8 +122,6 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
                         g_resizeWidth.store(w);
                         g_resizeHeight.store(h);
                         g_resizeRequested.store(true);
-
-                        LAS::instance().requestRebuild();  // Singleton access
                     }
                     // Real resize while visible
                     else if (!currentlyMinimized && (w != lastValidW || h != lastValidH)) {
@@ -135,8 +133,6 @@ bool pollEvents(int& outW, int& outH, bool& quit, bool& toggleFS) noexcept
                         g_resizeWidth.store(w);
                         g_resizeHeight.store(h);
                         g_resizeRequested.store(true);
-
-                        LAS::instance().requestRebuild();  // Singleton access
                     }
                     // Ignore repeated same-size or repeated 0x0 events
                 }
