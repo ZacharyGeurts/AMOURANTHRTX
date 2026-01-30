@@ -386,7 +386,7 @@ void RTX::VulkanRenderer::pew() noexcept {
         submit.pWaitDstStageMask = waitStages;
     }
 
-    //VK_CHECK(vkQueueSubmit(cachedGraphicsQueue, 1, &submit, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueSubmit(cachedGraphicsQueue, 1, &submit, VK_NULL_HANDLE));
 
     SwapchainManager::presentImage(cachedGraphicsQueue, imageIndex, acquireSemaphore, cachedSwapchain);
 

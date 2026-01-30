@@ -651,19 +651,20 @@ inline void ensureStagingRing() noexcept {
 // ── UPLOAD — staging ring + fire-and-forget fallback
 // =============================================================================
 inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
-                           VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
+                           VkCommandBuffer cmd) noexcept     // ← remove default = VK_NULL_HANDLE
+{
+    if (cmd == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("BufferManager", "uploadToBuffer requires valid command buffer (handle {})", handle);
+        return;
+    }
+
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end() || size > it->second.size) {
-        LOG_ERROR_CAT("BufferManager", "Invalid upload: handle {} or size too large ({})", handle, formatBytes(size));
+        LOG_ERROR_CAT("BufferManager", "Invalid upload …");
         return;
     }
 
     BufferInfo& info = it->second;
-
-    if (info.buffer == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("BufferManager", "uploadToBuffer: dstBuffer is VK_NULL_HANDLE (handle: {})", handle);
-        return;
-    }
 
     if (info.mapped != nullptr) {
         std::memcpy(info.mapped, data, size);
@@ -675,49 +676,14 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     std::memcpy(staging, data, size);
 
     VkBufferCopy copy{};
-    copy.srcOffset = static_cast<VkDeviceSize>(reinterpret_cast<std::uintptr_t>(staging) - reinterpret_cast<std::uintptr_t>(g_stagingRing.mapped));
+    copy.srcOffset = static_cast<VkDeviceSize>(
+        reinterpret_cast<uintptr_t>(staging) -
+        reinterpret_cast<uintptr_t>(g_stagingRing.mapped)
+    );
     copy.dstOffset = info.offset;
-    copy.size = size;
+    copy.size      = size;
 
-    VkDevice dev = stone_device();
-    VkQueue queue = stone_graphics_queue();
-
-    if (cmd != VK_NULL_HANDLE) {
-        vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
-    } else {
-        VkCommandPool pool = {};
-        VkCommandPoolCreateInfo pci{};
-        pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
-        VK_CHECK(vkCreateCommandPool(dev, &pci, nullptr, &pool));
-
-        VkCommandBuffer tcmd = VK_NULL_HANDLE;
-        VkCommandBufferAllocateInfo ai{};
-        ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        ai.commandPool = pool;
-        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        ai.commandBufferCount = 1;
-        VK_CHECK(vkAllocateCommandBuffers(dev, &ai, &tcmd));
-
-        VkCommandBufferBeginInfo bi{};
-        bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        VK_CHECK(vkBeginCommandBuffer(tcmd, &bi));
-        vkCmdCopyBuffer(tcmd, g_stagingRing.buffer, info.buffer, 1, &copy);
-        VK_CHECK(vkEndCommandBuffer(tcmd));
-
-        VkSubmitInfo si{};
-        si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        si.commandBufferCount = 1;
-        si.pCommandBuffers = &tcmd;
-        VK_CHECK(vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE));
-
-        vkQueueWaitIdle(queue);
-
-        vkFreeCommandBuffers(dev, pool, 1, &tcmd);
-        vkDestroyCommandPool(dev, pool, nullptr);
-    }
+    vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
 }
 
 // ── DESTROY — thread-safe, explicit only

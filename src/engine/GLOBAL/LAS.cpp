@@ -2,15 +2,14 @@
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
 // Singleton with lazy, synchronous rebuilds — main-thread only, no threading
-// Version 30.20 — January 27, 2026
-// - Removed async thread completely — synchronous rebuilds only
+// Version 30.21 — January 30, 2026
+// - Fixed uploadToBuffer calls — always pass command buffer
+// - Temporary one-time cmd buffers for initial/hot-reload uploads
+// - Synchronous rebuilds only, no async, no Woop
 // - Full D&D dice support (AABB approximations)
 // - Geometry hot-reload for meshes
 // - Instance transforms per-object
-// - No Woop — hardware wins
-// - On-demand scratch, StoneKey sealed, default scene
 // - No fences/semaphores — vkQueueWaitIdle for sync
-// - totalTime integration if needed (none here)
 // Empire stays predictable, debuggable, main-thread pure.
 // =============================================================================
 
@@ -54,7 +53,7 @@ RTX::LAS& RTX::LAS::instance() {
 
 // Constructor — minimal, no thread
 RTX::LAS::LAS() {
-    LOG_INFO_CAT("LAS", "v30.20 initialized — synchronous rebuilds only, no threading, no Woop");
+    LOG_INFO_CAT("LAS", "v30.21 initialized — synchronous rebuilds only, no threading, no Woop");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
@@ -122,6 +121,7 @@ VkAccelerationStructureKHR RTX::LAS::getTLAS() {
 
 // Barriers
 void RTX::LAS::insertASBuildToTraceBarrier(VkCommandBuffer cmd) {
+    if (!cmd) return;
     VkMemoryBarrier barrier{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -135,6 +135,7 @@ void RTX::LAS::insertASBuildToTraceBarrier(VkCommandBuffer cmd) {
 }
 
 void RTX::LAS::insertASBuildToBuildBarrier(VkCommandBuffer cmd) {
+    if (!cmd) return;
     VkMemoryBarrier barrier{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -238,7 +239,6 @@ void RTX::LAS::ensureReady() {
         LOG_FATAL_CAT("LAS", "Rebuild failed — TLAS may be invalid");
     }
 
-    // Final sync — prevent race with trace
     vkDeviceWaitIdle(stone_device());
 }
 
@@ -261,7 +261,46 @@ size_t RTX::LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materi
         return triangleMeshes.size();
     }
 
-    BufferManager::uploadToBuffer(vb, mesh->vertices.data(), mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
+    // Temporary command buffer for uploads
+    VkCommandPool transientPool = VK_NULL_HANDLE;
+    VkCommandBuffer uploadCmd = VK_NULL_HANDLE;
+
+    VkCommandPoolCreateInfo pci{};
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = StoneKey::stone_graphics_family();
+    if (vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Failed to create transient pool for mesh upload");
+        BufferManager::destroy(vb);
+        return triangleMeshes.size();
+    }
+
+    VkCommandBufferAllocateInfo ai{};
+    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ai.commandPool = transientPool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(stone_device(), &ai, &uploadCmd) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Failed to allocate command buffer for mesh upload");
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
+        BufferManager::destroy(vb);
+        return triangleMeshes.size();
+    }
+
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(uploadCmd, &bi) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Failed to begin command buffer for mesh upload");
+        vkFreeCommandBuffers(stone_device(), transientPool, 1, &uploadCmd);
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
+        BufferManager::destroy(vb);
+        return triangleMeshes.size();
+    }
+
+    BufferManager::uploadToBuffer(vb, mesh->vertices.data(),
+                                  mesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
+                                  uploadCmd);
 
     uint64_t ib = BufferManager::create(
         mesh->indices.size() * sizeof(uint32_t),
@@ -272,11 +311,31 @@ size_t RTX::LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materi
 
     if (ib == 0) {
         LOG_FATAL_CAT("LAS", "Failed to create index buffer");
+        vkEndCommandBuffer(uploadCmd);
+        vkFreeCommandBuffers(stone_device(), transientPool, 1, &uploadCmd);
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
         BufferManager::destroy(vb);
         return triangleMeshes.size();
     }
 
-    BufferManager::uploadToBuffer(ib, mesh->indices.data(), mesh->indices.size() * sizeof(uint32_t));
+    BufferManager::uploadToBuffer(ib, mesh->indices.data(),
+                                  mesh->indices.size() * sizeof(uint32_t),
+                                  uploadCmd);
+
+    vkEndCommandBuffer(uploadCmd);
+
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &uploadCmd;
+
+    if (vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Queue submit failed during mesh upload");
+    }
+    vkQueueWaitIdle(stone_graphics_queue());
+
+    vkFreeCommandBuffers(stone_device(), transientPool, 1, &uploadCmd);
+    vkDestroyCommandPool(stone_device(), transientPool, nullptr);
 
     InternalMesh m{};
     m.vertexBuffer    = vb;
@@ -312,6 +371,40 @@ void RTX::LAS::hotReloadMesh(size_t index, std::unique_ptr<MeshLoader::Mesh> new
     BufferManager::destroy(m.indexBuffer);
     BufferManager::destroy(m.blasStorage);
 
+    // Temporary command buffer for uploads
+    VkCommandPool transientPool = VK_NULL_HANDLE;
+    VkCommandBuffer uploadCmd = VK_NULL_HANDLE;
+
+    VkCommandPoolCreateInfo pci{};
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = StoneKey::stone_graphics_family();
+    if (vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Failed to create transient pool for hot-reload");
+        return;
+    }
+
+    VkCommandBufferAllocateInfo ai{};
+    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ai.commandPool = transientPool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(stone_device(), &ai, &uploadCmd) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Failed to allocate command buffer for hot-reload");
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
+        return;
+    }
+
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(uploadCmd, &bi) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Failed to begin command buffer for hot-reload");
+        vkFreeCommandBuffers(stone_device(), transientPool, 1, &uploadCmd);
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
+        return;
+    }
+
     // Recreate buffers
     m.vertexBuffer = BufferManager::create(
         newMesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
@@ -320,7 +413,17 @@ void RTX::LAS::hotReloadMesh(size_t index, std::unique_ptr<MeshLoader::Mesh> new
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         "LAS_Vertex_HotReload");
 
-    BufferManager::uploadToBuffer(m.vertexBuffer, newMesh->vertices.data(), newMesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex));
+    if (m.vertexBuffer == 0) {
+        LOG_FATAL_CAT("LAS", "Failed to recreate vertex buffer during hot-reload");
+        vkEndCommandBuffer(uploadCmd);
+        vkFreeCommandBuffers(stone_device(), transientPool, 1, &uploadCmd);
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
+        return;
+    }
+
+    BufferManager::uploadToBuffer(m.vertexBuffer, newMesh->vertices.data(),
+                                  newMesh->vertices.size() * sizeof(MeshLoader::Mesh::Vertex),
+                                  uploadCmd);
 
     m.indexBuffer = BufferManager::create(
         newMesh->indices.size() * sizeof(uint32_t),
@@ -329,7 +432,33 @@ void RTX::LAS::hotReloadMesh(size_t index, std::unique_ptr<MeshLoader::Mesh> new
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
         "LAS_Index_HotReload");
 
-    BufferManager::uploadToBuffer(m.indexBuffer, newMesh->indices.data(), newMesh->indices.size() * sizeof(uint32_t));
+    if (m.indexBuffer == 0) {
+        LOG_FATAL_CAT("LAS", "Failed to recreate index buffer during hot-reload");
+        vkEndCommandBuffer(uploadCmd);
+        vkFreeCommandBuffers(stone_device(), transientPool, 1, &uploadCmd);
+        vkDestroyCommandPool(stone_device(), transientPool, nullptr);
+        BufferManager::destroy(m.vertexBuffer);
+        return;
+    }
+
+    BufferManager::uploadToBuffer(m.indexBuffer, newMesh->indices.data(),
+                                  newMesh->indices.size() * sizeof(uint32_t),
+                                  uploadCmd);
+
+    vkEndCommandBuffer(uploadCmd);
+
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &uploadCmd;
+
+    if (vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {
+        LOG_FATAL_CAT("LAS", "Queue submit failed during hot-reload");
+    }
+    vkQueueWaitIdle(stone_graphics_queue());
+
+    vkFreeCommandBuffers(stone_device(), transientPool, 1, &uploadCmd);
+    vkDestroyCommandPool(stone_device(), transientPool, nullptr);
 
     m.vertexCount = static_cast<uint32_t>(newMesh->vertices.size());
     m.primitiveCount = static_cast<uint32_t>(newMesh->indices.size() / 3);
@@ -360,57 +489,48 @@ size_t RTX::LAS::addProceduralAABB(GeometryType type, const glm::vec3& center, f
     return proceduralPrimitives.size() - 1;
 }
 
-// Add procedural sphere (AABB approximation)
 size_t RTX::LAS::addProceduralSphere(const glm::vec3& center, float radius,
                                      uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralSphere, center, radius, materialIndex, transform);
 }
 
-// Add procedural cylinder (AABB approximation)
 size_t RTX::LAS::addProceduralCylinder(const glm::vec3& center, float radius, float height,
                                        uint32_t materialIndex, const glm::mat4& transform) {
     glm::vec3 halfExtents = glm::vec3(radius, height * 0.5f, radius);
     return addProceduralAABB(GeometryType::ProceduralCylinder, center, glm::length(halfExtents), materialIndex, transform);
 }
 
-// Add procedural cone (AABB approximation)
 size_t RTX::LAS::addProceduralCone(const glm::vec3& center, float radius, float height,
                                    uint32_t materialIndex, const glm::mat4& transform) {
     glm::vec3 halfExtents = glm::vec3(radius, height, radius);
     return addProceduralAABB(GeometryType::ProceduralCone, center, glm::length(halfExtents), materialIndex, transform);
 }
 
-// Add procedural D4 (tetrahedron — AABB approximation)
 size_t RTX::LAS::addProceduralD4(const glm::vec3& center, float size,
                                  uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD4, center, size, materialIndex, transform);
 }
 
-// Add procedural D6 (cube — AABB approximation)
 size_t RTX::LAS::addProceduralD6(const glm::vec3& center, float size,
                                  uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD6, center, size, materialIndex, transform);
 }
 
-// Add procedural D8 (octahedron — AABB approximation)
 size_t RTX::LAS::addProceduralD8(const glm::vec3& center, float size,
                                  uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD8, center, size, materialIndex, transform);
 }
 
-// Add procedural D10 (pentagonal trapezohedron — AABB approximation)
 size_t RTX::LAS::addProceduralD10(const glm::vec3& center, float size,
                                   uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD10, center, size, materialIndex, transform);
 }
 
-// Add procedural D12 (dodecahedron — AABB approximation)
 size_t RTX::LAS::addProceduralD12(const glm::vec3& center, float size,
                                   uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD12, center, size, materialIndex, transform);
 }
 
-// Add procedural D20 (icosahedron — AABB approximation)
 size_t RTX::LAS::addProceduralD20(const glm::vec3& center, float size,
                                   uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD20, center, size, materialIndex, transform);
@@ -441,6 +561,7 @@ void RTX::LAS::destroyPrimitive(size_t index, float amount) {
 
 // Batch build BLAS (triangles + procedural)
 bool RTX::LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd) {
+    if (!cmd) return false;
     bool built = false;
 
     // Triangle BLASes
@@ -589,6 +710,8 @@ bool RTX::LAS::batchBuildAndCompactBLAS(VkCommandBuffer cmd) {
 
 // Hybrid TLAS build
 bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
+    if (!cmd) return false;
+
     LOG_INFO_CAT("LAS", "Building hybrid TLAS");
 
     std::vector<VkAccelerationStructureInstanceKHR> instances;
@@ -641,7 +764,8 @@ bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
     }
 
     BufferManager::uploadToBuffer(instanceBuffer, instances.data(),
-                                  instances.size() * sizeof(VkAccelerationStructureInstanceKHR));
+                                  instances.size() * sizeof(VkAccelerationStructureInstanceKHR),
+                                  cmd);
 
     VkDeviceAddress instAddr = BufferManager::get_device_address(instanceBuffer);
 
@@ -744,13 +868,3 @@ void RTX::LAS::createDefaultHybridScene() {
 
     LOG_INFO_CAT("LAS", "Default fun toy test scene created — pink floor, spheres, D&D dice ring, pillars, cones");
 }
-
-// =============================================================================
-// Production ready — stable, efficient, fully synchronized
-// Synchronous rebuilds — main-thread only, no threading
-// No persistent scratch — allocate per-build
-// Full barriers + wait-idle
-// No Woop because I was half baked and hardware does it and/or better — hardware wins
-// Full D&D dice support (AABB approx) - Editor: Why was approx here?
-// Copy pasta and ask Grok the whole file at once. Cya. bye....
-// =============================================================================
