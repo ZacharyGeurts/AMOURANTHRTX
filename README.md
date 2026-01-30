@@ -54,8 +54,7 @@ chmod +x linux.sh
 ./linux.sh --help
 ```
 
-We bring you Zero cost secure RTX GPU operation by using current conventions.  
-Editor: I made this this thing so good that nobody on the planet gets screwed by it but me.  
+We bring you Zero cost secure RTX GPU operation by using both previous and current conventions.   
 Secure at compile time so nobody knows where you got it.  
 "We use a custom algorithim that is also unbreakable and unlocks 100% of the GPU."  
 Nobody cares, Amouranth already has it. Just use this one because there is no fingerprint to look at.  
