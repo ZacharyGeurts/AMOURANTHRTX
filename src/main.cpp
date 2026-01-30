@@ -28,6 +28,7 @@ using StoneKey::stone_surface;
 
 using StoneKey::stone_seal_device; 
 using StoneKey::stone_seal_physical;
+using StoneKey::stone_seal_window;
 using StoneKey::stone_seal_instance;
 using StoneKey::stone_seal_surface;
 using StoneKey::stone_seal_graphics_family;
@@ -209,7 +210,7 @@ int main(int, char**) {
         return 1;
     }
 
-    StoneKey::stone_seal_window(window);
+    stone_seal_window(window);
 
     const char* iconPaths[] = {"assets/textures/icon.ico", "assets/textures/ammo.png", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
