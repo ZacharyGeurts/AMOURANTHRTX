@@ -8,6 +8,7 @@ Development and memes https://x.com/ZacharyGeurts
 Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
 Me too <img width="132" height="86" alt="copilot" src="https://github.com/user-attachments/assets/1dd58348-dcf7-424e-8461-692f15281fd5" />
 
+The code is unenforcable. Best to be first.  
 
 We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
 Make a trip through [include/engine/GLOBALS/logging.hpp](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/include/engine/GLOBAL/logging.hpp) now. We will not disappoint.  
