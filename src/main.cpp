@@ -22,6 +22,23 @@
 #include <thread>
 #include <memory>
 
+using StoneKey::stone_device;
+using StoneKey::stone_instance;
+using StoneKey::stone_surface;
+
+using StoneKey::stone_seal_device; 
+using StoneKey::stone_seal_physical;
+using StoneKey::stone_seal_instance;
+using StoneKey::stone_seal_surface;
+using StoneKey::stone_seal_graphics_family;
+using StoneKey::stone_seal_present_family;
+using StoneKey::stone_seal_transfer_family;
+using StoneKey::stone_seal_compute_family;
+using StoneKey::stone_seal_graphics_queue;
+using StoneKey::stone_seal_present_queue;
+using StoneKey::stone_seal_transfer_queue;
+using StoneKey::stone_seal_compute_queue;
+
 using namespace std::chrono_literals;
 
 // Global renderer — owns the light
@@ -132,19 +149,19 @@ splash_cleanup:
 
     renderer.reset();
 
-    if (VkDevice dev = StoneKey::stone_device(); dev != VK_NULL_HANDLE) {
+    if (VkDevice dev = stone_device(); dev != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(dev);
         vkDestroyDevice(dev, nullptr);
-        StoneKey::stone_seal_device(VK_NULL_HANDLE);
+        stone_seal_device(VK_NULL_HANDLE);
     }
 
-    if (VkInstance inst = StoneKey::stone_instance(); inst != VK_NULL_HANDLE) {
-        if (VkSurfaceKHR surf = StoneKey::stone_surface(); surf != VK_NULL_HANDLE) {
+    if (VkInstance inst = stone_instance(); inst != VK_NULL_HANDLE) {
+        if (VkSurfaceKHR surf = stone_surface(); surf != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(inst, surf, nullptr);
-            StoneKey::stone_seal_surface(VK_NULL_HANDLE);
+            stone_seal_surface(VK_NULL_HANDLE);
         }
         vkDestroyInstance(inst, nullptr);
-        StoneKey::stone_seal_instance(VK_NULL_HANDLE);
+        stone_seal_instance(VK_NULL_HANDLE);
     }
 
     if (SDL_Window* win = StoneKey::stone_window(); win) {
@@ -209,7 +226,7 @@ int main(int, char**) {
     VkInstance instance = RTX::createVulkanInstance();
     if (!instance) apocalypse("Instance creation failed");
 
-    StoneKey::stone_seal_instance(instance);
+    stone_seal_instance(instance);
 
     RTX::loadInstanceExtensions(instance);
 
@@ -218,22 +235,22 @@ int main(int, char**) {
         std::print("[FATAL] Surface creation failed: {}\n", SDL_GetError());
         apocalypse("Surface creation failed");
     }
-    StoneKey::stone_seal_surface(surface);
+    stone_seal_surface(surface);
 
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) apocalypse("Device creation failed");
 
     // Seal device and related objects
-    StoneKey::stone_seal_device(device);
-    StoneKey::stone_seal_physical(RTX::g_ctx().physical);
-    StoneKey::stone_seal_graphics_family(RTX::g_ctx().graphicsFamily);
-    StoneKey::stone_seal_present_family(RTX::g_ctx().presentFamily);
-    StoneKey::stone_seal_transfer_family(RTX::g_ctx().transferFamily);
-    StoneKey::stone_seal_compute_family(RTX::g_ctx().computeFamily);
-    StoneKey::stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue);
-    StoneKey::stone_seal_present_queue(RTX::g_ctx().presentQueue);
-    StoneKey::stone_seal_transfer_queue(RTX::g_ctx().transferQueue);
-    StoneKey::stone_seal_compute_queue(RTX::g_ctx().computeQueue);
+    stone_seal_device(device);
+    stone_seal_physical(RTX::g_ctx().physical);
+    stone_seal_graphics_family(RTX::g_ctx().graphicsFamily);
+    stone_seal_present_family(RTX::g_ctx().presentFamily);
+    stone_seal_transfer_family(RTX::g_ctx().transferFamily);
+    stone_seal_compute_family(RTX::g_ctx().computeFamily);
+    stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue);
+    stone_seal_present_queue(RTX::g_ctx().presentQueue);
+    stone_seal_transfer_queue(RTX::g_ctx().transferQueue);
+    stone_seal_compute_queue(RTX::g_ctx().computeQueue);
 
     RTX::loadDeviceExtensions(device);
     RTX::g_ctx().init();
