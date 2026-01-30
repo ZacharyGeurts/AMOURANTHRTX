@@ -9,6 +9,7 @@
 //             JANUARY 29, 2026 — Fixed g_ext namespace + removed unused caches
 //             Descriptor buffer special path (host-visible + device address, lazy map)
 //             totalTime compatible — no fences/semaphores, fire-and-forget uploads
+//             AUTO-SUBMIT MODE: uploadToBuffer() with no cmd param creates, records, ends, submits, waits, frees
 // =============================================================================
 
 #pragma once
@@ -342,7 +343,7 @@ inline void ensureStagingRing() noexcept {
     return static_cast<std::byte*>(g_stagingRing.mapped) + offset;
 }
 
-// ── GET STAGING BUFFER ─────────────────────────────────────────────────────
+// ── GET STAGING BUFFER —────────────────────────────────────────────────────
 [[nodiscard]] inline VkBuffer getStagingBuffer() noexcept {
     ensureStagingRing();
     return g_stagingRing.buffer;
@@ -620,7 +621,6 @@ inline void ensureStagingRing() noexcept {
 // ── ALLOCATE SCRATCH — on-demand for AS builds
 // =============================================================================
 [[nodiscard]] inline VkDeviceAddress allocateScratch(VkDeviceSize requiredSize) noexcept {
-
     VkDeviceSize total = 0;
     VkDeviceAddress baseAddr = 0;
 
@@ -648,16 +648,10 @@ inline void ensureStagingRing() noexcept {
     return baseAddr;
 }
 
-// ── UPLOAD — staging ring + fire-and-forget fallback
+// ── UPLOAD — staging ring + automagic fire-and-forget when no cmd given
 // =============================================================================
 inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
-                           VkCommandBuffer cmd) noexcept     // ← remove default = VK_NULL_HANDLE
-{
-    if (cmd == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("BufferManager", "uploadToBuffer requires valid command buffer (handle {})", handle);
-        return;
-    }
-
+                           VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end() || size > it->second.size) {
         LOG_ERROR_CAT("BufferManager", "Invalid upload: handle {} or size too large ({})", handle, formatBytes(size));
@@ -676,8 +670,73 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         return;
     }
 
+    VkDevice dev = stone_device();
+    VkQueue queue = stone_graphics_queue();
+
+    if (cmd != VK_NULL_HANDLE) {
+        // Caller-provided cmd — just record
+        void* staging = mapStaging(size);
+        if (!staging) return;
+        std::memcpy(staging, data, size);
+
+        VkBufferCopy copy{};
+        copy.srcOffset = static_cast<VkDeviceSize>(
+            reinterpret_cast<uintptr_t>(staging) -
+            reinterpret_cast<uintptr_t>(g_stagingRing.mapped)
+        );
+        copy.dstOffset = info.offset;
+        copy.size = size;
+
+        vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
+        return;
+    }
+
+    // No cmd provided → automagic one-time submit
+    LOG_INFO_CAT("BufferManager", "Fire-and-forget upload to {} ({} bytes)", info.tag.empty() ? "unnamed" : info.tag, formatBytes(size));
+
+    VkCommandPool transientPool = VK_NULL_HANDLE;
+    VkCommandBuffer tempCmd = VK_NULL_HANDLE;
+
+    VkCommandPoolCreateInfo pci{};
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = StoneKey::stone_graphics_family();
+    VkResult res = vkCreateCommandPool(dev, &pci, nullptr, &transientPool);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "Failed to create transient pool for upload");
+        return;
+    }
+
+    VkCommandBufferAllocateInfo ai{};
+    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ai.commandPool = transientPool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    res = vkAllocateCommandBuffers(dev, &ai, &tempCmd);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "Failed to allocate temp cmd buffer for upload");
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
+
+    VkCommandBufferBeginInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    res = vkBeginCommandBuffer(tempCmd, &bi);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "Failed to begin temp cmd buffer for upload");
+        vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
+
     void* staging = mapStaging(size);
-    if (!staging) return;
+    if (!staging) {
+        vkEndCommandBuffer(tempCmd);
+        vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
     std::memcpy(staging, data, size);
 
     VkBufferCopy copy{};
@@ -688,7 +747,30 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     copy.dstOffset = info.offset;
     copy.size = size;
 
-    vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
+    vkCmdCopyBuffer(tempCmd, g_stagingRing.buffer, info.buffer, 1, &copy);
+
+    res = vkEndCommandBuffer(tempCmd);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "Failed to end temp cmd buffer for upload");
+        vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
+
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &tempCmd;
+
+    res = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BufferManager", "vkQueueSubmit failed for fire-and-forget upload: {}", string_VkResult(res));
+    }
+
+    vkQueueWaitIdle(queue);
+
+    vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
+    vkDestroyCommandPool(dev, transientPool, nullptr);
 }
 
 // ── DESTROY — thread-safe, explicit only
@@ -719,7 +801,7 @@ inline void destroy(uint64_t handle) noexcept {
 #define BM_GET_BUFFER(h)                    BufferManager::get_buffer(h)
 #define BM_GET_MEMORY(h)                    BufferManager::get_memory(h)
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
-#define BM_UPLOAD_TO_BUFFER(h, d, sz, c)    BufferManager::uploadToBuffer(h, d, sz, c)
+#define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)  BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)  // cmd optional
 #define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
 #define BM_LAZY_MAP_DESCRIPTOR(h)           BufferManager::lazyMapDescriptorBuffer(h)
 #define BM_AVAILABLE_VRAM()                 BufferManager::availableToTake()
