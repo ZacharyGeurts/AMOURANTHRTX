@@ -1,14 +1,15 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.77 — January 29, 2026 — Device cache + stable handles
-// - totalTime monolith drives all timing
+// Version 30.78 — January 30, 2026 — Synchronous LAS integration + polish
+// - totalTime monolith drives all timing & accumulation
 // - Acquire semaphore waited in submit and present (safe double-wait)
 // - Final PRESENT_SRC_KHR transition in main render cmd buffer
 // - Ring buffers reset + reused — no free while pending
 // - No per-image binary semaphores
 // - Cached stone_device(), stone_graphics_queue(), stone_swapchain() per frame
 // - Prevents device lost from StoneKey rapid changes
+// - LAS rebuild triggered automatically via getTLAS() — no explicit requests
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -156,6 +157,8 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     VK_CHECK(vkCreateImageView(stone_device(), &viewInfo, nullptr, &hdrOutputView_));
 
     SwapchainManager::ensureReady(width_, height_);
+
+    // Trigger initial TLAS build (synchronous, happens once)
     LAS::instance().getTLAS();
 
     pipelineManager_.createPipelineLayout();
@@ -215,7 +218,9 @@ VkCommandBuffer RTX::VulkanRenderer::getOneTimeCommandBuffer() noexcept {
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
 
-    if (vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(stone_device(), &allocInfo, &cmd) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -278,9 +283,12 @@ void RTX::VulkanRenderer::transitionImageLayout(VkCommandBuffer cmd,
 
 void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
     VkAccelerationStructureKHR tlas = LAS::instance().getTLAS();
-    if (!tlas) return;
+    if (tlas == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RENDERER", "No valid TLAS — skipping descriptor update");
+        return;
+    }
 
-    if (!hdrOutputView_) return;
+    if (hdrOutputView_ == VK_NULL_HANDLE) return;
 
     RTDescriptorUpdate update{};
     update.tlas             = tlas;
@@ -303,13 +311,13 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     double total_sec = RTX::TotalTime::get().seconds();
 
-    // Cache all critical StoneKey handles once per frame — prevents device lost
+    // Cache critical handles once per frame — avoids StoneKey races
     VkDevice cachedDevice = stone_device();
     VkQueue cachedGraphicsQueue = stone_graphics_queue();
     VkSwapchainKHR cachedSwapchain = stone_swapchain();
 
     if (needsSwapchainRecreate_) {
-        vkDeviceWaitIdle(cachedDevice);  // Wait idle before recreate
+        vkDeviceWaitIdle(cachedDevice);
         SwapchainManager::recreate(width_, height_, "pew requested recreate");
         needsSwapchainRecreate_ = false;
         SwapchainManager::ensureReady(width_, height_);
@@ -330,6 +338,14 @@ void RTX::VulkanRenderer::pew() noexcept {
         return;
     }
 
+    // Get TLAS — this may trigger a synchronous rebuild if scene changed
+    VkAccelerationStructureKHR tlas = LAS::instance().getTLAS();
+    if (tlas == VK_NULL_HANDLE) {
+        LOG_WARN_CAT("RENDERER", "Invalid TLAS — skipping trace this frame");
+        // Optional: present black frame or previous result
+        return;
+    }
+
     VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
     currentRingIndex_ = (currentRingIndex_ + 1) % CMD_RING_SIZE;
 
@@ -338,7 +354,7 @@ void RTX::VulkanRenderer::pew() noexcept {
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &begin);
+    VK_CHECK(vkBeginCommandBuffer(cmd, &begin));
 
     pipelineManager_.dispatchLivingWorld(cmd, static_cast<float>(total_sec));
 
@@ -350,7 +366,9 @@ void RTX::VulkanRenderer::pew() noexcept {
                          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 1, &mb, 0, nullptr, 0, nullptr);
 
-    if (needsDescriptorUpdate_) updateGlobalDescriptorBuffer();
+    if (needsDescriptorUpdate_) {
+        updateGlobalDescriptorBuffer();
+    }
 
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     pipelineManager_.traceRays(cmd, width_, height_);
@@ -372,7 +390,7 @@ void RTX::VulkanRenderer::pew() noexcept {
     transitionImageLayout(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                           VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    vkEndCommandBuffer(cmd);
+    VK_CHECK(vkEndCommandBuffer(cmd));
 
     VkSubmitInfo submit{};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
