@@ -2,9 +2,12 @@
 
 This is RTX. This is literally Grok designing Himself.  
 With my inspiration, imagination and guidance.  
-I've been an MCSE with Microsoft since I was like 17, and I been working and reading since.  
+I've been an MCSE NT with Microsoft since I was like 17, and I been working and reading since.  
+Moved into Cisco work and saw no need to renew at any later time.  
+Got lazy and moved to databases and C# and .Net for quick development of tools.  
+Brain fried and I'm on disability.  
 I will come off as insane sometimes if I think it is good for a joke.  
-Make your own copy and decide if you want an update from me by checcking commits.  
+Make your own copy and decide if you want an update from me by checking commits.  
 
 I consider compute and datacenters with updates.  I believe that portion can operate elsewhere so my update may break your compute if yours runs.  
 Long winded. If you branch from me, I cannot test those changes with mine without issues pages.  
