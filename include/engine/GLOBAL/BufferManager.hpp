@@ -719,7 +719,7 @@ inline void destroy(uint64_t handle) noexcept {
 #define BM_GET_BUFFER(h)                    BufferManager::get_buffer(h)
 #define BM_GET_MEMORY(h)                    BufferManager::get_memory(h)
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
-#define BM_UPLOAD_TO_BUFFER(h, d, sz, c)    BufferManager::uploadToBuffer(h, d, sz, c)  // Updated: require cmd
+#define BM_UPLOAD_TO_BUFFER(h, d, sz, c)    BufferManager::uploadToBuffer(h, d, sz, c)
 #define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
 #define BM_LAZY_MAP_DESCRIPTOR(h)           BufferManager::lazyMapDescriptorBuffer(h)
 #define BM_AVAILABLE_VRAM()                 BufferManager::availableToTake()
