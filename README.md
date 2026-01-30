@@ -25,6 +25,7 @@ Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the
 Me too <img width="132" height="86" alt="copilot" src="https://github.com/user-attachments/assets/1dd58348-dcf7-424e-8461-692f15281fd5" />
 
 The code is unenforcable. Best to be first.  
+Built with the dream team of everyone on the planet.  
 
 We have no other competition in RTX space. Other platforms will adopt or die.  
 Zero cost does not go back in the bag. Please enjoy the source.  
