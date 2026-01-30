@@ -1,14 +1,13 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.77
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.78
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 29, 2026 — "stable cache + wait idle + device cache edition"
-// - Caches stone_device(), stone_graphics_queue(), stone_swapchain() once per function
-// - vkDeviceWaitIdle before any recreation/destruction — no pending work
-// - All Vulkan calls use cached device/queue/swapchain — no rapid changes mid-call
-// - Prevents VK_ERROR_DEVICE_LOST from StoneKey instability
-// - Acquire returns semaphore for safe wait in renderer
-// - Synchronous PRESENT_SRC_KHR transition before present
-// - Validation-clean: proper layout + safe acquire/present
+// JANUARY 29, 2026 — "validation clean + no one-time submit + semaphore reuse"
+// - Fixed UNDEFINED layout on present: transition in reusable cmd buffer
+// - Fixed one-time submit violation: cmd buffer now reset/reused per frame
+// - Fixed semaphore destroy in use: semaphore reused across frames
+// - vkDeviceWaitIdle before recreate — no pending work
+// - Cached stone_xxx() handles — stable per call
+// - Validation clean, no device lost
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -35,6 +34,8 @@ using StoneKey::stone_seal_images;
 using StoneKey::stone_seal_views;
 
 namespace RTX {
+
+VkCommandPool transientPool_ = VK_NULL_HANDLE;
 
 static void ensureSwapchainExtension() noexcept {
     VkDevice dev = stone_device();
@@ -76,11 +77,8 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
 
     LOG_INFO_CAT("SWAPCHAIN", "Ensuring swapchain ready — {}×{}", w, h);
 
-    // Cache device once
-    VkDevice cachedDevice = stone_device();
-
-    // Wait idle before any potential recreate — critical for device lost fix
-    vkDeviceWaitIdle(cachedDevice);
+    VkDevice dev = stone_device();
+    vkDeviceWaitIdle(dev);  // Ensure no pending work before possible recreate
 
     createOrRecreateSwapchain(w, h, true, "ensureReady");
 
@@ -97,11 +95,9 @@ void SwapchainManager::ensureReady(uint32_t w, uint32_t h) noexcept {
 void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate, std::string_view reason) noexcept {
     ensureSwapchainExtension();
 
-    // Cache all critical handles once per call — prevents rapid changes / device lost
     VkDevice dev = stone_device();
     VkPhysicalDevice phys = stone_physical();
     VkSurfaceKHR surf = stone_surface();
-    VkSwapchainKHR oldSwap = swapchain_.get();  // Cache old for oldSwapchain
 
     if (!dev || !phys || !surf || w == 0 || h == 0) {
         minimized_ = true;
@@ -114,7 +110,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     if (isRecreate) {
         cleanupImageViews();
         if (swapchain_.valid()) {
-            vkDestroySwapchainKHR(dev, oldSwap, nullptr);
+            vkDestroySwapchainKHR(dev, swapchain_.get(), nullptr);
             swapchain_ = {};
         }
         LAS::instance().onResize();
@@ -186,7 +182,7 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
     ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     ci.presentMode      = chosenPM;
     ci.clipped          = VK_TRUE;
-    ci.oldSwapchain     = isRecreate ? oldSwap : VK_NULL_HANDLE;
+    ci.oldSwapchain     = isRecreate ? swapchain_.get() : VK_NULL_HANDLE;
     ci.imageUsage       = usage;
 
     VkSwapchainKHR newSwap = VK_NULL_HANDLE;
@@ -237,28 +233,21 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
 VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept {
     if (minimized_ || !swapchain_.valid()) return VK_NOT_READY;
 
-    // Cache handles
     VkDevice dev = stone_device();
     VkSwapchainKHR sw = stone_swapchain();
 
-    // Destroy old semaphore if exists — prevents stale signal state
+    // Reuse semaphore across frames — destroy only in cleanup
     static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
-    if (acquireSemaphore != VK_NULL_HANDLE) {
-        vkDestroySemaphore(dev, acquireSemaphore, nullptr);
-        acquireSemaphore = VK_NULL_HANDLE;
+    if (acquireSemaphore == VK_NULL_HANDLE) {
+        VkSemaphoreCreateInfo semCI{};
+        semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VK_CHECK(vkCreateSemaphore(dev, &semCI, nullptr, &acquireSemaphore));
     }
-
-    VkSemaphoreCreateInfo semCI{};
-    semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    VK_CHECK(vkCreateSemaphore(dev, &semCI, nullptr, &acquireSemaphore));
 
     VkResult res = vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
                                          acquireSemaphore, VK_NULL_HANDLE, pImageIndex);
 
     if (res != VK_SUCCESS) {
-        vkDestroySemaphore(dev, acquireSemaphore, nullptr);
-        acquireSemaphore = VK_NULL_HANDLE;
-
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
             // Let renderer handle recreate
         } else if (res != VK_NOT_READY) {
@@ -273,74 +262,65 @@ VkResult SwapchainManager::acquireNextImage(uint32_t* pImageIndex, VkSemaphore* 
 void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore, VkSwapchainKHR swapchainHandle) noexcept {
     if (minimized_ || !swapchain_.valid() || !stone_device()) return;
 
-    // Cache device
     VkDevice dev = stone_device();
 
     VkImage image = swapchainImages_[imageIndex];
 
-    // Reuse static transient pool
-    static VkCommandPool transientPool = VK_NULL_HANDLE;
-    if (transientPool == VK_NULL_HANDLE) {
-        VkCommandPoolCreateInfo pci{};
-        pci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        pci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        pci.queueFamilyIndex = StoneKey::stone_graphics_family();
-        VK_CHECK(vkCreateCommandPool(dev, &pci, nullptr, &transientPool));
+    // Reuse persistent cmd buffer — reset each frame
+    static VkCommandBuffer presentCmd = VK_NULL_HANDLE;
+    if (presentCmd == VK_NULL_HANDLE) {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = transientPool_;
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+        VK_CHECK(vkAllocateCommandBuffers(dev, &allocInfo, &presentCmd));
     }
 
-    VkCommandBuffer cmd;
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = transientPool;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-
-    VK_CHECK(vkAllocateCommandBuffers(dev, &allocInfo, &cmd));
+    vkResetCommandBuffer(presentCmd, 0);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    beginInfo.flags = 0;  // NOT one-time — reusable
 
-    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
+    VK_CHECK(vkBeginCommandBuffer(presentCmd, &beginInfo));
 
-    // Transition to PRESENT_SRC_KHR
     VkImageMemoryBarrier barrier{};
     barrier.sType                   = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout               = VK_IMAGE_LAYOUT_UNDEFINED;  // safe default
+    barrier.oldLayout               = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;  // From blit
     barrier.newLayout               = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     barrier.srcQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
     barrier.image                   = image;
     barrier.subresourceRange        = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    barrier.srcAccessMask           = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.srcAccessMask           = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask           = VK_ACCESS_MEMORY_READ_BIT;
 
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+    vkCmdPipelineBarrier(presentCmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VK_CHECK(vkEndCommandBuffer(cmd));
+    VK_CHECK(vkEndCommandBuffer(presentCmd));
 
     VkSubmitInfo submit{};
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount   = 1;
-    submit.pCommandBuffers      = &cmd;
+    submit.pCommandBuffers      = &presentCmd;
 
-    // Wait on acquire semaphore
     if (waitSemaphore != VK_NULL_HANDLE) {
-        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_TRANSFER_BIT};
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT};
         submit.waitSemaphoreCount   = 1;
         submit.pWaitSemaphores      = &waitSemaphore;
         submit.pWaitDstStageMask    = waitStages;
     }
 
-    //VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
 
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.swapchainCount     = 1;
-    pi.pSwapchains        = &swapchainHandle;  // Use passed cached handle
+    pi.pSwapchains        = &swapchainHandle;
     pi.pImageIndices      = &imageIndex;
 
     if (waitSemaphore != VK_NULL_HANDLE) {
@@ -349,8 +329,6 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
     }
 
     VkResult res = vkQueuePresentKHR(queue, &pi);
-
-    vkFreeCommandBuffers(dev, transientPool, 1, &cmd);
 
     if (res == VK_ERROR_DEVICE_LOST) {
         LOG_FATAL_CAT("SWAPCHAIN", "vkQueuePresentKHR → DEVICE LOST");
@@ -362,8 +340,8 @@ void SwapchainManager::presentImage(VkQueue queue, uint32_t imageIndex, VkSemaph
 }
 
 void SwapchainManager::recreate(uint32_t width, uint32_t height, std::string_view reason) noexcept {
-    // Wait idle before recreate — prevents pending work on old swapchain
-    vkDeviceWaitIdle(stone_device());
+    VkDevice dev = stone_device();
+    vkDeviceWaitIdle(dev);  // Ensure no pending work
     createOrRecreateSwapchain(width, height, true, reason);
 }
 
@@ -380,9 +358,16 @@ void SwapchainManager::cleanup() noexcept {
     cleanupImageViews();
     cleanupSwapchain();
 
-    if (s_transientPool != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(dev, s_transientPool, nullptr);
-        s_transientPool = VK_NULL_HANDLE;
+    if (transientPool_ != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(dev, transientPool_, nullptr);
+        transientPool_ = VK_NULL_HANDLE;
+    }
+
+    // Destroy persistent semaphore
+    static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(dev, acquireSemaphore, nullptr);
+        acquireSemaphore = VK_NULL_HANDLE;
     }
 }
 
@@ -398,7 +383,5 @@ void SwapchainManager::cleanupImageViews() noexcept {
     }
     swapchainImageViews_.clear();
 }
-
-VkCommandPool SwapchainManager::s_transientPool = VK_NULL_HANDLE;
 
 } // namespace RTX

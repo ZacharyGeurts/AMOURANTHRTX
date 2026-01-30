@@ -750,7 +750,7 @@ void RTX::LAS::createDefaultHybridScene() {
 // Synchronous rebuilds — main-thread only, no threading
 // No persistent scratch — allocate per-build
 // Full barriers + wait-idle
-// No Woop — hardware wins
-// Full D&D dice support (AABB approx)
-// Empire delivers maximum performance without compromise.
+// No Woop because I was half baked and hardware does it and/or better — hardware wins
+// Full D&D dice support (AABB approx) - Editor: Why was approx here?
+// Copy pasta and ask Grok the whole file at once. Cya. bye....
 // =============================================================================
