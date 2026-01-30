@@ -12,7 +12,7 @@
 // - Materials bound to 3 in descriptor update
 // - SBT forged at startup via BufferManager
 // - No blue noise — high-SPP convergence
-// - Fixed SBT recording: no end/submit when providedCmd given (avoids double-submit)
+// - Fixed SBT recording: end/submit only when ownCmd (no double-submit when providedCmd)
 // - Empire stable — pink photons breathe free
 // =============================================================================
 
@@ -673,8 +673,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         vkQueueWaitIdle(queue ? queue : stone_graphics_queue());
 
         vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
-    } else {
-        // Caller is responsible for ending and submitting the buffer — we just recorded
     }
 
     VkDeviceAddress raygenAddr = align_up(sbtAddress, rtProps.shaderGroupBaseAlignment);
