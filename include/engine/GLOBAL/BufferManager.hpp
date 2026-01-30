@@ -660,11 +660,16 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end() || size > it->second.size) {
-        LOG_ERROR_CAT("BufferManager", "Invalid upload …");
+        LOG_ERROR_CAT("BufferManager", "Invalid upload: handle {} or size too large ({})", handle, formatBytes(size));
         return;
     }
 
     BufferInfo& info = it->second;
+
+    if (info.buffer == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("BufferManager", "uploadToBuffer: dstBuffer is VK_NULL_HANDLE (handle: {})", handle);
+        return;
+    }
 
     if (info.mapped != nullptr) {
         std::memcpy(info.mapped, data, size);
@@ -681,7 +686,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         reinterpret_cast<uintptr_t>(g_stagingRing.mapped)
     );
     copy.dstOffset = info.offset;
-    copy.size      = size;
+    copy.size = size;
 
     vkCmdCopyBuffer(cmd, g_stagingRing.buffer, info.buffer, 1, &copy);
 }
@@ -714,7 +719,7 @@ inline void destroy(uint64_t handle) noexcept {
 #define BM_GET_BUFFER(h)                    BufferManager::get_buffer(h)
 #define BM_GET_MEMORY(h)                    BufferManager::get_memory(h)
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
-#define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)   BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)
+#define BM_UPLOAD_TO_BUFFER(h, d, sz, c)    BufferManager::uploadToBuffer(h, d, sz, c)  // Updated: require cmd
 #define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
 #define BM_LAZY_MAP_DESCRIPTOR(h)           BufferManager::lazyMapDescriptorBuffer(h)
 #define BM_AVAILABLE_VRAM()                 BufferManager::availableToTake()

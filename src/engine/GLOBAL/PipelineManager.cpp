@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing + compute pipeline, SBT, descriptor management
-// Version 30.8 — January 27, 2026
+// Version 30.9 — January 30, 2026 — Fixed double-submit in SBT creation
 // - Fixed push constant stageFlags to match layout range (fixes VUID-01796)
 // - On-demand compute pipeline creation in dispatchLivingWorld
 // - Timing driven by totalTime push only — no semaphores/fences
@@ -12,6 +12,7 @@
 // - Materials bound to 3 in descriptor update
 // - SBT forged at startup via BufferManager
 // - No blue noise — high-SPP convergence
+// - Fixed SBT recording: no end/submit when providedCmd given (avoids double-submit)
 // - Empire stable — pink photons breathe free
 // =============================================================================
 
@@ -81,7 +82,7 @@ static bool descPropsCached = false;
 // Eternal SBT forged flag
 bool s_eternalSbtForged = false;
 
-// Full push constant stage (must match layout range)
+// Full push constant stage mask (must match layout range)
 static constexpr VkShaderStageFlags FULL_PUSH_MASK =
     VK_SHADER_STAGE_COMPUTE_BIT |
     VK_SHADER_STAGE_RAYGEN_BIT_KHR |
@@ -660,18 +661,20 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         0, nullptr
     );
 
-    vkEndCommandBuffer(uploadCmd);
-
-    VkSubmitInfo submit{};
-    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount   = 1;
-    submit.pCommandBuffers      = &uploadCmd;
-
-    vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue ? queue : stone_graphics_queue());
-
     if (ownCmd) {
+        vkEndCommandBuffer(uploadCmd);
+
+        VkSubmitInfo submit{};
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &uploadCmd;
+
+        vkQueueSubmit(queue ? queue : stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE);
+        vkQueueWaitIdle(queue ? queue : stone_graphics_queue());
+
         vkFreeCommandBuffers(stone_device(), cmdPool, 1, &uploadCmd);
+    } else {
+        // Caller is responsible for ending and submitting the buffer — we just recorded
     }
 
     VkDeviceAddress raygenAddr = align_up(sbtAddress, rtProps.shaderGroupBaseAlignment);
@@ -903,4 +906,4 @@ void RTX::PipelineManager::writeRTDescriptorsToBuffer(const RTDescriptorUpdate& 
     // No flush needed (host-coherent)
 }
 
-} // namespace RTX nice
+} // namespace RTX
