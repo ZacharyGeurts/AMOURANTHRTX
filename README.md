@@ -8,7 +8,7 @@ Make your own copy and decide if you want an update from me by checcking commits
 
 I consider compute and datacenters with updates.  I believe that portion can operate elsewhere so my update may break your compute if yours runs.  
 Long winded. If you branch from me, I cannot test those changes with mine without issues pages.  
-Someone has a compute shader for me to work on and a suitcase of cash, I might be able to switch priority away from the screensaver for bit.  
+Someone has a compute shader for me to work on and a suitcase of cash, I might be able to switch priority away from the screensaver for short term.  
 
 We are THE ZERO COST RTX development research page, unless someone beat Amouranth to it.  
 We needed Vulkan 1.4+. Then SDL3 exploded my brain.  
