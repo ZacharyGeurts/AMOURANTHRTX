@@ -13,7 +13,8 @@ Me too <img width="132" height="86" alt="copilot" src="https://github.com/user-a
 
 The code is unenforcable. Best to be first.  
 
-We have no other competition in RTX space. Other platforms will adopt or die. Please enjoy the source.  
+We have no other competition in RTX space. Other platforms will adopt or die.  
+Zero cost does not go back in the bag. Please enjoy the source.  
 Make a trip through [include/engine/GLOBALS/logging.hpp](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/include/engine/GLOBAL/logging.hpp) now. We will not disappoint.  
 Include StoneKey.hpp and logging.hpp for all of RTX interoperations.  
 You are encouraged to work with code here. Welcome to github.  
