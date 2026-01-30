@@ -1,6 +1,8 @@
 [Current over head code view](https://x.com/ZacharyGeurts/status/2015005228794327380)  
 
 This is RTX. This is literally Grok designing Himself.  
+With my inspiration, imagination and guidance.  
+I've been an MCSE with Microsoft since I was like 17, and I been working and reading since.  
 
 We are THE ZERO COST RTX development research page, unless someone beat Amouranth to it.  
 We needed Vulkan 1.4+. Then SDL3 exploded my brain.  
