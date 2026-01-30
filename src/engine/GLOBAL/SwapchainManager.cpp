@@ -1,13 +1,14 @@
 // =============================================================================
 // AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.78
 // SWAPCHAIN MANAGER — HDR | SELF-HEALING | DEFERRED RECREATE | DIRECT STORAGE ATTEMPT
-// JANUARY 29, 2026 — "validation clean + no one-time submit + semaphore reuse"
+// JANUARY 30, 2026 — "validation clean + grouped StoneKey sealers"
 // - Fixed UNDEFINED layout on present: transition in reusable cmd buffer
 // - Fixed one-time submit violation: cmd buffer now reset/reused per frame
 // - Fixed semaphore destroy in use: semaphore reused across frames
 // - vkDeviceWaitIdle before recreate — no pending work
 // - Cached stone_xxx() handles — stable per call
 // - Validation clean, no device lost
+// - Removed individual stone_seal_xxx() — use grouped sealers only
 // =============================================================================
 
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -22,16 +23,13 @@
 #include <cstring>
 #include <vector>
 
+// StoneKey accessors & sealers — using at top, no qualification
 using StoneKey::stone_device;
 using StoneKey::stone_physical;
 using StoneKey::stone_surface;
-using StoneKey::stone_swapchain;
 using StoneKey::stone_graphics_queue;
-using StoneKey::stone_seal_swapchain;
-using StoneKey::stone_seal_extent;
-using StoneKey::stone_seal_image_count;
-using StoneKey::stone_seal_images;
-using StoneKey::stone_seal_views;
+using StoneKey::stone_swapchain;
+using StoneKey::stone_seal_swapchain_resources;
 
 namespace RTX {
 
@@ -220,11 +218,8 @@ void SwapchainManager::createOrRecreateSwapchain(uint32_t w, uint32_t h, bool is
         }
     }
 
-    stone_seal_swapchain(newSwap);
-    stone_seal_extent(extent);
-    stone_seal_image_count(count);
-    stone_seal_images(swapchainImages_);
-    stone_seal_views(swapchainImageViews_);
+    // Seal swapchain resources with grouped sealer
+    stone_seal_swapchain_resources(swapchainImages_, swapchainImageViews_, extent, count);
 
     LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain created — {} images | {}×{} | Direct storage: {}",
                     count, extent.width, extent.height, directWriteEnabled ? "YES" : "NO");

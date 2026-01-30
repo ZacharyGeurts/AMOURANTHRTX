@@ -1,13 +1,17 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — JANUARY 22, 2026
-// main.cpp
-// SPLASH ALWAYS SKIPPABLE | SDL3 CHECKS COMMENTED
+// AMOURANTH RTX Engine © 2026 — JANUARY 30, 2026
+// main.cpp — PURE LIGHT EMPIRE LAUNCHER
+// - Splash always skippable (any input)
+// - SDL3 high-DPI pixel size respected
+// - No sleeps or idles — eternal loop, no throttling
+// - StoneKey sealed early — empire locked before renderer
+// - Renderer owns everything — LAS, pipeline, SBT, eternal accumulation
+// - Lifetime log throttled (1/sec)
+// - Clean shutdown on quit
 // =============================================================================
 
 #include "engine/GLOBAL/SDL3.hpp"
 #include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/console.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/RTXHandler.hpp"
 #include "engine/GLOBAL/SwapchainManager.hpp"
@@ -19,42 +23,31 @@
 #include <SDL3/SDL_vulkan.h>
 #include <chrono>
 #include <print>
-#include <thread>
 #include <memory>
 
+// StoneKey accessors & sealers — using at top, no qualification
 using StoneKey::stone_device;
+using StoneKey::stone_window;
 using StoneKey::stone_instance;
 using StoneKey::stone_surface;
+using StoneKey::stone_seal_device_resources;
+using StoneKey::stone_seal_queues;
+using StoneKey::stone_seal_families;
+using StoneKey::stone_seal_final;
 
-using StoneKey::stone_seal_device; 
-using StoneKey::stone_seal_physical;
-using StoneKey::stone_seal_window;
-using StoneKey::stone_seal_instance;
-using StoneKey::stone_seal_surface;
-using StoneKey::stone_seal_graphics_family;
-using StoneKey::stone_seal_present_family;
-using StoneKey::stone_seal_transfer_family;
-using StoneKey::stone_seal_compute_family;
-using StoneKey::stone_seal_graphics_queue;
-using StoneKey::stone_seal_present_queue;
-using StoneKey::stone_seal_transfer_queue;
-using StoneKey::stone_seal_compute_queue;
-
-using namespace std::chrono_literals;
-
-// Global renderer — owns the light
+// Global renderer — owns the eternal light
 std::unique_ptr<RTX::VulkanRenderer> renderer;
 
 // =============================================================================
-// Sacrificial Splash — always skippable (any input)
+// Sacrificial Splash — skippable with any input
 // =============================================================================
 static void showSacrificialSplash() {
     constexpr int W = 1280, H = 720;
-    constexpr const char* TITLE = "AMOURANTH RTX vTURBO";
+    constexpr const char* TITLE = "AMOURANTH RTX v∞ TURBO";
 
     std::print("[SPLASH] Starting...\n");
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) { // you'll see
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
         std::print("[SPLASH] Video init failed: {}\n", SDL_GetError());
         return;
     }
@@ -68,7 +61,7 @@ static void showSacrificialSplash() {
     }
 
     SDL_Rect bounds{};
-    if (SDL_GetDisplayBounds(0, &bounds) == 0) { // you'll see
+    if (SDL_GetDisplayBounds(0, &bounds) == 0) {
         SDL_SetWindowPosition(splashWin, bounds.x + (bounds.w - W)/2, bounds.y + (bounds.h - H)/2);
     }
 
@@ -115,22 +108,17 @@ static void showSacrificialSplash() {
     SDL_RenderPresent(splashRen);
 
     auto start = std::chrono::steady_clock::now();
-    while (std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count() < 3.4f) { // 3.4 seconds
+    while (std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count() < 3.4f) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT) {
-                goto splash_cleanup;
-            }
-
-            // Any input skips splash (keyboard, mouse, controller button, axis motion)
-            if (e.type == SDL_EVENT_KEY_DOWN ||
+            if (e.type == SDL_EVENT_QUIT ||
+                e.type == SDL_EVENT_KEY_DOWN ||
                 e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
                 e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
                 e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
                 goto splash_cleanup;
             }
         }
-        std::this_thread::sleep_for(8ms);
     }
 
 splash_cleanup:
@@ -143,7 +131,7 @@ splash_cleanup:
 }
 
 // =============================================================================
-// Safe shutdown
+// Safe shutdown — empire lockdown
 // =============================================================================
 [[noreturn]] static void apocalypse(std::string_view reason = "Normal exit") {
     std::print("[MAIN] Shutdown: {}\n", reason);
@@ -153,21 +141,17 @@ splash_cleanup:
     if (VkDevice dev = stone_device(); dev != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(dev);
         vkDestroyDevice(dev, nullptr);
-        stone_seal_device(VK_NULL_HANDLE);
     }
 
     if (VkInstance inst = stone_instance(); inst != VK_NULL_HANDLE) {
         if (VkSurfaceKHR surf = stone_surface(); surf != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(inst, surf, nullptr);
-            stone_seal_surface(VK_NULL_HANDLE);
         }
         vkDestroyInstance(inst, nullptr);
-        stone_seal_instance(VK_NULL_HANDLE);
     }
 
-    if (SDL_Window* win = StoneKey::stone_window(); win) {
+    if (SDL_Window* win = stone_window(); win) {
         SDL_DestroyWindow(win);
-        StoneKey::stone_seal_window(nullptr);
     }
 
     SDL_Quit();
@@ -176,23 +160,23 @@ splash_cleanup:
 }
 
 // =============================================================================
-// Main — Launcher only — hands off to pure light
+// Main — Minimal launcher — pure light takes over
 // =============================================================================
 int main(int, char**) {
-    if (SDL_Init(SDL_INIT_EVENTS) == 0) { // you'll see
+    if (SDL_Init(SDL_INIT_EVENTS) == 0) {
         std::print("[FATAL] Early SDL init failed: {}\n", SDL_GetError());
         return 1;
     }
 
     showSacrificialSplash();
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) { // you'll see
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
         std::print("[FATAL] Video subsystem init failed: {}\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
 
-    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) { // you'll see
+    if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
         std::print("[FATAL] Vulkan loader failed: {}\n", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -200,7 +184,7 @@ int main(int, char**) {
 
     Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
-    SDL_Window* window = SDL_CreateWindow("AMOURANTH RTX vTURBO",
+    SDL_Window* window = SDL_CreateWindow("AMOURANTH RTX v∞ TURBO",
                                           Options::Window::DEFAULT_WIDTH,
                                           Options::Window::DEFAULT_HEIGHT,
                                           flags);
@@ -209,8 +193,6 @@ int main(int, char**) {
         SDL_Quit();
         return 1;
     }
-
-    stone_seal_window(window);
 
     const char* iconPaths[] = {"assets/textures/icon.ico", "assets/textures/ammo.png", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
@@ -222,62 +204,48 @@ int main(int, char**) {
     }
 
     int pixelW = 0, pixelH = 0;
-    SDL_GetWindowSizeInPixels(window, &pixelW, &pixelH);  // Correct SDL3 high-DPI pixel size
+    SDL_GetWindowSizeInPixels(window, &pixelW, &pixelH);
 
     VkInstance instance = RTX::createVulkanInstance();
     if (!instance) apocalypse("Instance creation failed");
 
-    stone_seal_instance(instance);
-
     RTX::loadInstanceExtensions(instance);
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) { // you'll not see ? scratches head
+    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
         std::print("[FATAL] Surface creation failed: {}\n", SDL_GetError());
         apocalypse("Surface creation failed");
     }
-    stone_seal_surface(surface);
 
     VkDevice device = RTX::createLogicalDeviceAndSelectGPU(instance, surface);
     if (!device) apocalypse("Device creation failed");
 
-    // Seal device and related objects
-    stone_seal_device(device);
-    stone_seal_physical(RTX::g_ctx().physical);
-    stone_seal_graphics_family(RTX::g_ctx().graphicsFamily);
-    stone_seal_present_family(RTX::g_ctx().presentFamily);
-    stone_seal_transfer_family(RTX::g_ctx().transferFamily);
-    stone_seal_compute_family(RTX::g_ctx().computeFamily);
-    stone_seal_graphics_queue(RTX::g_ctx().graphicsQueue);
-    stone_seal_present_queue(RTX::g_ctx().presentQueue);
-    stone_seal_transfer_queue(RTX::g_ctx().transferQueue);
-    stone_seal_compute_queue(RTX::g_ctx().computeQueue);
+    // Seal the empire — unbreakable lockdown
+    stone_seal_device_resources(instance, device, RTX::g_ctx().physical,
+                                surface, VK_NULL_HANDLE);  // swapchain sealed in SwapchainManager
+    stone_seal_queues(RTX::g_ctx().graphicsQueue, RTX::g_ctx().presentQueue,
+                      RTX::g_ctx().computeQueue, RTX::g_ctx().transferQueue);
+    stone_seal_families(RTX::g_ctx().graphicsFamily, RTX::g_ctx().presentFamily,
+                        RTX::g_ctx().transferFamily, RTX::g_ctx().computeFamily);
+    stone_seal_final();  // LOCKED — tamper = death
 
     RTX::loadDeviceExtensions(device);
     RTX::g_ctx().init();
 
     RTX::SwapchainManager::create(window, pixelW, pixelH);
 
-    // Renderer — owns LAS, pipeline, SBT
+    // Renderer owns the eternal light — LAS, pipeline, SBT, accumulation
     renderer = std::make_unique<RTX::VulkanRenderer>(pixelW, pixelH, window);
 
-    SDL_Renderer* sdlRen = SDL_CreateRenderer(window, nullptr);
-    if (!sdlRen) std::print("[WARN] SDL overlay renderer failed: {}\n", SDL_GetError());
-    Console::init(window, sdlRen);
-
-    // Local camera — renderer uses it directly
-    Camera cam;
-
-    std::print("[MAIN] Launcher complete — pure light engaged\n");
+    std::print("[MAIN] Empire launched — pure light engaged\n");
 
     auto last_log_time = std::chrono::steady_clock::now();
 
     while (true) {
-        renderer->pew(); // flip the lightswitch by the door and remove blindfold.
-// then why was I blindfolded?
+        renderer->pew();  // Eternal light loop — no sleep, no idle, pure fire
+
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            Console::handleEvent(e);
             if (e.type == SDL_EVENT_QUIT) {
                 apocalypse("Quit requested");
             }
@@ -286,13 +254,11 @@ int main(int, char**) {
             }
         }
 
-        Console::render();
-
-        // Throttled lifetime log — once per second
+        // Throttled lifetime log — once per second (non-blocking)
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - last_log_time).count();
         if (elapsed >= 1.0) {
-            LOG_INFO_CAT("MAIN", "ARRR! Lifetime: {:.6f}s | Pink photons eternal!",
+            LOG_INFO_CAT("MAIN", "Lifetime: {:.6f}s | Pink photons eternal!",
                          renderer->getLifetimeSeconds());
             last_log_time = now;
         }
@@ -301,13 +267,3 @@ int main(int, char**) {
     // Unreachable
     return 0;
 }
-
-// =============================================================================
-// Main v30.6 — January 22, 2026
-// - Uses Options::Window::DEFAULT_WIDTH / DEFAULT_HEIGHT / ALLOW_RESIZE
-// - Uses Options::Debug::ENABLE_VALIDATION_LAYERS for instance
-// - Splash always skippable (any input)
-// - Uses SDL_GetWindowSizeInPixels for accurate high-DPI render size
-// - Throttled lifetime log kept (1/sec)
-// - Pool before renderer — infrastructure first
-// =============================================================================

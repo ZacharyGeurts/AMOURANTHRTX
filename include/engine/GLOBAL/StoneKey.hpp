@@ -1,15 +1,14 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.8
-// STONEKEY v∞ — UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — STONEKEY v30.25
+// UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — FULL ACCESS GRANTED
 // FULLY HEADER-ONLY | NO .CPP | ZERO OVERHEAD | ETERNAL INTEGRITY
-// IDEMPOTENT: All seal functions safe against re-sealing
-// - Re-seal same value → no-op
-// - Re-seal different value → fatal breach detection
-// - Single global sealed flag for final tamper protection
-// DESCRIPTOR SETS & POOLS ARE DEAD — REMOVED FOR DESCRIPTOR BUFFER EMPIRE
-// - Kept: stone_pipeline_layout (still required)
-// - Kept: stone_compute_pipeline, stone_rt_pipeline
-// - Restored stone_mesh_* members
+// - Single global sealed flag + per-category tamper checks
+// - Centralized breach detection & abort
+// - Obfuscated only for handles/pointers — plain ints for families/counts
+// - One seal function per category — idempotent, safe re-seal
+// - Mandatory stone_seal_final() after startup — final lockdown
+// - Added operator= to Obfuscated<T> for raw assignment
+// - No descriptor sets/pools — descriptor buffer empire only
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -18,7 +17,6 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 #include <array>
-#include <bit>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -31,12 +29,12 @@ namespace RTX { class PipelineManager; }
 namespace StoneKey {
 
 // -----------------------------------------------------------------------------
-// Global sealed flag — final empire lockdown
+// Global empire lockdown — final tamper protection
 // -----------------------------------------------------------------------------
-inline bool stone_sealed = false;
+inline bool empire_sealed = false;
 
 // -----------------------------------------------------------------------------
-// PHASE 1: Per-process polymorphic key generation — ONE-TIME RUNTIME
+// Private empire state — only accessors exposed
 // -----------------------------------------------------------------------------
 namespace detail {
     [[nodiscard]] inline uint64_t get_process_seed() noexcept {
@@ -62,442 +60,268 @@ namespace detail {
         }();
         return keys;
     }
-}
 
-// -----------------------------------------------------------------------------
-// PHASE 2: Unbreakable distributed encryption — ZERO COST decrypt
-// -----------------------------------------------------------------------------
-template<typename T>
-struct Obfuscated {
-    static_assert(sizeof(T) <= sizeof(uint64_t), "Obfuscated only for pointer-sized types");
+    template<typename T>
+    struct Obfuscated {
+        static_assert(sizeof(T) <= sizeof(uint64_t), "Obfuscated only for pointer-sized types");
 
-    uint64_t slots[4]{};  // Zero-init = safe null before seal
+        uint64_t slots[4]{};
 
-    constexpr Obfuscated() noexcept = default;
-    explicit constexpr Obfuscated(T v) noexcept { encrypt(v); }
+        constexpr Obfuscated() noexcept = default;
+        explicit constexpr Obfuscated(T v) noexcept { encrypt(v); }
 
-    constexpr void encrypt(T v) noexcept {
-        const auto& keys = detail::get_keys();
-        uint64_t raw = reinterpret_cast<uintptr_t>(v);
-        slots[0] = raw ^ keys[0];
-        slots[1] = raw ^ keys[1];
-        slots[2] = raw ^ keys[2];
-        slots[3] = raw ^ keys[3];
-    }
+        constexpr void encrypt(T v) noexcept {
+            const auto& keys = get_keys();
+            uint64_t raw = reinterpret_cast<uintptr_t>(v);
+            slots[0] = raw ^ keys[0];
+            slots[1] = raw ^ keys[1];
+            slots[2] = raw ^ keys[2];
+            slots[3] = raw ^ keys[3];
+        }
 
-    [[nodiscard]] T decrypt() const noexcept {
-        const auto& keys = detail::get_keys();
-        uint64_t v0 = slots[0] ^ keys[0];
-        uint64_t v1 = slots[1] ^ keys[1];
-        uint64_t v2 = slots[2] ^ keys[2];
-        uint64_t v3 = slots[3] ^ keys[3];
+        [[nodiscard]] T decrypt() const noexcept {
+            const auto& keys = get_keys();
+            uint64_t v0 = slots[0] ^ keys[0];
+            uint64_t v1 = slots[1] ^ keys[1];
+            uint64_t v2 = slots[2] ^ keys[2];
+            uint64_t v3 = slots[3] ^ keys[3];
 
-        if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] {
-            if (stone_sealed) {
-                LOG_FATAL_CAT("EMPIRE", "StoneKey breach — empire compromised");
-                std::abort();
+            if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] {
+                if (empire_sealed) {
+                    LOG_FATAL_CAT("EMPIRE", "StoneKey breach — empire compromised");
+                    std::abort();
+                }
+                return nullptr;
             }
-            return nullptr;
+            return reinterpret_cast<T>(v0);
         }
-        return reinterpret_cast<T>(v0);
-    }
 
-    Obfuscated& operator=(T v) noexcept { encrypt(v); return *this; }
-};
-
-// -----------------------------------------------------------------------------
-// PHASE 3: Empire — Unbreakable zero-cost fortress (HEADER-ONLY)
-// -----------------------------------------------------------------------------
-struct Empire final {
-    Empire() = default;
-    Empire(const Empire&) = delete;
-    Empire& operator=(const Empire&) = delete;
-
-    static inline Obfuscated<VkInstance>            instance;
-    static inline Obfuscated<VkDevice>              device;
-    static inline Obfuscated<VkPhysicalDevice>      physical;
-    static inline Obfuscated<VkSurfaceKHR>          surface;
-    static inline Obfuscated<VkSwapchainKHR>        swapchain;
-
-    static inline Obfuscated<VkQueue> graphicsQueue;
-    static inline Obfuscated<VkQueue> presentQueue;
-    static inline Obfuscated<VkQueue> computeQueue;
-    static inline Obfuscated<VkQueue> transferQueue;
-
-    static inline uint32_t graphicsFamily = ~0u;
-    static inline uint32_t presentFamily = ~0u;
-    static inline uint32_t transferFamily = ~0u;
-    static inline uint32_t computeFamily = ~0u;
-
-    static inline Obfuscated<RTX::PipelineManager*> pipeline;
-    static inline Obfuscated<SDL_Window*>           window;
-
-    static inline std::vector<VkImage>     images;
-    static inline std::vector<VkImageView> views;
-    static inline Obfuscated<VkRenderPass> pass;
-    static inline VkExtent2D               extent{0, 0};
-    static inline uint32_t                 image_count = 0;
-
-    static inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+        // Added: allow direct assignment from raw T
+        Obfuscated& operator=(T v) noexcept {
+            encrypt(v);
+            return *this;
+        }
     };
 
-    static inline Obfuscated<VkCommandPool> transient_pool;
+    struct Empire {
+        Obfuscated<VkInstance>            instance;
+        Obfuscated<VkDevice>              device;
+        Obfuscated<VkPhysicalDevice>      physical;
+        Obfuscated<VkSurfaceKHR>          surface;
+        Obfuscated<VkSwapchainKHR>        swapchain;
 
-    // Compute pipeline — living world breathing
-    static inline Obfuscated<VkPipeline> computePipeline;
+        Obfuscated<VkQueue> graphics_queue;
+        Obfuscated<VkQueue> present_queue;
+        Obfuscated<VkQueue> compute_queue;
+        Obfuscated<VkQueue> transfer_queue;
 
-    // Ray-tracing pipeline — core light path
-    static inline Obfuscated<VkPipeline> rtPipeline;
+        uint32_t graphics_family = ~0u;
+        uint32_t present_family  = ~0u;
+        uint32_t transfer_family = ~0u;
+        uint32_t compute_family  = ~0u;
 
-    // Eternal pipeline layout (still required — descriptor buffer compatible)
-    static inline Obfuscated<VkPipelineLayout> pipelineLayout;
+        Obfuscated<RTX::PipelineManager*> pipeline;
+        Obfuscated<SDL_Window*>           window;
 
-    // Restored missing stone_mesh members
-    static inline Obfuscated<VkBuffer>       stone_mesh_vertex_buffer;
-    static inline Obfuscated<VkDeviceMemory> stone_mesh_vertex_memory;
-    static inline Obfuscated<VkBuffer>       stone_mesh_index_buffer;
-    static inline Obfuscated<VkDeviceMemory> stone_mesh_index_memory;
-    static inline uint32_t                   stone_mesh_index_count = 0;
-};
+        std::vector<VkImage>     images;
+        std::vector<VkImageView> views;
+        Obfuscated<VkRenderPass> pass;
+        VkExtent2D               extent{0, 0};
+        uint32_t                 image_count = 0;
 
-// -----------------------------------------------------------------------------
-// PHASE 4: Zero-cost unbreakable accessors
-// -----------------------------------------------------------------------------
-[[nodiscard]] inline VkInstance       stone_instance()       noexcept { return Empire::instance.decrypt(); }
-[[nodiscard]] inline VkDevice         stone_device()         noexcept { return Empire::device.decrypt(); }
-[[nodiscard]] inline VkPhysicalDevice stone_physical()       noexcept { return Empire::physical.decrypt(); }
-[[nodiscard]] inline VkSurfaceKHR     stone_surface()        noexcept { return Empire::surface.decrypt(); }
-[[nodiscard]] inline VkSwapchainKHR   stone_swapchain()      noexcept { return Empire::swapchain.decrypt(); }
+        VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+        };
 
-[[nodiscard]] inline VkQueue stone_graphics_queue() noexcept { return Empire::graphicsQueue.decrypt(); }
-[[nodiscard]] inline VkQueue stone_present_queue()  noexcept { return Empire::presentQueue.decrypt(); }
-[[nodiscard]] inline VkQueue stone_compute_queue()  noexcept { return Empire::computeQueue.decrypt(); }
-[[nodiscard]] inline VkQueue stone_transfer_queue() noexcept { return Empire::transferQueue.decrypt(); }
+        Obfuscated<VkCommandPool> transient_pool;
 
-[[nodiscard]] inline uint32_t& stone_graphics_family() noexcept { return Empire::graphicsFamily; }
-[[nodiscard]] inline uint32_t& stone_present_family()  noexcept { return Empire::presentFamily; }
-[[nodiscard]] inline uint32_t& stone_transfer_family() noexcept { return Empire::transferFamily; }
-[[nodiscard]] inline uint32_t& stone_compute_family()  noexcept { return Empire::computeFamily; }
+        Obfuscated<VkPipeline> compute_pipeline;
+        Obfuscated<VkPipeline> rt_pipeline;
+        Obfuscated<VkPipelineLayout> pipeline_layout;
 
-[[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept { return Empire::pipeline.decrypt(); }
-[[nodiscard]] inline SDL_Window*           stone_window()   noexcept { return Empire::window.decrypt(); }
-
-[[nodiscard]] inline VkRenderPass stone_pass() noexcept { return Empire::pass.decrypt(); }
-[[nodiscard]] inline VkExtent2D&  stone_extent() noexcept { return Empire::extent; }
-[[nodiscard]] inline uint32_t&    stone_width()   noexcept { return Empire::extent.width; }
-[[nodiscard]] inline uint32_t&    stone_height()  noexcept { return Empire::extent.height; }
-[[nodiscard]] inline uint32_t&    stone_image_count() noexcept { return Empire::image_count; }
-
-[[nodiscard]] inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR& stone_rtprops() noexcept { return Empire::rtProps; }
-[[nodiscard]] inline VkCommandPool stone_transient_pool() noexcept { return Empire::transient_pool.decrypt(); }
-
-// Compute pipeline accessor
-[[nodiscard]] inline VkPipeline stone_compute_pipeline() noexcept { return Empire::computePipeline.decrypt(); }
-
-// Ray-tracing pipeline accessor
-[[nodiscard]] inline VkPipeline stone_rt_pipeline() noexcept { return Empire::rtPipeline.decrypt(); }
-
-// Eternal pipeline layout accessor
-[[nodiscard]] inline VkPipelineLayout stone_pipeline_layout() noexcept { return Empire::pipelineLayout.decrypt(); }
-
-struct StoneMesh {
-    VkBuffer       vertexBuffer;
-    VkDeviceMemory vertexMemory;
-    VkBuffer       indexBuffer;
-    VkDeviceMemory indexMemory;
-    uint32_t       indexCount;
-};
-
-[[nodiscard]] inline StoneMesh stone_mesh() noexcept {
-    return {
-        Empire::stone_mesh_vertex_buffer.decrypt(),
-        Empire::stone_mesh_vertex_memory.decrypt(),
-        Empire::stone_mesh_index_buffer.decrypt(),
-        Empire::stone_mesh_index_memory.decrypt(),
-        Empire::stone_mesh_index_count
+        // Mesh members
+        Obfuscated<VkBuffer>       mesh_vertex_buffer;
+        Obfuscated<VkDeviceMemory> mesh_vertex_memory;
+        Obfuscated<VkBuffer>       mesh_index_buffer;
+        Obfuscated<VkDeviceMemory> mesh_index_memory;
+        uint32_t                   mesh_index_count = 0;
     };
+
+    inline Empire& empire() noexcept {
+        static Empire e;
+        return e;
+    }
 }
 
 // -----------------------------------------------------------------------------
-// PHASE 5: IDEMPOTENT unbreakable sealers — zero cost, breach-protected
+// Full, direct, zero-overhead access — unbreakable decrypt
 // -----------------------------------------------------------------------------
-inline void stone_seal_instance(VkInstance i) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (i != Empire::instance.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal instance with different handle — breach detected");
+[[nodiscard]] inline VkInstance       stone_instance()       noexcept { return detail::empire().instance.decrypt(); }
+[[nodiscard]] inline VkDevice         stone_device()         noexcept { return detail::empire().device.decrypt(); }
+[[nodiscard]] inline VkPhysicalDevice stone_physical()       noexcept { return detail::empire().physical.decrypt(); }
+[[nodiscard]] inline VkSurfaceKHR     stone_surface()        noexcept { return detail::empire().surface.decrypt(); }
+[[nodiscard]] inline VkSwapchainKHR   stone_swapchain()      noexcept { return detail::empire().swapchain.decrypt(); }
+
+[[nodiscard]] inline VkQueue stone_graphics_queue() noexcept { return detail::empire().graphics_queue.decrypt(); }
+[[nodiscard]] inline VkQueue stone_present_queue()  noexcept { return detail::empire().present_queue.decrypt(); }
+[[nodiscard]] inline VkQueue stone_compute_queue()  noexcept { return detail::empire().compute_queue.decrypt(); }
+[[nodiscard]] inline VkQueue stone_transfer_queue() noexcept { return detail::empire().transfer_queue.decrypt(); }
+
+[[nodiscard]] inline uint32_t stone_graphics_family() noexcept { return detail::empire().graphics_family; }
+[[nodiscard]] inline uint32_t stone_present_family()  noexcept { return detail::empire().present_family; }
+[[nodiscard]] inline uint32_t stone_transfer_family() noexcept { return detail::empire().transfer_family; }
+[[nodiscard]] inline uint32_t stone_compute_family()  noexcept { return detail::empire().compute_family; }
+
+[[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept { return detail::empire().pipeline.decrypt(); }
+[[nodiscard]] inline SDL_Window*           stone_window()   noexcept { return detail::empire().window.decrypt(); }
+
+[[nodiscard]] inline VkRenderPass stone_pass() noexcept { return detail::empire().pass.decrypt(); }
+[[nodiscard]] inline VkExtent2D&  stone_extent() noexcept { return detail::empire().extent; }
+[[nodiscard]] inline uint32_t&    stone_image_count() noexcept { return detail::empire().image_count; }
+
+[[nodiscard]] inline VkPhysicalDeviceRayTracingPipelinePropertiesKHR& stone_rtprops() noexcept { return detail::empire().rt_props; }
+[[nodiscard]] inline VkCommandPool stone_transient_pool() noexcept { return detail::empire().transient_pool.decrypt(); }
+
+[[nodiscard]] inline VkPipeline stone_compute_pipeline() noexcept { return detail::empire().compute_pipeline.decrypt(); }
+[[nodiscard]] inline VkPipeline stone_rt_pipeline() noexcept { return detail::empire().rt_pipeline.decrypt(); }
+[[nodiscard]] inline VkPipelineLayout stone_pipeline_layout() noexcept { return detail::empire().pipeline_layout.decrypt(); }
+
+[[nodiscard]] inline VkBuffer       stone_mesh_vertex_buffer()   noexcept { return detail::empire().mesh_vertex_buffer.decrypt(); }
+[[nodiscard]] inline VkDeviceMemory stone_mesh_vertex_memory()   noexcept { return detail::empire().mesh_vertex_memory.decrypt(); }
+[[nodiscard]] inline VkBuffer       stone_mesh_index_buffer()    noexcept { return detail::empire().mesh_index_buffer.decrypt(); }
+[[nodiscard]] inline VkDeviceMemory stone_mesh_index_memory()    noexcept { return detail::empire().mesh_index_memory.decrypt(); }
+[[nodiscard]] inline uint32_t       stone_mesh_index_count()     noexcept { return detail::empire().mesh_index_count; }
+
+// -----------------------------------------------------------------------------
+// Centralized idempotent sealers — one per category, unbreakable
+// -----------------------------------------------------------------------------
+inline void stone_seal_device_resources(VkInstance i, VkDevice d, VkPhysicalDevice p,
+                                        VkSurfaceKHR s, VkSwapchainKHR sc) noexcept {
+    if (empire_sealed) {
+        if (i != detail::empire().instance.decrypt() ||
+            d != detail::empire().device.decrypt() ||
+            p != detail::empire().physical.decrypt() ||
+            s != detail::empire().surface.decrypt() ||
+            sc != detail::empire().swapchain.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Device resources tamper attempt — empire compromised");
             std::abort();
         }
         return;
     }
-    Empire::instance = i;
-    sealed = true;
+
+    detail::empire().instance = i;
+    detail::empire().device = d;
+    detail::empire().physical = p;
+    detail::empire().surface = s;
+    detail::empire().swapchain = sc;
 }
 
-inline void stone_seal_device(VkDevice d) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (d != Empire::device.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal device with different handle — breach detected");
+inline void stone_seal_queues(VkQueue graphics, VkQueue present, VkQueue compute, VkQueue transfer) noexcept {
+    if (empire_sealed) {
+        if (graphics != detail::empire().graphics_queue.decrypt() ||
+            present != detail::empire().present_queue.decrypt() ||
+            compute != detail::empire().compute_queue.decrypt() ||
+            transfer != detail::empire().transfer_queue.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Queues tamper attempt — empire compromised");
             std::abort();
         }
         return;
     }
-    Empire::device = d;
-    sealed = true;
+
+    detail::empire().graphics_queue = graphics;
+    detail::empire().present_queue = present;
+    detail::empire().compute_queue = compute;
+    detail::empire().transfer_queue = transfer;
 }
 
-inline void stone_seal_physical(VkPhysicalDevice p) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (p != Empire::physical.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal physical device with different handle — breach detected");
+inline void stone_seal_families(uint32_t graphics, uint32_t present, uint32_t transfer, uint32_t compute) noexcept {
+    if (empire_sealed) {
+        if (graphics != detail::empire().graphics_family ||
+            present != detail::empire().present_family ||
+            transfer != detail::empire().transfer_family ||
+            compute != detail::empire().compute_family) {
+            LOG_FATAL_CAT("EMPIRE", "Families tamper attempt — empire compromised");
             std::abort();
         }
         return;
     }
-    Empire::physical = p;
-    sealed = true;
+
+    detail::empire().graphics_family = graphics;
+    detail::empire().present_family = present;
+    detail::empire().transfer_family = transfer;
+    detail::empire().compute_family = compute;
 }
 
-inline void stone_seal_surface(VkSurfaceKHR s) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (s != Empire::surface.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal surface with different handle — breach detected");
+inline void stone_seal_pipelines(RTX::PipelineManager* pipeline, VkPipeline compute, VkPipeline rt, VkPipelineLayout layout) noexcept {
+    if (empire_sealed) {
+        if (pipeline != detail::empire().pipeline.decrypt() ||
+            compute != detail::empire().compute_pipeline.decrypt() ||
+            rt != detail::empire().rt_pipeline.decrypt() ||
+            layout != detail::empire().pipeline_layout.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Pipelines tamper attempt — empire compromised");
             std::abort();
         }
         return;
     }
-    Empire::surface = s;
-    sealed = true;
+
+    detail::empire().pipeline = pipeline;
+    detail::empire().compute_pipeline = compute;
+    detail::empire().rt_pipeline = rt;
+    detail::empire().pipeline_layout = layout;
 }
 
-inline void stone_seal_swapchain(VkSwapchainKHR sc) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (sc != Empire::swapchain.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal swapchain with different handle — breach detected");
+inline void stone_seal_window_and_pass(SDL_Window* window, VkRenderPass pass) noexcept {
+    if (empire_sealed) {
+        if (window != detail::empire().window.decrypt() ||
+            pass != detail::empire().pass.decrypt()) {
+            LOG_FATAL_CAT("EMPIRE", "Window/pass tamper attempt — empire compromised");
             std::abort();
         }
         return;
     }
-    Empire::swapchain = sc;
-    sealed = true;
+
+    detail::empire().window = window;
+    detail::empire().pass = pass;
 }
 
-inline void stone_seal_graphics_queue(VkQueue q) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (q != Empire::graphicsQueue.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal graphics queue with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::graphicsQueue = q;
-    sealed = true;
+inline void stone_seal_swapchain_resources(const std::vector<VkImage>& images,
+                                           const std::vector<VkImageView>& views,
+                                           VkExtent2D extent,
+                                           uint32_t image_count) noexcept {
+    detail::empire().images = images;
+    detail::empire().views = views;
+    detail::empire().extent = extent;
+    detail::empire().image_count = image_count;
 }
 
-inline void stone_seal_present_queue(VkQueue q) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (q != Empire::presentQueue.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal present queue with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::presentQueue = q;
-    sealed = true;
+inline void stone_seal_rtprops(const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& props) noexcept {
+    detail::empire().rt_props = props;
 }
 
-inline void stone_seal_compute_queue(VkQueue q) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (q != Empire::computeQueue.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal compute queue with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::computeQueue = q;
-    sealed = true;
+inline void stone_seal_mesh_buffers(VkBuffer vb, VkDeviceMemory vm, VkBuffer ib, VkDeviceMemory im, uint32_t ic) noexcept {
+    detail::empire().mesh_vertex_buffer = vb;
+    detail::empire().mesh_vertex_memory = vm;
+    detail::empire().mesh_index_buffer = ib;
+    detail::empire().mesh_index_memory = im;
+    detail::empire().mesh_index_count = ic;
 }
-
-inline void stone_seal_transfer_queue(VkQueue q) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (q != Empire::transferQueue.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal transfer queue with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::transferQueue = q;
-    sealed = true;
-}
-
-inline void stone_seal_graphics_family(uint32_t idx) noexcept {
-    static bool sealed = false;
-    if (sealed && idx != Empire::graphicsFamily) {
-        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal graphics family with different index — breach detected");
-        std::abort();
-    }
-    Empire::graphicsFamily = idx;
-    sealed = true;
-}
-
-inline void stone_seal_present_family(uint32_t idx) noexcept {
-    static bool sealed = false;
-    if (sealed && idx != Empire::presentFamily) {
-        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal present family with different index — breach detected");
-        std::abort();
-    }
-    Empire::presentFamily = idx;
-    sealed = true;
-}
-
-inline void stone_seal_transfer_family(uint32_t idx) noexcept {
-    static bool sealed = false;
-    if (sealed && idx != Empire::transferFamily) {
-        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal transfer family with different index — breach detected");
-        std::abort();
-    }
-    Empire::transferFamily = idx;
-    sealed = true;
-}
-
-inline void stone_seal_compute_family(uint32_t idx) noexcept {
-    static bool sealed = false;
-    if (sealed && idx != Empire::computeFamily) {
-        LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal compute family with different index — breach detected");
-        std::abort();
-    }
-    Empire::computeFamily = idx;
-    sealed = true;
-}
-
-inline void stone_seal_pipeline(RTX::PipelineManager* p) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (p != Empire::pipeline.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal pipeline with different pointer — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::pipeline = p;
-    sealed = true;
-}
-
-inline void stone_seal_window(SDL_Window* w) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (w != Empire::window.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal window with different pointer — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::window = w;
-    sealed = true;
-}
-
-inline void stone_seal_pass(VkRenderPass p) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (p != Empire::pass.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal render pass with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::pass = p;
-    sealed = true;
-}
-
-inline void stone_seal_rtprops(VkPhysicalDeviceRayTracingPipelinePropertiesKHR props) noexcept {
-    Empire::rtProps = props;
-}
-
-inline void stone_seal_extent(VkExtent2D ext) noexcept { Empire::extent = ext; }
-inline void stone_seal_image_count(uint32_t cnt) noexcept { Empire::image_count = cnt; }
-inline void stone_seal_images(const std::vector<VkImage>& imgs) noexcept { Empire::images = imgs; }
-inline void stone_seal_images(std::vector<VkImage>&& imgs) noexcept { Empire::images = std::move(imgs); }
-inline void stone_seal_views(const std::vector<VkImageView>& vws) noexcept { Empire::views = vws; }
-inline void stone_seal_views(std::vector<VkImageView>&& vws) noexcept { Empire::views = std::move(vws); }
 
 inline void stone_seal_transient_pool(VkCommandPool pool) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (pool != Empire::transient_pool.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal transient pool with different handle — breach detected");
-            std::abort();
-        }
-        return;
+    if (empire_sealed && pool != detail::empire().transient_pool.decrypt()) {
+        LOG_FATAL_CAT("EMPIRE", "Transient pool tamper attempt — empire compromised");
+        std::abort();
     }
-    Empire::transient_pool = pool;
-    sealed = true;
-}
-
-// Seal compute pipeline
-inline void stone_seal_compute_pipeline(VkPipeline p) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (p != Empire::computePipeline.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal compute pipeline with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::computePipeline = p;
-    sealed = true;
-}
-
-// Seal ray-tracing pipeline
-inline void stone_seal_rt_pipeline(VkPipeline p) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (p != Empire::rtPipeline.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal ray-tracing pipeline with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::rtPipeline = p;
-    sealed = true;
-}
-
-// Seal eternal pipeline layout
-inline void stone_seal_pipeline_layout(VkPipelineLayout layout) noexcept {
-    static bool sealed = false;
-    if (sealed) {
-        if (layout != Empire::pipelineLayout.decrypt()) {
-            LOG_FATAL_CAT("EMPIRE", "Attempt to re-seal pipeline layout with different handle — breach detected");
-            std::abort();
-        }
-        return;
-    }
-    Empire::pipelineLayout = layout;
-    sealed = true;
+    detail::empire().transient_pool = pool;
 }
 
 // -----------------------------------------------------------------------------
-// FINAL UNBREAKABLE SEAL — ZERO COST
+// FINAL UNBREAKABLE SEAL — call once after all resources are set
 // -----------------------------------------------------------------------------
-inline void stone_seal_final() noexcept
-{
-    stone_sealed = true;
-    LOG_AMOURANTH("STONEKEY v∞ UNBREAKABLE FINAL SEAL FORGED — EMPIRE ETERNAL");
+inline void stone_seal_final() noexcept {
+    if (empire_sealed) return;
+
+    empire_sealed = true;
+    LOG_AMOURANTH("STONEKEY v30.25 — FINAL EMPIRE SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 }
 
 } // namespace StoneKey
-
-// =============================================================================
-// STONEKEY v∞ — IDEMPOTENT, UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — JANUARY 26, 2026
-// Descriptor sets & pools eliminated — descriptor buffer empire complete
-// All seal functions idempotent with breach detection
-// Kept: stone_pipeline_layout, stone_compute_pipeline, stone_rt_pipeline
-// =============================================================================

@@ -2,10 +2,10 @@
 // AMOURANTH RTX Engine - RTX Handler Implementation
 // Global Vulkan context, instance, device, queues
 // RTX feature enablement | Descriptor indexing | totalTime driven
-// Version 30.75 — January 27, 2026
+// Version 30.76 — January 30, 2026
 // - Removed timeline semaphores completely — totalTime monolith drives timing
 // - Descriptor pool delayed (called externally after first AS build)
-// - All sealing centralized via StoneKey — idempotent + breach detection
+// - All sealing centralized via StoneKey grouped sealers
 // - Instance, device, physical, surface, queues, families sealed here
 // - Minimal, production-stable
 // - VK_EXT_descriptor_buffer enabled explicitly
@@ -24,6 +24,11 @@
 #include <cstring>
 #include <format>
 #include <vector>
+
+// StoneKey accessors & sealers — using at top, no qualification
+using StoneKey::stone_seal_device_resources;
+using StoneKey::stone_seal_queues;
+using StoneKey::stone_seal_families;
 
 namespace RTX {
 
@@ -114,8 +119,7 @@ VkInstance createVulkanInstance() noexcept {
         return VK_NULL_HANDLE;
     }
 
-    // Seal the instance
-    StoneKey::stone_seal_instance(inst);
+    RTX::loadInstanceExtensions(inst);
 
     LOG_SUCCESS_CAT("RTX", "Instance created — {} extensions, validation {}",
                     extensions.size(), Options::Debug::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF");
@@ -185,9 +189,6 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
     // Set in context before sealing
     g_ctx().setPhysicalDevice(selected);
 
-    // Seal physical device
-    StoneKey::stone_seal_physical(selected);
-
     std::set<uint32_t> uniqueQ = {best.graphics.value(), best.present.value()};
     if (best.transfer.has_value()) uniqueQ.insert(best.transfer.value());
 
@@ -242,26 +243,17 @@ VkDevice createLogicalDeviceAndSelectGPU(VkInstance inst, VkSurfaceKHR surf) noe
         return VK_NULL_HANDLE;
     }
 
-    // Seal the device
-    StoneKey::stone_seal_device(dev);
-
     VkQueue graphicsQ, presentQ, computeQ, transferQ;
     vkGetDeviceQueue(dev, best.graphics.value(), 0, &graphicsQ);
     vkGetDeviceQueue(dev, best.present.value(), 0, &presentQ);
     computeQ = graphicsQ;  // compute on graphics for simplicity
     transferQ = best.transfer.has_value() ? [&](){ VkQueue q; vkGetDeviceQueue(dev, best.transfer.value(), 0, &q); return q; }() : graphicsQ;
 
-    // Seal queues
-    StoneKey::stone_seal_graphics_queue(graphicsQ);
-    StoneKey::stone_seal_present_queue(presentQ);
-    StoneKey::stone_seal_compute_queue(computeQ);
-    StoneKey::stone_seal_transfer_queue(transferQ);
-
-    // Seal queue families
-    StoneKey::stone_seal_graphics_family(best.graphics.value());
-    StoneKey::stone_seal_present_family(best.present.value());
-    StoneKey::stone_seal_compute_family(best.graphics.value());
-    StoneKey::stone_seal_transfer_family(best.transfer.value_or(best.graphics.value()));
+    // Seal the empire — unbreakable lockdown
+    stone_seal_device_resources(inst, dev, selected, surf, VK_NULL_HANDLE);  // swapchain sealed later
+    stone_seal_queues(graphicsQ, presentQ, computeQ, transferQ);
+    stone_seal_families(best.graphics.value(), best.present.value(),
+                        best.transfer.value_or(best.graphics.value()), best.graphics.value());
 
     g_ctx().graphicsQueue = graphicsQ;
     g_ctx().presentQueue = presentQ;

@@ -1,7 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Pipeline Manager
 // Ray tracing + compute pipeline, SBT, descriptor management
-// Version 30.9 — January 30, 2026 — Fixed double-submit in SBT creation
+// Version 30.10 — January 30, 2026 — StoneKey grouped sealers
 // - Fixed push constant stageFlags to match layout range (fixes VUID-01796)
 // - On-demand compute pipeline creation in dispatchLivingWorld
 // - Timing driven by totalTime push only — no semaphores/fences
@@ -13,6 +13,7 @@
 // - SBT forged at startup via BufferManager
 // - No blue noise — high-SPP convergence
 // - Fixed SBT recording: end/submit only when ownCmd (no double-submit when providedCmd)
+// - Replaced individual stone_seal_xxx() with grouped StoneKey sealers
 // - Empire stable — pink photons breathe free
 // =============================================================================
 
@@ -31,6 +32,7 @@
 #include <fstream>
 #include <mutex>
 
+// StoneKey accessors & sealers — using at top, no qualification
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_physical;
@@ -39,9 +41,7 @@ using StoneKey::stone_transient_pool;
 using StoneKey::stone_compute_pipeline;
 using StoneKey::stone_rt_pipeline;
 using StoneKey::stone_pipeline_layout;
-using StoneKey::stone_seal_pipeline_layout;
-using StoneKey::stone_seal_compute_pipeline;
-using StoneKey::stone_seal_rt_pipeline;
+using StoneKey::stone_seal_pipelines;
 
 using BufferManager::BufferInfo;
 using BufferManager::align_up;
@@ -198,7 +198,7 @@ void PipelineManager::createPipelineLayout()
     };
 
     VkPushConstantRange push{};
-    push.stageFlags = FULL_PUSH_MASK;  // Matches the full mask we now use everywhere
+    push.stageFlags = FULL_PUSH_MASK;
     push.offset     = 0;
     push.size       = sizeof(float);  // totalTime only
 
@@ -217,7 +217,6 @@ void PipelineManager::createPipelineLayout()
     }
 
     rtPipelineLayout_ = Handle<VkPipelineLayout>(pl, stone_device(), vkDestroyPipelineLayout);
-    stone_seal_pipeline_layout(pl);
 
     LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created");
 }
@@ -284,8 +283,6 @@ void PipelineManager::createComputePipeline()
     computePipeline_ = Handle<VkPipeline>(compPipe, stone_device(), vkDestroyPipeline);
     vkDestroyShaderModule(stone_device(), compModule, nullptr);
 
-    stone_seal_compute_pipeline(compPipe);
-
     LOG_SUCCESS_CAT("PIPELINE", "Compute pipeline created");
 }
 
@@ -317,7 +314,6 @@ void PipelineManager::dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) 
     g_ext.vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                              stone_pipeline_layout(), 0, 1, &bufferIndex, &offset);
 
-    // FIXED: Use full stage mask to match the layout's push constant range
     vkCmdPushConstants(cmd, stone_pipeline_layout(),
                        FULL_PUSH_MASK,
                        0, sizeof(float), &totalTime);
@@ -402,17 +398,14 @@ VkShaderModule PipelineManager::loadShader(const std::string& relativePath) cons
 {
     LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
-    // Try Linux path first (most common dev environment)
     std::string fullPath = std::format("build/bin/Linux/{}", relativePath);
     std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 
-    // If Linux path fails, try Windows path
     if (!file.is_open()) {
         fullPath = std::format("build-windows/bin/Windows/{}", relativePath);
         file.open(fullPath, std::ios::ate | std::ios::binary);
     }
 
-    // Final fallback: try plain "assets/shaders/" if both above fail (useful for source tree)
     if (!file.is_open()) {
         fullPath = std::format("assets/shaders/{}", relativePath);
         file.open(fullPath, std::ios::ate | std::ios::binary);
@@ -550,7 +543,6 @@ void PipelineManager::createRayTracingPipeline()
     }
 
     rtPipeline_ = Handle<VkPipeline>(pipeline, stone_device(), vkDestroyPipeline);
-    stone_seal_rt_pipeline(pipeline);
 
     LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created");
 }
@@ -643,7 +635,6 @@ void PipelineManager::createShaderBindingTable(VkCommandPool pool, VkQueue queue
         vkBeginCommandBuffer(uploadCmd, &beginInfo);
     }
 
-    // Clean macro upload — handles staging ring, memcpy, vkCmdCopyBuffer internally
     BM_UPLOAD_TO_BUFFER(sbtHandle, handles.data(), handles.size(), uploadCmd);
 
     VkMemoryBarrier memBarrier{};
