@@ -86,7 +86,7 @@ namespace detail {
             uint64_t v2 = slots[2] ^ keys[2];
             uint64_t v3 = slots[3] ^ keys[3];
 
-            if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] {
+            if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] { // if decrypt all zeroes
                 if (empire_sealed) {
                     LOG_FATAL_CAT("EMPIRE", "StoneKey breach — early assessment");
                 }
