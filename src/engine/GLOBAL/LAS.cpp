@@ -1,16 +1,17 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
-// Singleton with lazy, synchronous rebuilds — main-thread only, no threading
-// Version 30.24 — January 30, 2026 — Vestigial code eaten, sType fixed
-// - Synchronous rebuilds only — brief stalls during scene edits
-// - Temporary one-time cmd buffers for uploads
+// Singleton with toggleable sync/async rebuilds via Options::LAS::SYNC_REBUILD
+// Version 30.25 — January 30, 2026 — Sync/Async toggle support added
+// - Synchronous rebuilds (default): main-thread, brief stall, predictable/debuggable
+// - Asynchronous rebuilds (optional): background thread, no stall, signal completion
+// - Temporary one-time cmd buffers for uploads/hot-reload (sync mode)
 // - Full D&D dice support (AABB approximations)
 // - Geometry hot-reload for meshes
 // - Instance transforms per-object
-// - inst.mask = 0xFF everywhere (vestigial — always include in frame-free tracing)
+// - inst.mask = 0xFF everywhere (vestigial — frame-free persistent tracing)
 // - Explicit sType on VkAccelerationStructureBuildSizesInfoKHR
-// Empire stays predictable, debuggable, main-thread pure.
+// Empire stays predictable, debuggable — pink photons breathe free
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -20,10 +21,14 @@
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <algorithm>
+#include <thread>
+#include <future>
+#include <atomic>
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
@@ -49,7 +54,7 @@ RTX::LAS& RTX::LAS::instance() {
 }
 
 RTX::LAS::LAS() {
-    LOG_INFO_CAT("LAS", "v30.24 initialized — synchronous rebuilds only");
+    LOG_INFO_CAT("LAS", "v30.25 initialized — sync/async rebuilds via Options::LAS::SYNC_REBUILD");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
@@ -70,9 +75,17 @@ RTX::LAS::LAS() {
     tlasDirty = true;
     pendingBlasBuilds = true;
     proceduralDirty = true;
+
+    rebuildPromise = std::nullopt;
+    rebuildFuture = std::nullopt;
 }
 
 RTX::LAS::~LAS() {
+    // Wait for any pending async rebuild
+    if (rebuildFuture.has_value() && rebuildFuture->valid()) {
+        rebuildFuture->wait();
+    }
+
     clearTLAS();
 
     if (proceduralBlas) {
@@ -125,6 +138,31 @@ void RTX::LAS::insertASBuildToBuildBarrier(VkCommandBuffer cmd) {
 }
 
 void RTX::LAS::ensureReady() {
+    // Async mode: check if rebuild is running/completed
+    if (!Options::LAS::SYNC_REBUILD) {
+        if (rebuildFuture.has_value()) {
+            if (rebuildFuture->valid() && rebuildFuture->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                // Async rebuild finished — collect results
+                try {
+                    auto [newTlas, newTlasStorage, newSuccess] = rebuildFuture->get();
+                    tlas = newTlas;
+                    tlasStorage = newTlasStorage;
+                    tlasDirty = pendingBlasBuilds = proceduralDirty = !newSuccess;
+                    rebuildFuture.reset();
+                    LOG_INFO_CAT("LAS", "Async rebuild completed — TLAS ready");
+                } catch (const std::exception& e) {
+                    LOG_FATAL_CAT("LAS", "Async rebuild failed: {}", e.what());
+                    rebuildFuture.reset();
+                }
+            } else if (rebuildFuture->valid()) {
+                // Still running — return current (possibly stale) TLAS
+                LOG_INFO_CAT("LAS", "Async rebuild in progress — returning current TLAS");
+                return;
+            }
+        }
+    }
+
+    // Sync mode or async completed — do normal rebuild if dirty
     if (initialized && !tlasDirty && !pendingBlasBuilds && !proceduralDirty && tlas != VK_NULL_HANDLE) {
         return;
     }
@@ -134,51 +172,121 @@ void RTX::LAS::ensureReady() {
         initialized = true;
     }
 
-    VkCommandPool pool = VK_NULL_HANDLE;
-    VkCommandPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, StoneKey::stone_graphics_family() };
-    if (vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool) != VK_SUCCESS) return;
+    if (Options::LAS::SYNC_REBUILD) {
+        // Synchronous path (original)
+        VkCommandPool pool = VK_NULL_HANDLE;
+        VkCommandPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, StoneKey::stone_graphics_family() };
+        if (vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool) != VK_SUCCESS) return;
 
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo allocCI{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
-    if (vkAllocateCommandBuffers(stone_device(), &allocCI, &cmd) != VK_SUCCESS) {
-        vkDestroyCommandPool(stone_device(), pool, nullptr);
-        return;
-    }
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo allocCI{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
+        if (vkAllocateCommandBuffers(stone_device(), &allocCI, &cmd) != VK_SUCCESS) {
+            vkDestroyCommandPool(stone_device(), pool, nullptr);
+            return;
+        }
 
-    VkCommandBufferBeginInfo beginCI{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
-    if (vkBeginCommandBuffer(cmd, &beginCI) != VK_SUCCESS) {
+        VkCommandBufferBeginInfo beginCI{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+        if (vkBeginCommandBuffer(cmd, &beginCI) != VK_SUCCESS) {
+            vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+            vkDestroyCommandPool(stone_device(), pool, nullptr);
+            return;
+        }
+
+        bool success = true;
+
+        if (pendingBlasBuilds || proceduralDirty) {
+            success &= batchBuildAndCompactBLAS(cmd);
+            if (success) insertASBuildToBuildBarrier(cmd);
+        }
+
+        if (tlasDirty) {
+            clearTLAS();
+            success &= buildHybridTLAS(cmd);
+            if (success) insertASBuildToTraceBarrier(cmd);
+        }
+
+        if (!success || vkEndCommandBuffer(cmd) != VK_SUCCESS) success = false;
+
+        if (success) {
+            VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &cmd };
+            success &= (vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS);
+        }
+
+        if (success) vkQueueWaitIdle(stone_graphics_queue());
+
         vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
         vkDestroyCommandPool(stone_device(), pool, nullptr);
-        return;
-    }
 
-    bool success = true;
+        if (success) {
+            tlasDirty = pendingBlasBuilds = proceduralDirty = false;
+            LOG_SUCCESS_CAT("LAS", "Synchronous rebuild complete — TLAS ready");
+        } else {
+            LOG_FATAL_CAT("LAS", "Synchronous rebuild failed");
+        }
+    } else {
+        // Asynchronous path — launch rebuild in background thread
+        if (!rebuildFuture.has_value() || !rebuildFuture->valid()) {
+            LOG_INFO_CAT("LAS", "Launching async rebuild...");
+            rebuildPromise.emplace();
+            rebuildFuture.emplace(rebuildPromise->get_future());
 
-    if (pendingBlasBuilds || proceduralDirty) {
-        success &= batchBuildAndCompactBLAS(cmd);
-        if (success) insertASBuildToBuildBarrier(cmd);
-    }
+            std::thread([this, promise = std::move(*rebuildPromise)]() mutable {
+                VkCommandPool pool = VK_NULL_HANDLE;
+                VkCommandPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, StoneKey::stone_graphics_family() };
+                if (vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool) != VK_SUCCESS) {
+                    promise.set_value({VK_NULL_HANDLE, 0, false});
+                    return;
+                }
 
-    if (tlasDirty) {
-        clearTLAS();
-        success &= buildHybridTLAS(cmd);
-        if (success) insertASBuildToTraceBarrier(cmd);
-    }
+                VkCommandBuffer cmd = VK_NULL_HANDLE;
+                VkCommandBufferAllocateInfo allocCI{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
+                if (vkAllocateCommandBuffers(stone_device(), &allocCI, &cmd) != VK_SUCCESS) {
+                    vkDestroyCommandPool(stone_device(), pool, nullptr);
+                    promise.set_value({VK_NULL_HANDLE, 0, false});
+                    return;
+                }
 
-    if (!success || vkEndCommandBuffer(cmd) != VK_SUCCESS) success = false;
+                VkCommandBufferBeginInfo beginCI{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+                if (vkBeginCommandBuffer(cmd, &beginCI) != VK_SUCCESS) {
+                    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+                    vkDestroyCommandPool(stone_device(), pool, nullptr);
+                    promise.set_value({VK_NULL_HANDLE, 0, false});
+                    return;
+                }
 
-    if (success) {
-        VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &cmd };
-        success &= (vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS);
-    }
+                bool success = true;
 
-    if (success) vkQueueWaitIdle(stone_graphics_queue());
+                if (pendingBlasBuilds || proceduralDirty) {
+                    success &= batchBuildAndCompactBLAS(cmd);
+                    if (success) insertASBuildToBuildBarrier(cmd);
+                }
 
-    vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
-    vkDestroyCommandPool(stone_device(), pool, nullptr);
+                VkAccelerationStructureKHR newTlas = VK_NULL_HANDLE;
+                uint64_t newTlasStorage = 0;
 
-    if (success) {
-        tlasDirty = pendingBlasBuilds = proceduralDirty = false;
+                if (tlasDirty) {
+                    clearTLAS();
+                    success &= buildHybridTLAS(cmd);
+                    newTlas = tlas;
+                    newTlasStorage = tlasStorage;
+                    if (success) insertASBuildToTraceBarrier(cmd);
+                }
+
+                if (!success || vkEndCommandBuffer(cmd) != VK_SUCCESS) success = false;
+
+                if (success) {
+                    VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &cmd };
+                    success &= (vkQueueSubmit(stone_graphics_queue(), 1, &submit, VK_NULL_HANDLE) == VK_SUCCESS);
+                }
+
+                if (success) vkQueueWaitIdle(stone_graphics_queue());
+
+                vkFreeCommandBuffers(stone_device(), pool, 1, &cmd);
+                vkDestroyCommandPool(stone_device(), pool, nullptr);
+
+                promise.set_value({newTlas, newTlasStorage, success});
+            }).detach();
+        }
     }
 
     vkDeviceWaitIdle(stone_device());
@@ -335,48 +443,65 @@ void RTX::LAS::hotReloadMesh(size_t index, std::unique_ptr<MeshLoader::Mesh> new
 
 size_t RTX::LAS::addProceduralAABB(GeometryType type, const glm::vec3& center, float scale,
                                    uint32_t materialIndex, const glm::mat4& transform) {
-    proceduralPrimitives.push_back({ glm::vec4(center - glm::vec3(scale), 0.0f),
-                                     glm::vec4(center + glm::vec3(scale), 0.0f),
-                                     transform,
-                                     static_cast<uint32_t>(type),
-                                     materialIndex });
+    UniversalPrimitive p{};
+    p.aabbMin       = glm::vec4(center - glm::vec3(scale), 0.0f);
+    p.aabbMax       = glm::vec4(center + glm::vec3(scale), 0.0f);
+    p.transform     = transform;
+    p.type          = static_cast<uint32_t>(type);
+    p.materialIndex = materialIndex;
+    p.destruction   = 0.0f;
+
+    proceduralPrimitives.push_back(p);
     proceduralDirty = tlasDirty = true;
+
+    LOG_INFO_CAT("LAS", "Procedural AABB added — type {}, scale {:.1f}", static_cast<int>(type), scale);
     return proceduralPrimitives.size() - 1;
 }
 
-size_t RTX::LAS::addProceduralSphere(const glm::vec3& center, float radius, uint32_t materialIndex, const glm::mat4& transform) {
+size_t RTX::LAS::addProceduralSphere(const glm::vec3& center, float radius,
+                                     uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralSphere, center, radius, materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralCylinder(const glm::vec3& center, float radius, float height, uint32_t materialIndex, const glm::mat4& transform) {
-    return addProceduralAABB(GeometryType::ProceduralCylinder, center, glm::length(glm::vec3(radius, height * 0.5f, radius)), materialIndex, transform);
+size_t RTX::LAS::addProceduralCylinder(const glm::vec3& center, float radius, float height,
+                                       uint32_t materialIndex, const glm::mat4& transform) {
+    glm::vec3 halfExtents = glm::vec3(radius, height * 0.5f, radius);
+    return addProceduralAABB(GeometryType::ProceduralCylinder, center, glm::length(halfExtents), materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralCone(const glm::vec3& center, float radius, float height, uint32_t materialIndex, const glm::mat4& transform) {
-    return addProceduralAABB(GeometryType::ProceduralCone, center, glm::length(glm::vec3(radius, height, radius)), materialIndex, transform);
+size_t RTX::LAS::addProceduralCone(const glm::vec3& center, float radius, float height,
+                                   uint32_t materialIndex, const glm::mat4& transform) {
+    glm::vec3 halfExtents = glm::vec3(radius, height, radius);
+    return addProceduralAABB(GeometryType::ProceduralCone, center, glm::length(halfExtents), materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralD4(const glm::vec3& center, float size, uint32_t materialIndex, const glm::mat4& transform) {
+size_t RTX::LAS::addProceduralD4(const glm::vec3& center, float size,
+                                 uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD4, center, size, materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralD6(const glm::vec3& center, float size, uint32_t materialIndex, const glm::mat4& transform) {
+size_t RTX::LAS::addProceduralD6(const glm::vec3& center, float size,
+                                 uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD6, center, size, materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralD8(const glm::vec3& center, float size, uint32_t materialIndex, const glm::mat4& transform) {
+size_t RTX::LAS::addProceduralD8(const glm::vec3& center, float size,
+                                 uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD8, center, size, materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralD10(const glm::vec3& center, float size, uint32_t materialIndex, const glm::mat4& transform) {
+size_t RTX::LAS::addProceduralD10(const glm::vec3& center, float size,
+                                  uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD10, center, size, materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralD12(const glm::vec3& center, float size, uint32_t materialIndex, const glm::mat4& transform) {
+size_t RTX::LAS::addProceduralD12(const glm::vec3& center, float size,
+                                  uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD12, center, size, materialIndex, transform);
 }
 
-size_t RTX::LAS::addProceduralD20(const glm::vec3& center, float size, uint32_t materialIndex, const glm::mat4& transform) {
+size_t RTX::LAS::addProceduralD20(const glm::vec3& center, float size,
+                                  uint32_t materialIndex, const glm::mat4& transform) {
     return addProceduralAABB(GeometryType::ProceduralD20, center, size, materialIndex, transform);
 }
 
@@ -641,4 +766,4 @@ void RTX::LAS::createDefaultHybridScene() {
     addProceduralCylinder(glm::vec3(15, 10, 15), 2.0f, 20.0f, 4, glm::mat4(1.0f));
 
     addProceduralCone(glm::vec3(0, 15, 0), 5.0f, 10.0f, 5, glm::mat4(1.0f));
-}
+} // nice

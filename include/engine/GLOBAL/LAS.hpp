@@ -1,16 +1,17 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
-// Singleton with lazy, synchronous rebuilds — main-thread only, no threading
-// Version 30.22 — January 30, 2026
-// - Removed async rebuild thread — synchronous rebuilds only
-// - Fixed uploadToBuffer calls — always pass command buffer
-// - Temporary one-time cmd buffers for initial/hot-reload uploads
+// Singleton with toggleable sync/async rebuilds via Options::LAS::SYNC_REBUILD
+// Version 30.25 — January 30, 2026 — Sync/Async toggle support added
+// - Synchronous rebuilds (default): main-thread, brief stall, predictable/debuggable
+// - Asynchronous rebuilds (optional): background thread, no stall, signal completion
+// - Temporary one-time cmd buffers for uploads/hot-reload (sync mode)
 // - Full D&D dice support (AABB approximations)
 // - Geometry hot-reload for meshes
 // - Instance transforms per-object
-// - No fences/semaphores — vkQueueWaitIdle for sync
-// Empire stays predictable, debuggable, main-thread pure.
+// - inst.mask = 0xFF everywhere (vestigial — frame-free persistent tracing)
+// - Explicit sType on VkAccelerationStructureBuildSizesInfoKHR
+// Empire stays predictable, debuggable — pink photons breathe free
 // =============================================================================
 
 #pragma once
@@ -20,6 +21,8 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <future>
+#include <optional>
 
 #include "engine/GLOBAL/MeshLoader.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
@@ -144,6 +147,10 @@ private:
     bool pendingBlasBuilds = true;
     bool proceduralDirty   = true;
     bool initialized       = false;
+
+    // Async rebuild support (only used when Options::LAS::SYNC_REBUILD == false)
+    std::optional<std::promise<std::tuple<VkAccelerationStructureKHR, uint64_t, bool>>> rebuildPromise;
+    std::optional<std::future<std::tuple<VkAccelerationStructureKHR, uint64_t, bool>>> rebuildFuture;
 
     static constexpr uint32_t MAX_INSTANCES   = 131072;
     static constexpr uint32_t MAX_PROCEDURALS = 131072;

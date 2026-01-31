@@ -1,9 +1,11 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 24, 2026
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL — JANUARY 30, 2026
 // OPTIONS MENU — MINIMAL, FACTUAL, DEVELOPER-FIRST
-// EARTH ONLY — ONE SUN, ONE MOON | ATMOSPHERIC SHADERS | LINEAR TILING DEFAULT OFF
-// CAMERA PRESERVED | AUDIO EXPANDED (CHANNELS, HZ, BUFFER) | PINK PHOTONS ETERNAL
-// EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
+// - Synchronous / Asynchronous LAS rebuild toggle (Options::LAS::SYNC_REBUILD)
+// - All other options preserved — pink photons eternal
+// - Earth only — one sun, one moon | atmospheric shaders | linear tiling default OFF
+// - Camera preserved | audio expanded | validation on by default
+// Empire unbroken — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
@@ -13,9 +15,14 @@
 
 namespace Options {
 
+// ── LAS (Light Acceleration System) — sync vs async rebuild toggle
+namespace LAS {
+    inline bool SYNC_REBUILD = true;  // true = synchronous (brief stall, main-thread pure)
+                                      // false = asynchronous (threaded rebuild, no stall)
+                                      // Default: true — predictable, debuggable, no threading bugs
+}
+
 // ── PERFORMANCE & RENDERING (only the stuff that matters)
-// Linear tiling default OFF — max shader perf (optimal tiling)
-// Turn on only for predictable memory / BufferManager debugging
 namespace Rendering {
     inline bool    ACCUMULATION              = true;      // Temporal reprojection + accumulation
     inline bool    ADAPTIVE_SAMPLING         = true;      // Reduce samples in stable areas
@@ -106,8 +113,9 @@ namespace Debug {
 } // namespace Options
 
 // =============================================================================
-// FINAL CONFIG — JANUARY 24, 2026
-// - Added Rendering::DIRECT_SWAPCHAIN_WRITE toggle — zero-copy bleed when driver allows
+// FINAL CONFIG — JANUARY 30, 2026
+// - Added LAS::SYNC_REBUILD toggle — true = synchronous (brief stall, main-thread pure)
+//                                false = asynchronous (threaded rebuild, no stall)
 // - Earth only: one sun, one moon — stars via real atmospheric shaders
 // - Linear tiling DEFAULT OFF — max shader perf gains first
 // - Audio expanded: channels, sample rate, buffer size, haptics

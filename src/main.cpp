@@ -212,7 +212,7 @@ int main(int, char**) {
     RTX::loadInstanceExtensions(instance);
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
+    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
         std::print("[FATAL] Surface creation failed: {}\n", SDL_GetError());
         apocalypse("Surface creation failed");
     }

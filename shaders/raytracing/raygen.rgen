@@ -1,51 +1,36 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : require
-#extension GL_EXT_buffer_reference : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 #extension GL_EXT_scalar_block_layout : require
-
-// No layout(local_size_*) here — this is NOT a compute shader!
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 layout(location = 0) rayPayloadEXT vec3 hitValue;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
 
-layout(set = 0, binding = 2) uniform CameraUBO {
-    mat4 viewInverse;
-    mat4 projInverse;
-    vec4 cameraPos;
-    vec4 prevCameraPos;
-    float exposure;
-    float totalTime;
-    uint randomSeed;
-    uint maxDepth;
-} camera;
-
-layout(set = 0, binding = 3) readonly buffer Materials {
-    vec4 albedo;
-    vec4 emissive;
-    vec4 metallicRoughness;     // .x = metallic, .y = roughness
-    vec4 padding;
-} materials[];
-
 layout(push_constant) uniform PushConstants {
     float totalTime;
 } pc;
 
-// Simple RNG using totalTime + pixel coordinates
-uint rngState = uint(gl_LaunchIDEXT.x * 73856093u ^ gl_LaunchIDEXT.y * 19349663u ^ uint(pc.totalTime * 1000000.0));
-uint rng() {
-    rngState ^= rngState << 13;
-    rngState ^= rngState >> 17;
-    rngState ^= rngState << 5;
-    return rngState;
-}
+struct CameraSceneData {
+    mat4 viewInverse;
+    mat4 projInverse;
+    mat4 view;
+    mat4 proj;
+    vec4 cameraPos;
+    vec4 prevCameraPos;
+    float exposure;
+    float totalTime;        // duplicated for shader convenience
+    uint randomSeed;
+    uint maxDepth;
+    uint padding[2];
+};
 
-float rand() {
-    return float(rng()) / 4294967295.0;
-}
+layout(set = 0, binding = 2) uniform CameraUBO {
+    CameraSceneData camera;
+} cameraUBO;
 
 void main()
 {
@@ -53,19 +38,32 @@ void main()
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
 
     vec2 d = inUV * 2.0 - 1.0;
-    vec4 origin = camera.viewInverse * vec4(0, 0, 0, 1);
-    vec4 target = camera.projInverse * vec4(d.x, d.y, 1, 1);
-    vec4 direction = camera.viewInverse * vec4(normalize(target.xyz), 0);
+    vec4 target = cameraUBO.camera.projInverse * vec4(d.x, d.y, 1.0, 1.0);
+    vec3 direction = normalize((cameraUBO.camera.viewInverse * vec4(target.xyz, 0.0)).xyz);
+
+    vec3 origin = cameraUBO.camera.cameraPos.xyz;
 
     uint rayFlags = gl_RayFlagsOpaqueEXT;
     uint cullMask = 0xff;
-    float tmin = 0.001;
-    float tmax = 10000.0;
+    float tMin = 0.001;
+    float tMax = 10000.0;
 
     traceRayEXT(topLevelAS, rayFlags, cullMask,
-                0 /* sbtRecordOffset */, 0 /* sbtRecordStride */, 1 /* missIndex */,
-                origin.xyz, tmin, direction.xyz, tmax, 0);
+                /* sbtRecordOffset */ 0,
+                /* sbtRecordStride */ 1,
+                /* missIndex */ 0,
+                origin, tMin, direction, tMax, /* payload */ 0);
 
-    vec3 finalColor = hitValue * camera.exposure;
-    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(finalColor, 1.0));
+    // Simple pink test color + time-based breathing
+    vec3 color = hitValue;
+    float pulse = 0.5 + 0.5 * sin(pc.totalTime * 1.618 + inUV.x * 10.0 + inUV.y * 7.0);
+    color = mix(color, vec3(0.9, 0.3, 0.6), pulse * 0.4);
+
+    // Add subtle noise for visibility
+    uint seed = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * 8192u + uint(pc.totalTime * 1000.0);
+    seed = seed * 1664525u + 1013904223u;
+    float noise = float(seed) / 4294967295.0;
+    color += (noise - 0.5) * 0.05;
+
+    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1.0));
 }

@@ -2,51 +2,42 @@
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
-hitAttributeEXT vec3 attribs;
+// PUSH CONSTANT — must be declared in EVERY shader that uses it
+layout(push_constant) uniform PushConstants {
+    float totalTime;
+} pc;
 
-layout(set = 0, binding = 3) readonly buffer Materials {
+layout(location = 0) rayPayloadInEXT vec3 hitValue;
+
+hitAttributeEXT vec3 attribs; // barycentrics
+
+struct Material {
     vec4 albedo;
     vec4 emissive;
-    vec4 metallicRoughness;     // .x = metallic, .y = roughness
-} materials[];
+};
 
-layout(set = 0, binding = 7) readonly buffer LivingWorld {
-    vec4 sunDirAndIntensity;    // .xyz = direction, .w = intensity
-} world;
+layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
+    Material materials[];
+} materialBuffer;
 
 void main()
 {
-    uint matIndex = gl_InstanceID;
+    // Get material from instance custom index
+    uint matIndex = gl_InstanceCustomIndexEXT;
+    vec3 albedo = materialBuffer.materials[matIndex].albedo.rgb;
 
-    vec3 albedo = materials[matIndex].albedo.rgb;
-    vec3 emissive = materials[matIndex].emissive.rgb;
-    float metallic = materials[matIndex].metallicRoughness.x;
-    float roughness = materials[matIndex].metallicRoughness.y;
+    // Fake normal from ray direction for quick test lighting
+    vec3 normal = normalize(-gl_WorldRayDirectionEXT); // flip for visibility
+    vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+    float ndotl = max(0.0, dot(normal, lightDir));
 
-    vec3 normal = normalize(gl_WorldRayDirectionEXT);  // placeholder
+    // Simple lit color + pink tint
+    vec3 color = albedo * (0.2 + 0.8 * ndotl);
+    color += vec3(0.8, 0.2, 0.5) * 0.15; // pink glow
 
-    vec3 lightDir = normalize(world.sunDirAndIntensity.xyz);
-    float sunIntensity = world.sunDirAndIntensity.w;
+    // Modulate with time for breathing (using push constant)
+    float pulse = 0.5 + 0.5 * sin(pc.totalTime * 1.618 + gl_HitTEXT * 10.0);
+    color *= pulse;
 
-    float NdotL = max(dot(normal, lightDir), 0.0);
-
-    vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 kD = albedo * (1.0 - metallic);
-
-    vec3 viewDir = -gl_WorldRayDirectionEXT;
-    vec3 halfVec = normalize(lightDir + viewDir);
-    float NdotH = max(dot(normal, halfVec), 0.0);
-
-    float a = roughness * roughness;
-    float D = a * a / (NdotH * NdotH * (a * a - 1.0) + 1.0);
-    D /= 3.141592653589793 * D * D;
-
-    vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(viewDir, halfVec), 0.0), 5.0);
-
-    vec3 specular = F * D * NdotL * NdotH / max(4.0 * max(NdotL, 0.001), 0.000001);
-
-    vec3 direct = (kD / 3.141592653589793 + specular) * NdotL * sunIntensity;
-
-    hitValue = direct + emissive;
+    hitValue = color;
 }
