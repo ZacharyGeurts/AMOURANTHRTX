@@ -1,24 +1,25 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.62
-// PIPELINEMANAGER HEADER — NUCLEAR ZERO-COST RTX + COMPUTE EDITION
-// VK_EXT_DESCRIPTOR_BUFFER MODE | NO DESCRIPTOR SETS | MEMCPY UPDATES
-// SINGLE ETERNAL DESCRIPTOR BUFFER | FRAME-FREE TRACE & UPDATE
-// LIVING WORLD COMPUTE SUPPORT (living_world.spv) | MATERIALS ACTIVE
-// PUSH CONSTANT: 4 BYTES ONLY (time float) | NO DT | MAX DRIVER FRIENDLINESS
+// AMOURANTH RTX Engine — Pipeline Manager Header
+// Ray tracing + compute pipeline, SBT, eternal descriptor buffer
+// Version 30.10 — January 30, 2026 — descriptor buffer empire
+// - VK_EXT_descriptor_buffer only | no sets | memcpy updates
+// - Eternal mapped descriptor buffer | frame-free trace
+// - Living world compute (binding 7) | materials (binding 3)
+// - Push constant: 4 bytes (totalTime float)
+// - SBT forged once | dummy TLAS for startup
+// Empire stable — pink photons bindless & breathing free
 // =============================================================================
 
 #pragma once
 
 #include "engine/GLOBAL/RTXHandler.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/BufferManager.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
 #include "engine/GLOBAL/Extensions.hpp"
+#include "engine/GLOBAL/logging.hpp"
 
 #include <vulkan/vulkan.h>
 #include <vector>
-#include <string>
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -28,21 +29,14 @@ namespace RTX {
 struct Extensions;
 extern Extensions g_ext;
 
+// Minimal update struct — only what's actually written in .cpp
 struct RTDescriptorUpdate {
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
     VkBuffer ubo = VK_NULL_HANDLE;
     VkDeviceSize uboSize = 0;
     VkImageView rtOutputView = VK_NULL_HANDLE;
-    std::vector<VkImageView> accumulationViews;
-    std::vector<VkImageView> nexusScoreViews;
     VkBuffer materialsBuffer = VK_NULL_HANDLE;
     VkDeviceSize materialsSize = 0;
-    VkSampler blueNoiseSampler = VK_NULL_HANDLE;
-    VkImageView blueNoiseView = VK_NULL_HANDLE;
-    VkBuffer additionalStorageBuffer = VK_NULL_HANDLE;
-    VkDeviceSize additionalStorageSize = 0;
-    VkBuffer stoneKeyBuffer = VK_NULL_HANDLE;
-    VkDeviceSize stoneKeySize = 0;
 };
 
 class PipelineManager {
@@ -57,26 +51,25 @@ public:
 
     void createPipelineLayout();
     void createRayTracingPipeline();
-    void createComputePipeline();  // living world breathing
-    void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd);
-    void writeRTDescriptorsToBuffer(const RTDescriptorUpdate& updateInfo) noexcept;
-    void forgeRTXPipeline(VkCommandPool commandPool, VkQueue graphicsQueue, VkCommandBuffer mainCmd);
+    void createComputePipeline();           // on-demand for living world
+    void createShaderBindingTable(VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd = VK_NULL_HANDLE);
 
-    // Dispatch living world compute — called every pew before trace
+    void writeRTDescriptorsToBuffer(const RTDescriptorUpdate& updateInfo) noexcept;
+
     void dispatchLivingWorld(VkCommandBuffer cmd, float totalTime) noexcept;
+    void traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t height);
 
     VkShaderModule loadShader(const std::string& path) const;
 
-    // ZERO-COST TRACE — called directly from persistent command buffer
-    void traceRays(VkCommandBuffer cmd, uint32_t width, uint32_t height);
+    void cacheDeviceProperties();
 
-    static std::atomic<bool>     g_pipelineNeedsRebuild;
+    [[nodiscard]] static PipelineManager& instance() noexcept {
+        static PipelineManager inst;
+        return inst;
+    }
 
-    // Accessors
-    [[nodiscard]] VkPipeline       getPipeline() const;
-    [[nodiscard]] VkPipelineLayout getPipelineLayout() const;
-
-    [[nodiscard]] VkDeviceSize   sbtAddress() const noexcept { return sbtAddress_; }
+    // SBT accessors for traceRays
+    [[nodiscard]] VkDeviceSize sbtAddress() const noexcept { return sbtAddress_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& raygenRegion() const noexcept { return raygenSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& missRegion() const noexcept { return missSbtRegion_; }
     [[nodiscard]] const VkStridedDeviceAddressRegionKHR& hitRegion() const noexcept { return hitSbtRegion_; }
@@ -84,20 +77,9 @@ public:
 
     [[nodiscard]] VkAccelerationStructureKHR dummyTLAS() const noexcept { return dummyTLAS_.get(); }
 
-    [[nodiscard]] static PipelineManager& instance() noexcept {
-        static PipelineManager inst;
-        return inst;
-    }
+    static std::atomic<bool> g_pipelineNeedsRebuild;
 
-    void cacheDeviceProperties();
-
-    static inline bool s_crownForged = false;
     static inline bool s_eternalSbtForged = false;
-
-    VkStridedDeviceAddressRegionKHR raygenSbtRegion_{};
-    VkStridedDeviceAddressRegionKHR missSbtRegion_{};
-    VkStridedDeviceAddressRegionKHR hitSbtRegion_{};
-    VkStridedDeviceAddressRegionKHR callableSbtRegion_{};
 
 private:
     static constexpr std::array<VkDescriptorSetLayoutBinding, 9> kMainBindings{{
@@ -109,12 +91,13 @@ private:
          VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
         {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // Materials — active
+         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR}, // Materials
         {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
          VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
         {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR},
         {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // LivingWorldBuffer
+         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // LivingWorldBuffer
         {8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
          VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR}, // MaterialOverrides
         {9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
@@ -127,13 +110,18 @@ private:
 
     Handle<VkPipelineLayout>      rtPipelineLayout_;
     Handle<VkPipeline>            rtPipeline_;
-    Handle<VkPipeline>            computePipeline_;  // living world breathing
+    Handle<VkPipeline>            computePipeline_;
 
     Handle<VkBuffer>              sbtBuffer_;
-    Handle<VkDeviceMemory>        sbtMemory_;  // Manual SBT cleanup
+    Handle<VkDeviceMemory>        sbtMemory_;
 
     VkDeviceSize                  sbtAddress_{0};
     VkDeviceSize                  sbtSize_{0};
+
+    VkStridedDeviceAddressRegionKHR raygenSbtRegion_{};
+    VkStridedDeviceAddressRegionKHR missSbtRegion_{};
+    VkStridedDeviceAddressRegionKHR hitSbtRegion_{};
+    VkStridedDeviceAddressRegionKHR callableSbtRegion_{};
 
     std::vector<Handle<VkShaderModule>> shaderModules_;
 
@@ -145,20 +133,16 @@ private:
     Handle<VkDeviceMemory>            dummyAccelMemory_;
     Handle<VkAccelerationStructureKHR> dummyTLAS_;
 
-    // Descriptor buffer members (eternal, mapped, growable)
+    // Eternal descriptor buffer (mapped, host-coherent)
     uint64_t descriptorBufferHandle_ = 0;
     void* descriptorMapped_ = nullptr;
     VkDeviceAddress descriptorBufferAddress_ = 0;
-    VkDeviceSize currentMappedSize_ = 0;      // Current total mapped bytes
-    VkDeviceSize currentWriteOffset_ = 0;     // Next write position
 
     std::array<VkDeviceSize, kMainBindings.size()> bindingOffsets_{};
     VkPhysicalDeviceDescriptorBufferPropertiesEXT descProps_{};
 
     VkAccelerationStructureKHR createDummyTLAS();
-
     void cacheDescriptorProperties();
-    void growDescriptorBuffer(VkDeviceSize additionalSize);  // Future: dynamic growth
 };
 
 [[nodiscard]] inline PipelineManager& pipeline() noexcept {
@@ -166,15 +150,3 @@ private:
 }
 
 } // namespace RTX
-
-// =============================================================================
-// HEADER — JANUARY 25, 2026
-// - Switched to VK_EXT_descriptor_buffer: no sets, memcpy updates via vkGetDescriptorEXT
-// - Eternal descriptor buffer (host-coherent mapped) for zero CPU overhead
-// - Removed descriptor set allocation / binding / accessors
-// - Binding via vkCmdBindDescriptorBuffersEXT + offsets
-// - Living world at 7, materials at 3 — updated via direct writes
-// - Push constant: 4 bytes only (time float) — dt killed
-// - Descriptor buffer now minimal/growable — no layout size query (trashed sets)
-// Empire upgraded — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
-// =============================================================================

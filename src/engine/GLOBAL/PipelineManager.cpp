@@ -42,6 +42,7 @@ using StoneKey::stone_compute_pipeline;
 using StoneKey::stone_rt_pipeline;
 using StoneKey::stone_pipeline_layout;
 using StoneKey::stone_seal_pipelines;
+using StoneKey::stone_seal_rtprops;         // Fixes the compiler error on stone_seal_rtprops
 
 using BufferManager::BufferInfo;
 using BufferManager::align_up;
@@ -727,7 +728,7 @@ void RTX::PipelineManager::cacheDeviceProperties()
         throw std::runtime_error("Ray tracing unsupported");
     }
 
-    StoneKey::stone_seal_rtprops(rtProps);
+    stone_seal_rtprops(rtProps);  // Now resolves correctly thanks to the using declaration
 
     cached = true;
 

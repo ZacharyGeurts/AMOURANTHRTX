@@ -32,6 +32,7 @@
 #include <chrono>
 
 using StoneKey::stone_device;
+using StoneKey::stone_graphics_family;
 using StoneKey::stone_graphics_queue;
 using StoneKey::stone_swapchain;
 
@@ -204,7 +205,7 @@ void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
     VkCommandPoolCreateInfo info{};
     info.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     info.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    info.queueFamilyIndex = StoneKey::stone_graphics_family();
+    info.queueFamilyIndex = stone_graphics_family();
 
     VK_CHECK(vkCreateCommandPool(stone_device(), &info, nullptr, &transientCmdPool_));
 }

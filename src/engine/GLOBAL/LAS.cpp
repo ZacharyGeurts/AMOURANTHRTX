@@ -1,17 +1,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
-// Singleton with toggleable sync/async rebuilds via Options::LAS::SYNC_REBUILD
-// Version 30.25 — January 30, 2026 — Sync/Async toggle support added
-// - Synchronous rebuilds (default): main-thread, brief stall, predictable/debuggable
-// - Asynchronous rebuilds (optional): background thread, no stall, signal completion
-// - Temporary one-time cmd buffers for uploads/hot-reload (sync mode)
-// - Full D&D dice support (AABB approximations)
-// - Geometry hot-reload for meshes
-// - Instance transforms per-object
-// - inst.mask = 0xFF everywhere (vestigial — frame-free persistent tracing)
-// - Explicit sType on VkAccelerationStructureBuildSizesInfoKHR
-// Empire stays predictable, debuggable — pink photons breathe free
+// Version 30.26 — January 30, 2026
 // =============================================================================
 
 #include "engine/GLOBAL/LAS.hpp"
@@ -32,13 +22,11 @@
 
 using StoneKey::stone_device;
 using StoneKey::stone_graphics_queue;
+using StoneKey::stone_graphics_family;
 using RTX::g_ext;
 
-namespace {
-    constexpr uint32_t MAX_INSTANCES       = 8192;
-    constexpr uint32_t MAX_PROCEDURALS     = 16384;
-    constexpr uint32_t MAX_TRIANGLE_MESHES = 2048;
-}
+// Fix: bring SYNC_REBUILD into scope (Options::LAS is in global namespace)
+using ::Options::LAS::SYNC_REBUILD;
 
 static VkTransformMatrixKHR convertToVkTransform(const glm::mat4& mat) {
     VkTransformMatrixKHR tm{};
@@ -54,7 +42,7 @@ RTX::LAS& RTX::LAS::instance() {
 }
 
 RTX::LAS::LAS() {
-    LOG_INFO_CAT("LAS", "v30.25 initialized — sync/async rebuilds via Options::LAS::SYNC_REBUILD");
+    LOG_INFO_CAT("LAS", "v30.26 initialized — sync/async via Options::LAS::SYNC_REBUILD");
 
     instanceBuffer = BufferManager::create(
         MAX_INSTANCES * sizeof(VkAccelerationStructureInstanceKHR),
@@ -69,7 +57,7 @@ RTX::LAS::LAS() {
         "LAS_UniversalPrimitives");
 
     proceduralPrimitives.reserve(MAX_PROCEDURALS);
-    triangleMeshes.reserve(MAX_TRIANGLE_MESHES);
+    triangleMeshes.reserve(2048);
 
     initialized = false;
     tlasDirty = true;
@@ -81,7 +69,6 @@ RTX::LAS::LAS() {
 }
 
 RTX::LAS::~LAS() {
-    // Wait for any pending async rebuild
     if (rebuildFuture.has_value() && rebuildFuture->valid()) {
         rebuildFuture->wait();
     }
@@ -108,6 +95,12 @@ RTX::LAS::~LAS() {
 void RTX::LAS::onResize() {
     clearTLAS();
     tlasDirty = true;
+}
+
+void RTX::LAS::notifySwapchainRecreated() {
+    tlasDirty = true;
+    ensureReady();
+    LOG_INFO_CAT("LAS", "Swapchain recreated → TLAS rebuild triggered");
 }
 
 VkAccelerationStructureKHR RTX::LAS::getTLAS() {
@@ -138,11 +131,9 @@ void RTX::LAS::insertASBuildToBuildBarrier(VkCommandBuffer cmd) {
 }
 
 void RTX::LAS::ensureReady() {
-    // Async mode: check if rebuild is running/completed
-    if (!Options::LAS::SYNC_REBUILD) {
+    if (!SYNC_REBUILD) {  // ← now works cleanly thanks to using declaration
         if (rebuildFuture.has_value()) {
             if (rebuildFuture->valid() && rebuildFuture->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-                // Async rebuild finished — collect results
                 try {
                     auto [newTlas, newTlasStorage, newSuccess] = rebuildFuture->get();
                     tlas = newTlas;
@@ -155,14 +146,12 @@ void RTX::LAS::ensureReady() {
                     rebuildFuture.reset();
                 }
             } else if (rebuildFuture->valid()) {
-                // Still running — return current (possibly stale) TLAS
                 LOG_INFO_CAT("LAS", "Async rebuild in progress — returning current TLAS");
                 return;
             }
         }
     }
 
-    // Sync mode or async completed — do normal rebuild if dirty
     if (initialized && !tlasDirty && !pendingBlasBuilds && !proceduralDirty && tlas != VK_NULL_HANDLE) {
         return;
     }
@@ -172,10 +161,9 @@ void RTX::LAS::ensureReady() {
         initialized = true;
     }
 
-    if (Options::LAS::SYNC_REBUILD) {
-        // Synchronous path (original)
+    if (SYNC_REBUILD) {  // ← now works cleanly
         VkCommandPool pool = VK_NULL_HANDLE;
-        VkCommandPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, StoneKey::stone_graphics_family() };
+        VkCommandPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, stone_graphics_family() };
         if (vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool) != VK_SUCCESS) return;
 
         VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -224,7 +212,6 @@ void RTX::LAS::ensureReady() {
             LOG_FATAL_CAT("LAS", "Synchronous rebuild failed");
         }
     } else {
-        // Asynchronous path — launch rebuild in background thread
         if (!rebuildFuture.has_value() || !rebuildFuture->valid()) {
             LOG_INFO_CAT("LAS", "Launching async rebuild...");
             rebuildPromise.emplace();
@@ -232,7 +219,7 @@ void RTX::LAS::ensureReady() {
 
             std::thread([this, promise = std::move(*rebuildPromise)]() mutable {
                 VkCommandPool pool = VK_NULL_HANDLE;
-                VkCommandPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, StoneKey::stone_graphics_family() };
+                VkCommandPoolCreateInfo poolCI{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, stone_graphics_family() };
                 if (vkCreateCommandPool(stone_device(), &poolCI, nullptr, &pool) != VK_SUCCESS) {
                     promise.set_value({VK_NULL_HANDLE, 0, false});
                     return;
@@ -308,7 +295,7 @@ size_t RTX::LAS::addMesh(std::unique_ptr<MeshLoader::Mesh> mesh, uint32_t materi
     VkCommandPool transientPool = VK_NULL_HANDLE;
     VkCommandBuffer uploadCmd = VK_NULL_HANDLE;
 
-    VkCommandPoolCreateInfo pci{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, StoneKey::stone_graphics_family() };
+    VkCommandPoolCreateInfo pci{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, stone_graphics_family() };
     if (vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool) != VK_SUCCESS) {
         BufferManager::destroy(vb);
         return triangleMeshes.size();
@@ -376,7 +363,7 @@ void RTX::LAS::hotReloadMesh(size_t index, std::unique_ptr<MeshLoader::Mesh> new
     VkCommandPool transientPool = VK_NULL_HANDLE;
     VkCommandBuffer uploadCmd = VK_NULL_HANDLE;
 
-    VkCommandPoolCreateInfo pci{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, StoneKey::stone_graphics_family() };
+    VkCommandPoolCreateInfo pci{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, stone_graphics_family() };
     if (vkCreateCommandPool(stone_device(), &pci, nullptr, &transientPool) != VK_SUCCESS) return;
 
     VkCommandBufferAllocateInfo ai{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, transientPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1 };
@@ -654,7 +641,7 @@ bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
         VkAccelerationStructureInstanceKHR inst{};
         inst.transform = convertToVkTransform(m.transform);
         inst.instanceCustomIndex = m.materialIndex;
-        inst.mask = 0xFF;  // Vestigial — frame-free persistent tracing always includes everything
+        inst.mask = 0xFF;
         inst.instanceShaderBindingTableRecordOffset = 0;
         inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 
@@ -671,7 +658,7 @@ bool RTX::LAS::buildHybridTLAS(VkCommandBuffer cmd) {
         VkAccelerationStructureInstanceKHR inst{};
         inst.transform = convertToVkTransform(p.transform);
         inst.instanceCustomIndex = p.materialIndex;
-        inst.mask = 0xFF;  // Vestigial — frame-free persistent tracing always includes everything
+        inst.mask = 0xFF;
         inst.instanceShaderBindingTableRecordOffset = 1;
         inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 
@@ -766,4 +753,4 @@ void RTX::LAS::createDefaultHybridScene() {
     addProceduralCylinder(glm::vec3(15, 10, 15), 2.0f, 20.0f, 4, glm::mat4(1.0f));
 
     addProceduralCone(glm::vec3(0, 15, 0), 5.0f, 10.0f, 5, glm::mat4(1.0f));
-} // nice
+}

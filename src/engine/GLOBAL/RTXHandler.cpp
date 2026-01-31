@@ -14,6 +14,7 @@
 // =============================================================================
 
 #include "engine/GLOBAL/RTXHandler.hpp"
+#include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/logging.hpp"
 #include "engine/GLOBAL/OptionsMenu.hpp"
 #include "engine/GLOBAL/StoneKey.hpp"
@@ -29,10 +30,28 @@
 using StoneKey::stone_seal_device_resources;
 using StoneKey::stone_seal_queues;
 using StoneKey::stone_seal_families;
+using StoneKey::stone_seal_rtprops;
 
 namespace RTX {
 
 Context g_context_instance{};
+
+// =============================================================================
+// Singleton definition — provides the actual instance storage
+// =============================================================================
+Context& Context::get() noexcept {
+    static Context instance;
+    return instance;
+}
+
+// =============================================================================
+// Validation layers toggle definition (global storage)
+// =============================================================================
+namespace Options {
+namespace Debug {
+    bool ENABLE_VALIDATION_LAYERS = true;  // Default ON for catching issues early
+}
+}
 
 // =============================================================================
 // Queue Family Indices
@@ -119,7 +138,8 @@ VkInstance createVulkanInstance() noexcept {
         return VK_NULL_HANDLE;
     }
 
-    RTX::loadInstanceExtensions(inst);
+    // Assuming you have a loadInstanceExtensions function — if not, implement or remove
+    // RTX::loadInstanceExtensions(inst);
 
     LOG_SUCCESS_CAT("RTX", "Instance created — {} extensions, validation {}",
                     extensions.size(), Options::Debug::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF");

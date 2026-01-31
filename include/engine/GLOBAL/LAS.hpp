@@ -2,15 +2,11 @@
 // AMOURANTH RTX Engine - Light Acceleration System (LAS)
 // Hybrid acceleration structure manager (triangle BLAS + procedural AABB BLAS → TLAS)
 // Singleton with toggleable sync/async rebuilds via Options::LAS::SYNC_REBUILD
-// Version 30.25 — January 30, 2026 — Sync/Async toggle support added
-// - Synchronous rebuilds (default): main-thread, brief stall, predictable/debuggable
-// - Asynchronous rebuilds (optional): background thread, no stall, signal completion
-// - Temporary one-time cmd buffers for uploads/hot-reload (sync mode)
-// - Full D&D dice support (AABB approximations)
-// - Geometry hot-reload for meshes
-// - Instance transforms per-object
-// - inst.mask = 0xFF everywhere (vestigial — frame-free persistent tracing)
-// - Explicit sType on VkAccelerationStructureBuildSizesInfoKHR
+// Version 30.26 — January 30, 2026
+// - Sync/Async toggle support
+// - Consistent MAX_INSTANCES / MAX_PROCEDURALS (131072)
+// - Added notifySwapchainRecreated() for swapchain recreation handling
+// Note: Options::LAS lives in global namespace — qualify as ::Options::LAS if needed
 // Empire stays predictable, debuggable — pink photons breathe free
 // =============================================================================
 
@@ -36,12 +32,12 @@ enum class GeometryType : uint32_t {
     ProceduralCylinder  = 3,
     ProceduralPlane     = 4,
     ProceduralCone      = 5,
-    ProceduralD4        = 6,   // Tetrahedron (d4)
-    ProceduralD6        = 7,   // Cube (d6)
-    ProceduralD8        = 8,   // Octahedron (d8)
-    ProceduralD10       = 9,   // Pentagonal trapezohedron (d10)
-    ProceduralD12       = 10,  // Dodecahedron (d12)
-    ProceduralD20       = 11,  // Icosahedron (d20)
+    ProceduralD4        = 6,
+    ProceduralD6        = 7,
+    ProceduralD8        = 8,
+    ProceduralD10       = 9,
+    ProceduralD12       = 10,
+    ProceduralD20       = 11,
     ProceduralSDF       = 12,
     ProceduralVolume    = 13,
     ProceduralParticles = 14,
@@ -119,6 +115,8 @@ public:
 
     void onResize();
 
+    void notifySwapchainRecreated();
+
 private:
     LAS();
     ~LAS();
@@ -148,7 +146,6 @@ private:
     bool proceduralDirty   = true;
     bool initialized       = false;
 
-    // Async rebuild support (only used when Options::LAS::SYNC_REBUILD == false)
     std::optional<std::promise<std::tuple<VkAccelerationStructureKHR, uint64_t, bool>>> rebuildPromise;
     std::optional<std::future<std::tuple<VkAccelerationStructureKHR, uint64_t, bool>>> rebuildFuture;
 
