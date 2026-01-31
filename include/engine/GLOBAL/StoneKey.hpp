@@ -88,8 +88,7 @@ namespace detail {
 
             if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] {
                 if (empire_sealed) {
-                    LOG_FATAL_CAT("EMPIRE", "StoneKey breach — empire compromised");
-                    std::abort();
+                    LOG_FATAL_CAT("EMPIRE", "StoneKey breach — early assessment");
                 }
                 return nullptr;
             }
