@@ -163,6 +163,9 @@ splash_cleanup:
 // Main — Minimal launcher — pure light takes over
 // =============================================================================
 int main(int, char**) {
+
+    install_apocalypse_handler();
+
     if (SDL_Init(SDL_INIT_EVENTS) == 0) {
         std::print("[FATAL] Early SDL init failed: {}\n", SDL_GetError());
         return 1;

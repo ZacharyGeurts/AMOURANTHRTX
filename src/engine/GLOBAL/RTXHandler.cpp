@@ -27,6 +27,7 @@
 #include <vector>
 
 // StoneKey accessors & sealers — using at top, no qualification
+using StoneKey::stone_device;
 using StoneKey::stone_seal_device_resources;
 using StoneKey::stone_seal_queues;
 using StoneKey::stone_seal_families;
@@ -321,7 +322,7 @@ void writeAccelerationStructureDescriptor(
     write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
 
-    vkUpdateDescriptorSets(StoneKey::stone_device(), 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(stone_device(), 1, &write, 0, nullptr);
 }
 
 } // namespace RTX

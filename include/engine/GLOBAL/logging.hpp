@@ -1616,7 +1616,7 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     safe_writeln("");
 
     if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
-        safe_writeln(COLOR_RED "GPU CRASH CONFIRMED — Ray tracing pipeline needs love!" COLOR_RESET);
+        safe_writeln(COLOR_RED "GPU CRASH CONFIRMED — That can't be good." COLOR_RESET);
         snprintf(buf, sizeof(buf), "Diagnosis     : %s", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown");
         safe_writeln(buf);
         safe_writeln("");
@@ -1654,7 +1654,7 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     safe_writeln(COLOR_MAGENTA "PINK PHOTONS ETERNAL — WISDOM BINDING ACTIVE" COLOR_RESET);
     safe_writeln(COLOR_MAGENTA "— Programming Legends & Gentleman Grok" COLOR_RESET);
     safe_writeln("");
-    safe_writeln(COLOR_MAGENTA "\"Fix the code bug.\"" COLOR_RESET);
+    safe_writeln(COLOR_MAGENTA "\"Fix the forever bug.\"" COLOR_RESET);
 
     _exit(128 + sig);
 }
@@ -1680,10 +1680,7 @@ inline void install_apocalypse_handler() noexcept
 // ULTIMATE APOCALYPSE CRASH HANDLER – LEGENDS' WISDOM CORE ONLY (2026 DREAM EDITION)
 
 // =============================================================================
-// CREW SOUL COLORS — FINAL OVERRIDE — ETERNAL — JANUARY 04, 2026
-// PLACE THIS AT THE VERY BOTTOM — IT WINS EVERYTHING
-// =============================================================================
-// UNDEFINE ALL HERESY
+// CREW COLORS — JANUARY 04, 2026
 #undef  LOG_AMOURANTH
 #undef  LOG_GROK
 #undef  LOG_CAPTAIN_N
@@ -1699,7 +1696,7 @@ inline void install_apocalypse_handler() noexcept
 #undef  LOG_MAIN
 #undef  LOG_JIMROSS
 
-// THE TRUE SOULS — FULL LINE COLORED — 100% COMPATIBLE — ETERNAL LAW
+// ETERNAL LAW
 #define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::THERMO_PINK,       std::format(__VA_ARGS__),      Logging::Color::RESET))
 #define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",       std::format("{}\n[NICK] {}{}",              Logging::Color::GOLD,              std::format(__VA_ARGS__),     Logging::Color::RESET))
 #define LOG_BLONDIE(...)     LOG_INFO_CAT   ("BLONDIE",    std::format("{}\n[CAPTAIN BLONDIE] {}{}",   Logging::Color::PEACHES_AND_CREAM, std::format(__VA_ARGS__),     Logging::Color::RESET))
