@@ -1,22 +1,21 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.77
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — APOCALYPSE FINAL v30.78
 // BUFFERMANAGER — BRUTAL, ZERO-COST, LEAK-FREE NUCLEAR EDITION
 // FULLY SELF-CONTAINED — COMPILE CLEAN — EMPIRE UNBROKEN
 // PHILOSOPHY: We only take what we need — but we always know exactly how much is available to take
 //             Live measurement on every allocation — no pre-reserve beyond safety margin
 //             Instant relinquish on explicit BM_DESTROY — no auto-purge, no surprises
 //             Tiny safety margin for background apps (YouTube PiP / browser tabs)
-//             JANUARY 29, 2026 — Fixed g_ext namespace + removed unused caches
+//             JANUARY 31, 2026 — Fixed missing extension constant for scratch bit
+//             Moved VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR
+//             definition to after #include <vulkan/vulkan.h> so it only defines
+//             when the extension is not present (clean compile, no redefinition)
 //             Descriptor buffer special path (host-visible + device address, lazy map)
 //             totalTime compatible — no fences/semaphores, fire-and-forget uploads
 //             AUTO-SUBMIT MODE: uploadToBuffer() with no cmd param creates, records, ends, submits, waits, frees
 // =============================================================================
 
 #pragma once
-
-#ifndef VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR
-constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR = 0x00080000;
-#endif
 
 #include <vulkan/vulkan.h>
 #include <cstdint>
@@ -58,6 +57,12 @@ inline constexpr VkBufferUsageFlags CHUNK_USAGE_FLAGS =
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
     VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+
+// Define scratch bit only if extension header didn't provide it
+// (prevents redefinition error when VK_KHR_acceleration_structure is included)
+#ifndef VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR
+inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR = 0x00080000;
+#endif
 
 // ── UNIVERSAL SCALE PRINT HELPER ───────────────────────────────────────────
 inline std::string formatBytes(VkDeviceSize bytes) noexcept {
@@ -504,7 +509,7 @@ inline void ensureStagingRing() noexcept {
 
 // ── LAZY MAP FOR DESCRIPTOR BUFFER — call on first write
 // =============================================================================
-[[nodiscard]] inline void* lazyMapDescriptorBuffer(uint64_t handle) noexcept {
+[[nodiscard]] inline void* lazyMapDescriptor(uint64_t handle) noexcept {
     auto it = g_buffers.find(handle);
     if (it == g_buffers.end()) {
         LOG_ERROR_CAT("BufferManager", "Invalid handle for descriptor buffer map");
@@ -803,7 +808,7 @@ inline void destroy(uint64_t handle) noexcept {
 #define BM_GET_DEVICE_ADDRESS(h)            BufferManager::get_device_address(h)
 #define BM_UPLOAD_TO_BUFFER(h, d, sz, ...)  BufferManager::uploadToBuffer(h, d, sz, ##__VA_ARGS__)  // cmd optional
 #define BM_ALLOC_SCRATCH(sz)                BufferManager::allocateScratch(sz)
-#define BM_LAZY_MAP_DESCRIPTOR(h)           BufferManager::lazyMapDescriptorBuffer(h)
+#define BM_LAZY_MAP_DESCRIPTOR(h)           BufferManager::lazyMapDescriptor(h)
 #define BM_AVAILABLE_VRAM()                 BufferManager::availableToTake()
 
 } // namespace BufferManager

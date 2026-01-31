@@ -1,15 +1,12 @@
 // =============================================================================
-// AMOURANTH RTX Engine - Vulkan Renderer
+// AMOURANTH RTX Engine - Vulkan Renderer Implementation
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.78 — January 30, 2026 — Synchronous LAS integration + polish
-// - totalTime monolith drives all timing & accumulation
-// - Acquire semaphore waited in submit and present (safe double-wait)
-// - Final PRESENT_SRC_KHR transition in main render cmd buffer
-// - Ring buffers reset + reused — no free while pending
-// - No per-image binary semaphores
-// - Cached stone_device(), stone_graphics_queue(), stone_swapchain() per frame
-// - Prevents device lost from StoneKey rapid changes
-// - LAS rebuild triggered automatically via getTLAS() — no explicit requests
+// Version 30.80 — January 31, 2026 — Flattened Pipeline integration complete
+// - Direct calls to Pipeline:: namespace functions
+// - RTDescriptorUpdate is now global (defined in Pipeline.hpp)
+// - CMD_RING_SIZE defined in header (no longer needed here)
+// - All pipelineManager_ references removed
+// - PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include "engine/GLOBAL/VulkanRenderer.hpp"
@@ -66,7 +63,7 @@ struct CameraSceneData {
 };
 
 // =============================================================================
-// VulkanRenderer — Pure light ray tracing engine (descriptor-buffer edition)
+// VulkanRenderer implementation
 // =============================================================================
 RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
     : window_(window),
@@ -83,7 +80,6 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
       hdrOutputView_(VK_NULL_HANDLE),
       hdrOutputMemory_(VK_NULL_HANDLE),
       cmdRing_(),
-      pipelineManager_(),
       needsDescriptorUpdate_(true),
       needsSwapchainRecreate_(false)
 {
@@ -101,20 +97,20 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     VK_CHECK(vkAllocateCommandBuffers(stone_device(), &allocInfo, cmdRing_.data()));
 
-    // Camera UBO via BufferManager macro
+    // Camera UBO
     BM_CREATE(cameraUBOHandle_, sizeof(CameraSceneData),
               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
               "CameraUBO");
 
-    // Default materials via descriptor buffer macro
+    // Default materials
     std::array<Material, 1> defaultMats{};
     defaultMats[0].albedo = glm::vec4(1.0f);
     defaultMats[0].emissive = glm::vec4(0.0f);
 
-    defaultMaterialsHandle_ = BufferManager::createDescriptorBuffer(sizeof(defaultMats), "DefaultMaterials");
-    void* mapped = BufferManager::lazyMapDescriptorBuffer(defaultMaterialsHandle_);
+    BM_CREATE_DESCRIPTOR(defaultMaterialsHandle_, sizeof(defaultMats), "DefaultMaterials");
+    void* mapped = BM_LAZY_MAP_DESCRIPTOR(defaultMaterialsHandle_);
     if (mapped) {
         std::memcpy(mapped, defaultMats.data(), sizeof(defaultMats));
     }
@@ -159,16 +155,16 @@ RTX::VulkanRenderer::VulkanRenderer(int width, int height, SDL_Window* window)
 
     SwapchainManager::ensureReady(width_, height_);
 
-    // Trigger initial TLAS build (synchronous, happens once)
+    // Initial TLAS build
     LAS::instance().getTLAS();
 
-    pipelineManager_.createPipelineLayout();
-    pipelineManager_.createRayTracingPipeline();
-    pipelineManager_.createComputePipeline();
+    Pipeline::create_pipeline_layout();
+    Pipeline::create_ray_tracing_pipeline();
+    Pipeline::create_compute_pipeline();
 
     VkCommandBuffer oneTimeCmd = getOneTimeCommandBuffer();
     if (oneTimeCmd) {
-        pipelineManager_.createShaderBindingTable(transientCmdPool_, stone_graphics_queue(), oneTimeCmd);
+        Pipeline::create_shader_binding_table(transientCmdPool_, stone_graphics_queue(), oneTimeCmd);
 
         VkSubmitInfo submit{};
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -197,6 +193,8 @@ RTX::VulkanRenderer::~VulkanRenderer() {
     BM_DESTROY(defaultMaterialsHandle_);
 
     vkDestroyCommandPool(stone_device(), transientCmdPool_, nullptr);
+
+    Pipeline::shutdown();
 }
 
 void RTX::VulkanRenderer::createTransientCommandPool() noexcept {
@@ -297,9 +295,9 @@ void RTX::VulkanRenderer::updateGlobalDescriptorBuffer() noexcept {
     update.ubo              = BM_GET_BUFFER(cameraUBOHandle_);
     update.uboSize          = sizeof(CameraSceneData);
     update.materialsBuffer  = BM_GET_BUFFER(defaultMaterialsHandle_);
-    update.materialsSize    = BM_GET(defaultMaterialsHandle_)->size;
+    update.materialsSize    = sizeof(Material);
 
-    pipelineManager_.writeRTDescriptorsToBuffer(update);
+    Pipeline::write_rt_descriptors(update);
     needsDescriptorUpdate_ = false;
 }
 
@@ -312,7 +310,6 @@ void RTX::VulkanRenderer::pew() noexcept {
 
     double total_sec = RTX::TotalTime::get().seconds();
 
-    // Cache critical handles once per frame — avoids StoneKey races
     VkDevice cachedDevice = stone_device();
     VkQueue cachedGraphicsQueue = stone_graphics_queue();
     VkSwapchainKHR cachedSwapchain = stone_swapchain();
@@ -339,11 +336,9 @@ void RTX::VulkanRenderer::pew() noexcept {
         return;
     }
 
-    // Get TLAS — this may trigger a synchronous rebuild if scene changed
     VkAccelerationStructureKHR tlas = LAS::instance().getTLAS();
     if (tlas == VK_NULL_HANDLE) {
         LOG_WARN_CAT("RENDERER", "Invalid TLAS — skipping trace this frame");
-        // Optional: present black frame or previous result
         return;
     }
 
@@ -357,7 +352,7 @@ void RTX::VulkanRenderer::pew() noexcept {
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &begin));
 
-    pipelineManager_.dispatchLivingWorld(cmd, static_cast<float>(total_sec));
+    Pipeline::dispatch_living_world(cmd, static_cast<float>(total_sec));
 
     VkMemoryBarrier mb{};
     mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -372,7 +367,7 @@ void RTX::VulkanRenderer::pew() noexcept {
     }
 
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-    pipelineManager_.traceRays(cmd, width_, height_);
+    Pipeline::trace_rays(cmd, width_, height_);
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     VkImage swapImg = SwapchainManager::image(imageIndex);

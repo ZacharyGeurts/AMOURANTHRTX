@@ -1,32 +1,33 @@
 // =============================================================================
 // AMOURANTH RTX Engine - Vulkan Renderer Header
 // Pure light ray tracing core — no frames, no state, pew forever
-// Version 30.76 — January 28, 2026 — Validation-clean, minimal sync edition
-// - totalTime monolith drives all timing
+// Version 30.80 — January 31, 2026 — CMD_RING_SIZE fixed + Pipeline namespace clean
+// - No PipelineManager class member — all calls use Pipeline:: namespace functions
+// - CMD_RING_SIZE defined as constexpr (triple buffer default)
+// - Direct static calls to Pipeline system
+// - totalTime monolith drives all timing & accumulation
 // - Acquire semaphore waited in submit and present (safe double-wait)
 // - Final PRESENT_SRC_KHR transition in main render cmd buffer
 // - Ring buffers reset + reused — no free while pending
 // - No per-image binary semaphores
-// - Descriptor sets dead — eternal descriptor buffer empire
+// - Cached stone_device(), stone_graphics_queue(), stone_swapchain() per frame
+// - Prevents device lost from StoneKey rapid changes
+// - LAS rebuild triggered automatically via getTLAS() — no explicit requests
+// - PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
 
-#include "engine/GLOBAL/PipelineManager.hpp"
-#include "engine/GLOBAL/BufferManager.hpp"
-#include "engine/GLOBAL/SwapchainManager.hpp"
-#include "engine/GLOBAL/LAS.hpp"
-#include "engine/GLOBAL/logging.hpp"
-#include "engine/GLOBAL/camera.hpp"      // global CAM
-#include "engine/GLOBAL/OptionsMenu.hpp"
-
-#include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
-
-#include <array>
+#include <vulkan/vulkan.h>
 #include <vector>
 #include <chrono>
-#include <cstdint>
+
+#include "engine/GLOBAL/PipelineManager.hpp"
+#include "engine/GLOBAL/SwapchainManager.hpp"
+#include "engine/GLOBAL/LAS.hpp"
+#include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/BufferManager.hpp"
 
 namespace RTX {
 
@@ -37,64 +38,38 @@ public:
 
     void pew() noexcept;
 
-    [[nodiscard]] bool isMinimized() const noexcept { return minimized_; }
-    [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }
-    [[nodiscard]] double getLifetimeSeconds() const noexcept { return RTX::TotalTime::get().seconds(); }
-
 private:
-    // Core members — ordered to match constructor initializer list
-    SDL_Window*                     window_             = nullptr;
-    int                             width_              = 0;
-    int                             height_             = 0;
+    static constexpr uint32_t CMD_RING_SIZE = 3;  // Triple buffer — standard for low-latency
 
-    bool                            minimized_          = false;
-    bool                            destroyed_          = false;
+    SDL_Window* window_;
+    int width_;
+    int height_;
+    bool minimized_;
+    bool destroyed_;
 
     std::chrono::steady_clock::time_point last_time_;
 
-    // Fixed command buffer ring — self-disposing via reset on reuse
-    static constexpr size_t         CMD_RING_SIZE       = 64;
-    size_t                          currentRingIndex_   = 0;
+    uint32_t currentRingIndex_;
+    uint64_t defaultMaterialsHandle_;
+    uint64_t cameraUBOHandle_;
 
-    // Persistent resources (BufferManager handles + raw Vulkan caches)
-    uint64_t                        defaultMaterialsHandle_ = 0;   // BufferManager descriptor buffer handle
-    uint64_t                        cameraUBOHandle_        = 0;   // BufferManager UBO handle
-    VkBuffer                        cameraUBOBuffer_        = VK_NULL_HANDLE;  // raw VkBuffer cache
-    VkDeviceMemory                  cameraUBOMemory_        = VK_NULL_HANDLE;
+    VkCommandPool transientCmdPool_;
+    VkImage hdrOutputImage_;
+    VkImageView hdrOutputView_;
+    VkDeviceMemory hdrOutputMemory_;
 
-    VkCommandPool                   transientCmdPool_       = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> cmdRing_;
 
-    VkImage                         hdrOutputImage_         = VK_NULL_HANDLE;
-    VkImageView                     hdrOutputView_          = VK_NULL_HANDLE;
-    VkDeviceMemory                  hdrOutputMemory_        = VK_NULL_HANDLE;
+    bool needsDescriptorUpdate_;
+    bool needsSwapchainRecreate_;
 
-	std::vector<VkCommandBuffer>    cmdRing_;
-
-    PipelineManager                 pipelineManager_;
-
-    // Flags
-    bool                            needsDescriptorUpdate_   = true;   // → descriptor buffer memcpy
-    bool                            needsSwapchainRecreate_ = false;
-
-private:
     void createTransientCommandPool() noexcept;
-    [[nodiscard]] VkCommandBuffer getOneTimeCommandBuffer() noexcept;
-
+    VkCommandBuffer getOneTimeCommandBuffer() noexcept;
     void transitionImageLayout(VkCommandBuffer cmd,
                                VkImage image,
                                VkImageLayout oldLayout,
                                VkImageLayout newLayout) noexcept;
-
-    void updateGlobalDescriptorBuffer() noexcept;  // descriptor buffer update (replaces old set update)
+    void updateGlobalDescriptorBuffer() noexcept;
 };
 
 } // namespace RTX
-
-// =============================================================================
-// VULKAN RENDERER HEADER — v30.76 — JANUARY 28, 2026
-// Descriptor sets eliminated • eternal descriptor buffer • bindless empire
-// Frame-free • fixed cmd ring (reset + re-record) • minimal sync
-// BufferManager macros for all buffers • acquire semaphore for safe present
-// Deferred swapchain recreate • living world compute dispatched every pew
-// Pure light — pink photons bindless & breathing free — AMOURANTH FOREVER 💖
-// =============================================================================

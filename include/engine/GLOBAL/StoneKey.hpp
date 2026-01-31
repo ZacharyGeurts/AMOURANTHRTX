@@ -1,5 +1,5 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — STONEKEY v30.25
+// AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO — STONEKEY v30.26
 // UNBREAKABLE ZERO-COST HEADER-ONLY EMPIRE DEFENSE — FULL ACCESS GRANTED
 // FULLY HEADER-ONLY | NO .CPP | ZERO OVERHEAD | ETERNAL INTEGRITY
 // - Single global sealed flag + per-category tamper checks
@@ -9,6 +9,7 @@
 // - Mandatory stone_seal_final() after startup — final lockdown
 // - Added operator= to Obfuscated<T> for raw assignment
 // - No descriptor sets/pools — descriptor buffer empire only
+// - PipelineManager fully flattened: all state now lives here in the empire
 // PINK PHOTONS ETERNAL — EMPIRE UNBROKEN — AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -23,8 +24,6 @@
 #include <ctime>    // time
 #include <unistd.h> // getpid
 #include "engine/GLOBAL/logging.hpp"
-
-namespace RTX { class PipelineManager; }
 
 namespace StoneKey {
 
@@ -79,23 +78,28 @@ namespace detail {
             slots[3] = raw ^ keys[3];
         }
 
-        [[nodiscard]] T decrypt() const noexcept {
-            const auto& keys = get_keys();
-            uint64_t v0 = slots[0] ^ keys[0];
-            uint64_t v1 = slots[1] ^ keys[1];
-            uint64_t v2 = slots[2] ^ keys[2];
-            uint64_t v3 = slots[3] ^ keys[3];
+[[nodiscard]] T decrypt() const noexcept {
+    const auto& keys = get_keys();
+    uint64_t v0 = slots[0] ^ keys[0];
+    uint64_t v1 = slots[1] ^ keys[1];
+    uint64_t v2 = slots[2] ^ keys[2];
+    uint64_t v3 = slots[3] ^ keys[3];
 
-            if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] { // if decrypt all zeroes
-                if (empire_sealed) {
-                    LOG_FATAL_CAT("EMPIRE", "StoneKey breach — early assessment");
-                }
-                return nullptr;
-            }
-            return reinterpret_cast<T>(v0);
+    if (v0 != v1 || v0 != v2 || v0 != v3) [[unlikely]] {
+        if (empire_sealed) {
+            LOG_FATAL_CAT("EMPIRE", "StoneKey breach — early assessment");
         }
+        // For pointer types → nullptr
+        // For integer/handle types → invalid sentinel (~0ULL)
+        if constexpr (std::is_pointer_v<T>) {
+            return nullptr;
+        } else {
+            return static_cast<T>(~0ULL);  // or 0, depending on convention
+        }
+    }
+    return reinterpret_cast<T>(v0);
+}
 
-        // Added: allow direct assignment from raw T
         Obfuscated& operator=(T v) noexcept {
             encrypt(v);
             return *this;
@@ -119,7 +123,6 @@ namespace detail {
         uint32_t transfer_family = ~0u;
         uint32_t compute_family  = ~0u;
 
-        Obfuscated<RTX::PipelineManager*> pipeline;
         Obfuscated<SDL_Window*>           window;
 
         std::vector<VkImage>     images;
@@ -137,6 +140,37 @@ namespace detail {
         Obfuscated<VkPipeline> compute_pipeline;
         Obfuscated<VkPipeline> rt_pipeline;
         Obfuscated<VkPipelineLayout> pipeline_layout;
+
+        // === Pipeline system state (fully flattened) ===
+        Obfuscated<uint64_t> living_world_buffer_handle{0};
+        Obfuscated<uint64_t> descriptor_buffer_handle{0};
+        Obfuscated<void*>    descriptor_mapped{nullptr};
+
+        VkDeviceAddress      descriptor_buffer_address{0};
+        std::array<VkDeviceSize, 9> binding_offsets{};
+        VkPhysicalDeviceDescriptorBufferPropertiesEXT descriptor_props{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT
+        };
+        bool                 descriptor_props_cached = false;
+
+        bool                 eternal_sbt_forged = false;
+        VkDeviceAddress      sbt_address{0};
+        VkDeviceSize         sbt_size{0};
+        VkStridedDeviceAddressRegionKHR raygen_sbt_region{};
+        VkStridedDeviceAddressRegionKHR miss_sbt_region{};
+        VkStridedDeviceAddressRegionKHR hit_sbt_region{};
+
+        Obfuscated<VkAccelerationStructureKHR> dummy_tlas{VK_NULL_HANDLE};
+        Obfuscated<VkBuffer>                  dummy_accel_buffer{VK_NULL_HANDLE};
+        Obfuscated<VkDeviceMemory>            dummy_accel_memory{VK_NULL_HANDLE};
+
+        Obfuscated<VkDescriptorSetLayout>     main_descriptor_layout{VK_NULL_HANDLE};
+        Obfuscated<VkDescriptorSetLayout>     tex_descriptor_layout{VK_NULL_HANDLE};
+        Obfuscated<VkDescriptorSetLayout>     empty_descriptor_layout{VK_NULL_HANDLE};
+
+        uint32_t             raygen_group_count = 0;
+        uint32_t             miss_group_count = 0;
+        uint32_t             hit_group_count = 0;
 
         // Mesh members
         Obfuscated<VkBuffer>       mesh_vertex_buffer;
@@ -171,8 +205,7 @@ namespace detail {
 [[nodiscard]] inline uint32_t stone_transfer_family() noexcept { return detail::empire().transfer_family; }
 [[nodiscard]] inline uint32_t stone_compute_family()  noexcept { return detail::empire().compute_family; }
 
-[[nodiscard]] inline RTX::PipelineManager* stone_pipeline() noexcept { return detail::empire().pipeline.decrypt(); }
-[[nodiscard]] inline SDL_Window*           stone_window()   noexcept { return detail::empire().window.decrypt(); }
+[[nodiscard]] inline SDL_Window* stone_window() noexcept { return detail::empire().window.decrypt(); }
 
 [[nodiscard]] inline VkRenderPass stone_pass() noexcept { return detail::empire().pass.decrypt(); }
 [[nodiscard]] inline VkExtent2D&  stone_extent() noexcept { return detail::empire().extent; }
@@ -185,6 +218,36 @@ namespace detail {
 [[nodiscard]] inline VkPipeline stone_rt_pipeline() noexcept { return detail::empire().rt_pipeline.decrypt(); }
 [[nodiscard]] inline VkPipelineLayout stone_pipeline_layout() noexcept { return detail::empire().pipeline_layout.decrypt(); }
 
+// === Pipeline system accessors ===
+[[nodiscard]] inline uint64_t stone_living_world_buffer_handle() noexcept { return detail::empire().living_world_buffer_handle.decrypt(); }
+[[nodiscard]] inline uint64_t stone_descriptor_buffer_handle() noexcept { return detail::empire().descriptor_buffer_handle.decrypt(); }
+[[nodiscard]] inline void*    stone_descriptor_mapped() noexcept { return detail::empire().descriptor_mapped.decrypt(); }
+
+inline VkDeviceAddress& stone_descriptor_buffer_address() noexcept { return detail::empire().descriptor_buffer_address; }
+inline std::array<VkDeviceSize, 9>& stone_binding_offsets() noexcept { return detail::empire().binding_offsets; }
+inline VkPhysicalDeviceDescriptorBufferPropertiesEXT& stone_descriptor_props() noexcept { return detail::empire().descriptor_props; }
+inline bool& stone_descriptor_props_cached() noexcept { return detail::empire().descriptor_props_cached; }
+
+inline bool& stone_eternal_sbt_forged() noexcept { return detail::empire().eternal_sbt_forged; }
+inline VkDeviceAddress& stone_sbt_address() noexcept { return detail::empire().sbt_address; }
+inline VkDeviceSize& stone_sbt_size() noexcept { return detail::empire().sbt_size; }
+inline VkStridedDeviceAddressRegionKHR& stone_raygen_sbt_region() noexcept { return detail::empire().raygen_sbt_region; }
+inline VkStridedDeviceAddressRegionKHR& stone_miss_sbt_region() noexcept { return detail::empire().miss_sbt_region; }
+inline VkStridedDeviceAddressRegionKHR& stone_hit_sbt_region() noexcept { return detail::empire().hit_sbt_region; }
+
+[[nodiscard]] inline VkAccelerationStructureKHR stone_dummy_tlas() noexcept { return detail::empire().dummy_tlas.decrypt(); }
+[[nodiscard]] inline VkBuffer stone_dummy_accel_buffer() noexcept { return detail::empire().dummy_accel_buffer.decrypt(); }
+[[nodiscard]] inline VkDeviceMemory stone_dummy_accel_memory() noexcept { return detail::empire().dummy_accel_memory.decrypt(); }
+
+[[nodiscard]] inline VkDescriptorSetLayout stone_main_descriptor_layout() noexcept { return detail::empire().main_descriptor_layout.decrypt(); }
+[[nodiscard]] inline VkDescriptorSetLayout stone_tex_descriptor_layout() noexcept { return detail::empire().tex_descriptor_layout.decrypt(); }
+[[nodiscard]] inline VkDescriptorSetLayout stone_empty_descriptor_layout() noexcept { return detail::empire().empty_descriptor_layout.decrypt(); }
+
+inline uint32_t& stone_raygen_group_count() noexcept { return detail::empire().raygen_group_count; }
+inline uint32_t& stone_miss_group_count() noexcept { return detail::empire().miss_group_count; }
+inline uint32_t& stone_hit_group_count() noexcept { return detail::empire().hit_group_count; }
+
+// Mesh accessors (unchanged)
 [[nodiscard]] inline VkBuffer       stone_mesh_vertex_buffer()   noexcept { return detail::empire().mesh_vertex_buffer.decrypt(); }
 [[nodiscard]] inline VkDeviceMemory stone_mesh_vertex_memory()   noexcept { return detail::empire().mesh_vertex_memory.decrypt(); }
 [[nodiscard]] inline VkBuffer       stone_mesh_index_buffer()    noexcept { return detail::empire().mesh_index_buffer.decrypt(); }
@@ -251,10 +314,10 @@ inline void stone_seal_families(uint32_t graphics, uint32_t present, uint32_t tr
     detail::empire().compute_family = compute;
 }
 
-inline void stone_seal_pipelines(RTX::PipelineManager* pipeline, VkPipeline compute, VkPipeline rt, VkPipelineLayout layout) noexcept {
+// No PipelineManager* parameter — state is now fully internal
+inline void stone_seal_pipelines(VkPipeline compute, VkPipeline rt, VkPipelineLayout layout) noexcept {
     if (empire_sealed) {
-        if (pipeline != detail::empire().pipeline.decrypt() ||
-            compute != detail::empire().compute_pipeline.decrypt() ||
+        if (compute != detail::empire().compute_pipeline.decrypt() ||
             rt != detail::empire().rt_pipeline.decrypt() ||
             layout != detail::empire().pipeline_layout.decrypt()) {
             LOG_FATAL_CAT("EMPIRE", "Pipelines tamper attempt — empire compromised");
@@ -263,7 +326,6 @@ inline void stone_seal_pipelines(RTX::PipelineManager* pipeline, VkPipeline comp
         return;
     }
 
-    detail::empire().pipeline = pipeline;
     detail::empire().compute_pipeline = compute;
     detail::empire().rt_pipeline = rt;
     detail::empire().pipeline_layout = layout;
@@ -320,7 +382,7 @@ inline void stone_seal_final() noexcept {
     if (empire_sealed) return;
 
     empire_sealed = true;
-    LOG_AMOURANTH("STONEKEY v30.25 — FINAL EMPIRE SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
+    LOG_AMOURANTH("STONEKEY v30.26 — FINAL EMPIRE SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 }
 
 } // namespace StoneKey

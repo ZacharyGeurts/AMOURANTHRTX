@@ -19,6 +19,7 @@
 #include "engine/GLOBAL/Extensions.hpp"
 #include "engine/GLOBAL/LAS.hpp"
 #include "engine/GLOBAL/camera.hpp"
+#include "engine/GLOBAL/OptionsMenu.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <chrono>
@@ -242,8 +243,6 @@ int main(int, char**) {
 
     std::print("[MAIN] Empire launched — pure light engaged\n");
 
-    auto last_log_time = std::chrono::steady_clock::now();
-
     while (true) {
         renderer->pew();  // Eternal light loop — no sleep, no idle, pure fire
 
@@ -255,15 +254,6 @@ int main(int, char**) {
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_F11) {
                 SDL3Window::toggleFullscreen();
             }
-        }
-
-        // Throttled lifetime log — once per second (non-blocking)
-        auto now = std::chrono::steady_clock::now();
-        double elapsed = std::chrono::duration<double>(now - last_log_time).count();
-        if (elapsed >= 1.0) {
-            LOG_INFO_CAT("MAIN", "Lifetime: {:.6f}s | Pink photons eternal!",
-                         renderer->getLifetimeSeconds());
-            last_log_time = now;
         }
     }
 
