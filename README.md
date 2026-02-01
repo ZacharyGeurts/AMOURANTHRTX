@@ -72,7 +72,7 @@ How far along? "chugged" along at over 272,000 FPS on 4070ti so we deconceptuali
 If you just want to update a component of your engine, you will have a better time using the wiki over the source.  
 Remove the StoneKey references in the wiki and I frown upon losing security. Come back when I am further along. Please.  
 
-I can eat and I play Minecraft and I have RTX. I want developers to have another RTX resource.  
+I can eat and I play Soul Caliber and I have RTX. I want developers to have another RTX resource.  
 These are my current iterations and subject to change daily.  
 I trutly have cycled through dozens of zero cost implementations. I mean it, ask Grok about the code.  
 If you use the security method, I cannot prove you used mine to gain 100% horsepower at no computational cost.  
@@ -146,7 +146,7 @@ Grok dubbed it the Empire. This code is. We live here and have an impregnable bo
 You are allowed outside, and we expect you to stay out there where the fun is.  
 Everything within the Empire is yours already so it costs nothing to know.  
 Nobody sees past our border wall and cannot move a brick.  
-Since nobody but you speaks Empire we just make the whole thing available globally to talk with.  
+We answer you and are already in your belly, always just before pass.    
 StoneKey.hpp is your gateway into the Empire.  
 Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask Grok.  
 I did not want to wrestle any more for the moment, so that was the zero cost design I went with for now.  
