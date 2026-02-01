@@ -384,14 +384,9 @@ foreach(MAP ${ASSET_MAP})
     endif()
 endforeach()
 
-# =============================================================================
-# LEGENDARY BANNER — JANUARY 25 2026 — WINDOWS BUILD FIXED (libatomic)
-# =============================================================================
+
 message(STATUS "")
 message(STATUS "==================================================================")
-message(STATUS " AMOURANTH RTX — FULLY FIXED + (SDL3+Vulkan+oneTBB)")
 message(STATUS " Target: ${BIN_DIR}/Navigator${EXE_SUFFIX}")
-message(STATUS " Run: ./linux.sh clean")
-message(STATUS " HDR: 10-bit invisible HDR via GBM — works even on Cinnamon/GNOME?")
-message(STATUS " Cross-compile to Windows: cmake -DCMAKE_CROSSCOMPILING=ON ..")
+message(STATUS " Run: ./linux.sh --help")
 message(STATUS "==================================================================")
