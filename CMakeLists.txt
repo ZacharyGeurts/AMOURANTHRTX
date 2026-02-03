@@ -59,10 +59,10 @@ if(DISABLE_TRACE_AND_DEBUG_LOGS)
     add_definitions(-DDISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
-# =============================================================================
-# ADDRESS SANITIZER COMPLETELY DISABLED — STONEKEY v∞ IS DECEIVING
-# =============================================================================
-# ASan conflicts with StoneKey's intentional pointer obfuscation
+# ======================================
+# ADDRESS SANITIZER COMPLETELY DISABLED
+# ======================================
+# ASan conflicts with intentional pointer obfuscation
 # → NEVER ENABLE IT — EVER
 # Removed: -fsanitize=address,undefined,leak
 # Removed: link options
@@ -245,6 +245,7 @@ target_link_libraries(amouranth_engine PRIVATE
     dl              # Linux-only, but harmless on Windows
     pthread         # Linux-only, harmless on Windows
     m
+	stdc++exp
 )
 
 if(IS_LINUX)
@@ -269,8 +270,6 @@ endif()
 # SHADER COMPILATION — FIXED
 # =============================================================================
 set(SHADER_INCLUDE_FLAGS
-    -I${CMAKE_CURRENT_SOURCE_DIR}/include/engine/Vulkan
-    -I${CMAKE_CURRENT_SOURCE_DIR}/include/engine
     -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
 )
 set(SHADER_DEBUG_FLAGS -g -O0)
