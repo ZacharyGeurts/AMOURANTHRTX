@@ -435,12 +435,6 @@ inline RTX& rtx() noexcept {
 
 inline void stone_seal_device_resources(VkInstance i, VkDevice d, VkPhysicalDevice p,
                                         VkSurfaceKHR s, VkSwapchainKHR sc) noexcept {
-    vkh.checker(i != rtx().instance ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_device_resources - instance mismatch");
-    vkh.checker(d != rtx().device ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_device_resources - device mismatch");
-    vkh.checker(p != rtx().physical ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_device_resources - physical mismatch");
-    vkh.checker(s != rtx().surface ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_device_resources - surface mismatch");
-    vkh.checker(sc != rtx().swapchain ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_device_resources - swapchain mismatch");
-
     rtx().instance = i;
     rtx().device = d;
     rtx().physical = p;
@@ -449,11 +443,6 @@ inline void stone_seal_device_resources(VkInstance i, VkDevice d, VkPhysicalDevi
 }
 
 inline void stone_seal_queues(VkQueue graphics, VkQueue present, VkQueue compute, VkQueue transfer) noexcept {
-    vkh.checker(graphics != rtx().graphics_queue ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_queues - graphics_queue mismatch");
-    vkh.checker(present != rtx().present_queue ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_queues - present_queue mismatch");
-    vkh.checker(compute != rtx().compute_queue ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_queues - compute_queue mismatch");
-    vkh.checker(transfer != rtx().transfer_queue ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_queues - transfer_queue mismatch");
-
     rtx().graphics_queue = graphics;
     rtx().present_queue = present;
     rtx().compute_queue = compute;
@@ -461,11 +450,6 @@ inline void stone_seal_queues(VkQueue graphics, VkQueue present, VkQueue compute
 }
 
 inline void stone_seal_families(uint32_t graphics, uint32_t present, uint32_t transfer, uint32_t compute) noexcept {
-    vkh.checker(graphics != rtx().graphics_family ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_families - graphics_family mismatch");
-    vkh.checker(present != rtx().present_family ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_families - present_family mismatch");
-    vkh.checker(transfer != rtx().transfer_family ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_families - transfer_family mismatch");
-    vkh.checker(compute != rtx().compute_family ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_families - compute_family mismatch");
-
     rtx().graphics_family = graphics;
     rtx().present_family = present;
     rtx().transfer_family = transfer;
@@ -473,19 +457,12 @@ inline void stone_seal_families(uint32_t graphics, uint32_t present, uint32_t tr
 }
 
 inline void stone_seal_pipelines(VkPipeline compute, VkPipeline rt, VkPipelineLayout layout) noexcept {
-    vkh.checker(compute != rtx().compute_pipeline ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_pipelines - compute_pipeline mismatch");
-    vkh.checker(rt != rtx().rt_pipeline ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_pipelines - rt_pipeline mismatch");
-    vkh.checker(layout != rtx().pipeline_layout ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_pipelines - pipeline_layout mismatch");
-
     rtx().compute_pipeline = compute;
     rtx().rt_pipeline = rt;
     rtx().pipeline_layout = layout;
 }
 
 inline void stone_seal_window_and_pass(SDL_Window* window, VkRenderPass pass) noexcept {
-    vkh.checker(window != rtx().window ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_window_and_pass - window mismatch");
-    vkh.checker(pass != rtx().pass ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_window_and_pass - pass mismatch");
-
     rtx().window = window;
     rtx().pass = pass;
 }
@@ -505,12 +482,6 @@ inline void stone_seal_rtprops(const VkPhysicalDeviceRayTracingPipelinePropertie
 }
 
 inline void stone_seal_mesh_buffers(VkBuffer vb, VkDeviceMemory vm, VkBuffer ib, VkDeviceMemory im, uint32_t ic) noexcept {
-    vkh.checker(vb != rtx().mesh_vertex_buffer ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_mesh_buffers - vertex_buffer mismatch");
-    vkh.checker(vm != rtx().mesh_vertex_memory ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_mesh_buffers - vertex_memory mismatch");
-    vkh.checker(ib != rtx().mesh_index_buffer ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_mesh_buffers - index_buffer mismatch");
-    vkh.checker(im != rtx().mesh_index_memory ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_mesh_buffers - index_memory mismatch");
-    vkh.checker(ic != rtx().mesh_index_count ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_mesh_buffers - index_count mismatch");
-
     rtx().mesh_vertex_buffer = vb;
     rtx().mesh_vertex_memory = vm;
     rtx().mesh_index_buffer = ib;
@@ -519,8 +490,6 @@ inline void stone_seal_mesh_buffers(VkBuffer vb, VkDeviceMemory vm, VkBuffer ib,
 }
 
 inline void stone_seal_transient_pool(VkCommandPool pool) noexcept {
-    vkh.checker(pool != rtx().transient_pool ? VK_ERROR_UNKNOWN : VK_SUCCESS, "stone_seal_transient_pool - transient_pool mismatch");
-
     rtx().transient_pool = pool;
 }
 
