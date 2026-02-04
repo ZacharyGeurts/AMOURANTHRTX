@@ -121,7 +121,9 @@ int main(int, char**) {
     }
 
     uint32_t graphics_family = 0, present_family = 0, compute_family = 0, transfer_family = 0;
-    VkDevice device = createLogicalDeviceAndSelectGPU(instance, surface, &graphics_family, &present_family, &compute_family, &transfer_family);
+    VkDevice device = createLogicalDeviceAndSelectGPU(instance, surface, 
+                                                      &graphics_family, &present_family, 
+                                                      &compute_family, &transfer_family);
     if (device == VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
@@ -136,29 +138,37 @@ int main(int, char**) {
     vkGetDeviceQueue(device, compute_family, 0, &compute_queue);
     vkGetDeviceQueue(device, transfer_family, 0, &transfer_queue);
 
-    // Sealing in correct order
+    // Sealing in correct order — device + queues + families first
     stone_seal_device_resources(instance, device, rtx().physical, surface, VK_NULL_HANDLE);
     stone_seal_queues(graphics_queue, present_queue, compute_queue, transfer_queue);
     stone_seal_families(graphics_family, present_family, transfer_family, compute_family);
 
-    // Create swapchain
+    // Create swapchain early (needed for surface capabilities)
     Swapchain::create(g_window, Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
+    stone_seal_swapchain_resources(Swapchain::swapchainImages_, 
+                                   Swapchain::swapchainImageViews_, 
+                                   Swapchain::swapchainExtent_, 
+                                   Swapchain::swapchainImages_.size());
 
-    stone_seal_swapchain_resources(Swapchain::swapchainImages_, Swapchain::swapchainImageViews_, Swapchain::swapchainExtent_, Swapchain::swapchainImages_.size());
-
-    // Pipeline initialization (after sealing basics)
-    pipeline_initialize();
+    // ────────────────────────────────────────────────
+    // CRITICAL: Pipeline setup BEFORE renderer
+    // This is where rtx().transient_pool is created
+    // ────────────────────────────────────────────────
+    pipeline_initialize();                    // ← usually creates transient_pool
     pipeline_create_pipeline_layout();
     pipeline_create_ray_tracing_pipeline();
     pipeline_create_compute_pipeline();
     pipeline_create_shader_binding_table();
 
     stone_seal_pipelines(rtx().compute_pipeline, rtx().rt_pipeline, rtx().pipeline_layout);
-
     stone_seal_final();
 
-    // Renderer (owns HDR image, descriptor updates, pew)
-    renderer = std::make_unique<VulkanRenderer>(Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT, g_window);
+    // ────────────────────────────────────────────────
+    // NOW safe — transient pool exists
+    // ────────────────────────────────────────────────
+    renderer = std::make_unique<VulkanRenderer>(Options::Window::DEFAULT_WIDTH, 
+                                                Options::Window::DEFAULT_HEIGHT, 
+                                                g_window);
 
     // Eternal loop
     while (true) {

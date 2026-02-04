@@ -2,8 +2,8 @@
 // AMOURANTH RTX Engine (C) 2026
 // engine/GLOBAL/Pipeline.hpp
 // Ray tracing + compute pipeline, SBT, descriptor management
-// Version 0.81 —  February 02, 2026 — Header-only
-// - No namespaces — pure global scope
+// Version 0.81 — February 04, 2026 — Header-only
+// - Auto-create global transient pool on first use if missing
 // - AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -47,8 +47,35 @@ struct RTDescriptorUpdate {
 };
 
 // =============================================================================
-// Helpers — defined first (dependency order critical in header-only)
+// Helpers
 // =============================================================================
+
+inline void ensure_transient_pool() noexcept {
+    if (rtx().transient_pool != VK_NULL_HANDLE) return;
+
+    LOG_WARNING_CAT("PIPELINE", "No sealed transient pool found — auto-creating dummy one now");
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | 
+                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = rtx().graphics_family;
+
+    if (rtx().graphics_family == ~0u) {
+        LOG_FATAL_CAT("PIPELINE", "Cannot create transient pool — graphics family not sealed yet!");
+        std::abort();
+    }
+
+    VkResult res = vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to auto-create transient pool: {}", string_VkResult(res));
+        std::abort();
+    }
+
+    stone_seal_transient_pool(rtx().transient_pool);
+
+    LOG_SUCCESS_CAT("PIPELINE", "Dummy transient pool auto-created and sealed");
+}
 
 inline VkShaderModule load_shader(const std::string& relativePath) {
     LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
@@ -103,6 +130,8 @@ inline VkShaderModule load_shader(const std::string& relativePath) {
 
 inline VkAccelerationStructureKHR create_dummy_tlas() {
     LOG_INFO_CAT("PIPELINE", "Creating dummy TLAS");
+
+    ensure_transient_pool();
 
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -211,7 +240,7 @@ inline void cache_ray_tracing_properties() {
 }
 
 // =============================================================================
-// Main functions — now safe to use helpers
+// Main pipeline functions
 // =============================================================================
 
 inline void pipeline_initialize() noexcept {
@@ -225,6 +254,8 @@ inline void pipeline_initialize() noexcept {
         LOG_FATAL_CAT("PIPELINE", "Required extensions missing");
         return;
     }
+
+    ensure_transient_pool();
 
     rtx().dummy_tlas = create_dummy_tlas();
 
@@ -445,6 +476,12 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
     cache_ray_tracing_properties();
     const auto& rtProps = rtx().rt_props;
 
+    VkCommandPool cmdPool = pool ? pool : rtx().transient_pool;
+    if (cmdPool == VK_NULL_HANDLE) {
+        ensure_transient_pool();
+        cmdPool = rtx().transient_pool;
+    }
+
     const VkDeviceSize handleSize  = rtProps.shaderGroupHandleSize;
     const VkDeviceSize handleAlign = rtProps.shaderGroupHandleAlignment;
     const VkDeviceSize baseAlign   = rtProps.shaderGroupBaseAlignment;
@@ -488,17 +525,17 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
     VkCommandBuffer cmd = providedCmd;
     bool ownCmd = (providedCmd == VK_NULL_HANDLE);
-    VkCommandPool cmdPool = pool ? pool : rtx().transient_pool;
 
     if (ownCmd) {
         VkCommandBufferAllocateInfo alloc{};
-        alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        alloc.commandPool = cmdPool;
-        alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc.commandPool        = cmdPool;
+        alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc.commandBufferCount = 1;
 
         res = vkAllocateCommandBuffers(rtx().device, &alloc, &cmd);
         if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to allocate temp cmd buffer for SBT: {}", string_VkResult(res));
             BM_DESTROY(sbt_handle);
             return;
         }
@@ -523,9 +560,9 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         vkEndCommandBuffer(cmd);
 
         VkSubmitInfo submit{};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &cmd;
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &cmd;
 
         vkQueueSubmit(queue ? queue : rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
         vkQueueWaitIdle(queue ? queue : rtx().graphics_queue);
