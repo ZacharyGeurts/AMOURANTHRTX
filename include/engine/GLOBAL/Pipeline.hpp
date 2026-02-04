@@ -595,36 +595,39 @@ inline void pipeline_dispatch_living_world(VkCommandBuffer cmd, float totalTime)
     vkCmdDispatch(cmd, 1, 1, 1);
 }
 
-inline void pipeline_trace_rays(VkCommandBuffer cmd, uint32_t width, uint32_t height) noexcept {
-    if (!cmd) return;
+void pipeline_trace_rays(VkCommandBuffer cmd, uint32_t width, uint32_t height) noexcept {
+    // Guard: SBT must be valid
+    if (!rtx().eternal_sbt_forged || rtx().sbt_address == 0) {
+        LOG_FATAL_CAT("PIPELINE", "Cannot trace rays — SBT not forged or invalid address");
+        return;
+    }
 
-    VkPipeline rtPipe = rtx().rt_pipeline;
-    if (!rtPipe) return;
+    // Guard: Required regions must have non-zero size/address
+    if (rtx().raygen_sbt_region.size == 0 ||
+        rtx().miss_sbt_region.size == 0 ||
+        rtx().hit_sbt_region.size == 0) {
+        LOG_FATAL_CAT("PIPELINE", "Invalid SBT regions — raygen/miss/hit sizes are zero");
+        return;
+    }
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtPipe);
+    // Callable region: zeroed struct (valid but empty) — fixes VUID-vkCmdTraceRaysKHR-pCallableShaderBindingTable-parameter
+    VkStridedDeviceAddressRegionKHR callableRegion{};
+    // All fields intentionally 0 — this is correct for pipelines without callables
 
-    VkDescriptorBufferBindingInfoEXT bind{};
-    bind.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
-    bind.address = rtx().descriptor_buffer_address;
-    bind.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
+    // Bind the ray tracing pipeline — fixes VUID-vkCmdTraceRaysKHR-None-08606
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtx().rt_pipeline);
 
-    ext().vkCmdBindDescriptorBuffersEXT(cmd, 1, &bind);
-
-    uint32_t idx = 0;
-    VkDeviceSize off = 0;
-    ext().vkCmdSetDescriptorBufferOffsetsEXT(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                                             rtx().pipeline_layout, 0, 1, &idx, &off);
-
-    float totalTime = static_cast<float>(TotalTime::get().seconds());
-
-    vkCmdPushConstants(cmd, rtx().pipeline_layout, FULL_PUSH_MASK, 0, sizeof(float), &totalTime);
-
-    ext().vkCmdTraceRaysKHR(cmd,
-                            &rtx().raygen_sbt_region,
-                            &rtx().miss_sbt_region,
-                            &rtx().hit_sbt_region,
-                            nullptr,
-                            width, height, 1);
+    // Trace rays — now with pipeline bound and valid callable region
+    ext().vkCmdTraceRaysKHR(
+        cmd,
+        &rtx().raygen_sbt_region,
+        &rtx().miss_sbt_region,
+        &rtx().hit_sbt_region,
+        &callableRegion,           // Valid zeroed struct (not NULL)
+        width,
+        height,
+        1                          // depth = 1 (single dispatch)
+    );
 }
 
 inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noexcept {

@@ -126,119 +126,123 @@ public:
         pipeline_shutdown();
     }
 
-    void pew() noexcept {
-        if (minimized_ || destroyed_) return;
+void pew() noexcept {
+    if (minimized_ || destroyed_) return;
 
-        auto now = std::chrono::steady_clock::now();
-        TotalTime::get().advance(now - last_time_);
-        last_time_ = now;
+    auto now = std::chrono::steady_clock::now();
+    TotalTime::get().advance(now - last_time_);
+    last_time_ = now;
 
-        float total_sec = static_cast<float>(TotalTime::get().seconds());
+    float total_sec = static_cast<float>(TotalTime::get().seconds());
 
-        // Handle swapchain invalidation / resize
-        if (needsSwapchainRecreate_) {
-            vkDeviceWaitIdle(rtx().device);
-            Swapchain::recreate(static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
-            createOrRecreateHDRImage();  // HDR must match new size
-            needsSwapchainRecreate_ = false;
-            updateGlobalDescriptorBuffer();  // Re-bind new output view
-            if (Swapchain::minimized_) return;
-        }
-
-        // Update camera UBO every frame
-        updateCameraUBO(total_sec);
-
-        VkAccelerationStructureKHR tlas = getTLAS();
-        if (tlas == VK_NULL_HANDLE) return;
-
-        uint32_t imageIndex;
-        VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
-
-        VkResult res = Swapchain::acquireNextImage(&imageIndex, &acquireSemaphore);
-        if (res != VK_SUCCESS) {
-            if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
-                needsSwapchainRecreate_ = true;
-            }
-            return;
-        }
-
-        VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
-        currentRingIndex_ = (currentRingIndex_ + 1) % cmdRing_.size();
-
-        vkResetCommandBuffer(cmd, 0);
-
-        VkCommandBufferBeginInfo begin{};
-        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cmd, &begin);
-
-        // Optional compute prepass (living world / animation)
-        pipeline_dispatch_living_world(cmd, total_sec);
-
-        VkMemoryBarrier mb{};
-        mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                             0, 1, &mb, 0, nullptr, 0, nullptr);
-
-        if (needsDescriptorUpdate_) {
-            updateGlobalDescriptorBuffer();
-        }
-
-        transitionImageLayout(cmd, hdrOutputImage_,
-                              VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_GENERAL);
-
-        pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
-
-        transitionImageLayout(cmd, hdrOutputImage_,
-                              VK_IMAGE_LAYOUT_GENERAL,
-                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-        VkImage swapImg = Swapchain::swapchainImages_[imageIndex];
-
-        transitionImageLayout(cmd, swapImg,
-                              VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        VkImageBlit blit{};
-        blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[0]  = {0, 0, 0};
-        blit.srcOffsets[1]  = {width_, height_, 1};
-        blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[0]  = {0, 0, 0};
-        blit.dstOffsets[1]  = {width_, height_, 1};
-
-        vkCmdBlitImage(cmd,
-                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit, VK_FILTER_LINEAR);
-
-        transitionImageLayout(cmd, swapImg,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-        vkEndCommandBuffer(cmd);
-
-        VkSubmitInfo submit{};
-        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount   = 1;
-        submit.pCommandBuffers      = &cmd;
-
-        if (acquireSemaphore != VK_NULL_HANDLE) {
-            VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-            submit.waitSemaphoreCount   = 1;
-            submit.pWaitSemaphores      = &acquireSemaphore;
-            submit.pWaitDstStageMask    = waitStages;
-        }
-
-        vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
-
-        Swapchain::presentImage(rtx().graphics_queue, imageIndex, acquireSemaphore);
+    // Handle swapchain invalidation / resize
+    if (needsSwapchainRecreate_) {
+        vkDeviceWaitIdle(rtx().device);
+        Swapchain::recreate(static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
+        createOrRecreateHDRImage();  // HDR must match new size
+        needsSwapchainRecreate_ = false;
+        updateGlobalDescriptorBuffer();  // Re-bind new output view
+        if (Swapchain::minimized_) return;
     }
+
+    // Update camera UBO every frame (fast mapped path)
+    updateCameraUBO(total_sec);
+
+    VkAccelerationStructureKHR tlas = getTLAS();
+    if (tlas == VK_NULL_HANDLE) return;
+
+    uint32_t imageIndex;
+    VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+
+    VkResult res = Swapchain::acquireNextImage(&imageIndex, &acquireSemaphore);
+    if (res != VK_SUCCESS) {
+        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+            needsSwapchainRecreate_ = true;
+        }
+        return;
+    }
+
+    VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
+    currentRingIndex_ = (currentRingIndex_ + 1) % cmdRing_.size();
+
+    vkResetCommandBuffer(cmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin);
+
+    // Optional compute prepass (living world / animation)
+    pipeline_dispatch_living_world(cmd, total_sec);
+
+    VkMemoryBarrier mb{};
+    mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         0, 1, &mb, 0, nullptr, 0, nullptr);
+
+    if (needsDescriptorUpdate_) {
+        updateGlobalDescriptorBuffer();
+    }
+
+    transitionImageLayout(cmd, hdrOutputImage_,
+                          VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_GENERAL);
+
+    pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
+
+    transitionImageLayout(cmd, hdrOutputImage_,
+                          VK_IMAGE_LAYOUT_GENERAL,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    VkImage swapImg = Swapchain::swapchainImages_[imageIndex];
+
+    // Critical: Transition swapchain image to TRANSFER_DST before blit
+    transitionImageLayout(cmd, swapImg,
+                          VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkImageBlit blit{};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.srcOffsets[0]  = {0, 0, 0};
+    blit.srcOffsets[1]  = {width_, height_, 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.dstOffsets[0]  = {0, 0, 0};
+    blit.dstOffsets[1]  = {width_, height_, 1};
+
+    vkCmdBlitImage(cmd,
+                   hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &blit, VK_FILTER_LINEAR);
+
+    // Critical: Transition to PRESENT_SRC_KHR before submit — fixes VUID-VkPresentInfoKHR-pImageIndices-01430
+    transitionImageLayout(cmd, swapImg,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    vkEndCommandBuffer(cmd);
+
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+    VkSubmitInfo submit{};
+    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount   = 1;
+    submit.pCommandBuffers      = &cmd;
+
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        submit.waitSemaphoreCount   = 1;
+        submit.pWaitSemaphores      = &acquireSemaphore;
+        submit.pWaitDstStageMask    = waitStages;  // Only COLOR_ATTACHMENT_OUTPUT — fixes all invalid stage VUIDs
+    }
+
+    vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+
+    // Present — no extra swapchain arg needed
+    Swapchain::presentImage(rtx().graphics_queue, imageIndex, acquireSemaphore);
+}
 
     // Called from SDL resize event
     void onResize(int newWidth, int newHeight) noexcept {
