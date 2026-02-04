@@ -78,7 +78,6 @@ public:
         VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, cmdRing_.data());
         if (res != VK_SUCCESS) {
             LOG_FATAL_CAT("RENDERER", "Failed to allocate command buffer ring: {}", string_VkResult(res));
-            // In real code you might want to throw or early exit here
         }
 
         // Camera uniform buffer
@@ -238,8 +237,7 @@ public:
 
         vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
 
-        Swapchain::presentImage(rtx().graphics_queue, imageIndex,
-                                acquireSemaphore, rtx().swapchain);
+        Swapchain::presentImage(rtx().graphics_queue, imageIndex, acquireSemaphore);
     }
 
     // Called from SDL resize event

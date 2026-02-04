@@ -326,9 +326,6 @@ inline RTX& rtx() noexcept {
         return VK_NULL_HANDLE;
     }
 
-    // ────────────────────────────────────────────────
-    // SEAL THE PHYSICAL DEVICE AS SOON AS WE HAVE IT
-    // ────────────────────────────────────────────────
     rtx().physical = selected;
 
     VkPhysicalDeviceProperties props{};
@@ -382,144 +379,25 @@ inline RTX& rtx() noexcept {
     VkResult res = vkCreateDevice(selected, &devInfo, nullptr, &dev);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("VULKAN", "vkCreateDevice failed: {}", string_VkResult(res));
-        // Optional: clean up the premature seal if creation fails
         rtx().physical = VK_NULL_HANDLE;
         return VK_NULL_HANDLE;
     }
 
-    if (out_graphics_family) *out_graphics_family = best.graphics.value();
-    if (out_present_family)  *out_present_family  = best.present.value();
-    if (out_compute_family)  *out_compute_family  = best.compute.value();
-    if (out_transfer_family) *out_transfer_family = best.transfer.value_or(best.graphics.value());
+    rtx().graphics_family = best.graphics.value();
+    rtx().present_family = best.present.value();
+    rtx().compute_family = best.compute.value();
+    rtx().transfer_family = best.transfer.value_or(best.graphics.value());
+
+    vkGetDeviceQueue(dev, rtx().graphics_family, 0, &rtx().graphics_queue);
+    vkGetDeviceQueue(dev, rtx().present_family, 0, &rtx().present_queue);
+    vkGetDeviceQueue(dev, rtx().compute_family, 0, &rtx().compute_queue);
+    vkGetDeviceQueue(dev, rtx().transfer_family, 0, &rtx().transfer_queue);
 
     LOG_SUCCESS_CAT("VULKAN", "Logical device created — RTX + compute + descriptor buffer enabled");
 
     return dev;
 }
 
-[[noreturn]] inline void issue_execution_order(
-    std::string_view category,
-    std::string_view expected,
-    std::string_view actual,
-    const std::source_location& loc = std::source_location::current()) noexcept {
-    time_t now = time(nullptr);
-    char timestamp[64];
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S UTC", gmtime(&now));
-
-    std::string buf = std::format(
-        "\n╔════════════════════════════════════════════════════════════════════════════╗\n"
-        "║                       EXECUTION ORDER ISSUED                               ║\n"
-        "╟────────────────────────────────────────────────────────────────────────────╢\n"
-        "║ Timestamp: {}\n"
-        "║ Category:  {}\n"
-        "║ Location:  {}:{} ({})\n"
-        "║ Expected:  {}\n"
-        "║ Actual:    {}\n"
-        "RTX compromised — immediate termination.\n",
-        timestamp,
-        category,
-        loc.file_name(), loc.line(), loc.function_name(),
-        expected,
-        actual
-    );
-
-    auto st = std::stacktrace::current();
-    buf += "Backtrace:\n";
-    for (size_t i = 0; i < st.size(); ++i) {
-        buf += std::format("  [{}] {}\n", i, st[i].description());
-    }
-
-    LOG_FATAL_CAT("RTX", "{}", buf);
-    std::abort();
-}
-
-#define SEAL_CHECK(expected, actual, category) \
-    do { \
-        if ((expected) != (actual)) { \
-            issue_execution_order(category, std::string_view(#expected), std::string_view(#actual)); \
-        } \
-    } while(0)
-
-inline void stone_seal_device_resources(VkInstance i, VkDevice d, VkPhysicalDevice p,
-                                        VkSurfaceKHR s, VkSwapchainKHR sc) noexcept {
-    rtx().instance = i;
-    rtx().device = d;
-    rtx().physical = p;
-    rtx().surface = s;
-    rtx().swapchain = sc;
-}
-
-inline void stone_seal_queues(VkQueue graphics, VkQueue present, VkQueue compute, VkQueue transfer) noexcept {
-    rtx().graphics_queue = graphics;
-    rtx().present_queue = present;
-    rtx().compute_queue = compute;
-    rtx().transfer_queue = transfer;
-}
-
-inline void stone_seal_families(uint32_t graphics, uint32_t present, uint32_t transfer, uint32_t compute) noexcept {
-    rtx().graphics_family = graphics;
-    rtx().present_family = present;
-    rtx().transfer_family = transfer;
-    rtx().compute_family = compute;
-}
-
-inline void stone_seal_pipelines(VkPipeline compute, VkPipeline rt, VkPipelineLayout layout) noexcept {
-    rtx().compute_pipeline = compute;
-    rtx().rt_pipeline = rt;
-    rtx().pipeline_layout = layout;
-}
-
-inline void stone_seal_window_and_pass(SDL_Window* window, VkRenderPass pass) noexcept {
-    rtx().window = window;
-    rtx().pass = pass;
-}
-
-inline void stone_seal_swapchain_resources(const std::vector<VkImage>& images,
-                                           const std::vector<VkImageView>& views,
-                                           VkExtent2D extent,
-                                           uint32_t image_count) noexcept {
-    rtx().images = images;
-    rtx().views = views;
-    rtx().extent = extent;
-    rtx().image_count = image_count;
-}
-
-inline void stone_seal_rtprops(const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& props) noexcept {
-    rtx().rt_props = props;
-}
-
-inline void stone_seal_mesh_buffers(VkBuffer vb, VkDeviceMemory vm, VkBuffer ib, VkDeviceMemory im, uint32_t ic) noexcept {
-    rtx().mesh_vertex_buffer = vb;
-    rtx().mesh_vertex_memory = vm;
-    rtx().mesh_index_buffer = ib;
-    rtx().mesh_index_memory = im;
-    rtx().mesh_index_count = ic;
-}
-
-inline void stone_seal_transient_pool(VkCommandPool pool) noexcept {
-    rtx().transient_pool = pool;
-}
-
-inline void stone_seal_final() noexcept {
-    LOG_AMOURANTH("AMOURANTHRTX v0.81 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
-}
-
-// Stone accessors
-inline VkDevice stone_device() noexcept { return rtx().device; }
-inline VkPhysicalDevice stone_physical() noexcept { return rtx().physical; }
-inline VkSurfaceKHR stone_surface() noexcept { return rtx().surface; }
-inline VkSwapchainKHR stone_swapchain() noexcept { return rtx().swapchain; }
-inline VkQueue stone_graphics_queue() noexcept { return rtx().graphics_queue; }
-
-// LAS accessors
-inline auto& las_procedural_primitives() noexcept { return rtx().las_procedural_primitives; }
-inline bool& las_procedural_dirty() noexcept { return rtx().las_procedural_dirty; }
-inline bool& las_tlas_dirty() noexcept { return rtx().las_tlas_dirty; }
-inline bool& las_pending_blas_builds() noexcept { return rtx().las_pending_blas_builds; }
-inline bool& las_initialized() noexcept { return rtx().las_initialized; }
-inline VkAccelerationStructureKHR stone_las_tlas() noexcept { return rtx().las_tlas; }
-
-// VulkanExtensions — singleton
 struct VulkanExtensions {
     PFN_vkGetPhysicalDeviceSurfaceSupportKHR      vkGetPhysicalDeviceSurfaceSupportKHR      = nullptr;
     PFN_vkGetPhysicalDeviceSurfaceFormatsKHR      vkGetPhysicalDeviceSurfaceFormatsKHR      = nullptr;
@@ -575,15 +453,14 @@ inline VulkanExtensions& ext() noexcept {
                 SDL_Vulkan_GetVkGetInstanceProcAddr());
 
             if (vkGetInstanceProcAddr) {
-#define LOAD_INSTANCE(fn) \
-                e.fn = reinterpret_cast<PFN_##fn>(vkGetInstanceProcAddr(inst, #fn))
-
-                LOAD_INSTANCE(vkGetPhysicalDeviceSurfaceSupportKHR);
-                LOAD_INSTANCE(vkGetPhysicalDeviceSurfaceFormatsKHR);
-                LOAD_INSTANCE(vkGetPhysicalDeviceSurfacePresentModesKHR);
-                LOAD_INSTANCE(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
-
-#undef LOAD_INSTANCE
+                e.vkGetPhysicalDeviceSurfaceSupportKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(
+                    vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceSupportKHR"));
+                e.vkGetPhysicalDeviceSurfaceFormatsKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>(
+                    vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
+                e.vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>(
+                    vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfacePresentModesKHR"));
+                e.vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(
+                    vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
 
                 instanceLoaded = true;
             }
@@ -601,48 +478,67 @@ inline VulkanExtensions& ext() noexcept {
                     vkGetInstanceProcAddr(rtx().instance, "vkGetDeviceProcAddr"));
 
                 if (vkGetDeviceProcAddr) {
-#define LOAD(fn) \
-                    e.fn = reinterpret_cast<PFN_##fn>(vkGetDeviceProcAddr(dev, #fn)); \
-                    if (!e.fn) { \
-                        LOG_INFO_CAT("VULKAN", "Optional extension unavailable: {}", #fn); \
-                    }
+                    e.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
+                        vkGetDeviceProcAddr(dev, "vkCreateSwapchainKHR"));
+                    e.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
+                        vkGetDeviceProcAddr(dev, "vkDestroySwapchainKHR"));
+                    e.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
+                        vkGetDeviceProcAddr(dev, "vkGetSwapchainImagesKHR"));
+                    e.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>(
+                        vkGetDeviceProcAddr(dev, "vkAcquireNextImageKHR"));
+                    e.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(
+                        vkGetDeviceProcAddr(dev, "vkQueuePresentKHR"));
 
-                    LOAD(vkCreateSwapchainKHR);
-                    LOAD(vkDestroySwapchainKHR);
-                    LOAD(vkGetSwapchainImagesKHR);
-                    LOAD(vkAcquireNextImageKHR);
-                    LOAD(vkQueuePresentKHR);
+                    e.vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
+                        vkGetDeviceProcAddr(dev, "vkCreateRayTracingPipelinesKHR"));
+                    e.vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
+                        vkGetDeviceProcAddr(dev, "vkGetRayTracingShaderGroupHandlesKHR"));
+                    e.vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
+                        vkGetDeviceProcAddr(dev, "vkCmdTraceRaysKHR"));
 
-                    LOAD(vkCreateRayTracingPipelinesKHR);
-                    LOAD(vkGetRayTracingShaderGroupHandlesKHR);
-                    LOAD(vkCmdTraceRaysKHR);
+                    e.vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+                        vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureBuildSizesKHR"));
+                    e.vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+                        vkGetDeviceProcAddr(dev, "vkCmdBuildAccelerationStructuresKHR"));
+                    e.vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+                        vkGetDeviceProcAddr(dev, "vkCreateAccelerationStructureKHR"));
+                    e.vkDestroyAccelerationStructureKHR = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+                        vkGetDeviceProcAddr(dev, "vkDestroyAccelerationStructureKHR"));
+                    e.vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+                        vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureDeviceAddressKHR"));
 
-                    LOAD(vkGetAccelerationStructureBuildSizesKHR);
-                    LOAD(vkCmdBuildAccelerationStructuresKHR);
-                    LOAD(vkCreateAccelerationStructureKHR);
-                    LOAD(vkDestroyAccelerationStructureKHR);
-                    LOAD(vkGetAccelerationStructureDeviceAddressKHR);
+                    e.vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
+                        vkGetDeviceProcAddr(dev, "vkGetBufferDeviceAddress"));
 
-                    LOAD(vkGetBufferDeviceAddress);
+                    e.vkCmdCopyAccelerationStructureKHR = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(
+                        vkGetDeviceProcAddr(dev, "vkCmdCopyAccelerationStructureKHR"));
+                    e.vkCmdWriteAccelerationStructuresPropertiesKHR = reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
+                        vkGetDeviceProcAddr(dev, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
+                    e.vkCmdTraceRaysIndirect2KHR = reinterpret_cast<PFN_vkCmdTraceRaysIndirect2KHR>(
+                        vkGetDeviceProcAddr(dev, "vkCmdTraceRaysIndirect2KHR"));
 
-                    LOAD(vkCmdCopyAccelerationStructureKHR);
-                    LOAD(vkCmdWriteAccelerationStructuresPropertiesKHR);
-                    LOAD(vkCmdTraceRaysIndirect2KHR);
+                    e.vkCmdBeginRendering = reinterpret_cast<PFN_vkCmdBeginRendering>(
+                        vkGetDeviceProcAddr(dev, "vkCmdBeginRendering"));
+                    e.vkCmdEndRendering = reinterpret_cast<PFN_vkCmdEndRendering>(
+                        vkGetDeviceProcAddr(dev, "vkCmdEndRendering"));
+                    e.vkCmdPipelineBarrier2 = reinterpret_cast<PFN_vkCmdPipelineBarrier2>(
+                        vkGetDeviceProcAddr(dev, "vkCmdPipelineBarrier2"));
+                    e.vkQueueSubmit2KHR = reinterpret_cast<PFN_vkQueueSubmit2KHR>(
+                        vkGetDeviceProcAddr(dev, "vkQueueSubmit2KHR"));
 
-                    LOAD(vkCmdBeginRendering);
-                    LOAD(vkCmdEndRendering);
-                    LOAD(vkCmdPipelineBarrier2);
-                    LOAD(vkQueueSubmit2KHR);
+                    e.vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+                        vkGetDeviceProcAddr(dev, "vkSetDebugUtilsObjectNameEXT"));
 
-                    LOAD(vkSetDebugUtilsObjectNameEXT);
-
-                    LOAD(vkGetDescriptorSetLayoutSizeEXT);
-                    LOAD(vkGetDescriptorSetLayoutBindingOffsetEXT);
-                    LOAD(vkCmdBindDescriptorBuffersEXT);
-                    LOAD(vkCmdSetDescriptorBufferOffsetsEXT);
-                    LOAD(vkGetDescriptorEXT);
-
-#undef LOAD
+                    e.vkGetDescriptorSetLayoutSizeEXT = reinterpret_cast<PFN_vkGetDescriptorSetLayoutSizeEXT>(
+                        vkGetDeviceProcAddr(dev, "vkGetDescriptorSetLayoutSizeEXT"));
+                    e.vkGetDescriptorSetLayoutBindingOffsetEXT = reinterpret_cast<PFN_vkGetDescriptorSetLayoutBindingOffsetEXT>(
+                        vkGetDeviceProcAddr(dev, "vkGetDescriptorSetLayoutBindingOffsetEXT"));
+                    e.vkCmdBindDescriptorBuffersEXT = reinterpret_cast<PFN_vkCmdBindDescriptorBuffersEXT>(
+                        vkGetDeviceProcAddr(dev, "vkCmdBindDescriptorBuffersEXT"));
+                    e.vkCmdSetDescriptorBufferOffsetsEXT = reinterpret_cast<PFN_vkCmdSetDescriptorBufferOffsetsEXT>(
+                        vkGetDeviceProcAddr(dev, "vkCmdSetDescriptorBufferOffsetsEXT"));
+                    e.vkGetDescriptorEXT = reinterpret_cast<PFN_vkGetDescriptorEXT>(
+                        vkGetDeviceProcAddr(dev, "vkGetDescriptorEXT"));
 
                     deviceLoaded = true;
                 }
@@ -652,47 +548,6 @@ inline VulkanExtensions& ext() noexcept {
 
     return e;
 }
-
-// MACROS — LEAN AND CENTRALIZED
-#define VK_CREATE_RT_PIPELINES(...)              ext().vkCreateRayTracingPipelinesKHR(__VA_ARGS__)
-#define VK_GET_RT_GROUP_HANDLES(...)             ext().vkGetRayTracingShaderGroupHandlesKHR(__VA_ARGS__)
-#define VK_CMD_TRACE_RAYS(cmd, ...)              ext().vkCmdTraceRaysKHR(cmd, __VA_ARGS__)
-#define VK_CMD_TRACE_RAYS_INDIRECT2(cmd, ...)    ext().vkCmdTraceRaysIndirect2KHR(cmd, __VA_ARGS__)
-
-#define VK_GET_AS_BUILD_SIZES(...)               ext().vkGetAccelerationStructureBuildSizesKHR(__VA_ARGS__)
-#define VK_CMD_BUILD_ACCELERATION_STRUCTURES(...) ext().vkCmdBuildAccelerationStructuresKHR(__VA_ARGS__)
-#define VK_CREATE_ACCELERATION_STRUCTURE(...)    ext().vkCreateAccelerationStructureKHR(__VA_ARGS__)
-#define VK_DESTROY_ACCELERATION_STRUCTURE(...)   ext().vkDestroyAccelerationStructureKHR(__VA_ARGS__)
-#define VK_GET_AS_DEVICE_ADDRESS(...)            ext().vkGetAccelerationStructureDeviceAddressKHR(__VA_ARGS__)
-
-#define VK_GET_BUFFER_DEVICE_ADDRESS(...)        ext().vkGetBufferDeviceAddress(__VA_ARGS__)
-
-#define VK_CMD_COPY_ACCELERATION_STRUCTURE(cmd, info) \
-    ext().vkCmdCopyAccelerationStructureKHR(cmd, info)
-
-#define VK_CMD_WRITE_AS_PROPERTIES(cmd, count, as, queryType, queryPool, query) \
-    ext().vkCmdWriteAccelerationStructuresPropertiesKHR(cmd, count, as, queryType, queryPool, query)
-
-#define VK_CREATE_SWAPCHAIN(...)                 ext().vkCreateSwapchainKHR(__VA_ARGS__)
-#define VK_DESTROY_SWAPCHAIN(...)                ext().vkDestroySwapchainKHR(__VA_ARGS__)
-#define VK_GET_SWAPCHAIN_IMAGES(...)             ext().vkGetSwapchainImagesKHR(__VA_ARGS__)
-#define VK_ACQUIRE_NEXT_IMAGE(...)               ext().vkAcquireNextImageKHR(__VA_ARGS__)
-#define VK_QUEUE_PRESENT(...)                    ext().vkQueuePresentKHR(__VA_ARGS__)
-
-#define VK_GET_DESCRIPTOR_SET_LAYOUT_SIZE(layout, size) \
-    ext().vkGetDescriptorSetLayoutSizeEXT(rtx().device, layout, size)
-
-#define VK_GET_DESCRIPTOR_BINDING_OFFSET(layout, binding, offset) \
-    ext().vkGetDescriptorSetLayoutBindingOffsetEXT(rtx().device, layout, binding, offset)
-
-#define VK_CMD_BIND_DESCRIPTOR_BUFFERS(cmd, count, bindingInfos) \
-    ext().vkCmdBindDescriptorBuffersEXT(cmd, count, bindingInfos)
-
-#define VK_CMD_SET_DESCRIPTOR_BUFFER_OFFSETS(cmd, bindPoint, layout, firstSet, count, indices, offsets) \
-    ext().vkCmdSetDescriptorBufferOffsetsEXT(cmd, bindPoint, layout, firstSet, count, indices, offsets)
-
-#define VK_GET_DESCRIPTOR(device, getInfo, size, outDescriptor) \
-    ext().vkGetDescriptorEXT(device, getInfo, size, outDescriptor)
 
 // BufferManager helpers
 inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE     = 256ULL << 20;
@@ -773,7 +628,7 @@ struct VRAMReality {
         const auto& heap = props2.memoryProperties.memoryHeaps[i];
         if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
             reality.total += heap.size;
-            LOG_INFO_CAT("Memory", "Found device-local heap #{}: {} MB (flags=0x{:x})", 
+            LOG_INFO_CAT("Memory", "Found device-local heap #{}: {} MB (flags=0x{})", 
                          i, heap.size / (1024 * 1024), heap.flags);
         }
     }
@@ -1018,7 +873,7 @@ inline void ensureStagingRing() noexcept {
         return 0;
     }
 
-    LOG_INFO_CAT("BUFFER", "Creating buffer: size={} bytes, usage=0x{:x}, tag='{}'", size, usage, tag);
+    LOG_INFO_CAT("BUFFER", "Creating buffer: size={} bytes, usage=0x{}, tag='{}'", size, usage, tag);
 
     VkBufferUsageFlags fixedUsage = usage;
 
@@ -1030,7 +885,7 @@ inline void ensureStagingRing() noexcept {
                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
                       VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR)) {
         fixedUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        LOG_INFO_CAT("BUFFER", "Auto-added SHADER_DEVICE_ADDRESS_BIT (fixed usage now 0x{:x})", fixedUsage);
+        LOG_INFO_CAT("BUFFER", "Auto-added SHADER_DEVICE_ADDRESS_BIT (fixed usage now 0x{})", fixedUsage);
     }
 
     // Descriptor buffer path — short-circuit early
@@ -1074,7 +929,7 @@ inline void ensureStagingRing() noexcept {
                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-        LOG_INFO_CAT("BUFFER", "SBT detected — adjusted size {} → {} bytes (alignment={}), fixed usage=0x{:x}",
+        LOG_INFO_CAT("BUFFER", "SBT detected — adjusted size {} → {} bytes (alignment={}), fixed usage=0x{}",
                      originalSize, size, SBT_ALIGNMENT, fixedUsage);
     }
 
@@ -1178,14 +1033,31 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
                            VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     auto& buffers = rtx().buffers;
     auto it = buffers.find(handle);
-    if (it == buffers.end() || size > it->second.size) return;
+    if (it == buffers.end()) {
+        LOG_ERROR_CAT("BUFFER", "uploadToBuffer failed — invalid handle {}", handle);
+        return;
+    }
 
     BufferInfo& info = it->second;
 
-    if (info.buffer == VK_NULL_HANDLE) return;
+    if (size > info.size) {
+        LOG_ERROR_CAT("BUFFER", "uploadToBuffer failed — size {} exceeds buffer capacity {} (handle={}, tag='{}')",
+                      size, info.size, handle, info.tag);
+        return;
+    }
+
+    if (info.buffer == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("BUFFER", "uploadToBuffer failed — buffer is null (handle={}, tag='{}')", handle, info.tag);
+        return;
+    }
+
+    LOG_INFO_CAT("BUFFER", "Uploading {} bytes to buffer handle={} (tag='{}', offset={}, mapped={})",
+                 size, handle, info.tag, info.offset, info.mapped ? "yes" : "no");
 
     if (info.mapped != nullptr) {
+        LOG_INFO_CAT("BUFFER", "Direct memcpy to mapped buffer (fast path)");
         std::memcpy(info.mapped, data, size);
+        LOG_SUCCESS_CAT("BUFFER", "Upload complete via direct memcpy");
         return;
     }
 
@@ -1193,21 +1065,32 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     VkQueue queue = rtx().graphics_queue;
 
     if (cmd != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("BUFFER", "Using provided external cmd buffer for upload");
+
         void* staging = mapStaging(size);
-        if (!staging) return;
+        if (!staging) {
+            LOG_ERROR_CAT("BUFFER", "Failed to map staging memory for upload");
+            return;
+        }
+
         std::memcpy(staging, data, size);
 
         VkBufferCopy copy{};
         copy.srcOffset = static_cast<VkDeviceSize>(
-            reinterpret_cast<uintptr_t>(staging) -
+            reinterpret_cast<uintptr_t>(staging) - 
             reinterpret_cast<uintptr_t>(rtx().staging_ring.mapped)
         );
         copy.dstOffset = info.offset;
         copy.size = size;
 
         vkCmdCopyBuffer(cmd, rtx().staging_ring.buffer, info.buffer, 1, &copy);
+
+        LOG_SUCCESS_CAT("BUFFER", "Upload recorded into external cmd buffer");
         return;
     }
+
+    // No provided cmd → create temporary one-time cmd buffer
+    LOG_INFO_CAT("BUFFER", "No external cmd — creating temporary one-time buffer for upload");
 
     VkCommandPool transientPool = VK_NULL_HANDLE;
     VkCommandBuffer tempCmd = VK_NULL_HANDLE;
@@ -1216,32 +1099,52 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     pci.queueFamilyIndex = rtx().graphics_family;
-    vkCreateCommandPool(dev, &pci, nullptr, &transientPool);
+
+    VkResult res = vkCreateCommandPool(dev, &pci, nullptr, &transientPool);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BUFFER", "Failed to create transient pool for upload: {}", string_VkResult(res));
+        return;
+    }
 
     VkCommandBufferAllocateInfo ai{};
     ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ai.commandPool = transientPool;
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
-    vkAllocateCommandBuffers(dev, &ai, &tempCmd);
+
+    res = vkAllocateCommandBuffers(dev, &ai, &tempCmd);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BUFFER", "Failed to allocate temp cmd buffer for upload: {}", string_VkResult(res));
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
 
     VkCommandBufferBeginInfo bi{};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(tempCmd, &bi);
+
+    res = vkBeginCommandBuffer(tempCmd, &bi);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BUFFER", "Failed to begin temp cmd buffer for upload: {}", string_VkResult(res));
+        vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
 
     void* staging = mapStaging(size);
     if (!staging) {
+        LOG_ERROR_CAT("BUFFER", "Failed to map staging for upload");
         vkEndCommandBuffer(tempCmd);
         vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
         vkDestroyCommandPool(dev, transientPool, nullptr);
         return;
     }
+
     std::memcpy(staging, data, size);
 
     VkBufferCopy copy{};
     copy.srcOffset = static_cast<VkDeviceSize>(
-        reinterpret_cast<uintptr_t>(staging) -
+        reinterpret_cast<uintptr_t>(staging) - 
         reinterpret_cast<uintptr_t>(rtx().staging_ring.mapped)
     );
     copy.dstOffset = info.offset;
@@ -1249,18 +1152,34 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
     vkCmdCopyBuffer(tempCmd, rtx().staging_ring.buffer, info.buffer, 1, &copy);
 
-    vkEndCommandBuffer(tempCmd);
+    res = vkEndCommandBuffer(tempCmd);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BUFFER", "Failed to end temp cmd buffer for upload: {}", string_VkResult(res));
+        vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
 
     VkSubmitInfo submit{};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &tempCmd;
 
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    res = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("BUFFER", "vkQueueSubmit failed for upload: {}", string_VkResult(res));
+        vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
+        vkDestroyCommandPool(dev, transientPool, nullptr);
+        return;
+    }
+
     vkQueueWaitIdle(queue);
 
     vkFreeCommandBuffers(dev, transientPool, 1, &tempCmd);
     vkDestroyCommandPool(dev, transientPool, nullptr);
+
+    LOG_SUCCESS_CAT("BUFFER", "Upload complete via temporary cmd buffer ({} bytes, handle={}, tag='{}')",
+                    size, handle, info.tag);
 }
 
 inline void destroy(uint64_t handle) noexcept {
@@ -1347,7 +1266,7 @@ inline void writeAccelerationStructureDescriptor(
 
 inline size_t addAABBFromMesh(std::unique_ptr<Mesh> mesh, uint32_t materialIndex = 0,
                               const glm::mat4& transform = glm::mat4(1.0f)) noexcept {
-    if (!mesh) return las_procedural_primitives().size();
+    if (!mesh) return rtx().las_procedural_primitives.size();
 
     mesh->computeAABB();
 
@@ -1359,17 +1278,17 @@ inline size_t addAABBFromMesh(std::unique_ptr<Mesh> mesh, uint32_t materialIndex
     p.materialIndex = materialIndex;
     p.destruction   = 0.0f;
 
-    las_procedural_primitives().push_back(p);
-    las_procedural_dirty() = true;
-    las_tlas_dirty() = true;
-    las_pending_blas_builds() = true;
+    rtx().las_procedural_primitives.push_back(p);
+    rtx().las_procedural_dirty = true;
+    rtx().las_tlas_dirty = true;
+    rtx().las_pending_blas_builds = true;
 
     LOG_SUCCESS_CAT("LAS", "Mesh converted to AABB — min: ({},{},{}) | max: ({},{},{}) | material: {}",
                     mesh->aabbMin.x, mesh->aabbMin.y, mesh->aabbMin.z,
                     mesh->aabbMax.x, mesh->aabbMax.y, mesh->aabbMax.z,
                     materialIndex);
 
-    return las_procedural_primitives().size() - 1;
+    return rtx().las_procedural_primitives.size() - 1;
 }
 
 enum class GeometryType : uint32_t {
@@ -1397,15 +1316,15 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
     p.materialIndex = materialIndex;
     p.destruction   = 0.0f;
 
-    las_procedural_primitives().push_back(p);
-    las_procedural_dirty() = true;
-    las_tlas_dirty() = true;
-    las_pending_blas_builds() = true;
+    rtx().las_procedural_primitives.push_back(p);
+    rtx().las_procedural_dirty = true;
+    rtx().las_tlas_dirty = true;
+    rtx().las_pending_blas_builds = true;
 
     LOG_INFO_CAT("LAS", "Procedural AABB added — type {}, scale {}, material {}", 
                  static_cast<int>(type), scale, materialIndex);
 
-    return las_procedural_primitives().size() - 1;
+    return rtx().las_procedural_primitives.size() - 1;
 }
 
 [[nodiscard]] inline std::unique_ptr<Mesh> createPlane(float width = 1000.0f, float depth = 1000.0f) noexcept {
@@ -1511,34 +1430,52 @@ inline void createDefaultHybridScene() noexcept {
     addProceduralAABB(GeometryType::ProceduralCylinder, glm::vec3(-15, 10, -15), 2.0f, 6);
     addProceduralAABB(GeometryType::ProceduralCone, glm::vec3(0, 15, 0), 5.0f, 7);
 
-    LOG_SUCCESS_CAT("LAS", "Default hybrid AABB scene created — {} procedurals", las_procedural_primitives().size());
+    LOG_SUCCESS_CAT("LAS", "Default hybrid AABB scene created — {} procedurals", rtx().las_procedural_primitives.size());
 }
 
 inline void onResize() noexcept {
-    las_tlas_dirty() = true;
-    las_pending_blas_builds() = true;
-    las_procedural_dirty() = true;
+    rtx().las_tlas_dirty = true;
+    rtx().las_pending_blas_builds = true;
+    rtx().las_procedural_dirty = true;
     LOG_INFO_CAT("LAS", "Resize detected — marked dirty for rebuild");
 }
 
+// Zero-cost GLM mat4 → VkTransformMatrixKHR conversion (column-major GLM to row-major Vulkan 3x4)
+inline VkTransformMatrixKHR to_vk_transform(const glm::mat4& m) noexcept {
+    VkTransformMatrixKHR vkMat{};
+
+    // Direct element mapping — compiler optimizes to moves (zero extra cost)
+    vkMat.matrix[0][0] = m[0][0]; vkMat.matrix[0][1] = m[1][0]; vkMat.matrix[0][2] = m[2][0]; vkMat.matrix[0][3] = m[3][0];
+    vkMat.matrix[1][0] = m[0][1]; vkMat.matrix[1][1] = m[1][1]; vkMat.matrix[1][2] = m[2][1]; vkMat.matrix[1][3] = m[3][1];
+    vkMat.matrix[2][0] = m[0][2]; vkMat.matrix[2][1] = m[1][2]; vkMat.matrix[2][2] = m[2][2]; vkMat.matrix[2][3] = m[3][2];
+
+    return vkMat;
+}
+
 inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
-    if (las_initialized() && !las_tlas_dirty() && !las_pending_blas_builds() && 
-        !las_procedural_dirty() && stone_las_tlas() != VK_NULL_HANDLE) {
+    if (rtx().las_initialized && !rtx().las_tlas_dirty && !rtx().las_pending_blas_builds && 
+        !rtx().las_procedural_dirty && rtx().las_tlas != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("LAS", "LAS already up-to-date — no rebuild needed");
         return;
     }
 
-    if (!las_initialized()) {
+    LOG_INFO_CAT("LAS", "LAS rebuild required — dirty flags: tlas={}, pending_blas={}, procedural={}",
+                 rtx().las_tlas_dirty ? "dirty" : "clean",
+                 rtx().las_pending_blas_builds ? "pending" : "clean",
+                 rtx().las_procedural_dirty ? "dirty" : "clean");
+
+    if (!rtx().las_initialized) {
+        LOG_INFO_CAT("LAS", "Scene not initialized — building default hybrid scene");
         createDefaultHybridScene();
-        las_initialized() = true;
+        rtx().las_initialized = true;
     }
 
-    // If no external cmd buffer provided, use the global transient pool to allocate a temporary one
     VkCommandBuffer localCmd = cmd;
     bool ownsCmd = (cmd == VK_NULL_HANDLE);
 
     if (ownsCmd) {
         if (rtx().transient_pool == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("LAS", "No transient pool available — cannot build LAS without command buffer");
+            LOG_FATAL_CAT("LAS", "No transient command pool — cannot perform LAS rebuild");
             return;
         }
 
@@ -1550,7 +1487,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
         VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &localCmd);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "Failed to allocate temporary cmd buffer for LAS build: {}", string_VkResult(res));
+            LOG_FATAL_CAT("LAS", "Failed to allocate cmd buffer for LAS rebuild: {}", string_VkResult(res));
             return;
         }
 
@@ -1560,56 +1497,396 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
         res = vkBeginCommandBuffer(localCmd, &beginInfo);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "Failed to begin temporary cmd buffer: {}", string_VkResult(res));
+            LOG_FATAL_CAT("LAS", "Failed to begin cmd buffer for LAS rebuild: {}", string_VkResult(res));
             vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
             return;
         }
+
+        LOG_INFO_CAT("LAS", "Allocated and began temporary cmd buffer for LAS rebuild");
+    } else {
+        LOG_INFO_CAT("LAS", "Recording LAS rebuild into provided external cmd buffer");
     }
 
-    // Now we have a valid cmd buffer (either provided or local)
-    if (las_tlas_dirty()) {
-        // TODO: Record TLAS rebuild commands here using localCmd
-        // (build acceleration structures, copy, barriers, etc.)
-        // Example placeholder:
-        // vkCmdBuildAccelerationStructuresKHR(localCmd, ...);
-        // vkCmdPipelineBarrier(...);
+    // ────────────────────────────────────────────────
+    // Step 1: Update procedural primitives buffer if dirty
+    // ────────────────────────────────────────────────
+    if (rtx().las_procedural_dirty) {
+        LOG_INFO_CAT("TLAS", "Procedural primitives dirty — updating device buffer");
 
-        las_tlas_dirty() = false;
-        LOG_INFO_CAT("LAS", "TLAS rebuild recorded");
+        VkDeviceSize primSize = rtx().las_procedural_primitives.size() * sizeof(UniversalPrimitive);
+        if (primSize == 0) primSize = 16;
+
+        if (rtx().las_universal_primitives_buffer == 0) {
+            uint64_t primHandle = 0;
+            BM_CREATE(primHandle, primSize,
+                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                      "LAS_UniversalPrimitives");
+
+            if (primHandle == 0) {
+                LOG_FATAL_CAT("TLAS", "Failed to allocate procedural primitives buffer");
+                if (ownsCmd) {
+                    vkEndCommandBuffer(localCmd);
+                    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+                }
+                return;
+            }
+
+            rtx().las_universal_primitives_buffer = primHandle;
+        }
+
+        BM_UPLOAD_TO_BUFFER(rtx().las_universal_primitives_buffer,
+                            rtx().las_procedural_primitives.data(),
+                            primSize, localCmd);
+
+        LOG_SUCCESS_CAT("TLAS", "Uploaded {} procedural primitives ({} bytes) to device buffer",
+                        rtx().las_procedural_primitives.size(), primSize);
+        rtx().las_procedural_dirty = false;
     }
 
-    if (las_pending_blas_builds()) {
-        // TODO: Record BLAS builds for pending meshes/primitives
-        // vkCmdBuildAccelerationStructuresKHR(localCmd, ...);
+    // ────────────────────────────────────────────────
+    // Step 2: Build/update BLAS for triangle meshes if pending
+    // ────────────────────────────────────────────────
+    if (rtx().las_pending_blas_builds) {
+        LOG_INFO_CAT("BLAS", "Processing {} triangle meshes for BLAS build/update", 
+                     rtx().las_triangle_meshes.size());
 
-        las_pending_blas_builds() = false;
-        LOG_INFO_CAT("LAS", "Pending BLAS builds recorded");
+        for (size_t i = 0; i < rtx().las_triangle_meshes.size(); ++i) {
+            auto& mesh = rtx().las_triangle_meshes[i];
+
+            if (mesh.blasBuilt) {
+                LOG_INFO_CAT("BLAS", "Mesh #{} already built — skipping", i);
+                continue;
+            }
+
+            if (mesh.vertexBuffer == 0 || mesh.indexBuffer == 0) {
+                LOG_WARNING_CAT("BLAS", "Mesh #{} missing buffers — skipping BLAS build", i);
+                continue;
+            }
+
+            LOG_INFO_CAT("BLAS", "Building BLAS for mesh #{} (vertices={}, primitives={})", 
+                         i, mesh.vertexCount, mesh.primitiveCount);
+
+            VkAccelerationStructureGeometryKHR geom{};
+            geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+            geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+            geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+            geom.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+            geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+            geom.geometry.triangles.vertexData.deviceAddress = BM_GET_DEVICE_ADDRESS(mesh.vertexBuffer);
+            geom.geometry.triangles.maxVertex = mesh.vertexCount;
+            geom.geometry.triangles.vertexStride = sizeof(Vertex);
+            geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
+            geom.geometry.triangles.indexData.deviceAddress = BM_GET_DEVICE_ADDRESS(mesh.indexBuffer);
+
+            VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+            buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+            buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+            buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+            buildInfo.geometryCount = 1;
+            buildInfo.pGeometries = &geom;
+
+            VkAccelerationStructureBuildRangeInfoKHR rangeInfo{};
+            rangeInfo.primitiveCount = mesh.primitiveCount;
+            rangeInfo.primitiveOffset = 0;
+            rangeInfo.firstVertex = 0;
+            rangeInfo.transformOffset = 0;
+
+            const VkAccelerationStructureBuildRangeInfoKHR* pRangeInfo = &rangeInfo;
+
+            VkAccelerationStructureBuildSizesInfoKHR sizes{};
+            sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+            ext().vkGetAccelerationStructureBuildSizesKHR(
+                rtx().device,
+                VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                &buildInfo,
+                &rangeInfo.primitiveCount,
+                &sizes);
+
+            VkDeviceAddress scratchAddr = allocateScratch(sizes.buildScratchSize);
+            if (scratchAddr == 0) {
+                LOG_FATAL_CAT("BLAS", "Failed to allocate scratch for BLAS mesh #{}", i);
+                continue;
+            }
+
+            buildInfo.scratchData.deviceAddress = scratchAddr;
+
+            bool blasValid = true;
+
+            if (mesh.blas == VK_NULL_HANDLE) {
+                uint64_t blasStorageHandle = 0;
+                BM_CREATE(blasStorageHandle, sizes.accelerationStructureSize,
+                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                          "Mesh_BLAS_Storage_" + std::to_string(i));
+
+                if (blasStorageHandle == 0) {
+                    LOG_FATAL_CAT("BLAS", "Failed to allocate BLAS storage for mesh #{}", i);
+                    blasValid = false;
+                } else {
+                    auto* storageInfo = BM_GET(blasStorageHandle);
+                    if (!storageInfo) {
+                        BM_DESTROY(blasStorageHandle);
+                        blasValid = false;
+                    } else {
+                        mesh.blasStorage = blasStorageHandle;
+
+                        VkAccelerationStructureCreateInfoKHR blasCreate{};
+                        blasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+                        blasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+                        blasCreate.buffer = storageInfo->buffer;
+                        blasCreate.size = sizes.accelerationStructureSize;
+
+                        VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &blasCreate, nullptr, &mesh.blas);
+                        if (res != VK_SUCCESS) {
+                            LOG_FATAL_CAT("BLAS", "vkCreateAccelerationStructureKHR failed for mesh #{}: {}", i, string_VkResult(res));
+                            BM_DESTROY(blasStorageHandle);
+                            mesh.blas = VK_NULL_HANDLE;
+                            blasValid = false;
+                        } else {
+                            LOG_SUCCESS_CAT("BLAS", "Created BLAS acceleration structure for mesh #{}", i);
+                        }
+                    }
+                }
+            }
+
+            if (!blasValid || mesh.blas == VK_NULL_HANDLE) {
+                LOG_WARNING_CAT("BLAS", "Skipping BLAS build for mesh #{} — invalid acceleration structure", i);
+                continue;
+            }
+
+            buildInfo.dstAccelerationStructure = mesh.blas;
+
+            ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &buildInfo, &pRangeInfo);
+
+            VkMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+            barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+            vkCmdPipelineBarrier(localCmd,
+                                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                                 0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+            mesh.blasBuilt = true;
+            LOG_SUCCESS_CAT("BLAS", "BLAS built/updated for mesh #{} (primitives={})", i, mesh.primitiveCount);
+        }
+
+        rtx().las_pending_blas_builds = false;
+        LOG_SUCCESS_CAT("BLAS", "All pending BLAS builds completed");
     }
 
-    if (las_procedural_dirty()) {
-        // TODO: Update procedural primitives buffer / rebuild if needed
-        las_procedural_dirty() = false;
-        LOG_INFO_CAT("LAS", "Procedural primitives updated");
+    // ────────────────────────────────────────────────
+    // Step 3: Rebuild TLAS (instances of BLAS + procedurals)
+    // ────────────────────────────────────────────────
+    if (rtx().las_tlas_dirty) {
+        LOG_INFO_CAT("TLAS", "Rebuilding TLAS — {} procedural primitives + {} triangle meshes",
+                     rtx().las_procedural_primitives.size(), rtx().las_triangle_meshes.size());
+
+        VkDeviceSize instanceCount = rtx().las_procedural_primitives.size() + rtx().las_triangle_meshes.size();
+        VkDeviceSize instanceSize = instanceCount * sizeof(VkAccelerationStructureInstanceKHR);
+        if (instanceSize == 0) instanceSize = 64;
+
+        if (rtx().las_instance_buffer == 0) {
+            uint64_t instHandle = 0;
+            BM_CREATE(instHandle, instanceSize,
+                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                      "LAS_InstanceBuffer");
+
+            if (instHandle == 0) {
+                LOG_FATAL_CAT("TLAS", "Failed to allocate TLAS instance buffer");
+                if (ownsCmd) {
+                    vkEndCommandBuffer(localCmd);
+                    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+                }
+                return;
+            }
+
+            rtx().las_instance_buffer = instHandle;
+        }
+
+        std::vector<VkAccelerationStructureInstanceKHR> instances;
+        instances.reserve(instanceCount);
+
+        uint32_t instanceId = 0;
+
+        for (const auto& prim : rtx().las_procedural_primitives) {
+            VkAccelerationStructureInstanceKHR inst{};
+            inst.transform = to_vk_transform(prim.transform);
+            inst.instanceCustomIndex = instanceId++;
+            inst.mask = 0xFF;
+            inst.instanceShaderBindingTableRecordOffset = 0;
+            inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+            inst.accelerationStructureReference = 0;
+
+            instances.push_back(inst);
+        }
+
+        for (const auto& mesh : rtx().las_triangle_meshes) {
+            if (mesh.blas == VK_NULL_HANDLE) continue;
+
+            VkAccelerationStructureDeviceAddressInfoKHR addrInfo{};
+            addrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+            addrInfo.accelerationStructure = mesh.blas;
+            VkDeviceAddress blasAddr = ext().vkGetAccelerationStructureDeviceAddressKHR(rtx().device, &addrInfo);
+
+            VkAccelerationStructureInstanceKHR inst{};
+            inst.transform = to_vk_transform(mesh.transform);
+            inst.instanceCustomIndex = instanceId++;
+            inst.mask = 0xFF;
+            inst.instanceShaderBindingTableRecordOffset = 0;
+            inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+            inst.accelerationStructureReference = blasAddr;
+
+            instances.push_back(inst);
+        }
+
+        BM_UPLOAD_TO_BUFFER(rtx().las_instance_buffer, instances.data(), 
+                            instances.size() * sizeof(VkAccelerationStructureInstanceKHR), localCmd);
+
+        LOG_SUCCESS_CAT("TLAS", "Uploaded {} TLAS instances to device buffer", instanceCount);
+
+        VkAccelerationStructureGeometryKHR tlasGeom{};
+        tlasGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        tlasGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        tlasGeom.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+        tlasGeom.geometry.instances.arrayOfPointers = VK_FALSE;
+        tlasGeom.geometry.instances.data.deviceAddress = BM_GET_DEVICE_ADDRESS(rtx().las_instance_buffer);
+
+        VkAccelerationStructureBuildGeometryInfoKHR tlasBuild{};
+        tlasBuild.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+        tlasBuild.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        tlasBuild.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        tlasBuild.geometryCount = 1;
+        tlasBuild.pGeometries = &tlasGeom;
+
+        VkAccelerationStructureBuildRangeInfoKHR tlasRange{};
+        tlasRange.primitiveCount = static_cast<uint32_t>(instanceCount);
+        tlasRange.primitiveOffset = 0;
+        tlasRange.firstVertex = 0;
+        tlasRange.transformOffset = 0;
+
+        const VkAccelerationStructureBuildRangeInfoKHR* pTlasRange = &tlasRange;
+
+        VkAccelerationStructureBuildSizesInfoKHR tlasSizes{};
+        tlasSizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+        ext().vkGetAccelerationStructureBuildSizesKHR(
+            rtx().device,
+            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &tlasBuild,
+            &tlasRange.primitiveCount,
+            &tlasSizes);
+
+        VkDeviceAddress tlasScratchAddr = allocateScratch(tlasSizes.buildScratchSize);
+        if (tlasScratchAddr == 0) {
+            LOG_FATAL_CAT("TLAS", "Failed to allocate scratch for TLAS build");
+            if (ownsCmd) {
+                vkEndCommandBuffer(localCmd);
+                vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+            }
+            return;
+        }
+
+        tlasBuild.scratchData.deviceAddress = tlasScratchAddr;
+
+        bool tlasValid = true;
+
+        if (rtx().las_tlas == VK_NULL_HANDLE) {
+            uint64_t tlasStorageHandle = 0;
+            BM_CREATE(tlasStorageHandle, tlasSizes.accelerationStructureSize,
+                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                      "LAS_TLAS_Storage");
+
+            if (tlasStorageHandle == 0) {
+                LOG_FATAL_CAT("TLAS", "Failed to allocate TLAS storage buffer");
+                tlasValid = false;
+            } else {
+                rtx().las_tlas_storage = tlasStorageHandle;
+
+                auto* storageInfo = BM_GET(tlasStorageHandle);
+                if (!storageInfo) {
+                    BM_DESTROY(tlasStorageHandle);
+                    tlasValid = false;
+                } else {
+                    VkAccelerationStructureCreateInfoKHR tlasCreate{};
+                    tlasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+                    tlasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+                    tlasCreate.buffer = storageInfo->buffer;
+                    tlasCreate.size = tlasSizes.accelerationStructureSize;
+
+                    VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &tlasCreate, nullptr, &rtx().las_tlas);
+                    if (res != VK_SUCCESS) {
+                        LOG_FATAL_CAT("TLAS", "Failed to create TLAS: {}", string_VkResult(res));
+                        BM_DESTROY(tlasStorageHandle);
+                        rtx().las_tlas = VK_NULL_HANDLE;
+                        tlasValid = false;
+                    } else {
+                        LOG_SUCCESS_CAT("TLAS", "Created TLAS acceleration structure");
+                    }
+                }
+            }
+        }
+
+        if (!tlasValid || rtx().las_tlas == VK_NULL_HANDLE) {
+            LOG_WARNING_CAT("TLAS", "Skipping TLAS build — invalid acceleration structure");
+        } else {
+            tlasBuild.dstAccelerationStructure = rtx().las_tlas;
+
+            ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &tlasBuild, &pTlasRange);
+
+            VkMemoryBarrier tlasBarrier{};
+            tlasBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+            tlasBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+            vkCmdPipelineBarrier(localCmd,
+                                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                                 0, 1, &tlasBarrier, 0, nullptr, 0, nullptr);
+
+            rtx().las_tlas_dirty = false;
+            LOG_SUCCESS_CAT("TLAS", "TLAS rebuilt with {} instances", instanceCount);
+        }
     }
 
     if (ownsCmd) {
-        vkEndCommandBuffer(localCmd);
+        VkResult res = vkEndCommandBuffer(localCmd);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "Failed to end LAS rebuild cmd buffer: {}", string_VkResult(res));
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+            return;
+        }
 
         VkSubmitInfo submit{};
-        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount   = 1;
-        submit.pCommandBuffers      = &localCmd;
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &localCmd;
 
-        vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+        res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "Failed to submit LAS rebuild: {}", string_VkResult(res));
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+            return;
+        }
+
         vkQueueWaitIdle(rtx().graphics_queue);
-
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+
+        LOG_SUCCESS_CAT("LAS", "LAS rebuild complete — structures updated and ready");
+    } else {
+        LOG_INFO_CAT("LAS", "LAS rebuild recorded into external cmd buffer — awaiting submission");
     }
 }
 
 [[nodiscard]] inline VkAccelerationStructureKHR getTLAS() noexcept {
     ensureReady();
-    return stone_las_tlas();
+    return rtx().las_tlas;
 }
 
 struct Swapchain {
@@ -1619,6 +1896,7 @@ struct Swapchain {
         explicit Handle(VkSwapchainKHR v) : value(v) {}
         VkSwapchainKHR get() const { return value; }
         void reset() { value = VK_NULL_HANDLE; }
+        bool valid() const { return value != VK_NULL_HANDLE; }
     };
 
     inline static Handle swapchain_;
@@ -1635,17 +1913,15 @@ struct Swapchain {
             return;
         }
 
-        vkDeviceWaitIdle(stone_device());
+        vkDeviceWaitIdle(rtx().device);
 
         createOrRecreateSwapchain(w, h, true);
     }
 
     static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept {
-        ext();  // Ensure extensions are loaded
-
-        VkDevice dev = stone_device();
-        VkPhysicalDevice phys = stone_physical();
-        VkSurfaceKHR surf = stone_surface();
+        VkDevice dev = rtx().device;
+        VkPhysicalDevice phys = rtx().physical;
+        VkSurfaceKHR surf = rtx().surface;
 
         if (!dev || !phys || !surf || w == 0 || h == 0) {
             minimized_ = true;
@@ -1656,11 +1932,10 @@ struct Swapchain {
 
         if (isRecreate) {
             cleanupImageViews();
-            if (swapchain_.get() != VK_NULL_HANDLE) {
-                VK_DESTROY_SWAPCHAIN(dev, swapchain_.get(), nullptr);
+            if (swapchain_.valid()) {
+                ext().vkDestroySwapchainKHR(dev, swapchain_.get(), nullptr);
                 swapchain_.reset();
             }
-            onResize();
         }
 
         minimized_ = false;
@@ -1743,16 +2018,22 @@ struct Swapchain {
         ci.imageUsage       = usage;
 
         VkSwapchainKHR newSwap = VK_NULL_HANDLE;
-        VK_CREATE_SWAPCHAIN(dev, &ci, nullptr, &newSwap);
+        VkResult res = ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
+
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {}", string_VkResult(res));
+            minimized_ = true;
+            return;
+        }
 
         swapchain_ = Handle(newSwap);
         swapchainExtent_ = extent;
         swapchainFormat_ = chosenFormat.format;
 
         uint32_t count = 0;
-        VK_GET_SWAPCHAIN_IMAGES(dev, newSwap, &count, nullptr);
+        ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, nullptr);
         swapchainImages_.resize(count);
-        VK_GET_SWAPCHAIN_IMAGES(dev, newSwap, &count, swapchainImages_.data());
+        ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, swapchainImages_.data());
 
         swapchainImageViews_.resize(count);
 
@@ -1769,14 +2050,21 @@ struct Swapchain {
             vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageViews_[i]);
         }
 
-        stone_seal_swapchain_resources(swapchainImages_, swapchainImageViews_, extent, count);
+        rtx().images = swapchainImages_;
+        rtx().views = swapchainImageViews_;
+        rtx().extent = extent;
+        rtx().image_count = count;
     }
 
     [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept {
-        if (minimized_) return VK_NOT_READY;
+        if (minimized_ || !swapchain_.valid()) {
+            *pImageIndex = 0;
+            *pSemaphoreOut = VK_NULL_HANDLE;
+            return VK_NOT_READY;
+        }
 
-        VkDevice dev = stone_device();
-        VkSwapchainKHR sw = stone_swapchain();
+        VkDevice dev = rtx().device;
+        VkSwapchainKHR sw = swapchain_.get();
 
         static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
         if (acquireSemaphore == VK_NULL_HANDLE) {
@@ -1785,8 +2073,8 @@ struct Swapchain {
             vkCreateSemaphore(dev, &semCI, nullptr, &acquireSemaphore);
         }
 
-        VkResult res = VK_ACQUIRE_NEXT_IMAGE(dev, sw, UINT64_MAX,
-                                             acquireSemaphore, VK_NULL_HANDLE, pImageIndex);
+        VkResult res = ext().vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
+                                                   acquireSemaphore, VK_NULL_HANDLE, pImageIndex);
 
         if (res != VK_SUCCESS && res != VK_NOT_READY) {
             if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
@@ -1798,72 +2086,17 @@ struct Swapchain {
         return res;
     }
 
-    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore, VkSwapchainKHR swapchainHandle) noexcept {
-        if (minimized_) return;
-
-        VkDevice dev = stone_device();
-
-        if (imageIndex >= swapchainImages_.size()) return;
-
-        VkImage image = swapchainImages_[imageIndex];
-
-        static VkCommandBuffer presentCmd = VK_NULL_HANDLE;
-        if (presentCmd == VK_NULL_HANDLE) {
-            VkCommandBufferAllocateInfo allocInfo{};
-            allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-            allocInfo.commandPool        = rtx().transient_pool;
-            allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            allocInfo.commandBufferCount = 1;
-            vkAllocateCommandBuffers(dev, &allocInfo, &presentCmd);
+    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept {
+        if (minimized_ || !swapchain_.valid() || imageIndex >= swapchainImages_.size()) {
+            return;
         }
 
-        vkResetCommandBuffer(presentCmd, 0);
-
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = 0;
-
-        vkBeginCommandBuffer(presentCmd, &beginInfo);
-
-        VkImageMemoryBarrier barrier{};
-        barrier.sType                   = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout               = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout               = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        barrier.srcQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex     = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image                   = image;
-        barrier.subresourceRange        = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        barrier.srcAccessMask           = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask           = VK_ACCESS_MEMORY_READ_BIT;
-
-        vkCmdPipelineBarrier(presentCmd,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                             0,
-                             0, nullptr,
-                             0, nullptr,
-                             1, &barrier);
-
-        vkEndCommandBuffer(presentCmd);
-
-        VkSubmitInfo submit{};
-        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount   = 1;
-        submit.pCommandBuffers      = &presentCmd;
-
-        if (waitSemaphore != VK_NULL_HANDLE) {
-            VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT};
-            submit.waitSemaphoreCount   = 1;
-            submit.pWaitSemaphores      = &waitSemaphore;
-            submit.pWaitDstStageMask    = waitStages;
-        }
-
-        vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+        VkSwapchainKHR sw = swapchain_.get();
 
         VkPresentInfoKHR pi{};
         pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.swapchainCount     = 1;
-        pi.pSwapchains        = &swapchainHandle;
+        pi.pSwapchains        = &sw;
         pi.pImageIndices      = &imageIndex;
 
         if (waitSemaphore != VK_NULL_HANDLE) {
@@ -1871,11 +2104,11 @@ struct Swapchain {
             pi.pWaitSemaphores    = &waitSemaphore;
         }
 
-        VK_QUEUE_PRESENT(queue, &pi);
+        ext().vkQueuePresentKHR(queue, &pi);
     }
 
     static void recreate(uint32_t width, uint32_t height) noexcept {
-        vkDeviceWaitIdle(stone_device());
+        vkDeviceWaitIdle(rtx().device);
         createOrRecreateSwapchain(width, height, true);
     }
 
@@ -1884,18 +2117,12 @@ struct Swapchain {
     }
 
     static void cleanup() noexcept {
-        VkDevice dev = stone_device();
+        VkDevice dev = rtx().device;
         if (!dev) return;
         vkDeviceWaitIdle(dev);
 
-        onResize();
         cleanupImageViews();
         cleanupSwapchain();
-
-        if (rtx().transient_pool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(dev, rtx().transient_pool, nullptr);
-            rtx().transient_pool = VK_NULL_HANDLE;
-        }
 
         static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
         if (acquireSemaphore != VK_NULL_HANDLE) {
@@ -1904,13 +2131,14 @@ struct Swapchain {
         }
     }
 
+private:
     static void cleanupSwapchain() noexcept {
         swapchain_.reset();
         swapchainImages_.clear();
     }
 
     static void cleanupImageViews() noexcept {
-        VkDevice dev = stone_device();
+        VkDevice dev = rtx().device;
         for (auto v : swapchainImageViews_) {
             vkDestroyImageView(dev, v, nullptr);
         }

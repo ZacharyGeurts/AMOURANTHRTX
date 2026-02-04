@@ -97,7 +97,7 @@ static void showSacrificialSplash() noexcept {
 int main(int, char**) {
     install_apocalypse_handler();
 
-    sdl_init_all(Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT, "AMOURANTH RTX v∞ TURBO");
+    sdl_init_all(Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT, "AMOURANTHRTX");
 
     if (!g_window) {
         sdl_cleanup_all();
@@ -138,10 +138,18 @@ int main(int, char**) {
     vkGetDeviceQueue(device, compute_family, 0, &compute_queue);
     vkGetDeviceQueue(device, transfer_family, 0, &transfer_queue);
 
-    // Sealing in correct order — device + queues + families first
-    stone_seal_device_resources(instance, device, rtx().physical, surface, VK_NULL_HANDLE);
-    stone_seal_queues(graphics_queue, present_queue, compute_queue, transfer_queue);
-    stone_seal_families(graphics_family, present_family, transfer_family, compute_family);
+    // Direct sealing to rtx() — no stone_ wrappers
+    rtx().instance = instance;
+    rtx().device = device;
+    rtx().surface = surface;
+    rtx().graphics_queue = graphics_queue;
+    rtx().present_queue = present_queue;
+    rtx().compute_queue = compute_queue;
+    rtx().transfer_queue = transfer_queue;
+    rtx().graphics_family = graphics_family;
+    rtx().present_family = present_family;
+    rtx().transfer_family = transfer_family;
+    rtx().compute_family = compute_family;
 
     // ────────────────────────────────────────────────
     // Create and seal the REAL global transient command pool — early, explicit, once
@@ -165,17 +173,15 @@ int main(int, char**) {
             return 1;
         }
 
-        stone_seal_transient_pool(rtx().transient_pool);
-
         LOG_SUCCESS_CAT("VULKAN", "Global transient command pool created and sealed");
     }
 
     // Create swapchain
     Swapchain::create(g_window, Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
-    stone_seal_swapchain_resources(Swapchain::swapchainImages_, 
-                                   Swapchain::swapchainImageViews_, 
-                                   Swapchain::swapchainExtent_, 
-                                   Swapchain::swapchainImages_.size());
+    rtx().images = Swapchain::swapchainImages_;
+    rtx().views = Swapchain::swapchainImageViews_;
+    rtx().extent = Swapchain::swapchainExtent_;
+    rtx().image_count = Swapchain::swapchainImages_.size();
 
     // Pipeline initialization — now with guaranteed real pool
     pipeline_initialize();
@@ -184,8 +190,11 @@ int main(int, char**) {
     pipeline_create_compute_pipeline();
     pipeline_create_shader_binding_table();
 
-    stone_seal_pipelines(rtx().compute_pipeline, rtx().rt_pipeline, rtx().pipeline_layout);
-    stone_seal_final();
+    rtx().compute_pipeline = rtx().compute_pipeline;
+    rtx().rt_pipeline = rtx().rt_pipeline;
+    rtx().pipeline_layout = rtx().pipeline_layout;
+
+    LOG_AMOURANTH("AMOURANTHRTX v0.81 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 
     // Renderer — safe to allocate from rtx().transient_pool
     renderer = std::make_unique<VulkanRenderer>(Options::Window::DEFAULT_WIDTH, 

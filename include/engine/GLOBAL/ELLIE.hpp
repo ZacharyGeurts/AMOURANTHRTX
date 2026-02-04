@@ -709,8 +709,8 @@ private:
             {"Dispose", PARTY_PINK}, {"Logger", ELECTRIC_BLUE}, {"Vulkan", SAPPHIRE_BLUE},
             {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER},
             {"Queue", OBSIDIAN_BLACK}, {"RayTrace", TURQUOISE_BLUE}, {"RTX", HYPERSPACE_WARP},
-            {"Accel", PULSAR_GREEN}, {"TLAS", SUPERNOVA_ORANGE}, {"BLAS", SUPERNOVA_ORANGE},
-            {"LAS", SUPERNOVA_ORANGE}, {"AI", COSMIC_GOLD}, {"Memory", PEACHES_AND_CREAM},
+            {"Accel", PULSAR_GREEN}, {"TLAS", LIME}, {"BLAS", GREEN},
+            {"LAS", FROSTFIRE_BLUE}, {"AI", COSMIC_GOLD}, {"Memory", PEACHES_AND_CREAM},
             {"SBT", RASPBERRY_PINK}, {"Shader", NEBULA_VIOLET}, {"Renderer", BRIGHT_PINKISH_PURPLE},
             {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM}, {"GBuffer", QUANTUM_FLUX},
             {"Post", NUCLEAR_REACTOR}, {"Buffer", BRONZE_BROWN}, {"Image", LIME_YELLOW},
@@ -945,7 +945,7 @@ static constexpr auto vkh = []() constexpr noexcept {
                 default:                                  return "UNKNOWN_PRESENT_MODE";
             }
         }
-
+		
         // ────────────────────── FATAL CHECK — FULL EXECUTION REPORT ──────────────────────
         static void checker(VkResult r,
                           const char* call,
