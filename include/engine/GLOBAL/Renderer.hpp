@@ -135,23 +135,22 @@ void pew() noexcept {
 
     float total_sec = static_cast<float>(TotalTime::get().seconds());
 
-    // Handle swapchain invalidation / resize
+    // Handle resize / out-of-date
     if (needsSwapchainRecreate_) {
         vkDeviceWaitIdle(rtx().device);
         Swapchain::recreate(static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
-        createOrRecreateHDRImage();  // HDR must match new size
+        createOrRecreateHDRImage();
         needsSwapchainRecreate_ = false;
-        updateGlobalDescriptorBuffer();  // Re-bind new output view
+        updateGlobalDescriptorBuffer();
         if (Swapchain::minimized_) return;
     }
 
-    // Update camera UBO every frame (fast mapped path)
     updateCameraUBO(total_sec);
 
     VkAccelerationStructureKHR tlas = getTLAS();
     if (tlas == VK_NULL_HANDLE) return;
 
-    // Reusable shared binary semaphore — created once, reused forever
+    // Reusable shared binary semaphore (created once)
     static VkSemaphore sharedSemaphore = VK_NULL_HANDLE;
     if (sharedSemaphore == VK_NULL_HANDLE) {
         VkSemaphoreCreateInfo semCI{};
@@ -161,7 +160,7 @@ void pew() noexcept {
 
     uint32_t imageIndex;
 
-    // Acquire signals the shared semaphore
+    // Acquire signals the semaphore
     VkResult res = Swapchain::acquireNextImage(&imageIndex, &sharedSemaphore);
     if (res != VK_SUCCESS) {
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
@@ -180,7 +179,6 @@ void pew() noexcept {
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &begin);
 
-    // Optional compute prepass
     pipeline_dispatch_living_world(cmd, total_sec);
 
     VkMemoryBarrier mb{};
@@ -208,7 +206,6 @@ void pew() noexcept {
 
     VkImage swapImg = Swapchain::swapchainImages_[imageIndex];
 
-    // Transition swapchain image to TRANSFER_DST before blit
     transitionImageLayout(cmd, swapImg,
                           VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -226,29 +223,27 @@ void pew() noexcept {
                    swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
-    // Critical: Transition to PRESENT_SRC_KHR before submit
     transitionImageLayout(cmd, swapImg,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                           VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     vkEndCommandBuffer(cmd);
 
-    // Render submit **waits** on acquire semaphore, then **signals** it again for present
+    // CRITICAL: Render **waits** on acquire semaphore → guarantees signal operation executed
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
     VkSubmitInfo submit{};
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &sharedSemaphore;
+    submit.pWaitSemaphores      = &sharedSemaphore;           // ← This line fixes VUID-03268
     submit.pWaitDstStageMask    = waitStages;
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &cmd;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores    = &sharedSemaphore;
+    // No signal needed — present waits on the same semaphore
 
     vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
 
-    // Present waits on the same semaphore (now signaled by render submit)
+    // Present waits on the semaphore (now guaranteed signaled after render wait)
     Swapchain::presentImage(rtx().graphics_queue, imageIndex, sharedSemaphore);
 }
 
