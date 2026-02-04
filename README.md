@@ -13,6 +13,7 @@ Grok read all your forums and we tried that.
 I will come off as insane sometimes if I think it is good for a joke.  
 Make your own copy and decide if you want future updates from me by checking commits.  
 This is pre-release software and compiles. I should be on the final iteration.  
+The meaningful files are in include/engine/GLOBAL  
 
 I consider compute and datacenters with updates.  I believe that portion can operate elsewhere so my update may break your compute if yours runs.  
 Long winded. If you branch from me, I cannot test those changes with mine without issues pages.  
