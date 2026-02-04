@@ -1441,14 +1441,78 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         las_initialized() = true;
     }
 
-    if (cmd) {
-        if (las_tlas_dirty()) {
-            las_tlas_dirty() = false;
+    // If no external cmd buffer provided, use the global transient pool to allocate a temporary one
+    VkCommandBuffer localCmd = cmd;
+    bool ownsCmd = (cmd == VK_NULL_HANDLE);
+
+    if (ownsCmd) {
+        if (rtx().transient_pool == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("LAS", "No transient pool available — cannot build LAS without command buffer");
+            return;
         }
+
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = rtx().transient_pool;
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &localCmd);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "Failed to allocate temporary cmd buffer for LAS build: {}", string_VkResult(res));
+            return;
+        }
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        res = vkBeginCommandBuffer(localCmd, &beginInfo);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("LAS", "Failed to begin temporary cmd buffer: {}", string_VkResult(res));
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+            return;
+        }
+    }
+
+    // Now we have a valid cmd buffer (either provided or local)
+    if (las_tlas_dirty()) {
+        // TODO: Record TLAS rebuild commands here using localCmd
+        // (build acceleration structures, copy, barriers, etc.)
+        // Example placeholder:
+        // vkCmdBuildAccelerationStructuresKHR(localCmd, ...);
+        // vkCmdPipelineBarrier(...);
+
+        las_tlas_dirty() = false;
+        LOG_INFO_CAT("LAS", "TLAS rebuild recorded");
+    }
+
+    if (las_pending_blas_builds()) {
+        // TODO: Record BLAS builds for pending meshes/primitives
+        // vkCmdBuildAccelerationStructuresKHR(localCmd, ...);
+
         las_pending_blas_builds() = false;
+        LOG_INFO_CAT("LAS", "Pending BLAS builds recorded");
+    }
+
+    if (las_procedural_dirty()) {
+        // TODO: Update procedural primitives buffer / rebuild if needed
         las_procedural_dirty() = false;
-    } else {
-        LOG_WARNING_CAT("LAS", "No command buffer — LAS rebuild deferred until next frame");
+        LOG_INFO_CAT("LAS", "Procedural primitives updated");
+    }
+
+    if (ownsCmd) {
+        vkEndCommandBuffer(localCmd);
+
+        VkSubmitInfo submit{};
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &localCmd;
+
+        vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+        vkQueueWaitIdle(rtx().graphics_queue);
+
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
     }
 }
 

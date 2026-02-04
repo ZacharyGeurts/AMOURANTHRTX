@@ -143,18 +143,42 @@ int main(int, char**) {
     stone_seal_queues(graphics_queue, present_queue, compute_queue, transfer_queue);
     stone_seal_families(graphics_family, present_family, transfer_family, compute_family);
 
-    // Create swapchain early (needed for surface capabilities)
+    // ────────────────────────────────────────────────
+    // Create and seal the REAL global transient command pool — early, explicit, once
+    // This happens BEFORE swapchain, BEFORE pipeline, BEFORE renderer
+    // No dummies, no lazy creation, no chicken-egg
+    // ────────────────────────────────────────────────
+    {
+        VkCommandPoolCreateInfo poolInfo{};
+        poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | 
+                                    VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = rtx().graphics_family;
+
+        VkResult res = vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("VULKAN", "Failed to create global transient command pool: {}", string_VkResult(res));
+            vkDestroyDevice(device, nullptr);
+            vkDestroySurfaceKHR(instance, surface, nullptr);
+            vkDestroyInstance(instance, nullptr);
+            sdl_cleanup_all();
+            return 1;
+        }
+
+        stone_seal_transient_pool(rtx().transient_pool);
+
+        LOG_SUCCESS_CAT("VULKAN", "Global transient command pool created and sealed");
+    }
+
+    // Create swapchain
     Swapchain::create(g_window, Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
     stone_seal_swapchain_resources(Swapchain::swapchainImages_, 
                                    Swapchain::swapchainImageViews_, 
                                    Swapchain::swapchainExtent_, 
                                    Swapchain::swapchainImages_.size());
 
-    // ────────────────────────────────────────────────
-    // CRITICAL: Pipeline setup BEFORE renderer
-    // This is where rtx().transient_pool is created
-    // ────────────────────────────────────────────────
-    pipeline_initialize();                    // ← usually creates transient_pool
+    // Pipeline initialization — now with guaranteed real pool
+    pipeline_initialize();
     pipeline_create_pipeline_layout();
     pipeline_create_ray_tracing_pipeline();
     pipeline_create_compute_pipeline();
@@ -163,9 +187,7 @@ int main(int, char**) {
     stone_seal_pipelines(rtx().compute_pipeline, rtx().rt_pipeline, rtx().pipeline_layout);
     stone_seal_final();
 
-    // ────────────────────────────────────────────────
-    // NOW safe — transient pool exists
-    // ────────────────────────────────────────────────
+    // Renderer — safe to allocate from rtx().transient_pool
     renderer = std::make_unique<VulkanRenderer>(Options::Window::DEFAULT_WIDTH, 
                                                 Options::Window::DEFAULT_HEIGHT, 
                                                 g_window);
