@@ -112,138 +112,6 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     return inst;
 }
 
-[[nodiscard]] inline VkDevice createLogicalDeviceAndSelectGPU(
-    VkInstance inst,
-    VkSurfaceKHR surf,
-    uint32_t* out_graphics_family = nullptr,
-    uint32_t* out_present_family  = nullptr,
-    uint32_t* out_compute_family  = nullptr,
-    uint32_t* out_transfer_family = nullptr
-) noexcept {
-    uint32_t count = 0;
-    vkEnumeratePhysicalDevices(inst, &count, nullptr);
-    if (count == 0) {
-        LOG_FATAL_CAT("VULKAN", "No Vulkan GPUs found");
-        return VK_NULL_HANDLE;
-    }
-
-    std::vector<VkPhysicalDevice> devices(count);
-    vkEnumeratePhysicalDevices(inst, &count, devices.data());
-
-    VkPhysicalDevice selected = VK_NULL_HANDLE;
-    QueueFamilyIndices best;
-    int bestScore = -1;
-
-    for (VkPhysicalDevice pd : devices) {
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(pd, &props);
-
-        if (props.apiVersion < VK_API_VERSION_1_3) continue;
-
-        QueueFamilyIndices indices = findQueueFamilies(pd, surf);
-        if (!indices.complete()) continue;
-
-        uint32_t extCount = 0;
-        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr);
-        std::vector<VkExtensionProperties> exts(extCount);
-        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data());
-
-        bool hasAll = true;
-        for (const char* need : requiredDeviceExtensions) {
-            bool found = false;
-            for (const auto& e : exts) {
-                if (std::strcmp(e.extensionName, need) == 0) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                hasAll = false;
-                break;
-            }
-        }
-        if (!hasAll) continue;
-
-        int score = 0;
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
-        if (std::strstr(props.deviceName, "RTX") || std::strstr(props.deviceName, "GeForce")) score += 300000;
-
-        if (score > bestScore) {
-            bestScore = score;
-            selected = pd;
-            best = indices;
-        }
-    }
-
-    if (selected == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("VULKAN", "No RTX-capable GPU with compute support found");
-        return VK_NULL_HANDLE;
-    }
-
-    VkPhysicalDeviceProperties props{};
-    vkGetPhysicalDeviceProperties(selected, &props);
-    LOG_INFO_CAT("VULKAN", "Selected GPU: {}", props.deviceName);
-
-    std::set<uint32_t> uniqueQ = {best.graphics.value(), best.present.value(), best.compute.value()};
-    if (best.transfer.has_value()) uniqueQ.insert(best.transfer.value());
-
-    float prio = 1.0f;
-    std::vector<VkDeviceQueueCreateInfo> qInfos;
-    for (uint32_t fam : uniqueQ) {
-        qInfos.push_back({
-            .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = fam,
-            .queueCount       = 1,
-            .pQueuePriorities = &prio
-        });
-    }
-
-    VkPhysicalDeviceVulkan12Features vk12{};
-    vk12.sType                   = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12.bufferDeviceAddress     = VK_TRUE;
-    vk12.descriptorIndexing      = VK_TRUE;
-    vk12.runtimeDescriptorArray  = VK_TRUE;
-
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{};
-    accel.sType                  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
-    accel.accelerationStructure  = VK_TRUE;
-    accel.pNext                  = &vk12;
-
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipe{};
-    rtPipe.sType                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
-    rtPipe.rayTracingPipeline    = VK_TRUE;
-    rtPipe.pNext                 = &accel;
-
-    VkPhysicalDeviceDescriptorBufferFeaturesEXT descBufFeatures{};
-    descBufFeatures.sType        = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
-    descBufFeatures.descriptorBuffer = VK_TRUE;
-    descBufFeatures.pNext        = &rtPipe;
-
-    VkDeviceCreateInfo devInfo{};
-    devInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    devInfo.pNext                   = &descBufFeatures;
-    devInfo.queueCreateInfoCount    = static_cast<uint32_t>(qInfos.size());
-    devInfo.pQueueCreateInfos       = qInfos.data();
-    devInfo.enabledExtensionCount   = static_cast<uint32_t>(requiredDeviceExtensions.size());
-    devInfo.ppEnabledExtensionNames = requiredDeviceExtensions.data();
-
-    VkDevice dev = VK_NULL_HANDLE;
-    VkResult res = vkCreateDevice(selected, &devInfo, nullptr, &dev);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "vkCreateDevice failed: {}", string_VkResult(res));
-        return VK_NULL_HANDLE;
-    }
-
-    if (out_graphics_family) *out_graphics_family = best.graphics.value();
-    if (out_present_family)  *out_present_family  = best.present.value();
-    if (out_compute_family)  *out_compute_family  = best.compute.value();
-    if (out_transfer_family) *out_transfer_family = best.transfer.value_or(best.graphics.value());
-
-    LOG_SUCCESS_CAT("VULKAN", "Logical device created — RTX + compute + descriptor buffer enabled");
-
-    return dev;
-}
-
 struct UniversalPrimitive {
     glm::vec4 aabbMin;
     glm::vec4 aabbMax;
@@ -388,6 +256,145 @@ struct RTX {
 inline RTX& rtx() noexcept {
     static RTX e;
     return e;
+}
+
+[[nodiscard]] inline VkDevice createLogicalDeviceAndSelectGPU(
+    VkInstance inst,
+    VkSurfaceKHR surf,
+    uint32_t* out_graphics_family = nullptr,
+    uint32_t* out_present_family  = nullptr,
+    uint32_t* out_compute_family  = nullptr,
+    uint32_t* out_transfer_family = nullptr
+) noexcept {
+    uint32_t count = 0;
+    vkEnumeratePhysicalDevices(inst, &count, nullptr);
+    if (count == 0) {
+        LOG_FATAL_CAT("VULKAN", "No Vulkan GPUs found");
+        return VK_NULL_HANDLE;
+    }
+
+    std::vector<VkPhysicalDevice> devices(count);
+    vkEnumeratePhysicalDevices(inst, &count, devices.data());
+
+    VkPhysicalDevice selected = VK_NULL_HANDLE;
+    QueueFamilyIndices best;
+    int bestScore = -1;
+
+    for (VkPhysicalDevice pd : devices) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(pd, &props);
+
+        if (props.apiVersion < VK_API_VERSION_1_3) continue;
+
+        QueueFamilyIndices indices = findQueueFamilies(pd, surf);
+        if (!indices.complete()) continue;
+
+        uint32_t extCount = 0;
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr);
+        std::vector<VkExtensionProperties> exts(extCount);
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data());
+
+        bool hasAll = true;
+        for (const char* need : requiredDeviceExtensions) {
+            bool found = false;
+            for (const auto& e : exts) {
+                if (std::strcmp(e.extensionName, need) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                hasAll = false;
+                break;
+            }
+        }
+        if (!hasAll) continue;
+
+        int score = 0;
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 10000;
+        if (std::strstr(props.deviceName, "RTX") || std::strstr(props.deviceName, "GeForce")) score += 300000;
+
+        if (score > bestScore) {
+            bestScore = score;
+            selected = pd;
+            best = indices;
+        }
+    }
+
+    if (selected == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("VULKAN", "No RTX-capable GPU with compute support found");
+        return VK_NULL_HANDLE;
+    }
+
+    // ────────────────────────────────────────────────
+    // SEAL THE PHYSICAL DEVICE AS SOON AS WE HAVE IT
+    // ────────────────────────────────────────────────
+    rtx().physical = selected;
+
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(selected, &props);
+    LOG_INFO_CAT("VULKAN", "Selected GPU: {}", props.deviceName);
+
+    std::set<uint32_t> uniqueQ = {best.graphics.value(), best.present.value(), best.compute.value()};
+    if (best.transfer.has_value()) uniqueQ.insert(best.transfer.value());
+
+    float prio = 1.0f;
+    std::vector<VkDeviceQueueCreateInfo> qInfos;
+    for (uint32_t fam : uniqueQ) {
+        qInfos.push_back({
+            .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = fam,
+            .queueCount       = 1,
+            .pQueuePriorities = &prio
+        });
+    }
+
+    VkPhysicalDeviceVulkan12Features vk12{};
+    vk12.sType                   = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vk12.bufferDeviceAddress     = VK_TRUE;
+    vk12.descriptorIndexing      = VK_TRUE;
+    vk12.runtimeDescriptorArray  = VK_TRUE;
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{};
+    accel.sType                  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    accel.accelerationStructure  = VK_TRUE;
+    accel.pNext                  = &vk12;
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipe{};
+    rtPipe.sType                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    rtPipe.rayTracingPipeline    = VK_TRUE;
+    rtPipe.pNext                 = &accel;
+
+    VkPhysicalDeviceDescriptorBufferFeaturesEXT descBufFeatures{};
+    descBufFeatures.sType        = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
+    descBufFeatures.descriptorBuffer = VK_TRUE;
+    descBufFeatures.pNext        = &rtPipe;
+
+    VkDeviceCreateInfo devInfo{};
+    devInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    devInfo.pNext                   = &descBufFeatures;
+    devInfo.queueCreateInfoCount    = static_cast<uint32_t>(qInfos.size());
+    devInfo.pQueueCreateInfos       = qInfos.data();
+    devInfo.enabledExtensionCount   = static_cast<uint32_t>(requiredDeviceExtensions.size());
+    devInfo.ppEnabledExtensionNames = requiredDeviceExtensions.data();
+
+    VkDevice dev = VK_NULL_HANDLE;
+    VkResult res = vkCreateDevice(selected, &devInfo, nullptr, &dev);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("VULKAN", "vkCreateDevice failed: {}", string_VkResult(res));
+        // Optional: clean up the premature seal if creation fails
+        rtx().physical = VK_NULL_HANDLE;
+        return VK_NULL_HANDLE;
+    }
+
+    if (out_graphics_family) *out_graphics_family = best.graphics.value();
+    if (out_present_family)  *out_present_family  = best.present.value();
+    if (out_compute_family)  *out_compute_family  = best.compute.value();
+    if (out_transfer_family) *out_transfer_family = best.transfer.value_or(best.graphics.value());
+
+    LOG_SUCCESS_CAT("VULKAN", "Logical device created — RTX + compute + descriptor buffer enabled");
+
+    return dev;
 }
 
 [[noreturn]] inline void issue_execution_order(
