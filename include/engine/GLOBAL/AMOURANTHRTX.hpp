@@ -747,40 +747,75 @@ struct VRAMReality {
     static bool measured = false;
     static VRAMReality reality{};
 
-    if (measured) return reality;
+    if (measured) {
+        LOG_INFO_CAT("Memory", "VRAM stats already measured — returning cached values (total={} MB, usable={} MB, remaining={} MB)",
+                     reality.total / (1024 * 1024),
+                     reality.usable / (1024 * 1024),
+                     reality.remaining / (1024 * 1024));
+        return reality;
+    }
+
+    LOG_INFO_CAT("Memory", "Measuring VRAM reality — querying physical device properties");
 
     VkPhysicalDevice phys = rtx().physical;
+    if (phys == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("Memory", "Cannot measure VRAM — physical device not sealed yet!");
+        return VRAMReality{};
+    }
 
-    VkPhysicalDeviceMemoryProperties2 props2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+    VkPhysicalDeviceMemoryProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+
     vkGetPhysicalDeviceMemoryProperties2(phys, &props2);
 
+    reality.total = 0;
     for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
-        if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-            reality.total += props2.memoryProperties.memoryHeaps[i].size;
+        const auto& heap = props2.memoryProperties.memoryHeaps[i];
+        if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            reality.total += heap.size;
+            LOG_INFO_CAT("Memory", "Found device-local heap #{}: {} MB (flags=0x{:x})", 
+                         i, heap.size / (1024 * 1024), heap.flags);
         }
     }
 
+    LOG_INFO_CAT("Memory", "Total device-local VRAM detected: {} MB", reality.total / (1024 * 1024));
+
+    // Query current budget/usage via extension
     VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
     budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
     props2.pNext = &budget;
+
     vkGetPhysicalDeviceMemoryProperties2(phys, &props2);
 
+    reality.driver_footprint = 0;
     for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
-        if (props2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+        const auto& heap = props2.memoryProperties.memoryHeaps[i];
+        if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
             reality.driver_footprint = budget.heapUsage[i];
-            break;
+            LOG_INFO_CAT("Memory", "Driver-reported usage on local heap #{}: {} MB (budget={} MB)",
+                         i,
+                         budget.heapUsage[i] / (1024 * 1024),
+                         budget.heapBudget[i] / (1024 * 1024));
+            break;  // usually only one local heap
         }
     }
 
     if (reality.driver_footprint == 0) {
+        LOG_WARNING_CAT("Memory", "Driver usage reported as 0 — falling back to conservative 1.5 GB estimate");
         reality.driver_footprint = 1'500'000'000ULL;
     }
 
-    reality.usable = reality.total > (reality.driver_footprint + reality.safety_margin)
+    reality.usable = (reality.total > (reality.driver_footprint + reality.safety_margin))
                    ? reality.total - reality.driver_footprint - reality.safety_margin
                    : 0;
 
     reality.remaining = reality.usable;
+
+    LOG_SUCCESS_CAT("Memory", "VRAM reality measured: total={} MB | driver footprint={} MB | usable={} MB | remaining={} MB",
+                    reality.total / (1024 * 1024),
+                    reality.driver_footprint / (1024 * 1024),
+                    reality.usable / (1024 * 1024),
+                    reality.remaining / (1024 * 1024));
 
     measured = true;
     return reality;
@@ -978,10 +1013,16 @@ inline void ensureStagingRing() noexcept {
 
 [[nodiscard]] inline uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage,
                                      std::string_view tag = "") noexcept {
-    if (size == 0) return 0;
+    if (size == 0) {
+        LOG_WARNING_CAT("BUFFER", "create called with size=0 (tag={}) — returning invalid handle", tag);
+        return 0;
+    }
+
+    LOG_INFO_CAT("BUFFER", "Creating buffer: size={} bytes, usage=0x{:x}, tag='{}'", size, usage, tag);
 
     VkBufferUsageFlags fixedUsage = usage;
 
+    // Automatically enable shader device address for common storage/uniform/accel usages
     if (fixedUsage & (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
@@ -989,33 +1030,69 @@ inline void ensureStagingRing() noexcept {
                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
                       VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR)) {
         fixedUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        LOG_INFO_CAT("BUFFER", "Auto-added SHADER_DEVICE_ADDRESS_BIT (fixed usage now 0x{:x})", fixedUsage);
     }
 
+    // Descriptor buffer path — short-circuit early
     if (fixedUsage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) {
-        return createDescriptorBuffer(size, tag);
+        LOG_INFO_CAT("BUFFER", "Routing to descriptor buffer path");
+        uint64_t handle = createDescriptorBuffer(size, tag);
+        if (handle != 0) {
+            LOG_SUCCESS_CAT("BUFFER", "Descriptor buffer created successfully — handle={}", handle);
+        } else {
+            LOG_FATAL_CAT("BUFFER", "Descriptor buffer creation failed (size={}, tag='{}')", size, tag);
+        }
+        return handle;
     }
 
-    bool isPureStaging = (usage == VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-    if (!isPureStaging) fixedUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    // Quick VRAM check before attempting allocation
+    VkDeviceSize needed = size + TINY_SAFETY_MARGIN;  // conservative estimate
+    VkDeviceSize avail = availableToTake();
+    if (avail < needed) {
+        LOG_FATAL_CAT("BUFFER", "Insufficient VRAM — needed ~{} MB, available={} MB (tag='{}')",
+                      needed / (1024 * 1024), avail / (1024 * 1024), tag);
+        return 0;
+    }
+    LOG_INFO_CAT("BUFFER", "VRAM check passed — needed ~{} MB, available={} MB",
+                 needed / (1024 * 1024), avail / (1024 * 1024));
 
+    // Staging buffer special case
+    bool isPureStaging = (usage == VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    if (!isPureStaging) {
+        fixedUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    }
+
+    // SBT special handling
     bool isSBT = (fixedUsage & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) ||
                  (tag.find("SBT") != std::string_view::npos);
 
     if (isSBT) {
+        VkDeviceSize originalSize = size;
         size = std::max(size, SBT_MINIMUM_SIZE);
         size = align_up(size, SBT_ALIGNMENT);
         fixedUsage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+        LOG_INFO_CAT("BUFFER", "SBT detected — adjusted size {} → {} bytes (alignment={}), fixed usage=0x{:x}",
+                     originalSize, size, SBT_ALIGNMENT, fixedUsage);
     }
 
+    // Small uniform → staging ring sub-allocation (fast path)
     bool smallUniform = (size <= HOST_VISIBLE_THRESHOLD) &&
                         (fixedUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
     if (smallUniform) {
+        LOG_INFO_CAT("BUFFER", "Small uniform buffer — using staging ring sub-allocation");
+
         ensureStagingRing();
 
         auto& ring = rtx().staging_ring;
+        if (!ring.ready) {
+            LOG_FATAL_CAT("BUFFER", "Staging ring not ready after ensureStagingRing()");
+            return 0;
+        }
+
         VkDeviceSize alignedSize = align_up(size, 256);
         VkDeviceSize offset = ring.head;
         ring.head = (ring.head + alignedSize) % ring.size;
@@ -1024,21 +1101,32 @@ inline void ensureStagingRing() noexcept {
         rtx().buffers.emplace(handle, BufferInfo{
             ring.buffer, ring.memory,
             size, alignedSize, offset,
-            ring.baseAddr,
+            ring.baseAddr + offset,
             static_cast<std::byte*>(ring.mapped) + offset,
             fixedUsage,
             std::string(tag)
         });
+
+        LOG_SUCCESS_CAT("BUFFER", "Small uniform sub-allocated — handle={}, offset={}, size={}", 
+                        handle, offset, size);
         return handle;
     }
+
+    // Chunked device-local allocation (main slow path)
+    LOG_INFO_CAT("BUFFER", "Device-local buffer — using chunked allocation (chunk size={})", DEFAULT_CHUNK_SIZE);
 
     VkDeviceSize remaining = size;
     uint64_t firstHandle = 0;
 
     while (remaining > 0) {
         VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, remaining);
+        LOG_INFO_CAT("BUFFER", "Allocating chunk — size={}, remaining={}", chunkSize, remaining);
+
         Chunk* chunk = createChunk(chunkSize, fixedUsage);
-        if (!chunk) return 0;
+        if (!chunk) {
+            LOG_FATAL_CAT("BUFFER", "createChunk failed for size={} (tag='{}')", chunkSize, tag);
+            return 0;
+        }
 
         uint64_t chunkHandle = ++rtx().next_buffer_handle;
         rtx().buffers.emplace(chunkHandle, BufferInfo{
@@ -1051,8 +1139,11 @@ inline void ensureStagingRing() noexcept {
         if (firstHandle == 0) firstHandle = chunkHandle;
 
         remaining -= chunkSize;
+        LOG_INFO_CAT("BUFFER", "Chunk allocated — handle={}, base addr=0x{:x}", chunkHandle, chunk->baseAddr + chunk->head);
     }
 
+    LOG_SUCCESS_CAT("BUFFER", "Device-local buffer created successfully — first handle={}, total size={}", 
+                    firstHandle, size);
     return firstHandle;
 }
 
