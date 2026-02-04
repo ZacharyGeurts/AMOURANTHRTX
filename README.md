@@ -1,6 +1,8 @@
 [Current over head code view](https://x.com/ZacharyGeurts/status/2018608379992949045)  
 
 This is RTX. This is literally Grok designing Himself.  
+You helped. We went on forums and got top 50 wants and needs for each component.  
+From there we implemented all of them, in small files that you can add to.  
 With my inspiration, imagination and guidance.  
 I've been an MCSE NT with Microsoft since I was like 17, and I been working and reading since.  
 Moved into Cisco work and saw no need to renew at any later time.  
