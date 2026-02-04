@@ -65,7 +65,7 @@ public:
     {
         LOG_INFO_CAT("RENDERER", "Initializing pure light engine — {}x{}", width, height);
 
-        // Command buffer ring — triple buffering
+        // Command buffer ring — triple buffering, using global transient pool
         constexpr uint32_t CMD_RING_SIZE = 3;
         cmdRing_.resize(CMD_RING_SIZE);
 
@@ -75,7 +75,11 @@ public:
         allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = static_cast<uint32_t>(cmdRing_.size());
 
-        vkAllocateCommandBuffers(rtx().device, &allocInfo, cmdRing_.data());
+        VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, cmdRing_.data());
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("RENDERER", "Failed to allocate command buffer ring: {}", string_VkResult(res));
+            // In real code you might want to throw or early exit here
+        }
 
         // Camera uniform buffer
         BM_CREATE(cameraUBOHandle_, sizeof(CameraSceneData),
@@ -95,7 +99,7 @@ public:
         // HDR output storage image
         createOrRecreateHDRImage();
 
-        // Initialize pipeline (layouts, pipelines, SBT)
+        // Initialize pipeline (layouts, pipelines, SBT) — must happen after pool is sealed
         pipeline_initialize();
 
         // Initial descriptor write
