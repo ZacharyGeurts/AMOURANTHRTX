@@ -15,6 +15,12 @@ Make your own copy and decide if you want future updates from me by checking com
 This is pre-release software and compiles. I should be on the final iteration.  
 The meaningful files are in include/engine/GLOBAL  
 
+The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
+If a bit of memory changes, and your program is not the one, we exit.  
+We gather up the whole of RTX and secure and grant access with simply, rtx().  
+There is no hacking permissable within these walls.  
+Identifiable features of this software melts away on release build.  
+
 I consider compute and datacenters with updates.  I believe that portion can operate elsewhere so my update may break your compute if yours runs.  
 Long winded. If you branch from me, I cannot test those changes with mine without issues pages.  
 Someone has a compute shader for me to work on and a suitcase of cash, I might be able to switch priority away from the screensaver for short term.  
