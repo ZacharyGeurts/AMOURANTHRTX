@@ -151,10 +151,18 @@ void pew() noexcept {
     VkAccelerationStructureKHR tlas = getTLAS();
     if (tlas == VK_NULL_HANDLE) return;
 
-    uint32_t imageIndex;
-    VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+    // Reusable shared binary semaphore — created once, reused forever
+    static VkSemaphore sharedSemaphore = VK_NULL_HANDLE;
+    if (sharedSemaphore == VK_NULL_HANDLE) {
+        VkSemaphoreCreateInfo semCI{};
+        semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        vkCreateSemaphore(rtx().device, &semCI, nullptr, &sharedSemaphore);
+    }
 
-    VkResult res = Swapchain::acquireNextImage(&imageIndex, &acquireSemaphore);
+    uint32_t imageIndex;
+
+    // Acquire signals the shared semaphore
+    VkResult res = Swapchain::acquireNextImage(&imageIndex, &sharedSemaphore);
     if (res != VK_SUCCESS) {
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             needsSwapchainRecreate_ = true;
@@ -172,7 +180,7 @@ void pew() noexcept {
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cmd, &begin);
 
-    // Optional compute prepass (living world / animation)
+    // Optional compute prepass
     pipeline_dispatch_living_world(cmd, total_sec);
 
     VkMemoryBarrier mb{};
@@ -200,7 +208,7 @@ void pew() noexcept {
 
     VkImage swapImg = Swapchain::swapchainImages_[imageIndex];
 
-    // Critical: Transition swapchain image to TRANSFER_DST before blit
+    // Transition swapchain image to TRANSFER_DST before blit
     transitionImageLayout(cmd, swapImg,
                           VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -218,30 +226,30 @@ void pew() noexcept {
                    swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                    1, &blit, VK_FILTER_LINEAR);
 
-    // Critical: Transition to PRESENT_SRC_KHR before submit — fixes VUID-VkPresentInfoKHR-pImageIndices-01430
+    // Critical: Transition to PRESENT_SRC_KHR before submit
     transitionImageLayout(cmd, swapImg,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                           VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     vkEndCommandBuffer(cmd);
 
+    // Render submit **waits** on acquire semaphore, then **signals** it again for present
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
     VkSubmitInfo submit{};
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.waitSemaphoreCount   = 1;
+    submit.pWaitSemaphores      = &sharedSemaphore;
+    submit.pWaitDstStageMask    = waitStages;
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &cmd;
-
-    if (acquireSemaphore != VK_NULL_HANDLE) {
-        submit.waitSemaphoreCount   = 1;
-        submit.pWaitSemaphores      = &acquireSemaphore;
-        submit.pWaitDstStageMask    = waitStages;  // Only COLOR_ATTACHMENT_OUTPUT — fixes all invalid stage VUIDs
-    }
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores    = &sharedSemaphore;
 
     vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
 
-    // Present — no extra swapchain arg needed
-    Swapchain::presentImage(rtx().graphics_queue, imageIndex, acquireSemaphore);
+    // Present waits on the same semaphore (now signaled by render submit)
+    Swapchain::presentImage(rtx().graphics_queue, imageIndex, sharedSemaphore);
 }
 
     // Called from SDL resize event
