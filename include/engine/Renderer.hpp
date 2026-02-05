@@ -1,9 +1,3 @@
-// =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
-// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
-// AMOURANTH FOREVER 💖
-// =============================================================================
-
 #pragma once
 
 #include "engine/AMOURANTHRTX.hpp"
@@ -80,7 +74,7 @@ public:
         }
 
         // Camera uniform buffer
-        BM_CREATE(cameraUBOHandle_, sizeof(CameraSceneData),
+        cameraUBOHandle_ = Memory::create(sizeof(CameraSceneData),
                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                   VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -88,8 +82,8 @@ public:
 
         // Default materials (descriptor buffer)
         std::array<Material, 1> defaultMats{};
-        BM_CREATE_DESCRIPTOR(defaultMaterialsHandle_, sizeof(defaultMats), "DefaultMaterials");
-        void* mapped = BM_LAZY_MAP_DESCRIPTOR(defaultMaterialsHandle_);
+        defaultMaterialsHandle_ = Memory::createDescriptorBuffer(sizeof(defaultMats), "DefaultMaterials");
+        void* mapped = Memory::lazyMapDescriptor(defaultMaterialsHandle_);
         if (mapped) {
             std::memcpy(mapped, defaultMats.data(), sizeof(defaultMats));
         }
@@ -106,24 +100,25 @@ public:
         LOG_SUCCESS_CAT("RENDERER", "Pure light engine ready");
     }
 
-    ~VulkanRenderer() {
-        destroyed_ = true;
-        vkDeviceWaitIdle(rtx().device);
+~VulkanRenderer() {
+    destroyed_ = true;
+    vkDeviceWaitIdle(rtx().device);
 
-        vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+    vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+    vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+    vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
 
-        BM_DESTROY(cameraUBOHandle_);
-        BM_DESTROY(defaultMaterialsHandle_);
+    // Fixed: use Memory::destroy instead of plain destroy
+    Memory::destroy(cameraUBOHandle_);
+    Memory::destroy(defaultMaterialsHandle_);
 
-        if (!cmdRing_.empty()) {
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool,
-                                 static_cast<uint32_t>(cmdRing_.size()), cmdRing_.data());
-        }
-
-        pipeline_shutdown();
+    if (!cmdRing_.empty()) {
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool,
+                             static_cast<uint32_t>(cmdRing_.size()), cmdRing_.data());
     }
+
+    pipeline_shutdown();
+}
 
 void pew() noexcept {
     if (minimized_ || destroyed_) return;
@@ -282,7 +277,7 @@ private:
         VkMemoryRequirements memReqs{};
         vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &memReqs);
 
-        uint32_t memType = findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        uint32_t memType = Memory::findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         VkMemoryAllocateInfo mai{};
         mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -322,7 +317,7 @@ private:
         data.randomSeed = static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count() & 0xFFFFFFFFu);
         data.maxDepth   = 12;
 
-        BM_UPLOAD_TO_BUFFER(cameraUBOHandle_, &data, sizeof(data));
+        Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
     }
 
     void updateGlobalDescriptorBuffer() noexcept {
@@ -332,9 +327,9 @@ private:
         RTDescriptorUpdate update{};
         update.tlas            = tlas;
         update.rtOutputView    = hdrOutputView_;
-        update.ubo             = BM_GET_BUFFER(cameraUBOHandle_);
+        update.ubo             = rtx().buffers[cameraUBOHandle_].buffer;
         update.uboSize         = sizeof(CameraSceneData);
-        update.materialsBuffer = BM_GET_BUFFER(defaultMaterialsHandle_);
+        update.materialsBuffer = rtx().buffers[defaultMaterialsHandle_].buffer;
         update.materialsSize   = sizeof(Material) * 1;
 
         pipeline_write_rt_descriptors(update);

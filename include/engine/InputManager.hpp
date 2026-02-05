@@ -49,7 +49,7 @@ public:
         bindAction("crouch", SDL_SCANCODE_LCTRL);
         bindAction("interact", SDL_SCANCODE_E);
 
-        LOG_SUCCESS_CAT("INPUT", "{}STONEKEY INPUT v4.3 — FULL STATE + HOOKS — PINK PHOTONS ∞{}", 
+        LOG_SUCCESS_CAT("INPUT", "{}SECURE INPUT — FULL STATE + HOOKS{}", 
                         Logging::Color::RASPBERRY_PINK, Logging::Color::RESET);
     }
 
@@ -95,7 +95,7 @@ public:
 
     void invalidateAll() noexcept {
         generation_.fetch_add(1);
-        LOG_SUCCESS_CAT("INPUT", "{}ALL HANDLES INVALIDATED — HOT RELOAD DOMINATION{}", 
+        LOG_SUCCESS_CAT("INPUT", "{}ALL HANDLES INVALIDATED — HOT RELOAD{}", 
                         Logging::Color::RASPBERRY_PINK, Logging::Color::RESET);
     }
 

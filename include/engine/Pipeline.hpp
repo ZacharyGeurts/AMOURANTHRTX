@@ -101,7 +101,6 @@ inline VkShaderModule load_shader(const std::string& relativePath) {
 inline VkAccelerationStructureKHR create_dummy_tlas() {
     LOG_INFO_CAT("PIPELINE", "Creating dummy TLAS");
 
-    // No ensure_transient_pool() — pool must already exist and be sealed
     if (rtx().transient_pool == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Transient pool missing in create_dummy_tlas — initialization order broken");
         return VK_NULL_HANDLE;
@@ -128,30 +127,28 @@ inline VkAccelerationStructureKHR create_dummy_tlas() {
         rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo, &primitiveCount, &sizeInfo);
 
-    uint64_t buffer_handle = 0;
-    BM_CREATE(buffer_handle, sizeInfo.accelerationStructureSize,
-              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-              VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-              "Dummy_TLAS_Buffer");
+    uint64_t buffer_handle = Memory::create(sizeInfo.accelerationStructureSize,
+                                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                            "Dummy_TLAS_Buffer");
 
     if (buffer_handle == 0) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create dummy TLAS buffer");
         return VK_NULL_HANDLE;
     }
 
-    const BufferInfo* info = BM_GET(buffer_handle);
-    if (!info) {
-        BM_DESTROY(buffer_handle);
+    VkBuffer buffer = Memory::getBuffer(buffer_handle);
+    if (buffer == VK_NULL_HANDLE) {
+        Memory::destroy(buffer_handle);
         return VK_NULL_HANDLE;
     }
 
-    rtx().dummy_accel_buffer = info->buffer;
-    rtx().dummy_accel_memory = info->memory;
+    rtx().dummy_accel_buffer = buffer;
 
     VkAccelerationStructureCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    createInfo.buffer = info->buffer;
+    createInfo.buffer = buffer;
     createInfo.size = sizeInfo.accelerationStructureSize;
     createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
@@ -159,7 +156,7 @@ inline VkAccelerationStructureKHR create_dummy_tlas() {
     VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &createInfo, nullptr, &as);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create dummy TLAS: {}", string_VkResult(res));
-        BM_DESTROY(buffer_handle);
+        Memory::destroy(buffer_handle);
         return VK_NULL_HANDLE;
     }
 
@@ -237,12 +234,11 @@ inline void pipeline_initialize() noexcept {
 
     rtx().dummy_tlas = create_dummy_tlas();
 
-    uint64_t lw_handle = 0;
-    BM_CREATE(lw_handle, 64,
-              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-              VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-              "LivingWorldBuffer");
+    uint64_t lw_handle = Memory::create(64,
+                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                        "LivingWorldBuffer");
 
     if (lw_handle == 0) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create living world buffer");
@@ -451,22 +447,20 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         return;
     }
 
-    // Pool must already exist — no auto-creation
-    if (rtx().transient_pool == VK_NULL_HANDLE && pool == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "No transient pool available for SBT upload — create it early in main.cpp");
+    VkCommandPool cmdPool = pool ? pool : rtx().transient_pool;
+    if (cmdPool == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "No transient pool available for SBT upload");
         return;
     }
 
     cache_ray_tracing_properties();
     const auto& rtProps = rtx().rt_props;
 
-    VkCommandPool cmdPool = pool ? pool : rtx().transient_pool;
-
     const VkDeviceSize handleSize  = rtProps.shaderGroupHandleSize;
     const VkDeviceSize handleAlign = rtProps.shaderGroupHandleAlignment;
     const VkDeviceSize baseAlign   = rtProps.shaderGroupBaseAlignment;
 
-    const VkDeviceSize recordStride = align_up(handleSize, std::max(handleAlign, baseAlign));
+    const VkDeviceSize recordStride = Memory::align_up(handleSize, std::max(handleAlign, baseAlign));
 
     const uint32_t totalGroups = rtx().raygen_group_count + rtx().miss_group_count + rtx().hit_group_count;
 
@@ -475,23 +469,22 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
     const VkDeviceSize hitSize    = rtx().hit_group_count * recordStride;
 
     VkDeviceSize sbtSize = raygenSize + missSize + hitSize;
-    sbtSize = align_up(sbtSize, baseAlign);
+    sbtSize = Memory::align_up(sbtSize, baseAlign);
 
     LOG_INFO_CAT("PIPELINE", "Forging SBT — size={}", sbtSize);
 
-    uint64_t sbt_handle = 0;
-    BM_CREATE(sbt_handle, sbtSize,
-              VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-              VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-              "EternalSBT");
+    uint64_t sbt_handle = Memory::create(sbtSize,
+                                         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                         "EternalSBT");
 
     if (sbt_handle == 0) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create SBT buffer");
         return;
     }
 
-    VkDeviceAddress sbtAddr = BM_GET_DEVICE_ADDRESS(sbt_handle);
+    VkDeviceAddress sbtAddr = Memory::getDeviceAddress(sbt_handle);
 
     std::vector<uint8_t> handles(totalGroups * handleSize);
     VkResult res = ext().vkGetRayTracingShaderGroupHandlesKHR(
@@ -499,7 +492,7 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", string_VkResult(res));
-        BM_DESTROY(sbt_handle);
+        Memory::destroy(sbt_handle);
         return;
     }
 
@@ -516,7 +509,7 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         res = vkAllocateCommandBuffers(rtx().device, &alloc, &cmd);
         if (res != VK_SUCCESS) {
             LOG_FATAL_CAT("PIPELINE", "Failed to allocate temp cmd buffer for SBT: {}", string_VkResult(res));
-            BM_DESTROY(sbt_handle);
+            Memory::destroy(sbt_handle);
             return;
         }
 
@@ -526,7 +519,8 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         vkBeginCommandBuffer(cmd, &begin);
     }
 
-    BM_UPLOAD_TO_BUFFER(sbt_handle, handles.data(), handles.size(), cmd);
+    // Fixed: replaced non-existent Memory::upload with correct Memory::uploadToBuffer
+    Memory::uploadToBuffer(sbt_handle, handles.data(), handles.size(), cmd);
 
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -550,9 +544,9 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         vkFreeCommandBuffers(rtx().device, cmdPool, 1, &cmd);
     }
 
-    VkDeviceAddress raygenAddr = align_up(sbtAddr, rtProps.shaderGroupBaseAlignment);
-    VkDeviceAddress missAddr   = align_up(raygenAddr + raygenSize, rtProps.shaderGroupBaseAlignment);
-    VkDeviceAddress hitAddr    = align_up(missAddr + missSize, rtProps.shaderGroupBaseAlignment);
+    VkDeviceAddress raygenAddr = Memory::align_up(sbtAddr, rtProps.shaderGroupBaseAlignment);
+    VkDeviceAddress missAddr   = Memory::align_up(raygenAddr + raygenSize, rtProps.shaderGroupBaseAlignment);
+    VkDeviceAddress hitAddr    = Memory::align_up(missAddr + missSize, rtProps.shaderGroupBaseAlignment);
 
     rtx().sbt_address = sbtAddr;
     rtx().sbt_size = sbtSize;
@@ -593,13 +587,11 @@ inline void pipeline_dispatch_living_world(VkCommandBuffer cmd, float totalTime)
 }
 
 void pipeline_trace_rays(VkCommandBuffer cmd, uint32_t width, uint32_t height) noexcept {
-    // Guard: SBT must be valid
     if (!rtx().eternal_sbt_forged || rtx().sbt_address == 0) {
         LOG_FATAL_CAT("PIPELINE", "Cannot trace rays — SBT not forged or invalid address");
         return;
     }
 
-    // Guard: Required regions must have non-zero size/address
     if (rtx().raygen_sbt_region.size == 0 ||
         rtx().miss_sbt_region.size == 0 ||
         rtx().hit_sbt_region.size == 0) {
@@ -607,40 +599,43 @@ void pipeline_trace_rays(VkCommandBuffer cmd, uint32_t width, uint32_t height) n
         return;
     }
 
-    // Callable region: zeroed struct (valid but empty) — fixes VUID-vkCmdTraceRaysKHR-pCallableShaderBindingTable-parameter
     VkStridedDeviceAddressRegionKHR callableRegion{};
-    // All fields intentionally 0 — this is correct for pipelines without callables
 
-    // Bind the ray tracing pipeline — fixes VUID-vkCmdTraceRaysKHR-None-08606
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rtx().rt_pipeline);
 
-    // Trace rays — now with pipeline bound and valid callable region
     ext().vkCmdTraceRaysKHR(
         cmd,
         &rtx().raygen_sbt_region,
         &rtx().miss_sbt_region,
         &rtx().hit_sbt_region,
-        &callableRegion,           // Valid zeroed struct (not NULL)
+        &callableRegion,
         width,
         height,
-        1                          // depth = 1 (single dispatch)
+        1
     );
 }
 
 inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noexcept {
     uint64_t desc_handle = rtx().descriptor_buffer_handle;
     if (desc_handle == 0) {
-        constexpr VkDeviceSize INITIAL = 4096ULL * 4; // Increased initial size to avoid early overflow
-        BM_CREATE(desc_handle, INITIAL, VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT, "EternalDescriptorBuffer");
+        constexpr VkDeviceSize INITIAL = 4096ULL * 4;
+        desc_handle = Memory::create(INITIAL, VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT, "EternalDescriptorBuffer");
         if (desc_handle == 0) return;
         rtx().descriptor_buffer_handle = desc_handle;
-        rtx().descriptor_buffer_address = BM_GET_DEVICE_ADDRESS(desc_handle);
+        rtx().descriptor_buffer_address = Memory::getDeviceAddress(desc_handle);
     }
 
     void* mapped = rtx().descriptor_mapped;
     if (!mapped) {
-        mapped = BM_LAZY_MAP_DESCRIPTOR(desc_handle);
-        if (!mapped) return;
+        auto it = rtx().buffers.find(desc_handle);
+        if (it == rtx().buffers.end()) return;
+        BufferInfo& info = it->second;
+
+        if (info.mapped == nullptr) {
+            VkDevice dev = rtx().device;
+            vkMapMemory(dev, info.memory, 0, info.size, 0, &info.mapped);
+        }
+        mapped = info.mapped;
         rtx().descriptor_mapped = mapped;
     }
 
@@ -724,7 +719,7 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
 
     // Binding 7: Living world
     if (rtx().living_world_buffer_handle) {
-        VkBuffer buf = BM_GET_BUFFER(rtx().living_world_buffer_handle);
+        VkBuffer buf = Memory::getBuffer(rtx().living_world_buffer_handle);
 
         VkBufferDeviceAddressInfo info{};
         info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -749,12 +744,15 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
 inline void pipeline_shutdown() noexcept {
     void* mapped = rtx().descriptor_mapped;
     if (mapped != nullptr) {
-        const BufferInfo* info = BM_GET(rtx().descriptor_buffer_handle);
-        if (info) vkUnmapMemory(rtx().device, info->memory);
+        auto it = rtx().buffers.find(rtx().descriptor_buffer_handle);
+        if (it != rtx().buffers.end()) {
+            BufferInfo& info = it->second;
+            vkUnmapMemory(rtx().device, info.memory);
+        }
     }
 
-    BM_DESTROY(rtx().descriptor_buffer_handle);
-    BM_DESTROY(rtx().living_world_buffer_handle);
+    Memory::destroy(rtx().descriptor_buffer_handle);
+    Memory::destroy(rtx().living_world_buffer_handle);
 
     if (auto l = rtx().main_descriptor_layout) vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
     if (auto l = rtx().tex_descriptor_layout) vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
