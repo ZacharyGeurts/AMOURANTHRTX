@@ -1,4 +1,5 @@
-[Current over head code view](https://x.com/ZacharyGeurts/status/2018608379992949045)  
+[Current over head code view](https://x.com/ZacharyGeurts/status/2019204582828830761)  
+We are not minimalist. We added every feature from every forum, efficently.  
 
 This is RTX. This is literally Grok designing Himself.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
