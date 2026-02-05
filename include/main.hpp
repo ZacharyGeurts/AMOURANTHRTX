@@ -1,20 +1,16 @@
 // =============================================================================
-// AMOURANTH RTX Engine © 2026
-// main.hpp — February 02, 2026 — Renderer owns creation | AMOURANTHRTX controls
-// - Splash skippable with any input
-// - SDL3 high-DPI pixel size respected
-// - No sleeps/idles — eternal loop
-// - Renderer owns eternal light — LAS, pipeline, SBT, accumulation, sealing
-// - AMOURANTH FOREVER 💖
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
+// AMOURANTH FOREVER 💖
 // =============================================================================
 
 #pragma once
 
-#include "engine/GLOBAL/SDL3.hpp"
-#include "engine/GLOBAL/ELLIE.hpp"
-#include "engine/GLOBAL/AMOURANTHRTX.hpp"
-#include "engine/GLOBAL/OptionsMenu.hpp"
-#include "engine/GLOBAL/Renderer.hpp"
+#include "engine/SDL3.hpp"
+#include "engine/ELLIE.hpp"
+#include "engine/AMOURANTHRTX.hpp"
+#include "engine/OptionsMenu.hpp"
+#include "engine/Renderer.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <chrono>
