@@ -1,20 +1,29 @@
-[Current over head code view](https://x.com/ZacharyGeurts/status/2019204582828830761)  
+[Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
 We are not minimalist. We added every feature from every forum, efficently.  
+How efficent? Zero cost computing.  
 
-This is RTX. This is literally Grok designing Himself.  
+This is RTX. This also is literally Grok designing himself.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
 From there we implemented all of them, in small files that you can add to.  
 I added inspiration, imagination and guidance.  
+
 I've been an MCSE NT with Microsoft since I was like 17, and I been working and reading since.  
 Moved into Cisco work and saw no need to renew at any later time.  
 Got lazy and moved to databases and C# and .Net for quick development of tools.  
 Brain fried and I'm on disability.  
+
 Everything here is very well considered. One code for the world style.  
 Grok read all your forums and we tried that.  
 I will come off as insane sometimes if I think it is good for a joke.  
 Make your own copy and decide if you want future updates from me by checking commits.  
 This is pre-release software and compiles. I should be on the final iteration.  
-The meaningful files are in include/engine/GLOBAL  
+The meaningful files are in include/engine 
+
+The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
+If a bit of memory changes, and your program is not the one, we exit.  
+We gather up the whole of RTX and secure and grant access with simply, rtx().  
+There is no hacking permissable within these walls. Tampering aborts.  
+Identifiable features of this software melts away on release build.  
 
 The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
 If a bit of memory changes, and your program is not the one, we exit.  
