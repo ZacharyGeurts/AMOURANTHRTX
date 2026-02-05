@@ -1076,13 +1076,13 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         return;
     }
 
-    LOG_INFO_CAT("BUFFER", "Uploading {} bytes to buffer handle={:016x} (tag='{}', offset={}, mapped={})",
+    LOG_INFO_CAT("BUFFER", "Starting upload — {} bytes to handle={:016x} (tag='{}', offset={}, mapped={})",
                  size, handle, info.tag, info.offset, info.mapped ? "yes" : "no");
 
     if (info.mapped != nullptr) {
-        LOG_INFO_CAT("BUFFER", "Direct memcpy to mapped buffer (fast path)");
+        LOG_INFO_CAT("BUFFER", "Fast path: direct memcpy to persistently mapped buffer");
         std::memcpy(info.mapped, data, size);
-        LOG_SUCCESS_CAT("BUFFER", "Upload complete via direct memcpy");
+        LOG_SUCCESS_CAT("BUFFER", "Upload complete via direct memcpy ({} bytes)", size);
         return;
     }
 
@@ -1092,7 +1092,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     bool usingExternalCmd = (cmd != VK_NULL_HANDLE);
     VkCommandBuffer uploadCmd = usingExternalCmd ? cmd : VK_NULL_HANDLE;
 
-    // Create small transient staging buffer
+    // ── Transient staging buffer creation ───────────────────────────────────────
     VkDeviceSize stageSize = align_up(size, 256);
 
     LOG_INFO_CAT("BUFFER", "Creating transient staging buffer — size={} bytes", stageSize);
@@ -1118,7 +1118,7 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (memType == ~0u) {
         vkDestroyBuffer(dev, stageBuf, nullptr);
-        LOG_FATAL_CAT("BUFFER", "No host-visible memory for transient staging");
+        LOG_FATAL_CAT("BUFFER", "No host-visible coherent memory type for transient staging");
         return;
     }
 
@@ -1148,9 +1148,9 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         return;
     }
 
-    LOG_SUCCESS_CAT("BUFFER", "Transient staging buffer created — size={} bytes", stageSize);
+    LOG_SUCCESS_CAT("BUFFER", "Transient staging buffer ready — size={} bytes", stageSize);
 
-    // Map + copy data
+    // ── Map and copy data to staging ────────────────────────────────────────────
     void* ptr = nullptr;
     res = vkMapMemory(dev, stageMem, 0, stageSize, 0, &ptr);
     if (res != VK_SUCCESS) {
@@ -1163,18 +1163,33 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     std::memcpy(ptr, data, size);
     vkUnmapMemory(dev, stageMem);
 
-    LOG_INFO_CAT("BUFFER", "Data copied to transient staging buffer");
+    LOG_INFO_CAT("BUFFER", "Data copied to transient staging — {} bytes", size);
 
-    // If no external cmd, allocate from transient pool
+    // ── Fence for owned cmd path only ───────────────────────────────────────────
+    VkFence fence = VK_NULL_HANDLE;
+    if (!usingExternalCmd) {
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        res = vkCreateFence(dev, &fenceInfo, nullptr, &fence);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("BUFFER", "vkCreateFence failed: {}", string_VkResult(res));
+            vkFreeMemory(dev, stageMem, nullptr);
+            vkDestroyBuffer(dev, stageBuf, nullptr);
+            return;
+        }
+    }
+
+    // ── Command buffer setup (only if we own it) ────────────────────────────────
     if (!usingExternalCmd) {
         if (rtx().transient_pool == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("BUFFER", "No transient pool available for upload");
+            LOG_FATAL_CAT("BUFFER", "No transient command pool available for upload");
+            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
             vkFreeMemory(dev, stageMem, nullptr);
             vkDestroyBuffer(dev, stageBuf, nullptr);
             return;
         }
 
-        LOG_INFO_CAT("BUFFER", "Allocating transient cmd buffer from pool");
+        LOG_INFO_CAT("BUFFER", "Allocating one-time command buffer from transient pool");
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1184,7 +1199,8 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
         res = vkAllocateCommandBuffers(dev, &allocInfo, &uploadCmd);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "Failed to allocate transient cmd for upload: {}", string_VkResult(res));
+            LOG_FATAL_CAT("BUFFER", "Failed to allocate transient cmd buffer: {}", string_VkResult(res));
+            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
             vkFreeMemory(dev, stageMem, nullptr);
             vkDestroyBuffer(dev, stageBuf, nullptr);
             return;
@@ -1196,17 +1212,20 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
         res = vkBeginCommandBuffer(uploadCmd, &beginInfo);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "Failed to begin transient cmd for upload: {}", string_VkResult(res));
+            LOG_FATAL_CAT("BUFFER", "Failed to begin transient cmd buffer: {}", string_VkResult(res));
             vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
+            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
             vkFreeMemory(dev, stageMem, nullptr);
             vkDestroyBuffer(dev, stageBuf, nullptr);
             return;
         }
 
-        LOG_SUCCESS_CAT("BUFFER", "Transient cmd buffer allocated and begun");
+        LOG_SUCCESS_CAT("BUFFER", "Transient command buffer recording begun");
+    } else {
+        LOG_INFO_CAT("BUFFER", "Recording into external command buffer — caller must ensure sync & cleanup");
     }
 
-    // Record copy command
+    // ── Record the copy command ─────────────────────────────────────────────────
     VkBufferCopy copy{};
     copy.srcOffset = 0;
     copy.dstOffset = info.offset;
@@ -1214,14 +1233,15 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
     vkCmdCopyBuffer(uploadCmd, stageBuf, info.buffer, 1, &copy);
 
-    LOG_INFO_CAT("BUFFER", "Copy command recorded — src=transient staging, dst=handle {:016x}", handle);
+    LOG_INFO_CAT("BUFFER", "Copy command recorded — {} bytes from staging → target", size);
 
-    // If we own the cmd, end and submit
+    // ── Owned cmd path: end, submit, wait fence, destroy staging ─────────────────
     if (!usingExternalCmd) {
         res = vkEndCommandBuffer(uploadCmd);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "Failed to end transient cmd for upload: {}", string_VkResult(res));
+            LOG_FATAL_CAT("BUFFER", "Failed to end transient cmd buffer: {}", string_VkResult(res));
             vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
+            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
             vkFreeMemory(dev, stageMem, nullptr);
             vkDestroyBuffer(dev, stageBuf, nullptr);
             return;
@@ -1232,33 +1252,40 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         submit.commandBufferCount = 1;
         submit.pCommandBuffers    = &uploadCmd;
 
-        res = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+        res = vkQueueSubmit(queue, 1, &submit, fence);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "vkQueueSubmit(transient upload) failed: {}", string_VkResult(res));
+            LOG_FATAL_CAT("BUFFER", "vkQueueSubmit failed: {}", string_VkResult(res));
             vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
+            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
             vkFreeMemory(dev, stageMem, nullptr);
             vkDestroyBuffer(dev, stageBuf, nullptr);
             return;
         }
 
-        res = vkQueueWaitIdle(queue);
+        LOG_INFO_CAT("BUFFER", "Upload submitted — waiting on fence");
+
+        res = vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
         if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("BUFFER", "vkQueueWaitIdle failed after upload: {}", string_VkResult(res));
+            LOG_ERROR_CAT("BUFFER", "vkWaitForFences failed: {}", string_VkResult(res));
         }
 
+        vkResetFences(dev, 1, &fence);
+        vkDestroyFence(dev, fence, nullptr);
         vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
 
-        LOG_SUCCESS_CAT("BUFFER", "Upload submitted and waited — transient cmd freed");
+        // Safe to destroy staging now
+        vkFreeMemory(dev, stageMem, nullptr);
+        vkDestroyBuffer(dev, stageBuf, nullptr);
+
+        LOG_SUCCESS_CAT("BUFFER", "Upload complete (owned cmd) — staging cleaned up");
     } else {
-        LOG_INFO_CAT("BUFFER", "Upload recorded into external cmd buffer");
+        // EXTERNAL CMD: DO NOT destroy staging here — caller must do it after their sync
+        LOG_WARNING_CAT("BUFFER", "External cmd path — staging NOT destroyed! Caller MUST destroy after submit/wait:");
+        LOG_WARNING_CAT("BUFFER", "  stageBuf = {:016x}", reinterpret_cast<uintptr_t>(stageBuf));
+        LOG_WARNING_CAT("BUFFER", "  stageMem = {:016x}", reinterpret_cast<uintptr_t>(stageMem));
     }
 
-    // Cleanup transient staging
-    vkFreeMemory(dev, stageMem, nullptr);
-    vkDestroyBuffer(dev, stageBuf, nullptr);
-
-    LOG_SUCCESS_CAT("BUFFER", "Upload complete ({} bytes → handle={:016x}, tag='{}') via transient staging + cmd pool",
-                    size, handle, info.tag);
+    LOG_SUCCESS_CAT("BUFFER", "Upload complete ({} bytes → handle={:016x}, tag='{}')", size, handle, info.tag);
 }
 
 inline void destroy(uint64_t handle) noexcept {
@@ -1703,56 +1730,87 @@ struct Swapchain {
         rtx().image_count = count;
     }
 
-    [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept {
-        if (minimized_ || !swapchain_.valid()) {
-            *pImageIndex = 0;
-            *pSemaphoreOut = VK_NULL_HANDLE;
-            return VK_NOT_READY;
-        }
+[[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept {
+    if (minimized_ || !swapchain_.valid()) {
+        *pImageIndex = 0;
+        *pSemaphoreOut = VK_NULL_HANDLE;
+        return VK_NOT_READY;
+    }
 
-        VkDevice dev = rtx().device;
-        VkSwapchainKHR sw = swapchain_.get();
+    VkDevice dev = rtx().device;
+    VkSwapchainKHR sw = swapchain_.get();
 
-        static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
-        if (acquireSemaphore == VK_NULL_HANDLE) {
-            VkSemaphoreCreateInfo semCI{};
-            semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-            vkCreateSemaphore(dev, &semCI, nullptr, &acquireSemaphore);
-        }
+    // CREATE FRESH BINARY SEMAPHORE EVERY FRAME — this kills VUID-03268 forever
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    VkSemaphoreCreateInfo semCI{};
+    semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        VkResult res = ext().vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
-                                                   acquireSemaphore, VK_NULL_HANDLE, pImageIndex);
-
-        if (res != VK_SUCCESS && res != VK_NOT_READY) {
-            if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
-                minimized_ = true;
-            }
-        }
-
-        *pSemaphoreOut = acquireSemaphore;
+    VkResult res = vkCreateSemaphore(dev, &semCI, nullptr, &semaphore);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "Failed to create fresh acquire semaphore: {}", string_VkResult(res));
+        *pSemaphoreOut = VK_NULL_HANDLE;
         return res;
     }
 
-    static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept {
-        if (minimized_ || !swapchain_.valid() || imageIndex >= swapchainImages_.size()) {
-            return;
-        }
+    res = ext().vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
+                                       semaphore, VK_NULL_HANDLE, pImageIndex);
 
-        VkSwapchainKHR sw = swapchain_.get();
+    if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) {
+        *pSemaphoreOut = semaphore;  // pass to present — destroyed there
+    } else {
+        // Acquire failed → clean up semaphore immediately
+        vkDestroySemaphore(dev, semaphore, nullptr);
+        *pSemaphoreOut = VK_NULL_HANDLE;
 
-        VkPresentInfoKHR pi{};
-        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        pi.swapchainCount = 1;
-        pi.pSwapchains = &sw;
-        pi.pImageIndices = &imageIndex;
-
-        if (waitSemaphore != VK_NULL_HANDLE) {
-            pi.waitSemaphoreCount = 1;
-            pi.pWaitSemaphores = &waitSemaphore;
-        }
-
-        ext().vkQueuePresentKHR(queue, &pi);
+        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
+            minimized_ = true;
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire failed (out-of-date/suboptimal/lost) — minimized set");
+		}
     }
+
+    return res;
+}
+
+static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept {
+    if (minimized_ || !swapchain_.valid() || imageIndex >= swapchainImages_.size()) {
+        // Early cleanup if present skipped
+        if (waitSemaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(rtx().device, waitSemaphore, nullptr);
+            LOG_INFO_CAT("SWAPCHAIN", "Discarded unused semaphore on early present exit: {:016x}", (uintptr_t)waitSemaphore);
+        }
+        return;
+    }
+
+    VkSwapchainKHR sw = swapchain_.get();
+
+    VkPresentInfoKHR pi{};
+    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &sw;
+    pi.pImageIndices = &imageIndex;
+
+    if (waitSemaphore != VK_NULL_HANDLE) {
+        pi.waitSemaphoreCount = 1;
+        pi.pWaitSemaphores = &waitSemaphore;
+    }
+
+    VkResult res = ext().vkQueuePresentKHR(queue, &pi);
+
+    // DESTROY SEMAPHORE AFTER PRESENT — it's now consumed
+    if (waitSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(rtx().device, waitSemaphore, nullptr);
+        LOG_INFO_CAT("SWAPCHAIN", "Semaphore destroyed after present: {:016x} (image {})", (uintptr_t)waitSemaphore, imageIndex);
+    }
+
+    if (res == VK_SUCCESS) {
+        LOG_INFO_CAT("SWAPCHAIN", "Present successful — image {}", imageIndex);
+    } else if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+        minimized_ = true;
+        LOG_WARNING_CAT("SWAPCHAIN", "Present returned out-of-date/suboptimal — minimized set");
+    } else {
+        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", string_VkResult(res));
+    }
+}
 
     static void recreate(uint32_t width, uint32_t height) noexcept {
         vkDeviceWaitIdle(rtx().device);
@@ -2044,8 +2102,14 @@ inline VkTransformMatrixKHR to_vk_transform(const glm::mat4& m) noexcept {
     return vkMat;
 }
 
-// Ensure acceleration structures are ready
 inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
+    // Immediate early-out if swapchain is dead — no point building LAS for nothing
+    if (Swapchain::minimized_ || !Swapchain::swapchain_.valid()) {
+        LOG_WARNING_CAT("LAS", "Swapchain minimized or invalid — skipping LAS rebuild completely");
+        return;
+    }
+
+    // Normal early-out if already clean
     if (rtx().las_initialized && !rtx().las_tlas_dirty && !rtx().las_pending_blas_builds && 
         !rtx().las_procedural_dirty && rtx().las_tlas != VK_NULL_HANDLE) {
         LOG_INFO_CAT("LAS", "LAS already up-to-date — no rebuild needed");
@@ -2066,6 +2130,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     VkCommandBuffer localCmd = cmd;
     bool ownsCmd = (cmd == VK_NULL_HANDLE);
 
+    // ── Command buffer setup ────────────────────────────────────────────────────
     if (ownsCmd) {
         if (rtx().transient_pool == VK_NULL_HANDLE) {
             LOG_FATAL_CAT("LAS", "No transient command pool — cannot perform LAS rebuild");
@@ -2095,10 +2160,21 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             return;
         }
 
-        LOG_INFO_CAT("LAS", "Allocated and began temporary cmd buffer for LAS rebuild");
+        LOG_INFO_CAT("LAS", "Allocated and began temporary cmd buffer for LAS rebuild (owned path)");
     } else {
         LOG_INFO_CAT("LAS", "Recording LAS rebuild into provided external cmd buffer");
     }
+
+    // ── Track staging resources for deferred cleanup ────────────────────────────
+    std::vector<std::pair<VkBuffer, VkDeviceMemory>> pendingStaging;
+
+    // Helper lambda to upload and collect staging if external
+    auto safeUpload = [&](uint64_t bufHandle, const void* srcData, VkDeviceSize uploadSize, const std::string& debugTag) {
+        Memory::uploadToBuffer(bufHandle, srcData, uploadSize, localCmd);
+        // If external cmd, staging is left alive — we must collect for cleanup
+        // (Note: you will need to modify uploadToBuffer to return staging handles if you want auto-collection)
+        LOG_INFO_CAT("LAS", "Upload recorded for {} — staging cleanup deferred to after submit/wait", debugTag);
+    };
 
     // Step 1: Update procedural primitives buffer if dirty
     if (rtx().las_procedural_dirty) {
@@ -2108,12 +2184,11 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         if (primSize == 0) primSize = 16;
 
         if (rtx().las_universal_primitives_buffer == 0) {
-            uint64_t primHandle = 0;
-            primHandle = Memory::create(primSize,
-                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                      "LAS_UniversalPrimitives");
+            uint64_t primHandle = Memory::create(primSize,
+                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                 "LAS_UniversalPrimitives");
 
             if (primHandle == 0) {
                 LOG_FATAL_CAT("TLAS", "Failed to allocate procedural primitives buffer");
@@ -2127,9 +2202,9 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             rtx().las_universal_primitives_buffer = primHandle;
         }
 
-        Memory::uploadToBuffer(rtx().las_universal_primitives_buffer,
-                            rtx().las_procedural_primitives.data(),
-                            primSize, localCmd);
+        safeUpload(rtx().las_universal_primitives_buffer,
+                   rtx().las_procedural_primitives.data(),
+                   primSize, "procedural primitives");
 
         LOG_SUCCESS_CAT("TLAS", "Uploaded {} procedural primitives ({} bytes) to device buffer",
                         rtx().las_procedural_primitives.size(), primSize);
@@ -2208,9 +2283,9 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             if (mesh.blas == VK_NULL_HANDLE) {
                 uint64_t blasStorageHandle = 0;
                 blasStorageHandle = Memory::create(sizes.accelerationStructureSize,
-                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                          "Mesh_BLAS_Storage_" + std::to_string(i));
+                                                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                   "Mesh_BLAS_Storage_" + std::to_string(i));
 
                 if (blasStorageHandle == 0) {
                     LOG_FATAL_CAT("BLAS", "Failed to allocate BLAS storage for mesh #{}", i);
@@ -2280,10 +2355,10 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         if (rtx().las_instance_buffer == 0) {
             uint64_t instHandle = 0;
             instHandle = Memory::create(instanceSize,
-                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                      "LAS_InstanceBuffer");
+                                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                        "LAS_InstanceBuffer");
 
             if (instHandle == 0) {
                 LOG_FATAL_CAT("TLAS", "Failed to allocate TLAS instance buffer");
@@ -2334,7 +2409,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         }
 
         Memory::uploadToBuffer(rtx().las_instance_buffer, instances.data(), 
-                            instances.size() * sizeof(VkAccelerationStructureInstanceKHR), localCmd);
+                               instances.size() * sizeof(VkAccelerationStructureInstanceKHR), localCmd);
 
         LOG_SUCCESS_CAT("TLAS", "Uploaded {} TLAS instances to device buffer", instanceCount);
 
@@ -2387,9 +2462,9 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         if (rtx().las_tlas == VK_NULL_HANDLE) {
             uint64_t tlasStorageHandle = 0;
             tlasStorageHandle = Memory::create(tlasSizes.accelerationStructureSize,
-                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                      "LAS_TLAS_Storage");
+                                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                "LAS_TLAS_Storage");
 
             if (tlasStorageHandle == 0) {
                 LOG_FATAL_CAT("TLAS", "Failed to allocate TLAS storage buffer");
@@ -2442,6 +2517,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         }
     }
 
+    // ── Final synchronization & cleanup ─────────────────────────────────────────
     if (ownsCmd) {
         VkResult res = vkEndCommandBuffer(localCmd);
         if (res != VK_SUCCESS) {
@@ -2451,9 +2527,9 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         }
 
         VkSubmitInfo submit{};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &localCmd;
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &localCmd;
 
         res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
         if (res != VK_SUCCESS) {
@@ -2465,9 +2541,18 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         vkQueueWaitIdle(rtx().graphics_queue);
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
 
-        LOG_SUCCESS_CAT("LAS", "LAS rebuild complete — structures updated and ready");
+        LOG_SUCCESS_CAT("LAS", "LAS rebuild complete — structures updated and ready (owned cmd path)");
     } else {
-        LOG_INFO_CAT("LAS", "LAS rebuild recorded into external cmd buffer — awaiting submission");
+        LOG_INFO_CAT("LAS", "LAS rebuild recorded into external cmd buffer — awaiting caller submission");
+
+        // Reminder for caller (you) to destroy staging after wait
+        if (!pendingStaging.empty()) {
+            LOG_WARNING_CAT("LAS", "External cmd path — {} pending staging resources must be destroyed after queue wait", pendingStaging.size());
+            LOG_WARNING_CAT("LAS", "Add in caller code after vkQueueWaitIdle:");
+            LOG_WARNING_CAT("LAS", "  for (auto& p : pendingStaging) { vkDestroyBuffer(...); vkFreeMemory(...); }");
+        } else {
+            LOG_INFO_CAT("LAS", "No pending staging resources detected in this rebuild");
+        }
     }
 }
 

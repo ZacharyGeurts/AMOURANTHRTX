@@ -1,10 +1,10 @@
+#pragma once
+
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 // =============================================================================
-
-#pragma once
 
 #include "engine/AMOURANTHRTX.hpp"
 #include "engine/ELLIE.hpp"
@@ -48,7 +48,7 @@ struct RTDescriptorUpdate {
 // =============================================================================
 
 inline VkShaderModule load_shader(const std::string& relativePath) {
-    LOG_INFO_CAT("PIPELINE", "Loading shader: {}", relativePath);
+    LOG_ATTEMPT_CAT("PIPELINE", "Loading shader: {}", relativePath);
 
     std::array<std::string, 3> paths = {
         std::format("build/bin/Linux/{}", relativePath),
@@ -75,12 +75,14 @@ inline VkShaderModule load_shader(const std::string& relativePath) {
     size_t size = static_cast<size_t>(file.tellg());
     if (size == 0 || size % 4 != 0) {
         LOG_FATAL_CAT("PIPELINE", "Invalid SPIR-V size ({} bytes): {}", size, usedPath);
+        file.close();
         return VK_NULL_HANDLE;
     }
 
     std::vector<char> code(size);
     file.seekg(0);
     file.read(code.data(), size);
+    file.close();
 
     VkShaderModuleCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -94,15 +96,15 @@ inline VkShaderModule load_shader(const std::string& relativePath) {
         return VK_NULL_HANDLE;
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded: {} ({} bytes) from {}", relativePath, size, usedPath);
+    LOG_SUCCESS_CAT("PIPELINE", "Shader loaded successfully — {} ({} bytes) from {}", relativePath, size, usedPath);
     return module;
 }
 
 inline VkAccelerationStructureKHR create_dummy_tlas() {
-    LOG_INFO_CAT("PIPELINE", "Creating dummy TLAS");
+    LOG_ATTEMPT_CAT("PIPELINE", "Creating dummy TLAS for pipeline safety");
 
     if (rtx().transient_pool == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Transient pool missing in create_dummy_tlas — initialization order broken");
+        LOG_FATAL_CAT("PIPELINE", "Transient pool missing — cannot create dummy TLAS (init order issue)");
         return VK_NULL_HANDLE;
     }
 
@@ -134,13 +136,14 @@ inline VkAccelerationStructureKHR create_dummy_tlas() {
                                             "Dummy_TLAS_Buffer");
 
     if (buffer_handle == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create dummy TLAS buffer");
+        LOG_FATAL_CAT("PIPELINE", "Failed to allocate dummy TLAS storage buffer");
         return VK_NULL_HANDLE;
     }
 
     VkBuffer buffer = Memory::getBuffer(buffer_handle);
     if (buffer == VK_NULL_HANDLE) {
         Memory::destroy(buffer_handle);
+        LOG_FATAL_CAT("PIPELINE", "Dummy TLAS buffer handle invalid after creation");
         return VK_NULL_HANDLE;
     }
 
@@ -155,19 +158,25 @@ inline VkAccelerationStructureKHR create_dummy_tlas() {
     VkAccelerationStructureKHR as = VK_NULL_HANDLE;
     VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &createInfo, nullptr, &as);
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create dummy TLAS: {}", string_VkResult(res));
+        LOG_FATAL_CAT("PIPELINE", "vkCreateAccelerationStructureKHR failed for dummy TLAS: {}", string_VkResult(res));
         Memory::destroy(buffer_handle);
         return VK_NULL_HANDLE;
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS created");
+    rtx().dummy_tlas = as;
+
+    LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS created successfully — handle {:016x}, size {} bytes",
+                    (uintptr_t)as, sizeInfo.accelerationStructureSize);
     return as;
 }
 
 inline void cache_descriptor_properties() {
-    if (rtx().descriptor_props_cached) return;
+    if (rtx().descriptor_props_cached) {
+        LOG_INFO_CAT("PIPELINE", "Descriptor buffer properties already cached — skipping");
+        return;
+    }
 
-    LOG_INFO_CAT("PIPELINE", "Caching descriptor buffer properties");
+    LOG_ATTEMPT_CAT("PIPELINE", "Caching physical device descriptor buffer properties");
 
     VkPhysicalDeviceDescriptorBufferPropertiesEXT props{};
     props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT;
@@ -181,14 +190,17 @@ inline void cache_descriptor_properties() {
     rtx().descriptor_props = props;
     rtx().descriptor_props_cached = true;
 
-    LOG_SUCCESS_CAT("PIPELINE", "Descriptor buffer properties cached");
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor buffer properties cached successfully");
 }
 
 inline void cache_ray_tracing_properties() {
     static bool cached = false;
-    if (cached) return;
+    if (cached) {
+        LOG_INFO_CAT("PIPELINE", "Ray tracing properties already cached — skipping");
+        return;
+    }
 
-    LOG_INFO_CAT("PIPELINE", "Caching ray tracing properties");
+    LOG_ATTEMPT_CAT("PIPELINE", "Caching ray tracing pipeline properties");
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR props{};
     props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
@@ -200,14 +212,15 @@ inline void cache_ray_tracing_properties() {
     vkGetPhysicalDeviceProperties2(rtx().physical, &pdProps2);
 
     if (props.shaderGroupHandleSize == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Ray tracing not supported");
+        LOG_FATAL_CAT("PIPELINE", "Ray tracing not supported — shader group handle size is zero");
         return;
     }
 
     rtx().rt_props = props;
     cached = true;
 
-    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing properties cached");
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing properties cached — handle size {}, alignment {}", 
+                    props.shaderGroupHandleSize, props.shaderGroupHandleAlignment);
 }
 
 // =============================================================================
@@ -215,24 +228,28 @@ inline void cache_ray_tracing_properties() {
 // =============================================================================
 
 inline void pipeline_initialize() noexcept {
-    LOG_INFO_CAT("PIPELINE", "Initializing Pipeline — frame-free mode");
+    LOG_ATTEMPT_CAT("PIPELINE", "Initializing pipeline subsystem — frame-free mode");
 
+    // Early extension check
     if (!ext().vkCmdTraceRaysKHR || !ext().vkCreateRayTracingPipelinesKHR ||
         !ext().vkGetRayTracingShaderGroupHandlesKHR || !ext().vkCreateAccelerationStructureKHR ||
         !ext().vkGetAccelerationStructureBuildSizesKHR || !ext().vkGetBufferDeviceAddress ||
         !ext().vkGetDescriptorEXT || !ext().vkCmdBindDescriptorBuffersEXT ||
         !ext().vkCmdSetDescriptorBufferOffsetsEXT) {
-        LOG_FATAL_CAT("PIPELINE", "Required extensions missing");
+        LOG_FATAL_CAT("PIPELINE", "Critical ray-tracing or descriptor buffer extensions missing — aborting init");
         return;
     }
 
-    // Pool must already exist — no creation here
     if (rtx().transient_pool == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Transient pool missing in pipeline_initialize — create it in main.cpp early");
+        LOG_FATAL_CAT("PIPELINE", "Transient command pool missing — must be created before pipeline init");
         return;
     }
 
     rtx().dummy_tlas = create_dummy_tlas();
+    if (rtx().dummy_tlas == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "Dummy TLAS creation failed — pipeline init aborted");
+        return;
+    }
 
     uint64_t lw_handle = Memory::create(64,
                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -241,20 +258,23 @@ inline void pipeline_initialize() noexcept {
                                         "LivingWorldBuffer");
 
     if (lw_handle == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create living world buffer");
+        LOG_FATAL_CAT("PIPELINE", "Failed to create living world buffer — init aborted");
         return;
     }
     rtx().living_world_buffer_handle = lw_handle;
 
     cache_descriptor_properties();
 
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline initialized");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline subsystem initialized — dummy TLAS ready, living world buffer allocated");
 }
 
 inline void pipeline_create_pipeline_layout() {
-    if (rtx().pipeline_layout != VK_NULL_HANDLE) return;
+    if (rtx().pipeline_layout != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("PIPELINE", "Pipeline layout already exists — skipping creation");
+        return;
+    }
 
-    LOG_INFO_CAT("PIPELINE", "Creating pipeline layout");
+    LOG_ATTEMPT_CAT("PIPELINE", "Creating main pipeline layout");
 
     VkDescriptorSetLayoutCreateInfo mainInfo{};
     mainInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -265,7 +285,7 @@ inline void pipeline_create_pipeline_layout() {
     VkDescriptorSetLayout mainLayout = VK_NULL_HANDLE;
     VkResult res = vkCreateDescriptorSetLayout(rtx().device, &mainInfo, nullptr, &mainLayout);
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create main layout: {}", string_VkResult(res));
+        LOG_FATAL_CAT("PIPELINE", "Failed to create main descriptor set layout: {}", string_VkResult(res));
         return;
     }
     rtx().main_descriptor_layout = mainLayout;
@@ -290,7 +310,7 @@ inline void pipeline_create_pipeline_layout() {
     VkDescriptorSetLayout texLayout = VK_NULL_HANDLE;
     res = vkCreateDescriptorSetLayout(rtx().device, &texInfo, nullptr, &texLayout);
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create texture layout: {}", string_VkResult(res));
+        LOG_FATAL_CAT("PIPELINE", "Failed to create texture descriptor set layout: {}", string_VkResult(res));
         return;
     }
     rtx().tex_descriptor_layout = texLayout;
@@ -303,7 +323,7 @@ inline void pipeline_create_pipeline_layout() {
     VkDescriptorSetLayout emptyLayout = VK_NULL_HANDLE;
     res = vkCreateDescriptorSetLayout(rtx().device, &emptyInfo, nullptr, &emptyLayout);
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create empty layout: {}", string_VkResult(res));
+        LOG_FATAL_CAT("PIPELINE", "Failed to create empty descriptor set layout: {}", string_VkResult(res));
         return;
     }
     rtx().empty_descriptor_layout = emptyLayout;
@@ -327,23 +347,26 @@ inline void pipeline_create_pipeline_layout() {
     VkPipelineLayout pl = VK_NULL_HANDLE;
     res = vkCreatePipelineLayout(rtx().device, &plInfo, nullptr, &pl);
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create pipeline layout: {}", string_VkResult(res));
+        LOG_FATAL_CAT("PIPELINE", "vkCreatePipelineLayout failed: {}", string_VkResult(res));
         return;
     }
 
     rtx().pipeline_layout = pl;
 
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created successfully — main, texture, and empty sets bound");
 }
 
 inline void pipeline_create_compute_pipeline() {
-    if (rtx().compute_pipeline != VK_NULL_HANDLE) return;
+    if (rtx().compute_pipeline != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("PIPELINE", "Compute pipeline already exists — skipping creation");
+        return;
+    }
 
-    LOG_INFO_CAT("PIPELINE", "Creating compute pipeline for living world");
+    LOG_ATTEMPT_CAT("PIPELINE", "Creating compute pipeline for living world simulation");
 
     VkShaderModule compModule = load_shader("assets/shaders/compute/living_world.spv");
     if (compModule == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to load living_world.spv");
+        LOG_FATAL_CAT("PIPELINE", "Failed to load living_world.spv — compute pipeline creation aborted");
         return;
     }
 
@@ -370,13 +393,16 @@ inline void pipeline_create_compute_pipeline() {
     rtx().compute_pipeline = compPipe;
     vkDestroyShaderModule(rtx().device, compModule, nullptr);
 
-    LOG_SUCCESS_CAT("PIPELINE", "Compute pipeline created");
+    LOG_SUCCESS_CAT("PIPELINE", "Compute pipeline created successfully for living world");
 }
 
 inline void pipeline_create_ray_tracing_pipeline() {
-    if (rtx().rt_pipeline != VK_NULL_HANDLE) return;
+    if (rtx().rt_pipeline != VK_NULL_HANDLE) {
+        LOG_INFO_CAT("PIPELINE", "Ray tracing pipeline already exists — skipping creation");
+        return;
+    }
 
-    LOG_INFO_CAT("PIPELINE", "Creating ray tracing pipeline");
+    LOG_ATTEMPT_CAT("PIPELINE", "Creating ray tracing pipeline");
 
     auto load = [](std::string_view path) -> VkShaderModule {
         return load_shader(std::string(path));
@@ -388,7 +414,7 @@ inline void pipeline_create_ray_tracing_pipeline() {
     VkShaderModule ahit   = load("assets/shaders/raytracing/anyhit.spv");
 
     if (!raygen || !miss || !chit || !ahit) {
-        LOG_FATAL_CAT("PIPELINE", "Shader load failed");
+        LOG_FATAL_CAT("PIPELINE", "One or more ray tracing shaders failed to load — pipeline creation aborted");
         return;
     }
 
@@ -433,23 +459,26 @@ inline void pipeline_create_ray_tracing_pipeline() {
 
     rtx().rt_pipeline = pipeline;
 
-    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created");
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created successfully");
 }
 
 inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HANDLE,
                                                  VkQueue queue = VK_NULL_HANDLE,
                                                  VkCommandBuffer providedCmd = VK_NULL_HANDLE) {
-    if (rtx().eternal_sbt_forged) return;
+    if (rtx().eternal_sbt_forged) {
+        LOG_INFO_CAT("PIPELINE", "SBT already forged — skipping recreation");
+        return;
+    }
 
     VkPipeline rtPipe = rtx().rt_pipeline;
     if (rtPipe == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "No ray-tracing pipeline — cannot forge SBT");
+        LOG_FATAL_CAT("PIPELINE", "No ray-tracing pipeline exists — cannot forge SBT");
         return;
     }
 
     VkCommandPool cmdPool = pool ? pool : rtx().transient_pool;
     if (cmdPool == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "No transient pool available for SBT upload");
+        LOG_FATAL_CAT("PIPELINE", "No transient command pool available for SBT upload");
         return;
     }
 
@@ -471,7 +500,7 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
     VkDeviceSize sbtSize = raygenSize + missSize + hitSize;
     sbtSize = Memory::align_up(sbtSize, baseAlign);
 
-    LOG_INFO_CAT("PIPELINE", "Forging SBT — size={}", sbtSize);
+    LOG_ATTEMPT_CAT("PIPELINE", "Forging eternal shader binding table — total size {} bytes ({} groups)", sbtSize, totalGroups);
 
     uint64_t sbt_handle = Memory::create(sbtSize,
                                          VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
@@ -480,7 +509,7 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
                                          "EternalSBT");
 
     if (sbt_handle == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create SBT buffer");
+        LOG_FATAL_CAT("PIPELINE", "Failed to allocate eternal SBT buffer");
         return;
     }
 
@@ -500,6 +529,8 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
     bool ownCmd = (providedCmd == VK_NULL_HANDLE);
 
     if (ownCmd) {
+        LOG_INFO_CAT("PIPELINE", "No provided cmd buffer — allocating one-time command buffer for SBT upload");
+
         VkCommandBufferAllocateInfo alloc{};
         alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         alloc.commandPool        = cmdPool;
@@ -508,7 +539,7 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
         res = vkAllocateCommandBuffers(rtx().device, &alloc, &cmd);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("PIPELINE", "Failed to allocate temp cmd buffer for SBT: {}", string_VkResult(res));
+            LOG_FATAL_CAT("PIPELINE", "Failed to allocate temp cmd buffer for SBT upload: {}", string_VkResult(res));
             Memory::destroy(sbt_handle);
             return;
         }
@@ -516,10 +547,17 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         VkCommandBufferBeginInfo begin{};
         begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cmd, &begin);
+
+        res = vkBeginCommandBuffer(cmd, &begin);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to begin temp cmd buffer for SBT: {}", string_VkResult(res));
+            vkFreeCommandBuffers(rtx().device, cmdPool, 1, &cmd);
+            Memory::destroy(sbt_handle);
+            return;
+        }
     }
 
-    // Fixed: replaced non-existent Memory::upload with correct Memory::uploadToBuffer
+    // Upload shader group handles to SBT buffer
     Memory::uploadToBuffer(sbt_handle, handles.data(), handles.size(), cmd);
 
     VkMemoryBarrier barrier{};
@@ -531,14 +569,27 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
                          0, 1, &barrier, 0, nullptr, 0, nullptr);
 
     if (ownCmd) {
-        vkEndCommandBuffer(cmd);
+        res = vkEndCommandBuffer(cmd);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to end temp cmd buffer for SBT: {}", string_VkResult(res));
+            vkFreeCommandBuffers(rtx().device, cmdPool, 1, &cmd);
+            Memory::destroy(sbt_handle);
+            return;
+        }
 
         VkSubmitInfo submit{};
         submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount   = 1;
         submit.pCommandBuffers      = &cmd;
 
-        vkQueueSubmit(queue ? queue : rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+        res = vkQueueSubmit(queue ? queue : rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("PIPELINE", "vkQueueSubmit failed for SBT upload: {}", string_VkResult(res));
+            vkFreeCommandBuffers(rtx().device, cmdPool, 1, &cmd);
+            Memory::destroy(sbt_handle);
+            return;
+        }
+
         vkQueueWaitIdle(queue ? queue : rtx().graphics_queue);
 
         vkFreeCommandBuffers(rtx().device, cmdPool, 1, &cmd);
@@ -557,7 +608,8 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
     rtx().eternal_sbt_forged = true;
 
-    LOG_SUCCESS_CAT("PIPELINE", "SBT forged");
+    LOG_SUCCESS_CAT("PIPELINE", "Eternal shader binding table forged successfully — size {} bytes, address 0x{:x}",
+                    sbtSize, sbtAddr);
 }
 
 inline void pipeline_dispatch_living_world(VkCommandBuffer cmd, float totalTime) noexcept {
@@ -565,7 +617,12 @@ inline void pipeline_dispatch_living_world(VkCommandBuffer cmd, float totalTime)
         pipeline_create_compute_pipeline();
     }
 
-    if (rtx().compute_pipeline == VK_NULL_HANDLE) return;
+    if (rtx().compute_pipeline == VK_NULL_HANDLE) {
+        LOG_WARNING_CAT("PIPELINE", "No compute pipeline available — skipping living world dispatch");
+        return;
+    }
+
+    LOG_INFO_CAT("PIPELINE", "Dispatching living world compute — time {:.3f}s", totalTime);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, rtx().compute_pipeline);
 
@@ -584,11 +641,13 @@ inline void pipeline_dispatch_living_world(VkCommandBuffer cmd, float totalTime)
     vkCmdPushConstants(cmd, rtx().pipeline_layout, FULL_PUSH_MASK, 0, sizeof(float), &totalTime);
 
     vkCmdDispatch(cmd, 1, 1, 1);
+
+    LOG_SUCCESS_CAT("PIPELINE", "Living world dispatch recorded");
 }
 
 void pipeline_trace_rays(VkCommandBuffer cmd, uint32_t width, uint32_t height) noexcept {
     if (!rtx().eternal_sbt_forged || rtx().sbt_address == 0) {
-        LOG_FATAL_CAT("PIPELINE", "Cannot trace rays — SBT not forged or invalid address");
+        LOG_FATAL_CAT("PIPELINE", "Cannot trace rays — eternal SBT not forged or invalid address");
         return;
     }
 
@@ -598,6 +657,8 @@ void pipeline_trace_rays(VkCommandBuffer cmd, uint32_t width, uint32_t height) n
         LOG_FATAL_CAT("PIPELINE", "Invalid SBT regions — raygen/miss/hit sizes are zero");
         return;
     }
+
+    LOG_ATTEMPT_CAT("PIPELINE", "Tracing rays — resolution {}x{}", width, height);
 
     VkStridedDeviceAddressRegionKHR callableRegion{};
 
@@ -613,14 +674,21 @@ void pipeline_trace_rays(VkCommandBuffer cmd, uint32_t width, uint32_t height) n
         height,
         1
     );
+
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing dispatch recorded");
 }
 
 inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noexcept {
+    LOG_ATTEMPT_CAT("PIPELINE", "Updating global ray-tracing descriptor buffer");
+
     uint64_t desc_handle = rtx().descriptor_buffer_handle;
     if (desc_handle == 0) {
         constexpr VkDeviceSize INITIAL = 4096ULL * 4;
         desc_handle = Memory::create(INITIAL, VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT, "EternalDescriptorBuffer");
-        if (desc_handle == 0) return;
+        if (desc_handle == 0) {
+            LOG_FATAL_CAT("PIPELINE", "Failed to create eternal descriptor buffer");
+            return;
+        }
         rtx().descriptor_buffer_handle = desc_handle;
         rtx().descriptor_buffer_address = Memory::getDeviceAddress(desc_handle);
     }
@@ -628,18 +696,28 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
     void* mapped = rtx().descriptor_mapped;
     if (!mapped) {
         auto it = rtx().buffers.find(desc_handle);
-        if (it == rtx().buffers.end()) return;
+        if (it == rtx().buffers.end()) {
+            LOG_FATAL_CAT("PIPELINE", "Descriptor buffer handle invalid");
+            return;
+        }
         BufferInfo& info = it->second;
 
         if (info.mapped == nullptr) {
             VkDevice dev = rtx().device;
-            vkMapMemory(dev, info.memory, 0, info.size, 0, &info.mapped);
+            VkResult res = vkMapMemory(dev, info.memory, 0, info.size, 0, &info.mapped);
+            if (res != VK_SUCCESS) {
+                LOG_FATAL_CAT("PIPELINE", "Failed to map descriptor buffer: {}", string_VkResult(res));
+                return;
+            }
         }
         mapped = info.mapped;
         rtx().descriptor_mapped = mapped;
     }
 
-    if (!update.tlas) return;
+    if (!update.tlas) {
+        LOG_WARNING_CAT("PIPELINE", "No TLAS provided — skipping descriptor update");
+        return;
+    }
 
     uint8_t* base = static_cast<uint8_t*>(mapped);
     const auto& props = rtx().descriptor_props;
@@ -739,28 +817,51 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
         ext().vkGetDescriptorEXT(rtx().device, &get, props.storageBufferDescriptorSize,
                                  base + rtx().binding_offsets[7]);
     }
+
+    LOG_SUCCESS_CAT("PIPELINE", "Ray-tracing descriptor buffer updated successfully");
 }
 
 inline void pipeline_shutdown() noexcept {
+    LOG_ATTEMPT_CAT("PIPELINE", "Shutting down pipeline subsystem");
+
     void* mapped = rtx().descriptor_mapped;
     if (mapped != nullptr) {
         auto it = rtx().buffers.find(rtx().descriptor_buffer_handle);
         if (it != rtx().buffers.end()) {
             BufferInfo& info = it->second;
             vkUnmapMemory(rtx().device, info.memory);
+            LOG_INFO_CAT("PIPELINE", "Descriptor buffer unmapped");
         }
     }
 
     Memory::destroy(rtx().descriptor_buffer_handle);
     Memory::destroy(rtx().living_world_buffer_handle);
 
-    if (auto l = rtx().main_descriptor_layout) vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
-    if (auto l = rtx().tex_descriptor_layout) vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
-    if (auto l = rtx().empty_descriptor_layout) vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
+    if (auto l = rtx().main_descriptor_layout) {
+        vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
+        LOG_INFO_CAT("PIPELINE", "Main descriptor set layout destroyed");
+    }
+    if (auto l = rtx().tex_descriptor_layout) {
+        vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
+        LOG_INFO_CAT("PIPELINE", "Texture descriptor set layout destroyed");
+    }
+    if (auto l = rtx().empty_descriptor_layout) {
+        vkDestroyDescriptorSetLayout(rtx().device, l, nullptr);
+        LOG_INFO_CAT("PIPELINE", "Empty descriptor set layout destroyed");
+    }
 
-    if (auto t = rtx().dummy_tlas) ext().vkDestroyAccelerationStructureKHR(rtx().device, t, nullptr);
-    if (auto b = rtx().dummy_accel_buffer) vkDestroyBuffer(rtx().device, b, nullptr);
-    if (auto m = rtx().dummy_accel_memory) vkFreeMemory(rtx().device, m, nullptr);
+    if (auto t = rtx().dummy_tlas) {
+        ext().vkDestroyAccelerationStructureKHR(rtx().device, t, nullptr);
+        LOG_INFO_CAT("PIPELINE", "Dummy TLAS destroyed");
+    }
+    if (auto b = rtx().dummy_accel_buffer) {
+        vkDestroyBuffer(rtx().device, b, nullptr);
+        LOG_INFO_CAT("PIPELINE", "Dummy TLAS buffer destroyed");
+    }
+    if (auto m = rtx().dummy_accel_memory) {
+        vkFreeMemory(rtx().device, m, nullptr);
+        LOG_INFO_CAT("PIPELINE", "Dummy TLAS memory freed");
+    }
 
-    LOG_INFO_CAT("PIPELINE", "Pipeline shutdown complete");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline subsystem shutdown complete");
 }

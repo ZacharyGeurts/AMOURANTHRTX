@@ -58,7 +58,7 @@ public:
     {
         LOG_INFO_CAT("RENDERER", "Initializing pure light engine — {}x{}", width, height);
 
-        // Command buffer ring — triple buffering, using global transient pool
+        // Command buffer ring — triple buffering using global transient pool
         constexpr uint32_t CMD_RING_SIZE = 3;
         cmdRing_.resize(CMD_RING_SIZE);
 
@@ -71,14 +71,22 @@ public:
         VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, cmdRing_.data());
         if (res != VK_SUCCESS) {
             LOG_FATAL_CAT("RENDERER", "Failed to allocate command buffer ring: {}", string_VkResult(res));
+            return;
         }
+
+        LOG_SUCCESS_CAT("RENDERER", "Command buffer ring allocated — {} buffers", CMD_RING_SIZE);
 
         // Camera uniform buffer
         cameraUBOHandle_ = Memory::create(sizeof(CameraSceneData),
-                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                  "CameraUBO");
+                                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                          "CameraUBO");
+
+        if (cameraUBOHandle_ == 0) {
+            LOG_FATAL_CAT("RENDERER", "Failed to create CameraUBO");
+            return;
+        }
 
         // Default materials (descriptor buffer)
         std::array<Material, 1> defaultMats{};
@@ -86,83 +94,96 @@ public:
         void* mapped = Memory::lazyMapDescriptor(defaultMaterialsHandle_);
         if (mapped) {
             std::memcpy(mapped, defaultMats.data(), sizeof(defaultMats));
+            LOG_SUCCESS_CAT("RENDERER", "Default materials uploaded to descriptor buffer");
+        } else {
+            LOG_FATAL_CAT("RENDERER", "Failed to map default materials descriptor buffer");
         }
 
         // HDR output storage image
         createOrRecreateHDRImage();
 
-        // Initialize pipeline (layouts, pipelines, SBT) — must happen after pool is sealed
+        // Initialize pipeline (layouts, pipelines, SBT)
         pipeline_initialize();
 
         // Initial descriptor write
         updateGlobalDescriptorBuffer();
 
-        LOG_SUCCESS_CAT("RENDERER", "Pure light engine ready");
+        LOG_SUCCESS_CAT("RENDERER", "Pure light engine fully initialized and ready");
     }
 
-~VulkanRenderer() {
-    destroyed_ = true;
-    vkDeviceWaitIdle(rtx().device);
+    ~VulkanRenderer() {
+        if (destroyed_) return;
+        destroyed_ = true;
 
-    vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-    vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-    vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+        LOG_INFO_CAT("RENDERER", "Shutting down pure light engine");
 
-    // Fixed: use Memory::destroy instead of plain destroy
-    Memory::destroy(cameraUBOHandle_);
-    Memory::destroy(defaultMaterialsHandle_);
+        vkDeviceWaitIdle(rtx().device);
 
-    if (!cmdRing_.empty()) {
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool,
-                             static_cast<uint32_t>(cmdRing_.size()), cmdRing_.data());
+        vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+        vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+        vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+
+        Memory::destroy(cameraUBOHandle_);
+        Memory::destroy(defaultMaterialsHandle_);
+
+        if (!cmdRing_.empty()) {
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool,
+                                 static_cast<uint32_t>(cmdRing_.size()), cmdRing_.data());
+            LOG_INFO_CAT("RENDERER", "Command buffer ring freed");
+        }
+
+        pipeline_shutdown();
+
+        LOG_SUCCESS_CAT("RENDERER", "Shutdown complete");
     }
-
-    pipeline_shutdown();
-}
 
 void pew() noexcept {
-    if (minimized_ || destroyed_) return;
+    if (destroyed_) return;
 
+    // Always advance time — zero cost, keeps everything alive
     auto now = std::chrono::steady_clock::now();
     TotalTime::get().advance(now - last_time_);
     last_time_ = now;
 
     float total_sec = static_cast<float>(TotalTime::get().seconds());
 
-    // Handle resize / out-of-date
-    if (needsSwapchainRecreate_) {
-        vkDeviceWaitIdle(rtx().device);
-        Swapchain::recreate(static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
-        createOrRecreateHDRImage();
-        needsSwapchainRecreate_ = false;
-        updateGlobalDescriptorBuffer();
-        if (Swapchain::minimized_) return;
+    // Quick check: is the swapchain actually ready for rendering?
+    // If not → skip **everything** except time advance
+    if (minimized_ || !Swapchain::swapchain_.valid()) {
+        LOG_INFO_CAT("RENDERER", "Swapchain not ready/minimized — time only ({:.3f}s), zero cost frame", total_sec);
+        return;
     }
 
-    updateCameraUBO(total_sec);
-
-    VkAccelerationStructureKHR tlas = getTLAS();
-    if (tlas == VK_NULL_HANDLE) return;
-
-    // Reusable shared binary semaphore (created once)
-    static VkSemaphore sharedSemaphore = VK_NULL_HANDLE;
-    if (sharedSemaphore == VK_NULL_HANDLE) {
-        VkSemaphoreCreateInfo semCI{};
-        semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        vkCreateSemaphore(rtx().device, &semCI, nullptr, &sharedSemaphore);
-    }
-
+    // Acquire image — this is the real gate. If acquire fails, we pay almost nothing
     uint32_t imageIndex;
+    VkSemaphore renderSemaphore = VK_NULL_HANDLE;
 
-    // Acquire signals the semaphore
-    VkResult res = Swapchain::acquireNextImage(&imageIndex, &sharedSemaphore);
-    if (res != VK_SUCCESS) {
+    VkResult res = Swapchain::acquireNextImage(&imageIndex, &renderSemaphore);
+    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+        if (renderSemaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(rtx().device, renderSemaphore, nullptr);
+        }
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             needsSwapchainRecreate_ = true;
         }
         return;
     }
 
+    // At this point: swapchain wants a frame → we pay the cost
+    LOG_INFO_CAT("RENDERER", "Frame active — time {:.3f}s, acquired image {}", total_sec, imageIndex);
+
+    // Update UBO (cheap)
+    updateCameraUBO(total_sec);
+
+    // Only rebuild LAS if dirty **and** we have a valid frame to render
+    VkAccelerationStructureKHR tlas = getTLAS();
+    if (tlas == VK_NULL_HANDLE) {
+        LOG_WARNING_CAT("RENDERER", "No valid TLAS — skipping trace");
+        Swapchain::presentImage(rtx().present_queue, imageIndex, renderSemaphore);
+        return;
+    }
+
+    // Command buffer from ring
     VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
     currentRingIndex_ = (currentRingIndex_ + 1) % cmdRing_.size();
 
@@ -171,8 +192,10 @@ void pew() noexcept {
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
     vkBeginCommandBuffer(cmd, &begin);
 
+    // Living world (cheap dispatch)
     pipeline_dispatch_living_world(cmd, total_sec);
 
     VkMemoryBarrier mb{};
@@ -184,10 +207,12 @@ void pew() noexcept {
                          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                          0, 1, &mb, 0, nullptr, 0, nullptr);
 
+    // Descriptor update only if needed
     if (needsDescriptorUpdate_) {
         updateGlobalDescriptorBuffer();
     }
 
+    // HDR → trace → blit → present chain
     transitionImageLayout(cmd, hdrOutputImage_,
                           VK_IMAGE_LAYOUT_UNDEFINED,
                           VK_IMAGE_LAYOUT_GENERAL);
@@ -223,39 +248,50 @@ void pew() noexcept {
 
     vkEndCommandBuffer(cmd);
 
-    // CRITICAL: Render **waits** on acquire semaphore → guarantees signal operation executed
+    // Submit — wait on acquire semaphore
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
     VkSubmitInfo submit{};
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &sharedSemaphore;           // ← This line fixes VUID-03268
+    submit.pWaitSemaphores      = &renderSemaphore;
     submit.pWaitDstStageMask    = waitStages;
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &cmd;
-    // No signal needed — present waits on the same semaphore
 
-    vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+    res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", string_VkResult(res));
+        vkDestroySemaphore(rtx().device, renderSemaphore, nullptr);
+        return;
+    }
 
-    // Present waits on the semaphore (now guaranteed signaled after render wait)
-    Swapchain::presentImage(rtx().graphics_queue, imageIndex, sharedSemaphore);
+    // Present consumes the semaphore
+    Swapchain::presentImage(rtx().present_queue, imageIndex, renderSemaphore);
+    // semaphore destroyed inside presentImage
 }
 
-    // Called from SDL resize event
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
+            LOG_WARNING_CAT("RENDERER", "Window minimized — paused rendering");
             return;
         }
+
+        if (newWidth == width_ && newHeight == height_) return;
 
         width_  = newWidth;
         height_ = newHeight;
         minimized_ = false;
         needsSwapchainRecreate_ = true;
+
+        LOG_INFO_CAT("RENDERER", "Resize detected — new size {}x{}", width_, height_);
     }
 
 private:
     void createOrRecreateHDRImage() noexcept {
+        LOG_INFO_CAT("RENDERER", "Creating/recreating HDR output image — {}x{}", width_, height_);
+
         vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
         vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
         vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
@@ -272,19 +308,32 @@ private:
         hdrInfo.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         hdrInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        vkCreateImage(rtx().device, &hdrInfo, nullptr, &hdrOutputImage_);
+        VkResult res = vkCreateImage(rtx().device, &hdrInfo, nullptr, &hdrOutputImage_);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("RENDERER", "vkCreateImage(HDR) failed: {}", string_VkResult(res));
+            return;
+        }
 
         VkMemoryRequirements memReqs{};
         vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &memReqs);
 
         uint32_t memType = Memory::findMemoryType(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (memType == ~0u) {
+            LOG_FATAL_CAT("RENDERER", "No device-local memory for HDR image");
+            return;
+        }
 
         VkMemoryAllocateInfo mai{};
         mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         mai.allocationSize  = memReqs.size;
         mai.memoryTypeIndex = memType;
 
-        vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_);
+        res = vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("RENDERER", "vkAllocateMemory(HDR) failed: {}", string_VkResult(res));
+            return;
+        }
+
         vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
 
         VkImageViewCreateInfo viewInfo{};
@@ -299,6 +348,8 @@ private:
         vkCreateImageView(rtx().device, &viewInfo, nullptr, &hdrOutputView_);
 
         needsDescriptorUpdate_ = true;
+
+        LOG_SUCCESS_CAT("RENDERER", "HDR output image ready — view {:016x}", (uintptr_t)hdrOutputView_);
     }
 
     void updateCameraUBO(float totalTime) noexcept {
@@ -318,11 +369,16 @@ private:
         data.maxDepth   = 12;
 
         Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
+
+        LOG_INFO_CAT("RENDERER", "Camera UBO updated — exposure {}, time {:.3f}s", data.exposure, data.totalTime);
     }
 
     void updateGlobalDescriptorBuffer() noexcept {
         VkAccelerationStructureKHR tlas = getTLAS();
-        if (tlas == VK_NULL_HANDLE) return;
+        if (tlas == VK_NULL_HANDLE) {
+            LOG_WARNING_CAT("RENDERER", "No valid TLAS for descriptor update — skipping");
+            return;
+        }
 
         RTDescriptorUpdate update{};
         update.tlas            = tlas;
@@ -334,6 +390,9 @@ private:
 
         pipeline_write_rt_descriptors(update);
         needsDescriptorUpdate_ = false;
+
+        LOG_SUCCESS_CAT("RENDERER", "Global descriptor buffer updated — TLAS {:016x}, HDR view {:016x}",
+                        (uintptr_t)tlas, (uintptr_t)hdrOutputView_);
     }
 
     void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
@@ -368,6 +427,9 @@ private:
         }
 
         vkCmdPipelineBarrier(cmd, src, dst, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        LOG_INFO_CAT("RENDERER", "Image layout transition — {} → {} for image {:016x}",
+                     string_VkImageLayout(oldLayout), string_VkImageLayout(newLayout), (uintptr_t)image);
     }
 
     // Member variables
