@@ -834,19 +834,6 @@ static LONG WINAPI apocalypse_handler(EXCEPTION_POINTERS* pExceptionInfo) noexce
         }
     }
 
-    safe_writeln(COLOR_BOLD COLOR_MAGENTA "                    PROGRAMMING LEGENDS' HEADS -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET);
-    safe_writeln(COLOR_CYAN "Crash on Windows — MiniDump generated. Wisdom follows." COLOR_RESET);
-    safe_writeln("");
-
-    safe_writeln(COLOR_BOLD COLOR_BLUE "========================== THE MANUAL ==========================" COLOR_RESET);
-
-    for (const char** line = verdict->lines; *line; ++line) {
-        safe_writeln(*line);
-    }
-
-    safe_writeln(COLOR_BOLD COLOR_BLUE "=================================================================" COLOR_RESET);
-    safe_writeln("");
-
     char buf[512];
     snprintf(buf, sizeof(buf), COLOR_YELLOW "EXCEPTION CODE : 0x%08lX" COLOR_RESET,
              pExceptionInfo->ExceptionRecord->ExceptionCode);
@@ -889,10 +876,6 @@ static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept {
     struct timespec req = { 0, 8000000L };
     nanosleep(&req, nullptr);
     safe_write("\033[2J\033[H", 7);
-
-    safe_writeln(COLOR_BOLD COLOR_MAGENTA "                    PROGRAMMING LEGENDS' HEADS -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET);
-    safe_writeln(COLOR_CYAN "The code crashed... ultimate mentors incoming! 48+ lines of wisdom." COLOR_RESET);
-    safe_writeln("");
 
     const AdviceManualEntry* verdict = &THE_MANUAL[0];
     for (const auto& e : THE_MANUAL) {

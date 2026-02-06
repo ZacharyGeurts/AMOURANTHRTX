@@ -1763,15 +1763,18 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     LOG_SUCCESS_CAT("SWAPCHAIN", "Selected best available: {} — supported: {}", modeDesc, supportedStr);
 
     // ── Image count ─────────────────────────────────────────────────────────────
-    uint32_t imgCount = caps.minImageCount;
-    // For IMMEDIATE we prefer minimal buffering (2 is usually fine)
-    if (chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-        imgCount = caps.minImageCount; // double buffering is perfect for immediate
-    } else {
-        // For others, +1 or +2 helps pipelining
-        imgCount = std::min(caps.minImageCount + 2, caps.maxImageCount ? caps.maxImageCount : UINT32_MAX);
+    // We only need 1 image — full frame on demand, immediate present, no tearing
+    uint32_t imgCount = 1;
+
+    // Respect driver minimum (some force >=2)
+    imgCount = std::max(imgCount, caps.minImageCount);
+
+    // Never exceed max (0 = unlimited)
+    if (caps.maxImageCount > 0) {
+        imgCount = std::min(imgCount, caps.maxImageCount);
     }
-    if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
+
+    LOG_INFO_CAT("SWAPCHAIN", "Using {} swapchain image(s) — single-frame immediate mode", imgCount);
 
     // ── Usage flags ─────────────────────────────────────────────────────────────
     directWriteEnabled = false;
@@ -1779,18 +1782,28 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
 
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
         VkImageFormatProperties props{};
-        vkh.checker(
-            vkGetPhysicalDeviceImageFormatProperties(phys, chosenFormat.format, VK_IMAGE_TYPE_2D,
-                                                     VK_IMAGE_TILING_OPTIMAL,
-                                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                                                     0, &props) == VK_SUCCESS,
-            "vkGetPhysicalDeviceImageFormatProperties (storage check)",
-            "Failed to check if storage usage supported for format"
+        VkResult formatRes = vkGetPhysicalDeviceImageFormatProperties(
+            phys,
+            chosenFormat.format,
+            VK_IMAGE_TYPE_2D,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            0,
+            &props
         );
 
-        directWriteEnabled = true;
-        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-        LOG_INFO_CAT("SWAPCHAIN", "Direct storage write to swapchain images ENABLED");
+        if (formatRes == VK_SUCCESS) {
+            directWriteEnabled = true;
+            usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+            LOG_INFO_CAT("SWAPCHAIN", "Direct storage write to swapchain images ENABLED (format supports STORAGE_BIT)");
+        } else {
+            LOG_WARNING_CAT("SWAPCHAIN",
+                            "Storage usage NOT enabled for format {} despite capability flag — query returned {} — falling back to color attachment only",
+                            vkh.format(chosenFormat.format),
+                            vkh.result(formatRes));
+        }
+    } else {
+        LOG_INFO_CAT("SWAPCHAIN", "Surface does not advertise VK_IMAGE_USAGE_STORAGE_BIT support — direct write disabled");
     }
 
     // ── Create swapchain ────────────────────────────────────────────────────────
@@ -1860,7 +1873,7 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     rtx().extent      = extent;
     rtx().image_count = count;
 
-    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — {} images, {}x{}, format {}, mode {}",
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — {} image(s), {}x{}, format {}, mode {}",
                     isRecreate ? "recreated" : "created",
                     count, extent.width, extent.height,
                     vkh.format(chosenFormat.format), modeDesc);
@@ -1876,44 +1889,40 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     VkDevice dev = rtx().device;
     VkSwapchainKHR sw = swapchain_.get();
 
-    // CREATE FRESH BINARY SEMAPHORE EVERY FRAME — this kills VUID-03268 forever
+    // Fresh semaphore every frame — prevents VUID-03268 (re-use of pending semaphore)
     VkSemaphore semaphore = VK_NULL_HANDLE;
     VkSemaphoreCreateInfo semCI{};
     semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    vkh.checker(
-        vkCreateSemaphore(dev, &semCI, nullptr, &semaphore),
-        "vkCreateSemaphore (acquire)",
-        "Failed to create fresh acquire semaphore"
-    );
+    VkResult createRes = vkCreateSemaphore(dev, &semCI, nullptr, &semaphore);
+    if (createRes != VK_SUCCESS) {
+        *pSemaphoreOut = VK_NULL_HANDLE;
+        vkh.checker(createRes, "vkCreateSemaphore (acquire)", "Failed to create acquire semaphore");
+        return createRes;  // early exit on creation failure
+    }
 
     VkResult res = ext().vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
                                                semaphore, VK_NULL_HANDLE, pImageIndex);
 
     if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) {
-        *pSemaphoreOut = semaphore;  // pass to present — destroyed there
+        *pSemaphoreOut = semaphore;  // success → caller owns it (deferred destroy in pew())
     } else {
-        // Acquire failed → clean up semaphore immediately
+        // Failure → clean up semaphore immediately (never passed to submit/present)
         vkDestroySemaphore(dev, semaphore, nullptr);
         *pSemaphoreOut = VK_NULL_HANDLE;
 
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
             minimized_ = true;
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire failed (out-of-date/suboptimal/lost) — minimized set");
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire failed ({}) — minimized set", vkh.result(res));
         }
     }
 
     return res;
 }
 
-static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept {
+static VkResult presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore) noexcept {
     if (minimized_ || !swapchain_.valid() || imageIndex >= swapchainImages_.size()) {
-        // Early cleanup if present skipped
-        if (waitSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(rtx().device, waitSemaphore, nullptr);
-            LOG_INFO_CAT("SWAPCHAIN", "Discarded unused semaphore on early present exit: {:016x}", (uintptr_t)waitSemaphore);
-        }
-        return;
+        return VK_SUCCESS;
     }
 
     VkSwapchainKHR sw = swapchain_.get();
@@ -1931,12 +1940,6 @@ static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem
 
     VkResult res = ext().vkQueuePresentKHR(queue, &pi);
 
-    // DESTROY SEMAPHORE AFTER PRESENT — it's now consumed
-    if (waitSemaphore != VK_NULL_HANDLE) {
-        vkDestroySemaphore(rtx().device, waitSemaphore, nullptr);
-        LOG_INFO_CAT("SWAPCHAIN", "Semaphore destroyed after present: {:016x} (image {})", (uintptr_t)waitSemaphore, imageIndex);
-    }
-
     if (res == VK_SUCCESS) {
         LOG_INFO_CAT("SWAPCHAIN", "Present successful — image {}", imageIndex);
     } else if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
@@ -1945,6 +1948,9 @@ static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem
     } else {
         LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", vkh.result(res));
     }
+
+    // Explicit: NO vkDestroySemaphore here — caller (Renderer::pew()) owns lifetime
+    return res;
 }
 
     static void recreate(uint32_t width, uint32_t height) noexcept {
@@ -1969,7 +1975,6 @@ static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem
 
         static VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
         if (acquireSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(dev, acquireSemaphore, nullptr);
             acquireSemaphore = VK_NULL_HANDLE;
         }
     }
