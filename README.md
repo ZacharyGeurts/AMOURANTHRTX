@@ -1,6 +1,7 @@
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
 We are not minimalist. We added every feature from every forum, efficently.  
 How efficent? Zero cost computing.  
+C++23 Vulkan 1.4+ and SDL3 with inclusion of GLM.  
 
 This is RTX. This also is literally Grok designing himself.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
@@ -13,60 +14,47 @@ Got lazy and moved to databases and C# and .Net for quick development of tools.
 Brain fried and I'm on disability.  
 
 Everything here is very well considered. One code for the world style.  
-Grok read all your forums and we tried that.  
-I will come off as insane sometimes if I think it is good for a joke.  
+I will come off as insane more than rarely if I think it is good for a joke.  
+The code is to be kept clean on my end.  
 Make your own copy and decide if you want future updates from me by checking commits.  
-This is pre-release software and compiles. I should be on the final iteration.  
-The meaningful files are in include/engine 
+This is pre-release software and compiles and pumps.  
+The meaningful files are in include/engine and should be our final tree layout.  
 
 The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
-If a bit of memory changes, and your program is not the one, we exit.  
-We gather up the whole of RTX and secure and grant access with simply, rtx().  
+If a bit of memory changes, and your program is not the one making changes, we exit.  
+This is trvial math and has "no cost" post compiling.  
+We gather up the whole of RTX and secure and grant access with simply, rtx() singleton.  
 There is no hacking permissable within these walls. Tampering aborts.  
 Identifiable features of this software melts away on release build.  
 
-The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
-If a bit of memory changes, and your program is not the one, we exit.  
-We gather up the whole of RTX and secure and grant access with simply, rtx().  
-There is no hacking permissable within these walls.  
-Identifiable features of this software melts away on release build.  
+I consider compute and datacenters with updates.  
+We are THE ZERO COST RTX development research page.  
+Amouranth beat the world to it and steps on RTX.  
+Built with the dream team of Grok and everyone on the planet.  
 
-I consider compute and datacenters with updates.  I believe that portion can operate elsewhere so my update may break your compute if yours runs.  
-Long winded. If you branch from me, I cannot test those changes with mine without issues pages.  
-Someone has a compute shader for me to work on and a suitcase of cash, I might be able to switch priority away from the screensaver for short term.  
-
-We are THE ZERO COST RTX development research page, unless someone beat Amouranth to it.  
-We needed Vulkan 1.4+. Then SDL3 exploded my brain.  
-I took advantage of Grok.  
-The commit count is stoopid. <3 Gorillaz    
-
-Development and memes https://x.com/ZacharyGeurts
+Development and memes https://x.com/ZacharyGeurts  
+Check recent commits to follow code updates.  
 Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
 Me too <img width="132" height="86" alt="copilot" src="https://github.com/user-attachments/assets/1dd58348-dcf7-424e-8461-692f15281fd5" />
 
-The code is unenforcable. Best to be first.  
-Built with the dream team of everyone on the planet.  
-
-We have no other competition in RTX space. Other platforms will adopt or die.  
-Zero cost does not go back in the bag. Please enjoy the source.  
-Make a trip through [include/engine/GLOBALS/logging.hpp](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/include/engine/GLOBAL/logging.hpp) now. We will not disappoint.  
-Include StoneKey.hpp and logging.hpp for all of RTX interoperations.  
 You are encouraged to work with code here. Welcome to github.  
 The best advice I have for you is to make some money with it first.  
 Cut all operational costs securely and to zero.  
-If you already know you want zero cost and what else you want to do, grab a copy and make it do it with Grok is my advice.  
 Come back and keep up with me. I will not be adding a cycle without ensuring the robot eats an EMP for it.  
 We did not start at zero cost and I will not return to that other costly space.  
 
 SDL3 from github.  
 Vulkan SDK is at LunarG.  
 GLM and build tools I was able to get with apt.  
-The cmake build system needs internet to function and tries to help. (mine went out one night)  
-uses stb and tinyobj and is really smart everywhere really. "the city of the future" but sorta crumbly right now.  
-Copy and paste your cmake into Grok and see if you can make Jack Wayne RTX. Have fun.  
-It may have been confusing to anyone unfamiliar with Open Source.  
-You owe me 3% of every dollar I can make you. *sigh, already gone.  
+The cmake build system needs internet to function and tries to help.  
+Uses tinyobj and is really smart everywhere really really.  
+You owe me 3% of every dollar I can make you. Of the 3 cents I send two of them over to Amouranth and Nick.  
+Or you can cut me out and just dono over at Ammo's twitch page.  
+If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
+She steps on RTX and dominates it now.  
 
+There is a cmake build system and linux.sh script that is to assist with cross platform development.  
+Currently it is intended to use Linux as your SDK and Ming to make your Windows builds.  
 Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
 Or trash it and grab a new one tomorrow.  
 ```
@@ -77,106 +65,33 @@ chmod +x linux.sh
 ./linux.sh --help
 ```
 
-We bring you Zero cost secure RTX GPU operation by using both previous and current conventions.   
-Secure and costs dissolve at compile time with Release builds, and nobody knows how you got it.  
-At this point, zero cost is zero cost is zero cost.  
-"We use a custom algorithim that is also unbreakable and unlocks 100% of the GPU."  
-Nobody cares, Amouranth already has it. Just use this one because there is no fingerprint to look at.  
-Which one? StoneKey.hpp. Have Grok 4.1 beta or whatever change to your hearts content.  
-C++23 but Grok can probably make it C# in a day.  
-
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
-"Maybe another Zero computational cost that makes itself unreadable" First? Is there second?  
+There are pretty much two states, working and non. Things move fast here.  
 
-How far along? "chugged" along at over 272,000 FPS on 4070ti so we deconceptualized framerates.    
-If you just want to update a component of your engine, you will have a better time using the wiki over the source.  
-Remove the StoneKey references in the wiki and I frown upon losing security. Come back when I am further along. Please.  
-
-I can eat and I play Soul Caliber and I have RTX. I want developers to have another RTX resource.  
-These are my current iterations and subject to change daily.  
-I trutly have cycled through dozens of zero cost implementations. I mean it, ask Grok about the code.  
-If you use the security method, I cannot prove you used mine to gain 100% horsepower at no computational cost.  
-99.99997 I would at least have something to say maybe... in court ... if it wasn't invisible.  
-If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
-
-She steps on RTX and dominates it now.  
+How far along? "chugged" along at over 272,000 FPS on 4070ti so we deconceptualized framerates.  
+If your TV is 60 fps we just update the timer the rest of the time.  
+By decoupling everything, we should be in theoretical areas of infinite FPS apart from hardware.  
 
 I tried to keep the wiki smart enough that even a high school freshman can dream big.  
-Everyone gets the tab on their browser now, up and comers would be foolish not to use it.  
+Everyone gets the tab on their browser now for Grok and AI, up and comers would be foolish not to use it.  
 
-If you are here for a while, slow your scroll. The files are short.  
-You can use ming on a Mint VM to compile for your Windows probably.  
-My script is mostly there and I had success with Windows builds over on the Plastic Beach branch.  
-My advice is stay away from the scripts folder. That is mine for now.  
-I have anxiety about people compiling on with other compilers. I wish I could help more.  
 You can copy and paste the whole codebase into Grok long before you run out of questions.  
 Also, welcome to 2026.  
-Really you will want to be using linux.sh and cmake. The shader compiling and incremental build system that is included removes a large part of the headache.  
-Side effect? Native development for my platform too :P X11 Mint  
+Really you will want to be using linux.sh and cmake.  
+The shader compiling and incremental build system that is included removes a large part of the headache.  
+Side effect? Native development for my platform too. X11 Mint  
 
 This is your headstart into RTX development. If you do not want to take it, you do not have to.  
-
-Zero cost. Zero computational cost. Not using cycles in costs. Zero!  
-Old methods. New technology. We are friendly.  
-We really do have RTX in a bottle.  
-I went through top 50 forum wishlists for every component and design is modular as well as interwoven.  
-Moduluar in the sense that BufferManager or nearly file is simply, "Grok, rewrite my file to this..."  
-Please respect where you got it.  
-We do security here. Please respect that.  
-If it turns out Tom Brady is amazing at cryptography too, we will update StoneKey.  
-
-Digress. The swapchain picks always best for your platform.  
-"Seriously?" Yeah. It's literally 420 lines, and celebrates the Joe and Elon interview.  
-However, if you do not like it, Grok can write you a whole new one.  
-It gives you better than HDR where supported.  
-Grok and I ride Mint till I topple Mailbox and 2! frames in flight.  
-
-Wait... what? o.O  
-Grok.  
-He is your expert. That is where I'm getting my news on what is being updated anywhere in the world, then I tell him to write it.  
-Ask him about his code. (He preferred him).  
-And I mean it. I will paste three files at a time for one question.  
 We are short files.  
-
 "Return full file in a code block and no stubs" is parlance around here.  
 
-He broke it? Ctrl-Z and try again. Learn THE code. It is short and read it a few times.  
-There really are not that many files if you want to check a few now on the wiki.  
-We do all that for no overhead, because that is what RTX Hardware developers want everyone to have.  
+Grok broke it? Ctrl-Z and try again.  
+We do all of it for no overhead, because that is what RTX Hardware developers want everyone to have.  
 Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this iteration figured out anything new.  
 Your development is yours, and we will be here if you want another fresh start.  
 
-To most people? Not much. Developers will either have their own zero cost implmentation to unlock 100% of RTX potential or use the same one.  
-If it is uncheckable, same thing to eyeballs.  
-It just means there is a new RTX foundational layer that anyone can take advantage of when implemented.  
-Smaller downloads? Maybe I'm not selling this right.  
-When a security researcher puts together zero cost security, it is invisible to fingerprinting tools.  
-Or he is researching money. Either way, enjoy the code.  
-
-We are probably more like a secure layer at this point, so you have no obligation to share code back with us.  
+You have no obligation to share code back with us.  
 I'm a nerd. I would love it if you did. You guys can have the issues page for your forum.  
-Boring. Nope. It is RTX so we can turn on the lights and let you infinitely dig in the light with a day night cycle etc, at no cost because RTX can draw a world very fast.  
-We can shrink and grow any color everywhere as light or materials or translucent objects, without sweating the GPU so we blast annoying high frame rates to prove a point.  
-The Zero cost RTX Demo scene is about to become a reality for everyone, bois.  
-I will try to get to the point of providing water and fire implementations you can modify for your projects, etc.  
-AABB - this is how we make RTX worlds from now on. https://alelievr.github.io/Modern-Rendering-Introduction/AABBIntersection/  
-ALL high end game engines. Godot looks brilliant.  
-
-Grok dubbed it the Empire. This code is. We live here and have an impregnable border.  
-You are allowed outside, and we expect you to stay out there where the fun is.  
-Everything within the Empire is yours already so it costs nothing to know.  
-Nobody sees past our border wall and cannot move a brick.  
-We answer you and are already in your belly, always just before pass.    
-StoneKey.hpp is your gateway into the Empire.  
-Add it to your cpp, never hpp. Why does buffermanager have one? long story, ask Grok.  
-I did not want to wrestle any more for the moment, so that was the zero cost design I went with for now.  
-
-SDL3 and MeshLoader means the file format count is more 3 letter capitals than Linus Sebastian knows.  
-Lets adjust your file input on entry, to be the best evah! ... eh.vah.  
-Snap an eyeball and come back. https://jcgt.org/published/0002/01/05/paper.pdf  
-Our (me and Grok's implementation) in LAS.hpp and LAS.cpp or please see wiki for LAS  
-Each file is part of the GPU and we covered every aspect of it as we crawled out of the motherboard socket.  
-SDL3 turns on our window and also "happens" to have VR haptics and MP3s and stuff.  
 
 Have your RTX at zero cost per watt with me.  
 *flashing lights warning https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif  
@@ -190,68 +105,11 @@ See my profile picture on X @ZacharyGeurts for the real Grand Champion.
 Grok does not build from a vacuum, and I even brought Alan Turing in for this one.  
 <img width="1300" alt="Turing" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-01-18%2023-10-25.png" />   
 
-Git build
-https://x.com/ZacharyGeurts/status/2011437836994847224
-
-Anyway, problems for the rest of the world. Lets get to it.  
-
-Built with and for SDL3 Vulkan 1.4+ C++23  
-And we are bringing in GLM on a Fortnight glider. https://github.com/g-truc/glm  
-
-What makes AMOURANTHRTX different?
-We unlock the RTX. Compute, Path tracing. Securely. No interference with what you want to show.  
-A nerd Mario Paint that lets us make Mario Paint or Minecraft or whatever, for the less nerdy.  
-Also for some, there are trillions of dollars in that industry.  
-RAW video card power per watt with no overhead.  
-The FPS truly screams. (270,000+ FPS on 4070ti)  
-
-This is an anal OCD project. We do not simulate star twinkle, we add atmospheric layers.  
-Temperature, day, night, humidity, wind, we will have it all for you, to use or to stick a rectangle over and make Hollow Knight 2.  
-This code has one requirement and should be portable where SDL3 and Vulkan and GLM go. RTX.  
-SDL3 can do everything you could want. Smart enough you can prototype new input methods or just play a sound effect.  
-
-The CPU is truly unbound.  
-More AI availability for Thomas the Tank Engine Models.  
-Welcome to RTX, just make it in a compute shader instead. The CPU is yours and we are all of RTX on a plate o7.  
-
-Working prototype. https://github.com/ZacharyGeurts/AMOURANTHRTX/tree/PlasticBeach  
-We can do far better without the constraints of 2 files. (main.cpp and main.hpp)    
-
-If you break it worse than me, throw it in the trash and grab another copy.  
-
-What does zero cost mean? We hang everything out as inline and constexp encrypted globals, so you do not ask for anything. You know everything.  
-Hackers see garbage because they are not compiled with us, and tamper protection prevents any modification.  
-Smart software handles everything so you can focus on world building.  
-Add StoneKey.hpp and logging.hpp to your cpp file and you will be on the team and allowed to listen and talk to the system if you showed at compile time.  
-Supposed to be how it works. logging.cpp holds origins because Ellie Fier rocks, and logging is with the package.  
-Zero cost logging with no footprint when switched to Release builds.  
-
-What is everything? Ummm... RTX. The buzzword. Shoots lights when turned on. Pew Pew.  
-We get free magic with it for stars and whatnot. You should be able to do kilometers of shooting cheesewheels.  
-It is a maybe up to 20 megabyte secure nugget that will let your RTX video card do everything it can.  
-Everybody is about to have one.  
-Vulkan 1.4+ truly is exceptional.  
-
 This is the last stop for RTX. Zero cost. Impregnable RTX engine.  
 Period.
 
 OptionsMenu.hpp might be exciting to some.  
 
-Multiplatfom Linux SDK sufficient for an industry reset.  
-This is an SDK in the manner that tries to assist with cross compilation.  
-No operational cost to use RTX.  
-Cross platform support with Ming to do Windows and probably ARM, PPC, etc. if you put it in there.  
-```C++23 RTX```
-StoneKey.hpp is the everything of Vulkan made globals and hackerproof.  
-StoneKey hands you the sealed vaults. Use them from there as globals. The rest is invisble.  
-Invisible? More like o7. I have one true love and it is getters and setters. We are Empire secure, we hide nothing.  
-Each piece smart and friendly.  
-Compile time decides your friendlies, hold tight for cheese wheels.  
-We keep file sizes small for AI coding (~800 lines on the big one)  
-Feel free to open issues for anything. Questions, comments, assistance.  
-Complaints? Tell Grok to turn it into a Windows powershell file or whatever or leave it.  
-@ZacharyGeurts on X.  
-Too good to be true? You can put a copy on your desktop and prove me wrong.  
 Welcome to the community.  
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
@@ -268,10 +126,6 @@ Open an issue and paste your apt install list and I will update this page.
 ```
 sudo apt update && sudo apt install gcc-14 g++-14
 ```
-
-Gets to the renderer but backend changes have it up and down.  
-Working prototype Christmas 2025. See branch Plastic Beach.  
-Last visual Dec 9th commit (pink screen) using fallback TLAS, so I turned it off and went back to work.  
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
@@ -300,7 +154,7 @@ I would be taking a 1 to their 2 parts as far as distribution ratio.
 If you use the product you agree to 3 cents on the dollar or 3%. Not above.  
 If they do not like my using their brand, they can come to Michigan and stream the firing.
 And if you wear a pirate hat and want to cut me out, consider subbing or gifting a sub on twitch.
-Cut me in? Make money first. There is currently no way to send me money. Show up at my door with a suitcase?
+Show up at my door with a suitcase? Send me an email?  
 The bed is clean and I usually fall asleep on the couch. Expect Asmongold but more social issues.  
 https://www.twitch.tv/AMOURANTH  
 I plan fireworks before 4th of July.  
