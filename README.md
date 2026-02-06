@@ -16,6 +16,11 @@ chmod +x linux.sh
 
 Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 There are pretty much two states, working and non. Things move fast here.  
+A real star is ELLIE.hpp. It is more than full featured when it comes to debugging and logging.  
+We track and tell you everything along the way.  
+Filenames, line numbers, function names.  
+Debugging becomes a breeze.  
+<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-02-05%2021-32-45.png?raw=true" />  
 
 This is RTX. This also is literally Grok designing himself.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
@@ -87,7 +92,8 @@ Side effect? Native development for my platform too. X11 Mint
 
 This is your headstart into RTX development. If you do not want to take it, you do not have to.  
 We are short files.  
-"Return full file in a code block and no stubs" is parlance around here.  
+"Return full file in a code block and no stubs and full functions" is parlance around here.  
+"Update and return the full function with my new ideas..."  
 
 Grok broke it? Ctrl-Z and try again.  
 We do all of it for no overhead, because that is what RTX Hardware developers want everyone to have.  
