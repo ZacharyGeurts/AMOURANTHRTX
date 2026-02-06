@@ -3,6 +3,20 @@ We are not minimalist. We added every feature from every forum, efficently.
 How efficent? Zero cost computing.  
 C++23 Vulkan 1.4+ and SDL3 with inclusion of GLM.  
 
+Welcome to the community.  
+Use the green code button above to download zip.  
+Or, use the preferred method with git.  
+```
+# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
+git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
+cd AMOURANTHRTX
+chmod +x linux.sh
+./linux.sh --help
+```
+
+Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
+There are pretty much two states, working and non. Things move fast here.  
+
 This is RTX. This also is literally Grok designing himself.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
 From there we implemented all of them, in small files that you can add to.  
@@ -57,20 +71,6 @@ There is a cmake build system and linux.sh script that is to assist with cross p
 Currently it is intended to use Linux as your SDK and Ming to make your Windows builds.  
 Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
 Or trash it and grab a new one tomorrow.  
-
-Welcome to the community.  
-Use the green code button above to download zip.  
-Or, use the preferred method with git.  
-```
-# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
-git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
-cd AMOURANTHRTX
-chmod +x linux.sh
-./linux.sh --help
-```
-
-Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
-There are pretty much two states, working and non. Things move fast here.  
 
 How far along? "chugged" along at over 272,000 FPS on 4070ti so we deconceptualized framerates.  
 If your TV is 60 fps we just update the timer the rest of the time.  
