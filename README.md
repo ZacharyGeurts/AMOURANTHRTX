@@ -57,6 +57,10 @@ There is a cmake build system and linux.sh script that is to assist with cross p
 Currently it is intended to use Linux as your SDK and Ming to make your Windows builds.  
 Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
 Or trash it and grab a new one tomorrow.  
+
+Welcome to the community.  
+Use the green code button above to download zip.  
+Or, use the preferred method with git.  
 ```
 # CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
@@ -109,23 +113,6 @@ This is the last stop for RTX. Zero cost. Impregnable RTX engine.
 Period.
 
 OptionsMenu.hpp might be exciting to some.  
-
-Welcome to the community.  
-Use the green code button above to download zip.  
-Or, use the preferred method with git.  
-```
-# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
-git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
-cd AMOURANTHRTX
-chmod +x linux.sh
-./linux.sh --help
-```
-Cmake handles many of the dependancies.  
-You will likely need SDL3 and Vulkan 1.4+ SDK from LunarG  
-Open an issue and paste your apt install list and I will update this page.  
-```
-sudo apt update && sudo apt install gcc-14 g++-14
-```
 
 AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
