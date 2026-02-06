@@ -41,6 +41,7 @@
 #define VK_KHR_deferred_host_operations 1
 #define VK_KHR_buffer_device_address 1
 #define VK_EXT_descriptor_buffer 1
+#define VK_EXT_present_mode_fifo_latest_ready 1
 
 // Required Vulkan device extensions
 inline constexpr std::array<const char*, 8> requiredDeviceExtensions = {{
@@ -1520,14 +1521,42 @@ inline void init() noexcept {
     desc_buf.descriptorBuffer = VK_TRUE;
     desc_buf.pNext = &rt_pipe;
 
+    // Optional extensions
+    uint32_t extCount = 0;
+    vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, nullptr);
+    std::vector<VkExtensionProperties> exts(extCount);
+    vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, exts.data());
+
+    std::vector<const char*> enabledExtensions(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end());
+
+    std::array<const char*, 1> optionalExtensions = {{
+        VK_EXT_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME
+    }};
+
+    for (const char* opt : optionalExtensions) {
+        bool found = false;
+        for (const auto& avail : exts) {
+            if (strcmp(avail.extensionName, opt) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            enabledExtensions.push_back(opt);
+            LOG_INFO_CAT("VULKAN", "Enabling optional extension: {}", opt);
+        } else {
+            LOG_INFO_CAT("VULKAN", "Optional extension not supported: {}", opt);
+        }
+    }
+
     // Create device
     VkDeviceCreateInfo dev_ci{};
     dev_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dev_ci.pNext = &desc_buf;
     dev_ci.queueCreateInfoCount = static_cast<uint32_t>(queue_infos.size());
     dev_ci.pQueueCreateInfos = queue_infos.data();
-    dev_ci.enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtensions.size());
-    dev_ci.ppEnabledExtensionNames = requiredDeviceExtensions.data();
+    dev_ci.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
+    dev_ci.ppEnabledExtensionNames = enabledExtensions.data();
 
     VkDevice dev = VK_NULL_HANDLE;
     VkResult res = vkCreateDevice(selected, &dev_ci, nullptr, &dev);
@@ -1592,143 +1621,218 @@ struct Swapchain {
         createOrRecreateSwapchain(w, h, true);
     }
 
-    static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept {
-        VkDevice dev = rtx().device;
-        VkPhysicalDevice phys = rtx().physical;
-        VkSurfaceKHR surf = rtx().surface;
+static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept {
+    VkDevice dev = rtx().device;
+    VkPhysicalDevice phys = rtx().physical;
+    VkSurfaceKHR surf = rtx().surface;
 
-        if (!dev || !phys || !surf || w == 0 || h == 0) {
-            minimized_ = true;
-            return;
-        }
-
-        vkDeviceWaitIdle(dev);
-
-        if (isRecreate) {
-            cleanupImageViews();
-            if (swapchain_.valid()) {
-                ext().vkDestroySwapchainKHR(dev, swapchain_.get(), nullptr);
-                swapchain_.reset();
-            }
-        }
-
-        minimized_ = false;
-
-        VkSurfaceCapabilitiesKHR caps{};
-        ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps);
-
-        VkExtent2D extent{};
-        if (caps.currentExtent.width == UINT32_MAX) {
-            extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
-            extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
-        } else {
-            extent = caps.currentExtent;
-        }
-
-        if (extent.width == 0 || extent.height == 0) {
-            minimized_ = true;
-            return;
-        }
-
-        uint32_t fmtCount = 0;
-        ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, nullptr);
-
-        std::vector<VkSurfaceFormatKHR> formats(fmtCount);
-        ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, formats.data());
-
-        VkSurfaceFormatKHR chosenFormat{};
-        if (!formats.empty()) {
-            chosenFormat = formats.front();
-
-            constexpr std::array prefs = {
-                VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-                VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-                VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            };
-
-            for (const auto& pref : prefs) {
-                auto it = std::find_if(formats.begin(), formats.end(),
-                                       [&](const auto& f) { return f.format == pref.format && f.colorSpace == pref.colorSpace; });
-                if (it != formats.end()) {
-                    chosenFormat = *it;
-                    break;
-                }
-            }
-        }
-
-        VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
-
-        uint32_t imgCount = caps.minImageCount + 1;
-        if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
-
-        directWriteEnabled = false;
-        VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-
-        if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
-            VkImageFormatProperties props{};
-            if (vkGetPhysicalDeviceImageFormatProperties(phys, chosenFormat.format, VK_IMAGE_TYPE_2D,
-                                                         VK_IMAGE_TILING_OPTIMAL,
-                                                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                                                         0, &props) == VK_SUCCESS) {
-                directWriteEnabled = true;
-                usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-            }
-        }
-
-        VkSwapchainCreateInfoKHR ci{};
-        ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        ci.surface = surf;
-        ci.minImageCount = imgCount;
-        ci.imageFormat = chosenFormat.format;
-        ci.imageColorSpace = chosenFormat.colorSpace;
-        ci.imageExtent = extent;
-        ci.imageArrayLayers = 1;
-        ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        ci.preTransform = caps.currentTransform;
-        ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        ci.presentMode = chosenPM;
-        ci.clipped = VK_TRUE;
-        ci.oldSwapchain = swapchain_.get();
-        ci.imageUsage = usage;
-
-        VkSwapchainKHR newSwap = VK_NULL_HANDLE;
-        VkResult res = ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
-
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {}", string_VkResult(res));
-            minimized_ = true;
-            return;
-        }
-
-        swapchain_ = Handle(newSwap);
-        swapchainExtent_ = extent;
-        swapchainFormat_ = chosenFormat.format;
-
-        uint32_t count = 0;
-        ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, nullptr);
-        swapchainImages_.resize(count);
-        ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, swapchainImages_.data());
-
-        swapchainImageViews_.resize(count);
-
-        VkImageViewCreateInfo viewCI{};
-        viewCI.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewCI.format = chosenFormat.format;
-        viewCI.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                             VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-        viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        for (uint32_t i = 0; i < count; ++i) {
-            viewCI.image = swapchainImages_[i];
-            vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageViews_[i]);
-        }
-
-        rtx().images = swapchainImages_;
-        rtx().views = swapchainImageViews_;
-        rtx().extent = extent;
-        rtx().image_count = count;
+    if (!dev || !phys || !surf || w == 0 || h == 0) {
+        minimized_ = true;
+        LOG_WARNING_CAT("SWAPCHAIN", "Cannot create swapchain — invalid params or minimized");
+        return;
     }
+
+    vkDeviceWaitIdle(dev);
+
+    if (isRecreate) {
+        cleanupImageViews();
+        if (swapchain_.valid()) {
+            ext().vkDestroySwapchainKHR(dev, swapchain_.get(), nullptr);
+            swapchain_.reset();
+        }
+    }
+
+    minimized_ = false;
+
+    VkSurfaceCapabilitiesKHR caps{};
+    ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps);
+
+    VkExtent2D extent{};
+    if (caps.currentExtent.width == UINT32_MAX) {
+        extent.width  = std::clamp(w, caps.minImageExtent.width,  caps.maxImageExtent.width);
+        extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
+    } else {
+        extent = caps.currentExtent;
+    }
+
+    if (extent.width == 0 || extent.height == 0) {
+        minimized_ = true;
+        LOG_WARNING_CAT("SWAPCHAIN", "Swapchain extent zero — window minimized");
+        return;
+    }
+
+    // ── Surface formats ─────────────────────────────────────────────────────────
+    uint32_t fmtCount = 0;
+    ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, nullptr);
+
+    std::vector<VkSurfaceFormatKHR> formats(fmtCount);
+    ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, formats.data());
+
+    VkSurfaceFormatKHR chosenFormat = formats.empty() ? VkSurfaceFormatKHR{} : formats.front();
+
+    constexpr std::array preferredFormats = {
+        VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+        VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+        VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+    };
+
+    for (const auto& pref : preferredFormats) {
+        auto it = std::find_if(formats.begin(), formats.end(),
+                               [&](const auto& f) { return f.format == pref.format && f.colorSpace == pref.colorSpace; });
+        if (it != formats.end()) {
+            chosenFormat = *it;
+            break;
+        }
+    }
+
+    LOG_INFO_CAT("SWAPCHAIN", "Chosen format: {} ({})",
+                 string_VkFormat(chosenFormat.format),
+                 string_VkColorSpaceKHR(chosenFormat.colorSpace));
+
+    // ── Present modes — spit immediately, we control freshness ourselves ────────
+    uint32_t pmCount = 0;
+    ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, nullptr);
+    std::vector<VkPresentModeKHR> supportedModes(pmCount);
+    ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, supportedModes.data());
+
+    // Debug: show exactly what the surface offers
+    std::string supportedStr = "Supported present modes: ";
+    for (auto m : supportedModes) {
+        switch (m) {
+            case VK_PRESENT_MODE_IMMEDIATE_KHR:         supportedStr += "IMMEDIATE "; break;
+            case VK_PRESENT_MODE_MAILBOX_KHR:           supportedStr += "MAILBOX "; break;
+            case VK_PRESENT_MODE_FIFO_KHR:              supportedStr += "FIFO "; break;
+            case VK_PRESENT_MODE_FIFO_RELAXED_KHR:      supportedStr += "FIFO_RELAXED "; break;
+            case VK_PRESENT_MODE_FIFO_LATEST_READY_EXT: supportedStr += "FIFO_LATEST_READY "; break;
+            default:                                    supportedStr += std::to_string(m) + " "; break;
+        }
+    }
+    LOG_INFO_CAT("SWAPCHAIN", "{}", supportedStr);
+
+    // Our eternal preference: IMMEDIATE = spit when ready
+    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR; // absolute safe fallback
+
+    // Priority 1: IMMEDIATE — we never fail timing, we fire when the frame is done
+    if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != supportedModes.end()) {
+        chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        LOG_SUCCESS_CAT("SWAPCHAIN", "IMMEDIATE selected — spit instantly when ready (golden monkey path)");
+    }
+    // Priority 2: FIFO_LATEST_READY — freshest tear-free if we can't get immediate
+    else if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_FIFO_LATEST_READY_EXT) != supportedModes.end()) {
+        chosenPM = VK_PRESENT_MODE_FIFO_LATEST_READY_EXT;
+        LOG_WARNING_CAT("SWAPCHAIN", "IMMEDIATE unavailable — using FIFO_LATEST_READY (still very fresh)");
+    }
+    // Priority 3: everything else is weak sauce
+    else {
+        LOG_WARNING_CAT("SWAPCHAIN", "No IMMEDIATE or LATEST_READY — falling back to FIFO (sad trombone)");
+    }
+
+    std::string modeDesc;
+    switch (chosenPM) {
+        case VK_PRESENT_MODE_IMMEDIATE_KHR:
+            modeDesc = "IMMEDIATE_KHR — spit instantly when ready";
+            break;
+        case VK_PRESENT_MODE_FIFO_LATEST_READY_EXT:
+            modeDesc = "FIFO_LATEST_READY_EXT — freshest tear-free fallback";
+            break;
+        case VK_PRESENT_MODE_FIFO_KHR:
+            modeDesc = "FIFO_KHR — tear-free but queues (weak sauce)";
+            break;
+        default:
+            modeDesc = "Unknown — danger zone";
+            break;
+    }
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Selected best available: {} — supported: {}", modeDesc, supportedStr);
+
+    // ── Image count ─────────────────────────────────────────────────────────────
+    uint32_t imgCount = caps.minImageCount;
+    // For IMMEDIATE we prefer minimal buffering (2 is usually fine)
+    if (chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+        imgCount = caps.minImageCount; // double buffering is perfect for immediate
+    } else {
+        // For others, +1 or +2 helps pipelining
+        imgCount = std::min(caps.minImageCount + 2, caps.maxImageCount ? caps.maxImageCount : UINT32_MAX);
+    }
+    if (caps.maxImageCount > 0) imgCount = std::min(imgCount, caps.maxImageCount);
+
+    // ── Usage flags ─────────────────────────────────────────────────────────────
+    directWriteEnabled = false;
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
+        VkImageFormatProperties props{};
+        if (vkGetPhysicalDeviceImageFormatProperties(phys, chosenFormat.format, VK_IMAGE_TYPE_2D,
+                                                     VK_IMAGE_TILING_OPTIMAL,
+                                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+                                                     0, &props) == VK_SUCCESS) {
+            directWriteEnabled = true;
+            usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+            LOG_INFO_CAT("SWAPCHAIN", "Direct storage write to swapchain images ENABLED");
+        }
+    }
+
+    // ── Create swapchain ────────────────────────────────────────────────────────
+    VkSwapchainCreateInfoKHR ci{};
+    ci.sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    ci.surface         = surf;
+    ci.minImageCount   = imgCount;
+    ci.imageFormat     = chosenFormat.format;
+    ci.imageColorSpace = chosenFormat.colorSpace;
+    ci.imageExtent     = extent;
+    ci.imageArrayLayers = 1;
+    ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ci.preTransform    = caps.currentTransform;
+    ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    ci.presentMode     = chosenPM;
+    ci.clipped         = VK_TRUE;
+    ci.oldSwapchain    = swapchain_.get();
+    ci.imageUsage      = usage;
+
+    VkSwapchainKHR newSwap = VK_NULL_HANDLE;
+    VkResult res = ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
+
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {}", string_VkResult(res));
+        minimized_ = true;
+        return;
+    }
+
+    swapchain_ = Handle(newSwap);
+    swapchainExtent_ = extent;
+    swapchainFormat_ = chosenFormat.format;
+
+    // ── Get images & create views ───────────────────────────────────────────────
+    uint32_t count = 0;
+    ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, nullptr);
+    swapchainImages_.resize(count);
+    ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, swapchainImages_.data());
+
+    swapchainImageViews_.resize(count);
+
+    VkImageViewCreateInfo viewCI{};
+    viewCI.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewCI.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+    viewCI.format           = chosenFormat.format;
+    viewCI.components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                               VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    for (uint32_t i = 0; i < count; ++i) {
+        viewCI.image = swapchainImages_[i];
+        vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageViews_[i]);
+    }
+
+    rtx().images      = swapchainImages_;
+    rtx().views       = swapchainImageViews_;
+    rtx().extent      = extent;
+    rtx().image_count = count;
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — {} images, {}x{}, format {}, mode {}",
+                    isRecreate ? "recreated" : "created",
+                    count, extent.width, extent.height,
+                    string_VkFormat(chosenFormat.format), modeDesc);
+}
 
 [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept {
     if (minimized_ || !swapchain_.valid()) {
@@ -1765,7 +1869,7 @@ struct Swapchain {
         if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
             minimized_ = true;
             LOG_WARNING_CAT("SWAPCHAIN", "Acquire failed (out-of-date/suboptimal/lost) — minimized set");
-		}
+        }
     }
 
     return res;

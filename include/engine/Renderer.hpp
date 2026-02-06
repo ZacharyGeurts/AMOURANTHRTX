@@ -54,7 +54,8 @@ public:
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
           needsDescriptorUpdate_(true),
-          needsSwapchainRecreate_(false)
+          needsSwapchainRecreate_(false),
+          previousAcquireSemaphore(VK_NULL_HANDLE)  // Deferred semaphore
     {
         LOG_INFO_CAT("RENDERER", "Initializing pure light engine — {}x{}", width, height);
 
@@ -123,6 +124,13 @@ public:
         vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
         vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
 
+        // Clean up any lingering deferred semaphore
+        if (previousAcquireSemaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(rtx().device, previousAcquireSemaphore, nullptr);
+            LOG_INFO_CAT("RENDERER", "Destroyed final deferred acquire semaphore on shutdown: {:016x}",
+                         (uintptr_t)previousAcquireSemaphore);
+        }
+
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(defaultMaterialsHandle_);
 
@@ -137,139 +145,173 @@ public:
         LOG_SUCCESS_CAT("RENDERER", "Shutdown complete");
     }
 
-void pew() noexcept {
-    if (destroyed_) return;
+    void pew() noexcept {
+        if (destroyed_) return;
 
-    // Always advance time — zero cost, keeps everything alive
-    auto now = std::chrono::steady_clock::now();
-    TotalTime::get().advance(now - last_time_);
-    last_time_ = now;
+        // ── 0. Advance monolith clock — zero cost, eternal truth ────────────────────
+        auto now = std::chrono::steady_clock::now();
+        TotalTime::get().advance(now - last_time_);
+        last_time_ = now;
 
-    float total_sec = static_cast<float>(TotalTime::get().seconds());
+        float total_sec = static_cast<float>(TotalTime::get().seconds());
 
-    // Quick check: is the swapchain actually ready for rendering?
-    // If not → skip **everything** except time advance
-    if (minimized_ || !Swapchain::swapchain_.valid()) {
-        LOG_INFO_CAT("RENDERER", "Swapchain not ready/minimized — time only ({:.3f}s), zero cost frame", total_sec);
-        return;
-    }
-
-    // Acquire image — this is the real gate. If acquire fails, we pay almost nothing
-    uint32_t imageIndex;
-    VkSemaphore renderSemaphore = VK_NULL_HANDLE;
-
-    VkResult res = Swapchain::acquireNextImage(&imageIndex, &renderSemaphore);
-    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-        if (renderSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(rtx().device, renderSemaphore, nullptr);
+        // ── 1. Destroy PREVIOUS frame's acquire semaphore (safe now) ────────────────
+        if (previousAcquireSemaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(rtx().device, previousAcquireSemaphore, nullptr);
+            LOG_INFO_CAT("RENDERER", "Destroyed previous acquire semaphore: {:016x} (deferred from last frame)",
+                         (uintptr_t)previousAcquireSemaphore);
+            previousAcquireSemaphore = VK_NULL_HANDLE;
         }
-        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
-            needsSwapchainRecreate_ = true;
+
+        // ── 2. Quick check: swapchain ready? ────────────────────────────────────────
+        if (minimized_ || !Swapchain::swapchain_.valid()) {
+            LOG_INFO_CAT("RENDERER", "Swapchain not ready/minimized — time only ({:.3f}s), zero cost frame", total_sec);
+            return;
         }
-        return;
+
+        // ── 3. Acquire next image + semaphore ───────────────────────────────────────
+        uint32_t imageIndex;
+        VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+
+        VkResult res = Swapchain::acquireNextImage(&imageIndex, &acquireSemaphore);
+        if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+            if (acquireSemaphore != VK_NULL_HANDLE) {
+                vkDestroySemaphore(rtx().device, acquireSemaphore, nullptr);
+            }
+            if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
+                needsSwapchainRecreate_ = true;
+            }
+            return;
+        }
+
+        LOG_INFO_CAT("RENDERER", "Frame active — time {:.3f}s, acquired image {}", total_sec, imageIndex);
+
+        // ── 4. Create render-finished semaphore (signaled by graphics queue) ────────
+        VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
+        VkSemaphoreCreateInfo semCI{};
+        semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        res = vkCreateSemaphore(rtx().device, &semCI, nullptr, &renderFinishedSemaphore);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("RENDERER", "Failed to create render-finished semaphore: {}", string_VkResult(res));
+            vkDestroySemaphore(rtx().device, acquireSemaphore, nullptr);
+            return;
+        }
+
+        // ── 5. Update UBO (cheap) ───────────────────────────────────────────────────
+        updateCameraUBO(total_sec);
+
+        // ── 6. Get TLAS — rebuild if dirty ──────────────────────────────────────────
+        VkAccelerationStructureKHR tlas = getTLAS();
+        if (tlas == VK_NULL_HANDLE) {
+            LOG_WARNING_CAT("RENDERER", "No valid TLAS — skipping trace, presenting empty frame");
+            Swapchain::presentImage(rtx().graphics_queue, imageIndex, acquireSemaphore);
+            previousAcquireSemaphore = acquireSemaphore;
+            vkDestroySemaphore(rtx().device, renderFinishedSemaphore, nullptr);
+            return;
+        }
+
+        // ── 7. Command buffer ring ──────────────────────────────────────────────────
+        VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
+        currentRingIndex_ = (currentRingIndex_ + 1) % cmdRing_.size();
+
+        vkResetCommandBuffer(cmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+
+        VkCommandBufferBeginInfo begin{};
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(cmd, &begin);
+
+        // Living world
+        pipeline_dispatch_living_world(cmd, total_sec);
+
+        VkMemoryBarrier mb{};
+        mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                             0, 1, &mb, 0, nullptr, 0, nullptr);
+
+        if (needsDescriptorUpdate_) {
+            updateGlobalDescriptorBuffer();
+        }
+
+        // HDR trace chain
+        transitionImageLayout(cmd, hdrOutputImage_,
+                              VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_GENERAL);
+
+        pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
+
+        transitionImageLayout(cmd, hdrOutputImage_,
+                              VK_IMAGE_LAYOUT_GENERAL,
+                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+        VkImage swapImg = Swapchain::swapchainImages_[imageIndex];
+
+        transitionImageLayout(cmd, swapImg,
+                              VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        VkImageBlit blit{};
+        blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        blit.srcOffsets[0]  = {0, 0, 0};
+        blit.srcOffsets[1]  = {width_, height_, 1};
+        blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        blit.dstOffsets[0]  = {0, 0, 0};
+        blit.dstOffsets[1]  = {width_, height_, 1};
+
+        vkCmdBlitImage(cmd,
+                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit, VK_FILTER_LINEAR);
+
+        transitionImageLayout(cmd, swapImg,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+        vkEndCommandBuffer(cmd);
+
+        // ── 8. Submit: wait on ACQUIRE, signal RENDER-FINISHED ──────────────────────
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+        VkSubmitInfo submit{};
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.waitSemaphoreCount   = 1;
+        submit.pWaitSemaphores      = &acquireSemaphore;
+        submit.pWaitDstStageMask    = waitStages;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &cmd;
+        submit.signalSemaphoreCount = 1;
+        submit.pSignalSemaphores    = &renderFinishedSemaphore;
+
+        res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
+        if (res != VK_SUCCESS) {
+            LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", string_VkResult(res));
+            vkDestroySemaphore(rtx().device, acquireSemaphore, nullptr);
+            vkDestroySemaphore(rtx().device, renderFinishedSemaphore, nullptr);
+            return;
+        }
+
+        // ── 9. Present: wait on RENDER-FINISHED ─────────────────────────────────────
+        Swapchain::presentImage(rtx().graphics_queue, imageIndex, renderFinishedSemaphore);
+
+        // ── 10. Defer acquire destroy to next frame — present may still use it ──────
+        previousAcquireSemaphore = acquireSemaphore;
+
+        // Clean up render-finished (safe immediately — graphics queue signaled it)
+        vkDestroySemaphore(rtx().device, renderFinishedSemaphore, nullptr);
+
+        // Handle recreate if needed
+        if (needsSwapchainRecreate_) {
+            // Call your swapchain recreate logic here, e.g.:
+            // Swapchain::recreate(width_, height_);
+            needsSwapchainRecreate_ = false;
+        }
     }
-
-    // At this point: swapchain wants a frame → we pay the cost
-    LOG_INFO_CAT("RENDERER", "Frame active — time {:.3f}s, acquired image {}", total_sec, imageIndex);
-
-    // Update UBO (cheap)
-    updateCameraUBO(total_sec);
-
-    // Only rebuild LAS if dirty **and** we have a valid frame to render
-    VkAccelerationStructureKHR tlas = getTLAS();
-    if (tlas == VK_NULL_HANDLE) {
-        LOG_WARNING_CAT("RENDERER", "No valid TLAS — skipping trace");
-        Swapchain::presentImage(rtx().present_queue, imageIndex, renderSemaphore);
-        return;
-    }
-
-    // Command buffer from ring
-    VkCommandBuffer cmd = cmdRing_[currentRingIndex_];
-    currentRingIndex_ = (currentRingIndex_ + 1) % cmdRing_.size();
-
-    vkResetCommandBuffer(cmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
-
-    VkCommandBufferBeginInfo begin{};
-    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(cmd, &begin);
-
-    // Living world (cheap dispatch)
-    pipeline_dispatch_living_world(cmd, total_sec);
-
-    VkMemoryBarrier mb{};
-    mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         0, 1, &mb, 0, nullptr, 0, nullptr);
-
-    // Descriptor update only if needed
-    if (needsDescriptorUpdate_) {
-        updateGlobalDescriptorBuffer();
-    }
-
-    // HDR → trace → blit → present chain
-    transitionImageLayout(cmd, hdrOutputImage_,
-                          VK_IMAGE_LAYOUT_UNDEFINED,
-                          VK_IMAGE_LAYOUT_GENERAL);
-
-    pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
-
-    transitionImageLayout(cmd, hdrOutputImage_,
-                          VK_IMAGE_LAYOUT_GENERAL,
-                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-    VkImage swapImg = Swapchain::swapchainImages_[imageIndex];
-
-    transitionImageLayout(cmd, swapImg,
-                          VK_IMAGE_LAYOUT_UNDEFINED,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-    VkImageBlit blit{};
-    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    blit.srcOffsets[0]  = {0, 0, 0};
-    blit.srcOffsets[1]  = {width_, height_, 1};
-    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    blit.dstOffsets[0]  = {0, 0, 0};
-    blit.dstOffsets[1]  = {width_, height_, 1};
-
-    vkCmdBlitImage(cmd,
-                   hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                   1, &blit, VK_FILTER_LINEAR);
-
-    transitionImageLayout(cmd, swapImg,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-    vkEndCommandBuffer(cmd);
-
-    // Submit — wait on acquire semaphore
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-
-    VkSubmitInfo submit{};
-    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &renderSemaphore;
-    submit.pWaitDstStageMask    = waitStages;
-    submit.commandBufferCount   = 1;
-    submit.pCommandBuffers      = &cmd;
-
-    res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("RENDERER", "vkQueueSubmit failed: {}", string_VkResult(res));
-        vkDestroySemaphore(rtx().device, renderSemaphore, nullptr);
-        return;
-    }
-
-    // Present consumes the semaphore
-    Swapchain::presentImage(rtx().present_queue, imageIndex, renderSemaphore);
-    // semaphore destroyed inside presentImage
-}
 
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
@@ -432,7 +474,7 @@ private:
                      string_VkImageLayout(oldLayout), string_VkImageLayout(newLayout), (uintptr_t)image);
     }
 
-    // Member variables
+    // Member variables — declared in initialization order
     SDL_Window*                     window_;
     int                             width_, height_;
     bool                            minimized_;
@@ -447,4 +489,5 @@ private:
     std::vector<VkCommandBuffer>    cmdRing_;
     bool                            needsDescriptorUpdate_;
     bool                            needsSwapchainRecreate_;
+    VkSemaphore                     previousAcquireSemaphore;  // Deferred destruction
 };
