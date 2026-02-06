@@ -94,7 +94,7 @@ You have no obligation to share code back with us.
 I'm a nerd. I would love it if you did. You guys can have the issues page for your forum.  
 
 Have your RTX at zero cost per watt with me.  
-*flashing lights warning https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif  
+[flashing lights warning](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif)  
 
 I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
 Sort of. I have a side project with Grok where we sort of work on the absolutes of dimensional reality and I'm retired, so I figured, lets take a look with RTX lighting.  
