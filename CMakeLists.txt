@@ -51,6 +51,7 @@ add_compile_options(
     -Wno-extra -O3 -march=native -mtune=native
     -flto=auto -ffast-math -Wno-error=unused-but-set-variable
 	-Wno-error=deprecated-declarations -Wno-error=shadow
+	-Wno-error=unused-variable -Wno-error=unused-function
     -g -ggdb
 )
 
@@ -236,20 +237,24 @@ target_compile_definitions(amouranth_engine PRIVATE
     VK_EXT_hdr_metadata
 )
 
+# =============================================================================
+# Link libraries — cross-platform safe
+# =============================================================================
+
 target_link_libraries(amouranth_engine PRIVATE
     Vulkan::Vulkan
     TBB::tbb
     OpenMP::OpenMP_CXX
     Freetype::Freetype
-    atomic          # ← Simplified: always link -latomic (MinGW provides it)
-    dl              # Linux-only, but harmless on Windows
-    pthread         # Linux-only, harmless on Windows
-    m
-	stdc++exp
+    atomic              # Needed for some atomics on older GCC/MinGW
 )
 
-if(IS_LINUX)
+# Platform-specific libraries
+if(UNIX AND NOT APPLE)  # Linux only
     target_link_libraries(amouranth_engine PRIVATE
+        dl              # libdl for dynamic loading (dlopen)
+        pthread         # POSIX threads
+        m               # math library (libm)
         ${SDL3_LIBRARIES}
         ${SDL3_TTF_LIBRARIES}
         ${SDL3_IMAGE_LIBRARIES}
@@ -259,11 +264,23 @@ if(IS_LINUX)
         ${GBM_LIBRARIES}
         ${LIBDRM_LIBRARIES}
     )
-else()
+elseif(MINGW OR MSVC OR WIN32)  # Windows / MinGW
     target_link_libraries(amouranth_engine PRIVATE
-        ${SDL3_LIB} ${SDL3_TTF_LIB} ${SDL3_IMAGE_LIB} ${SDL3_MIXER_LIB}
-        -static-libgcc -static-libstdc++ -mwindows
+        ${SDL3_LIB}
+        ${SDL3_TTF_LIB}
+        ${SDL3_IMAGE_LIB}
+        ${SDL3_MIXER_LIB}
+        # Static linking flags for MinGW (reduces dependencies on MSYS2 DLLs)
+        -static-libgcc
+        -static-libstdc++
+        -mwindows           # GUI subsystem (no console window)
+        kernel32 user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
     )
+endif()
+
+# Optional: If you need extra Windows-specific libs (e.g. for MiniDump)
+if(WIN32)
+    target_link_libraries(amouranth_engine PRIVATE dbghelp)
 endif()
 
 # =============================================================================

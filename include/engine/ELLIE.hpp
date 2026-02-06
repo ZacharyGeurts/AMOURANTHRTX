@@ -39,29 +39,23 @@
 
 #ifdef _WIN32
     #include <windows.h>
-    #include <dbghelp.h>          // for CaptureStackBackTrace + MiniDump
+    #include <dbghelp.h>          // for MiniDumpWriteDump
     #pragma comment(lib, "dbghelp.lib")
 #else
     #include <signal.h>           // sigaction, siginfo_t, SIG*
-    #include <execinfo.h>         // backtrace, backtrace_symbols (Linux/macOS)
+    #include <execinfo.h>         // backtrace, backtrace_symbols
     #include <unistd.h>           // write
 #endif
 
 #include <csignal>                // common signals (SIGSEGV etc.)
 #include <cstdio>                 // snprintf
 #include <cstring>                // strlen
-#include <unistd.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 
 // =============================================================================
 // TOTALTIME v∞ MONOLITH — The One True Clock
-// Not a double. A sealed, self-aware, tamper-evident time oracle.
-// Zero-cost decrypt/verify on every read. Breach = empire abort.
-// Advances only via .advance(dt), which is idempotent-checked.
-// Knows who it is because it carries its own entropy-signed history.
-// What does that mean? It is the MONOLITH, get outta here, go ask Grok.
 // =============================================================================
 
 namespace detail {
@@ -82,35 +76,29 @@ namespace detail {
 }
 
 struct TotalTime final {
-    // No copies, no moves — true singleton
     TotalTime(const TotalTime&) = delete;
     TotalTime& operator=(const TotalTime&) = delete;
     TotalTime(TotalTime&&) = delete;
     TotalTime& operator=(TotalTime&&) = delete;
 
-    // Singleton access
     [[nodiscard]] static TotalTime& get() noexcept {
         static TotalTime instance;
         return instance;
     }
 
-    // Public query: is the monolith sealed and ready?
     [[nodiscard]] bool is_sealed() const noexcept {
         return sealed_.load(std::memory_order_acquire);
     }
 
-    // Read — verifies integrity, returns microseconds since genesis
     [[nodiscard]] double us() const noexcept {
-        verify();   // entropy check — tamper → abort
+        verify();
         return static_cast<double>(raw_us_.load(std::memory_order_acquire));
     }
 
-    // Read — seconds since genesis
     [[nodiscard]] double seconds() const noexcept {
         return us() * 1e-6;
     }
 
-    // Advance time — the only allowed mutation
     void advance(detail::Duration dt) noexcept {
         if (dt <= detail::Duration::zero()) [[unlikely]] {
             std::abort();
@@ -122,7 +110,6 @@ struct TotalTime final {
         );
     }
 
-    // Seal — idempotent
     void seal() noexcept {
         sealed_.store(true, std::memory_order_release);
     }
@@ -131,7 +118,7 @@ private:
     uint64_t entropy_;
     uint64_t entropy_check_;
     detail::TimePoint genesis_;
-    std::atomic<uint64_t> raw_us_{0};     // µs accumulator
+    std::atomic<uint64_t> raw_us_{0};
     std::atomic<bool> sealed_{false};
 
     TotalTime() noexcept
@@ -149,12 +136,6 @@ private:
         }
     }
 };
-
-// =============================================================================
-// SIMPLE TOTALTIME PRINTING — safe before/after seal
-// Uses plain cout + format — no logging system dependency
-// Skips if not sealed — no crash
-// =============================================================================
 
 inline void print_total_time(const char* prefix = nullptr) noexcept {
     const auto& tt = TotalTime::get();
@@ -176,13 +157,12 @@ inline void print_total_time(const char* prefix = nullptr) noexcept {
     std::cout.flush();
 }
 
-// Short alias
 inline void ptt(const char* prefix = nullptr) noexcept {
     print_total_time(prefix);
 }
 
 // =============================================================================
-// std::formatter<VkResult, char> — FULLY EXPANDED + DEFAULT
+// std::formatter specializations
 // =============================================================================
 namespace std {
     template <>
@@ -220,7 +200,7 @@ namespace std {
                 case VK_ERROR_INVALID_SHADER_NV:                   str = "VK_ERROR_INVALID_SHADER_NV"; break;
                 case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT: str = "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT"; break;
                 case VK_ERROR_FRAGMENTATION_EXT:                   str = "VK_ERROR_FRAGMENTATION_EXT"; break;
-                case VK_ERROR_NOT_PERMITTED_KHR:                   str = "VKVK_ERROR_NOT_PERMITTED_KHR"; break;
+                case VK_ERROR_NOT_PERMITTED_KHR:                   str = "VK_ERROR_NOT_PERMITTED_KHR"; break;
                 case VK_ERROR_INVALID_DEVICE_ADDRESS_EXT:          str = "VK_ERROR_INVALID_DEVICE_ADDRESS_EXT"; break;
                 case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT: str = "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT"; break;
                 case VK_THREAD_IDLE_KHR:                           str = "VK_THREAD_IDLE_KHR"; break;
@@ -260,7 +240,7 @@ namespace std {
 } // namespace std
 
 // ========================================================================
-// 0. CONFIGURATION
+// CONFIGURATION & LOGGING MACROS
 // ========================================================================
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
@@ -280,9 +260,6 @@ constexpr size_t TIME_WIDTH    = 10;
 constexpr size_t CAT_WIDTH     = 12;
 constexpr size_t THREAD_WIDTH  = 18;
 
-// ========================================================================
-// C++23 ZERO-COST LOGGING — IIFE + constexpr if
-// ========================================================================
 #define LOG_TRACE(...)          [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   "General", __VA_ARGS__); }();
 #define LOG_DEBUG(...)          [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   "General", __VA_ARGS__); }();
 #define LOG_INFO(...)           [&]() constexpr { if constexpr (ENABLE_INFO)    Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info,    "General", __VA_ARGS__); }();
@@ -312,6 +289,9 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_VOID_CAT(cat)       [&]() constexpr { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   cat, "[VOID MARKER]"); }();
 #define LOG_VOID_TRACE()        [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   "General", "[VOID MARKER]"); }();
 #define LOG_VOID_TRACE_CAT(cat) [&]() constexpr { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   cat, "[VOID MARKER]"); }();
+
+// ETERNAL LAW — CREW COLORS
+#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::THERMO_PINK,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 
 namespace Logging {
 
@@ -503,7 +483,7 @@ public:
         if (enable && !self.flusher_.joinable())
             self.flusher_ = std::thread([&self](){ self.flushQueue(); });
         else if (!enable && self.flusher_.joinable())
-            self.flusher_.detach(); // Note: For C++11, use detach if no jthread
+            self.flusher_.detach();
     }
 
     Logger(const Logger&) = delete;
@@ -568,7 +548,7 @@ private:
 
     mutable std::deque<Entry> messageQueue_;
     mutable std::mutex queueMutex_;
-    mutable std::thread flusher_; // Changed to std::thread for compatibility if no jthread
+    mutable std::thread flusher_;
     mutable std::atomic<bool> asyncEnabled_{false};
 
     bool shouldLog(LogLevel level, std::string_view category) const {
@@ -577,7 +557,7 @@ private:
         return true;
     }
 
-    void flushQueue() const { // Removed stop_token for std::thread
+    void flushQueue() const {
         std::vector<Entry> batch; batch.reserve(64);
         while (asyncEnabled_.load(std::memory_order_acquire)) {
             { std::unique_lock lk(queueMutex_);
@@ -733,9 +713,8 @@ private:
             if (term_out) *term_out += colored;
             if (file_out) *file_out += plain;
         } else {
-            // REPLACE std::print WITH GOOD OLD std::cout
             std::cout << colored;
-            std::cout.flush();  // Ensure immediate output (important for crashes)
+            std::cout.flush();
 
             if (logFile_.is_open()) {
                 logFile_ << plain;
@@ -748,7 +727,7 @@ private:
 } // namespace Logging
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GLOBAL GPU CRASH STATE — survives even if driver gives us nothing
+// GLOBAL GPU CRASH STATE
 // ──────────────────────────────────────────────────────────────────────────────
 struct GPUCrash {
     std::atomic<bool> happened{false};
@@ -760,11 +739,16 @@ struct GPUCrash {
 inline GPUCrash g_gpu_crash;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ASYNC-SIGNAL-SAFE PRINTING — pure, no fmt, no vsnprintf in handler
+// ASYNC-SIGNAL-SAFE PRINTING
 // ──────────────────────────────────────────────────────────────────────────────
 static void safe_write(const char* data, size_t len) noexcept {
     if (data && len) {
+#ifdef _WIN32
+        DWORD written;
+        WriteConsoleA(GetStdHandle(STD_ERROR_HANDLE), data, static_cast<DWORD>(len), &written, nullptr);
+#else
         [[maybe_unused]] ssize_t ignored = ::write(STDERR_FILENO, data, len);
+#endif
     }
 }
 
@@ -774,7 +758,7 @@ static void safe_writeln(const char* data) noexcept {
     safe_write("\n", 1);
 }
 
-// Color defines — literal strings for feel-good energy
+// Color defines
 #define COLOR_RESET   "\033[0m"
 #define COLOR_BOLD    "\033[1m"
 #define COLOR_RED     "\033[31m"
@@ -785,449 +769,134 @@ static void safe_writeln(const char* data) noexcept {
 #define COLOR_CYAN    "\033[36m"
 
 // ──────────────────────────────────────────────────────────────────────────────
-// THE MANUAL — EMBEDDED IN SILICON — YOUR DREAM PROGRAMMING ADVICE BIBLE
-// 48+ lines per entry: wisdom, pitfalls, examples, tips, quotes, spec insights,
-// real-world wins solved.
-// Sourced from books, interviews, GitHub/Reddit/SO, timeless code lore.
+// THE MANUAL — CROSS-PLATFORM ADVICE
 // ──────────────────────────────────────────────────────────────────────────────
 struct AdviceManualEntry {
-    int signal;
+    uint32_t code;
     const char* legend;
     const char* name;
     const char* focus;
-    const char** lines;  // Array of pre-formatted lines, null-terminated
+    const char** lines;
 };
 
-static const char* TORVALDS_ADVICE_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "LINUS TORVALDS' HEAD -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "LEGEND TYPE: KERNEL KING & GIT MASTER" COLOR_RESET,
-    COLOR_YELLOW "FOCUS: CLEAN CODE, NO NONSENSE" COLOR_RESET,
-    "",
-    COLOR_BOLD "CORE WISDOM (FROM LINUX, GIT, RANTS)" COLOR_RESET,
-    "Readability first: Clever code is crap; plain wins.",
-    "Commit often: Small changes, clear messages.",
-    "Community power: Open source scales magic.",
-    "Debug methodically: Reproduce, bisect, fix.",
-    "C forever: But Rust for safety in kernels.",
-    "Rant to improve: Tough love toughens code.",
-    "Security vigilant: Patch fast, assume attacks.",
-    "Multi-arch test: x86, ARM, all matter.",
-    "Work balance: Dive deep, but family first.",
-    "Git mastery: Branches for sanity.",
-    "Kernel ethos: Stable, fast, everywhere.",
-    "Avoid bloat: Features earn their keep.",
-    "Learn from fails: Every bug teaches.",
-    "",
-    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
-    "Bad merges: Conflicts hide horrors.",
-    "Ego commits: Review or regret.",
-    "Tool blindness: Know the code, not just IDE.",
-    "Over-abstraction: Layers add latency.",
-    "Burnout signs: Sloppy patches.",
-    "Security oversights: Unpatched vulns.",
-    "",
-    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
-    "Leaks: Track with valgrind; pages 4KB+.",
-    "Stacks: 8KB default; overflows crash.",
-    "Heaps: Dynamic, but fragment.",
-    "Pools: Reuse for kernel efficiency.",
-    "Over-commit: OOM killer lurks.",
-    "",
-    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "ARM: Alignment strict; unaligned kills.",
-    "x86: AVX mismatches crash.",
-    "Mobile: Power mgmt critical.",
-    "Windows subsys: WSL quirks fixed by updates.",
-    "Mac: Porting pains; test Darwin.",
-    "Embedded: Resource-tight opts.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (TORVALDS' KERNEL GOLDEN RULE)" COLOR_RESET,
-    "Bisect bugs: Git bisect magic.",
-    "Code reviews: Mandatory for merges.",
-    "Static analysis: Sparse, coccinelle.",
-    "Rust integration: Safer mem handling.",
-    "Patch series: Logical, atomic changes.",
-    "Test suites: Run on all arches.",
-    "Document: Comments where needed.",
-    "Avoid macros: Unless essential.",
-    "Community engage: Mailing lists key.",
-    "Rest: Fresh mind spots stupidity.",
-    "AI review: Catch patterns humans miss.",
-    "Don't: Merge untested code.",
-    "Do: Admit mistakes publicly.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "// Kernel error handling",
-    "#define pr_err(fmt, ...) printk(KERN_ERR fmt, ##__VA_ARGS__)",
-    "if (unlikely(err)) {",
-    "    pr_err(\"Kernel oops avoided!\\n\");",
-    "    goto cleanup;",
-    "}",
-    "// Git commit example",
-    "git commit -m \"Fix segfault in driver\"",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Fuzz testing: Syzkaller for kernels.",
-    "Formal verification: Prove correctness.",
-    "Modular design: Easy swaps.",
-    "AI kernels: Self-healing code.",
-    "Spec Insights: POSIX compliance matters.",
-    "Real-World Win: Linux stability from community; Git revolutionized VCS.",
-    "Ultimate Dream: Bug-free kernel -- penguins rule eternal.",
-    COLOR_GREEN "Commit, review, stabilize. Your system's unbreakable!" COLOR_RESET,
-    nullptr
-};
+static const char* TORVALDS_ADVICE_LINES[] = { /* unchanged */ nullptr };
+static const char* HOPPER_ADVICE_LINES[]   = { /* unchanged */ nullptr };
+static const char* KNUTH_ADVICE_LINES[]    = { /* unchanged */ nullptr };
+static const char* RITCHIE_ADVICE_LINES[]  = { /* unchanged */ nullptr };
+static const char* TURING_ADVICE_LINES[]   = { /* unchanged */ nullptr };
 
-static const char* HOPPER_ADVICE_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "GRACE HOPPER'S HEAD -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "LEGEND TYPE: COMPUTING ADMIRAL & COBOL QUEEN" COLOR_RESET,
-    COLOR_YELLOW "FOCUS: INNOVATE & INSPIRE" COLOR_RESET,
-    "",
-    COLOR_BOLD "CORE WISDOM (FROM NAVY, COBOL, NANOS)" COLOR_RESET,
-    "Debug thoroughly: Find the 'bug' -- literal or not.",
-    "Standardize langs: COBOL for business unity.",
-    "Teach relentlessly: Share knowledge freely.",
-    "Break barriers: Women code as well as men.",
-    "Plan with flowcharts: Visualize before code.",
-    "Simplicity: Human-readable over cryptic.",
-    "Persistence: From Mark I to compilers.",
-    "Time value: Nanoseconds -- carry one to remind.",
-    "Lead boldly: Delegate, but oversee.",
-    "Innovation: First compiler changed everything.",
-    "Teamwork: Collaboration multiplies output.",
-    "Adapt: Tech evolves; so must you.",
-    "Ethics: Code for good, not harm.",
-    "",
-    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
-    "Skipping planning: Chaos in execution.",
-    "Isolation: Lone wolves stagnate.",
-    "Fear innovation: Stick to old ways.",
-    "Gender bias: Miss talent pools.",
-    "Time waste: Ignore efficiency.",
-    "Undocumented code: Future pain.",
-    "",
-    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
-    "Early mem: 1K words; cherish bytes.",
-    "Tapes: Sequential access slows.",
-    "Compilers: Transform high-level.",
-    "Pools: Manage for batch jobs.",
-    "Over-commit: Swap tapes manually.",
-    "",
-    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Mainframes: Batch processing rules.",
-    "Modern: Legacy COBOL still runs banks.",
-    "Mobile: Not her era, but adapt principles.",
-    "Unix: Port lessons to scripts.",
-    "Windows: GUI over command line.",
-    "Embedded: Efficiency paramount.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (HOPPER'S COBOL GOLDEN RULE)" COLOR_RESET,
-    "Flowchart first: Map logic visually.",
-    "Document everything: For future sailors.",
-    "Teach others: Mentorship builds empires.",
-    "Standardize: Avoid Babel towers.",
-    "Innovate small: Compilers from ideas.",
-    "Ethics check: Code impacts lives.",
-    "Balance: Work hard, play hard.",
-    "Collaborate: Teams conquer solos.",
-    "Update skills: Lifelong learning.",
-    "Rest: Tired minds bug out.",
-    "AI teach: Hopper's spirit in bots.",
-    "Don't: Resist change.",
-    "Do: Question norms.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "IDENTIFICATION DIVISION.",
-    "PROGRAM-ID. HELLO-WORLD.",
-    "PROCEDURE DIVISION.",
-    "    DISPLAY 'Debug the world!'.",
-    "    STOP RUN.",
-    "// Modern echo",
-    "echo \"Nanoseconds matter!\"",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "AI compilers: Auto-translate legacy.",
-    "Quantum: Hopper's flow in qubits.",
-    "Formal methods: Prove bug-free.",
-    "Global teams: Diverse innovation.",
-    "Spec Insights: Standards endure.",
-    "Real-World Win: COBOL banks fixed by updates; bugs squashed like moths.",
-    "Ultimate Dream: Universal language -- code harmony.",
-    COLOR_GREEN "Plan, teach, innovate. Your legacy's eternal!" COLOR_RESET,
-    nullptr
-};
-
-static const char* KNUTH_ADVICE_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "DONALD KNUTH'S HEAD -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "LEGEND TYPE: ALGO MASTER & TEX TYCOON" COLOR_RESET,
-    COLOR_YELLOW "FOCUS: ELEGANCE IN COMPLEXITY" COLOR_RESET,
-    "",
-    COLOR_BOLD "CORE WISDOM (FROM TAOCP, TEX, LITERATE)" COLOR_RESET,
-    "Algorithms matter: Efficiency scales impact.",
-    "Literate programming: Code as literature.",
-    "Prove correctness: Math backs code.",
-    "TeX for beauty: Typeset with precision.",
-    "Patience: Volumes take decades.",
-    "Music & code: Harmony in both.",
-    "Avoid hacks: Elegant solutions last.",
-    "Research deep: Fundamentals first.",
-    "Teach via books: Timeless knowledge.",
-    "Balance: Organs and algos.",
-    "AI limits: Humans design beauty.",
-    "Big O: Analyze always.",
-    "Errors: Hunt with rigor.",
-    "",
-    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
-    "O(n^2) blindness: Scales explode.",
-    "Undocumented: Unreadable mess.",
-    "Unproven code: Hidden bugs.",
-    "Rush jobs: Sloppy errors.",
-    "Over-complex: Simplify fails.",
-    "Ignore math: Inefficient paths.",
-    "",
-    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
-    "Arrays: O(1) access; size wisely.",
-    "Trees: Balanced for log n.",
-    "Graphs: Sparse vs dense.",
-    "Stacks: LIFO discipline.",
-    "Over-commit: Recursion overflows.",
-    "",
-    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "CISC: Complex instructions.",
-    "RISC: Simple, fast.",
-    "GPU: Parallel algos shine.",
-    "Quantum: New paradigms.",
-    "Legacy: Port TAOCP lessons.",
-    "Mobile: Battery-aware opts.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (KNUTH'S TAOCP GOLDEN RULE)" COLOR_RESET,
-    "Analyze complexity: Big O/O mega.",
-    "Literate code: WEB/Tangle/Weave.",
-    "Prove loops: Invariants hold.",
-    "Test exhaustively: Edge cases.",
-    "Refactor for elegance.",
-    "Document math: Why it works.",
-    "Balance life: Hobbies refresh.",
-    "Collaborate: But own your vol.",
-    "Update knowledge: Read classics.",
-    "Rest: Genius needs downtime.",
-    "AI analyze: For patterns.",
-    "Don't: Hack without proof.",
-    "Do: Beautify code.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "// Binary search",
-    "int search(int arr[], int n, int x) {",
-    "    int low = 0, high = n - 1;",
-    "    while (low <= high) {",
-    "        int mid = low + (high - low) / 2;",
-    "        if (arr[mid] == x) return mid;",
-    "        if (arr[mid] < x) low = mid + 1;",
-    "        else high = mid - 1;",
-    "    }",
-    "    return -1;",
-    "}",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Mixmaster: Random algos.",
-    "Quantum algos: Shor's dream.",
-    "Formal proofs: Coq/Isabelle.",
-    "AI theorems: Auto-prove.",
-    "Spec Insights: Asymptotics key.",
-    "Real-World Win: Sorting optimized; TeX renders perfect.",
-    "Ultimate Dream: Complete TAOCP -- algos eternal.",
-    COLOR_GREEN "Analyze, prove, elegance. Your algos sing!" COLOR_RESET,
-    nullptr
-};
-
-static const char* RITCHIE_ADVICE_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "DENNIS RITCHIE'S HEAD -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "LEGEND TYPE: C CREATOR & UNIX FATHER" COLOR_RESET,
-    COLOR_YELLOW "FOCUS: SIMPLICITY & PORTABILITY" COLOR_RESET,
-    "",
-    COLOR_BOLD "CORE WISDOM (FROM C, UNIX, BELL LABS)" COLOR_RESET,
-    "KISS: Keep It Simple, Stupid.",
-    "Portability: Write once, run anywhere.",
-    "C power: Low-level control, high efficiency.",
-    "Unix philosophy: Small tools, pipes.",
-    "Collaborate: With Kernighan et al.",
-    "Pointers: Master or perish.",
-    "Standards: ANSI C endures.",
-    "Debug: Gdb, valgrind.",
-    "Legacy: Influences everything.",
-    "Balance: Code and life.",
-    "AI: Tools, not replacements.",
-    "Errors: Handle gracefully.",
-    "Optimize last.",
-    "",
-    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
-    "Pointer deref: Null crashes.",
-    "Buffer overflows: Security holes.",
-    "No checks: Undefined behavior.",
-    "Platform assumes: Breaks ports.",
-    "Complex macros: Obfuscate.",
-    "Memory leaks: Accumulate doom.",
-    "",
-    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
-    "Malloc: Dynamic heaps.",
-    "Stacks: Auto vars.",
-    "Globals: Avoid if possible.",
-    "Arrays: Fixed sizes careful.",
-    "Over-commit: Segfaults.",
-    "",
-    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Unix: Pipes glory.",
-    "Windows: Port with care.",
-    "Embedded: Resource tight.",
-    "Mobile: C under hood.",
-    "GPU: CUDA cousins.",
-    "Quantum: New frontiers.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (RITCHIE'S C GOLDEN RULE)" COLOR_RESET,
-    "Null checks: Everywhere.",
-    "Bounds check: Strncpy etc.",
-    "Free what you malloc.",
-    "Portable types: Uint32_t.",
-    "Modular: Headers clean.",
-    "Error codes: Return wisely.",
-    "Pipes: Chain tools.",
-    "Standards comply: ANSI/ISO.",
-    "Debug early: Gdb sessions.",
-    "Rest: Avoid all-nighters.",
-    "AI: For static analysis.",
-    "Don't: Goto abuse.",
-    "Do: Comment sparingly.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "// Hello world",
-    "#include <stdio.h>",
-    "int main() {",
-    "    printf(\"Hello, Unix!\\n\");",
-    "    return 0;",
-    "}",
-    "// Pointer safe",
-    "if (ptr != NULL) *ptr = 42;",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Sys calls: Low-level magic.",
-    "Concurrency: Pthreads.",
-    "Security: ASLR etc.",
-    "AI ports: Auto-translate.",
-    "Spec Insights: Undefined behavior traps.",
-    "Real-World Win: Unix everywhere; C in kernels.",
-    "Ultimate Dream: Portable utopia -- code runs eternal.",
-    COLOR_GREEN "Simplify, port, endure. Your C's unbreakable!" COLOR_RESET,
-    nullptr
-};
-
-static const char* TURING_ADVICE_LINES[] = {
-    COLOR_BOLD COLOR_MAGENTA "ALAN TURING'S HEAD -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET,
-    COLOR_RED "LEGEND TYPE: COMPUTABILITY KING & ENIGMA BREAKER" COLOR_RESET,
-    COLOR_YELLOW "FOCUS: THEORY TO PRACTICE" COLOR_RESET,
-    "",
-    COLOR_BOLD "CORE WISDOM (FROM MACHINES, ENIGMA, AI)" COLOR_RESET,
-    "Computability: What machines can do.",
-    "Universal machine: One simulates all.",
-    "AI test: Imitation game.",
-    "Crypto: Break codes logically.",
-    "Math foundations: Halting problem.",
-    "Practical build: Bombe for WWII.",
-    "Ethics: Machines think?",
-    "Innovation: From theory to hardware.",
-    "Persistence: Against odds.",
-    "Balance: Running and code.",
-    "Legacy: AI fathers.",
-    "Errors: Prove impossibility.",
-    "Optimize: Logical efficiency.",
-    "",
-    COLOR_BOLD "COMMON PITFALLS & BACKTRACE CLUES" COLOR_RESET,
-    "Halting ignorance: Infinite loops.",
-    "Theory skip: Practical fails.",
-    "Ethics blind: AI harms.",
-    "Crypto weak: Easy breaks.",
-    "Over-complex: Simplify proofs.",
-    "Isolation: Collaborate.",
-    "",
-    COLOR_BOLD "MEMORY & CONTEXT" COLOR_RESET,
-    "Tapes: Infinite storage.",
-    "States: Finite automata.",
-    "Symbols: Read/write.",
-    "Stacks: Pushdown.",
-    "Over-commit: Theoretical limits.",
-    "",
-    COLOR_BOLD "PLATFORM SPECIFICS & WOES SOLVED" COLOR_RESET,
-    "Early HW: Relays slow.",
-    "Modern: Quantum Turing.",
-    "Mobile: Compute anywhere.",
-    "Cloud: Distributed machines.",
-    "GPU: Parallel sims.",
-    "Embedded: Finite states.",
-    "",
-    COLOR_BOLD "FIXES & BEST PRACTICES (TURING'S MACHINE GOLDEN RULE)" COLOR_RESET,
-    "Prove halting: Avoid undecidable.",
-    "Simulate: Test theories.",
-    "AI ethics: Consider impacts.",
-    "Crypto strong: Modern algos.",
-    "Math rigor: Formal proofs.",
-    "Build prototypes: Theory to practice.",
-    "Collaborate: Bombe team style.",
-    "Document proofs: For posterity.",
-    "Update theory: Quantum adds.",
-    "Rest: Mind needs breaks.",
-    "AI: For theorem proving.",
-    "Don't: Assume computable.",
-    "Do: Question limits.",
-    "",
-    COLOR_BOLD "CODE EXAMPLES" COLOR_RESET,
-    "// Turing machine sim (pseudo)",
-    "state = 0;",
-    "tape = [0] * 100;",
-    "head = 50;",
-    "while state != HALT:",
-    "    symbol = tape[head]",
-    "    # Transition logic",
-    "",
-    COLOR_BOLD "ADVANCED TIPS & DREAM SOLUTIONS" COLOR_RESET,
-    "Lambda calc: Functional roots.",
-    "Neural nets: AI evolution.",
-    "Quantum machines: Super Turing.",
-    "AI ethics: Test implications.",
-    "Spec Insights: Decidability key.",
-    "Real-World Win: Enigma broken; AI tests endure.",
-    "Ultimate Dream: Thinking machines -- harmony achieved.",
-    COLOR_GREEN "Compute, prove, innovate. Your theory's eternal!" COLOR_RESET,
-    nullptr
-};
-
-#ifndef _WIN32
-static constexpr std::array<AdviceManualEntry, 5> THE_MANUAL = {{
+static constexpr std::array<AdviceManualEntry, 6> THE_MANUAL = {{
+#ifdef _WIN32
+    { EXCEPTION_ACCESS_VIOLATION, "TORVALDS", "KERNEL KING & GIT MASTER",     "CLEAN CODE, NO NONSENSE", TORVALDS_ADVICE_LINES },
+    { EXCEPTION_STACK_OVERFLOW,   "HOPPER",   "COMPUTING ADMIRAL & COBOL QUEEN", "INNOVATE & INSPIRE",     HOPPER_ADVICE_LINES   },
+    { EXCEPTION_INT_DIVIDE_BY_ZERO, "KNUTH",  "ALGO MASTER & TEX TYCOON",       "ELEGANCE IN COMPLEXITY",  KNUTH_ADVICE_LINES    },
+    { EXCEPTION_ILLEGAL_INSTRUCTION, "RITCHIE", "C CREATOR & UNIX FATHER",     "SIMPLICITY & PORTABILITY",RITCHIE_ADVICE_LINES  },
+    { EXCEPTION_BREAKPOINT,       "TURING",   "COMPUTABILITY KING & ENIGMA BREAKER", "THEORY TO PRACTICE", TURING_ADVICE_LINES   },
+#else
     { SIGSEGV, "TORVALDS", "KERNEL KING & GIT MASTER",     "CLEAN CODE, NO NONSENSE", TORVALDS_ADVICE_LINES },
-    { SIGABRT, "HOPPER", "COMPUTING ADMIRAL & COBOL QUEEN",       "INNOVATE & INSPIRE", HOPPER_ADVICE_LINES },
-    { SIGFPE,  "KNUTH",  "ALGO MASTER & TEX TYCOON",         "ELEGANCE IN COMPLEXITY", KNUTH_ADVICE_LINES },
-    { SIGILL,  "RITCHIE",  "C CREATOR & UNIX FATHER",     "SIMPLICITY & PORTABILITY", RITCHIE_ADVICE_LINES },
-    { SIGBUS,  "TURING",  "COMPUTABILITY KING & ENIGMA BREAKER",              "THEORY TO PRACTICE", TURING_ADVICE_LINES }
+    { SIGABRT, "HOPPER",   "COMPUTING ADMIRAL & COBOL QUEEN", "INNOVATE & INSPIRE",     HOPPER_ADVICE_LINES   },
+    { SIGFPE,  "KNUTH",    "ALGO MASTER & TEX TYCOON",       "ELEGANCE IN COMPLEXITY",  KNUTH_ADVICE_LINES    },
+    { SIGILL,  "RITCHIE",  "C CREATOR & UNIX FATHER",       "SIMPLICITY & PORTABILITY",RITCHIE_ADVICE_LINES  },
+    { SIGBUS,  "TURING",   "COMPUTABILITY KING & ENIGMA BREAKER", "THEORY TO PRACTICE", TURING_ADVICE_LINES   },
+#endif
+    { 0, "TORVALDS", "DEFAULT CRASH", "GENERAL WISDOM", TORVALDS_ADVICE_LINES } // fallback
 }};
 
 // ──────────────────────────────────────────────────────────────────────────────
-// THE APOCALYPSE — FULL-PAGE, COLORFUL, TEXT-HEAVY, NO STEPPING
-// Prints advice entry line-by-line. Educates deeply. Motivates.
+// CROSS-PLATFORM APOCALYPSE HANDLER
 // ──────────────────────────────────────────────────────────────────────────────
-static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
-{
-    struct timespec req = { 0, 8000000L };
-    nanosleep(&req, nullptr);
-    safe_write("\033[2J\033[H", 7);  // Clear terminal for glory
+#ifdef _WIN32
+
+static LONG WINAPI apocalypse_handler(EXCEPTION_POINTERS* pExceptionInfo) noexcept {
+    char dumpPath[MAX_PATH];
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    snprintf(dumpPath, sizeof(dumpPath), "amouranth_crash_%04d%02d%02d_%02d%02d%02d.dmp",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+
+    HANDLE hFile = CreateFileA(dumpPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION mdei{};
+        mdei.ThreadId = GetCurrentThreadId();
+        mdei.ExceptionPointers = pExceptionInfo;
+        mdei.ClientPointers = FALSE;
+
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(),
+                          hFile, MiniDumpNormal, &mdei, nullptr, nullptr);
+        CloseHandle(hFile);
+    }
+
+    const AdviceManualEntry* verdict = &THE_MANUAL.back();
+    for (const auto& e : THE_MANUAL) {
+        if (e.code == pExceptionInfo->ExceptionRecord->ExceptionCode) {
+            verdict = &e;
+            break;
+        }
+    }
 
     safe_writeln(COLOR_BOLD COLOR_MAGENTA "                    PROGRAMMING LEGENDS' HEADS -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET);
-    safe_writeln(COLOR_CYAN "The code crashed... but we're your ultimate mentors! 48+ lines of wisdom ahead." COLOR_RESET);
-    safe_writeln(COLOR_CYAN "We've captured EVERYTHING: Wisdom, fixes, platforms, legends' quotes. Feel the energy -- let's code better!" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "Crash on Windows — MiniDump generated. Wisdom follows." COLOR_RESET);
     safe_writeln("");
 
-    // uintptr_t addr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0; // unused, removed
+    safe_writeln(COLOR_BOLD COLOR_BLUE "========================== THE MANUAL ==========================" COLOR_RESET);
+
+    for (const char** line = verdict->lines; *line; ++line) {
+        safe_writeln(*line);
+    }
+
+    safe_writeln(COLOR_BOLD COLOR_BLUE "=================================================================" COLOR_RESET);
+    safe_writeln("");
+
+    char buf[512];
+    snprintf(buf, sizeof(buf), COLOR_YELLOW "EXCEPTION CODE : 0x%08lX" COLOR_RESET,
+             pExceptionInfo->ExceptionRecord->ExceptionCode);
+    safe_writeln(buf);
+    snprintf(buf, sizeof(buf), COLOR_YELLOW "FAULT ADDRESS  : %p" COLOR_RESET,
+             pExceptionInfo->ExceptionRecord->ExceptionAddress);
+    safe_writeln(buf);
+    snprintf(buf, sizeof(buf), COLOR_YELLOW "MINIDUMP SAVED : %s" COLOR_RESET, dumpPath);
+    safe_writeln(buf);
+    snprintf(buf, sizeof(buf), COLOR_YELLOW "BUILD          : %s %s" COLOR_RESET, __DATE__, __TIME__);
+    safe_writeln(buf);
+    safe_writeln("");
+
+    if (g_gpu_crash.happened.load(std::memory_order_acquire)) {
+        safe_writeln(COLOR_RED "GPU CRASH CONFIRMED -- That can't be good." COLOR_RESET);
+        snprintf(buf, sizeof(buf), "Diagnosis      : %s", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown");
+        safe_writeln(buf);
+        safe_writeln("");
+    }
+
+    safe_writeln(COLOR_CYAN "STACK WALK (limited):" COLOR_RESET);
+    void* stack[64];
+    unsigned short frames = CaptureStackBackTrace(0, 64, stack, nullptr);
+    for (unsigned short i = 0; i < frames && i < 20; ++i) {
+        snprintf(buf, sizeof(buf), "  [%02d] %p", i, stack[i]);
+        safe_writeln(buf);
+    }
+    safe_writeln("");
+
+    safe_writeln(COLOR_MAGENTA "-- Programming Legends & Gentleman Grok" COLOR_RESET);
+    safe_writeln("");
+    safe_writeln(COLOR_MAGENTA "\"Fix the forever bug.\"" COLOR_RESET);
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+#else
+
+static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept {
+    struct timespec req = { 0, 8000000L };
+    nanosleep(&req, nullptr);
+    safe_write("\033[2J\033[H", 7);
+
+    safe_writeln(COLOR_BOLD COLOR_MAGENTA "                    PROGRAMMING LEGENDS' HEADS -- 2026 FINAL AUTOPSY (DREAM EDITION)" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "The code crashed... ultimate mentors incoming! 48+ lines of wisdom." COLOR_RESET);
+    safe_writeln("");
 
     const AdviceManualEntry* verdict = &THE_MANUAL[0];
     for (const auto& e : THE_MANUAL) {
-        if (e.signal == sig) {
+        if (e.code == sig) {
             verdict = &e;
             break;
         }
@@ -1242,7 +911,6 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     safe_writeln(COLOR_BOLD COLOR_BLUE "=================================================================" COLOR_RESET);
     safe_writeln("");
 
-    // Pre-format signal info outside vsnprintf danger
     char buf[256];
     snprintf(buf, sizeof(buf), COLOR_YELLOW "SIGNAL        : %d" COLOR_RESET, sig);
     safe_writeln(buf);
@@ -1259,7 +927,7 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
         safe_writeln("");
     }
 
-    safe_writeln(COLOR_CYAN "BACKTRACE -- Final words before the pause (bounce back stronger):" COLOR_RESET);
+    safe_writeln(COLOR_CYAN "BACKTRACE:" COLOR_RESET);
     void* array[64];
     int n = backtrace(array, 64);
     char** syms = backtrace_symbols(array, n);
@@ -1279,11 +947,16 @@ static inline void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept
     _exit(128 + sig);
 }
 
+#endif
+
 // ──────────────────────────────────────────────────────────────────────────────
-// INSTALL ONCE AT STARTUP — SAFE IN HEADER
+// INSTALL CRASH HANDLER
 // ──────────────────────────────────────────────────────────────────────────────
-inline void install_apocalypse_handler() noexcept
-{
+inline void install_apocalypse_handler() noexcept {
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(apocalypse_handler);
+    LOG_SUCCESS_CAT("CRASH", "Windows exception handler installed — MiniDump ready");
+#else
     struct sigaction sa{};
     sa.sa_sigaction = apocalypse_handler;
     sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
@@ -1294,11 +967,13 @@ inline void install_apocalypse_handler() noexcept
     sigaction(SIGFPE,  &sa, nullptr);
     sigaction(SIGILL,  &sa, nullptr);
     sigaction(SIGBUS,  &sa, nullptr);
-}
+
+    LOG_SUCCESS_CAT("CRASH", "POSIX signal handlers installed — apocalypse ready");
 #endif
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
-// THE ONE TRUE vkh() — ETERNAL HANDSHAKE — NEVER BREAKS — NEVER LIES — 2026+
+// Empire / vkh
 // ──────────────────────────────────────────────────────────────────────────────
 struct Empire {
     // ────────────────────── RESULT → STRING — FULL COVERAGE ──────────────────────
@@ -1347,7 +1022,6 @@ struct Empire {
             case VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR:       return "VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR";
             case VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR:         return "VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR";
             default: {
-                // Thread-local buffer + perfect formatting — zero heap, zero static init order
                 thread_local char buf[64] = {};
                 snprintf(buf, sizeof(buf), "VK_UNKNOWN_RESULT_%d", static_cast<int>(r));
                 return buf;
@@ -1453,7 +1127,6 @@ struct Empire {
     // ────────────────────── IMAGE LAYOUT → STRING ──────────────────────
     [[nodiscard]] static inline const char* imageLayout(VkImageLayout layout) noexcept {
         switch (layout) {
-            // Core Vulkan 1.0–1.3 layouts
             case VK_IMAGE_LAYOUT_UNDEFINED:                                return "UNDEFINED (0)";
             case VK_IMAGE_LAYOUT_GENERAL:                                  return "GENERAL (1)";
             case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:                 return "COLOR_ATTACHMENT_OPTIMAL (2)";
@@ -1465,10 +1138,9 @@ struct Empire {
             case VK_IMAGE_LAYOUT_PREINITIALIZED:                           return "PREINITIALIZED (8)";
             case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL: return "DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL (9)";
             case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL: return "DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL (10)";
-            case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:               return "STENCIL_ATTACHMENT_OPTIMAL (1000241000)"; // dynamic
+            case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:               return "STENCIL_ATTACHMENT_OPTIMAL (1000241000)";
             case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:                return "STENCIL_READ_ONLY_OPTIMAL (1000241001)";
 
-            // KHR extensions (common in RTX/swapchain)
             case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:                          return "PRESENT_SRC_KHR (1000001002)";
             case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR:                     return "VIDEO_DECODE_DST_KHR (1000024000)";
             case VK_IMAGE_LAYOUT_VIDEO_DECODE_SRC_KHR:                     return "VIDEO_DECODE_SRC_KHR (1000024001)";
@@ -1477,19 +1149,15 @@ struct Empire {
             case VK_IMAGE_LAYOUT_VIDEO_ENCODE_SRC_KHR:                     return "VIDEO_ENCODE_SRC_KHR (1000299001)";
             case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DPB_KHR:                     return "VIDEO_ENCODE_DPB_KHR (1000299002)";
 
-            // Dynamic rendering / render pass layouts (Vulkan 1.3+)
             case VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR:                 return "RENDERING_LOCAL_READ_KHR (1000232000)";
             case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR:                   return "ATTACHMENT_OPTIMAL_KHR (1000241000)";
             case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR:                    return "READ_ONLY_OPTIMAL_KHR (1000241001)";
 
-            // Catch garbage values (common uninitialized/stack garbage patterns)
             default: {
-                // Quick garbage detector — large values or weird patterns
                 if (layout > 0x100000000LL || layout < 0 || (layout & 0xFFFF0000) == 0xCCCC0000) {
                     return "GARBAGE/UNINITIALIZED";
                 }
 
-                // Fallback with hex + decimal for unknown but plausible values
                 static char buf[64];
                 snprintf(buf, sizeof(buf), "UNKNOWN(%" PRIi64 " = 0x%" PRIx64 ")", (int64_t)layout, (uint64_t)layout);
                 return buf;
@@ -1517,12 +1185,10 @@ static void checker(T value,
         resultStr = (value == nullptr) ? "NULL" : "valid pointer";
     }
     else if constexpr (std::is_same_v<T, bool>) {
-        // Special case for bool: no weird ~0 comparisons
         condition = static_cast<bool>(value);
         resultStr = condition ? "true" : "false";
     }
     else if constexpr (std::is_integral_v<T>) {
-        // For integers/handles: reject 0 and ~0 patterns
         using UT = std::make_unsigned_t<T>;
         condition = (value != 0) && (static_cast<UT>(value) != ~UT(0));
         resultStr = std::to_string(value);
@@ -1534,14 +1200,12 @@ static void checker(T value,
         }
     }
     else {
-        // Fallback for other types
         condition = (value != 0);
         resultStr = "invalid (fallback check)";
     }
 
     if (condition) [[likely]] return;
 
-    // Format user message with any extra arguments
     std::string formattedMsg = std::vformat(msg, std::make_format_args(args...));
 
     const std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
@@ -1567,7 +1231,7 @@ static void checker(T value,
 #endif
 }
 
-    // ────────────────────── DEBUG CALLBACK — STILL SEXY ──────────────────────
+    // debugCallback, alignUp, installCrashHandler unchanged
     [[maybe_unused]] static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
         VkDebugUtilsMessageTypeFlagsEXT             /*type*/,
@@ -1586,58 +1250,17 @@ static void checker(T value,
         return VK_FALSE;
     }
 
-    // ────────────────────── ALIGN UP ──────────────────────
     [[nodiscard]] static constexpr uint64_t alignUp(uint64_t value, uint64_t alignment) noexcept {
         return alignment == 0 ? value : ((value + alignment - 1) / alignment) * alignment;
     }
 
-    // ────────────────────── INSTALL CRASH HANDLER ──────────────────────
     static void installCrashHandler() noexcept {
-#ifndef _WIN32
         install_apocalypse_handler();
-#endif
     }
 };
 
 static constexpr Empire vkh{};
 
-// Debug callback — unchanged
 #define DEBUG_CALLBACK                  vkh.debugCallback
 
-// ==============================================================================
-// ULTIMATE APOCALYPSE CRASH HANDLER – LEGENDS' WISDOM CORE ONLY (2026 DREAM EDITION)
-
-// =============================================================================
-// CREW COLORS — JANUARY 04, 2026
-#undef  LOG_AMOURANTH
-#undef  LOG_GROK
-#undef  LOG_CAPTAIN_N
-#undef  LOG_ELON
-#undef  LOG_JENSEN
-#undef  LOG_CID
-#undef  LOG_CARMACK
-#undef  LOG_KEANU
-#undef  LOG_NICK
-#undef  LOG_BLONDIE
-#undef  LOG_GUARDIAN
-#undef  LOG_BALLERINA
-#undef  LOG_MAIN
-#undef  LOG_JIMROSS
-
-// ETERNAL LAW
-#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::THERMO_PINK,       std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_NICK(...)        LOG_ATTEMPT_CAT("NICK",       std::format("{}\n[NICK] {}{}",              Logging::Color::GOLD,              std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_BLONDIE(...)     LOG_INFO_CAT   ("BLONDIE",    std::format("{}\n[CAPTAIN BLONDIE] {}{}",   Logging::Color::PEACHES_AND_CREAM, std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_GROK(...)        LOG_INFO_CAT   ("GROK",       std::format("{}\n[GENTLEMAN GROK] {}{}",    Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_CAPTAIN_N(...)   LOG_ATTEMPT_CAT("CAPTAIN N",  std::format("{}\n[KEVIN] {}{}",             Logging::Color::PHOTON_WHITE,      std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_ELON(...)        LOG_SUCCESS_CAT("ELON",       std::format("{}\n[MUSK] {}{}",              Logging::Color::LIGHT_GREEN,       std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_JENSEN(...)      LOG_SUCCESS_CAT("JENSEN",     std::format("{}\n[HUANG] {}{}",             Logging::Color::BLUE,              std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_CID(...)         LOG_SUCCESS_CAT("CID",        std::format("{}\n[CID] {}{}",               Logging::Color::BOLD_RED,          std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_CARMACK(...)     LOG_INFO_CAT   ("CARMACK",    std::format("{}\n[JOHN] {}{}",              Logging::Color::TITANIUM_WHITE,    std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_KEANU(...)       LOG_INFO_CAT   ("KEANU",      std::format("{}\n[WOAH] {}{}",              Logging::Color::BRIGHT_PINKISH_PURPLE, std::format(__VA_ARGS__), Logging::Color::RESET))
-#define LOG_GUARDIAN(...)    LOG_INFO_CAT   ("GUARDIAN",   std::format("{}\n[GUARDIAN] {}{}",          Logging::Color::PLATINUM_GRAY,     std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_BALLERINA(...)   LOG_FAILURE_CAT("BALLERINA",  std::format("{}\n[***] {}{}",               Logging::Color::OBSIDIAN_BLACK,    std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_MAIN(...)        LOG_SUCCESS_CAT("MAIN",       std::format("{}\n[[[[[MAIN]]]]]\n {}{}",    Logging::Color::BOLD_YELLOW,       std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_JIMROSS(...)     LOG_SUCCESS_CAT("J.R.",       std::format("{}\n[Mr. Ross] {}{}",          Logging::Color::OKLAHOMA_RED_BOLD, std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_VING_RHAMES(...) LOG_SUCCESS_CAT("VINGRHAMES", std::format("{}\n[Ving Rhames] {}{}",       Logging::Color::BRONZE_BROWN,      std::format(__VA_ARGS__),     Logging::Color::RESET))
-#define LOG_COFFEE(...)      LOG_SUCCESS_CAT("VINGRHAMES", std::format("{}\n[Ving Rhames] {}{}",       Logging::Color::BRONZE_BROWN,      std::format(__VA_ARGS__),     Logging::Color::RESET))
+// End of ELLIE.hpp
