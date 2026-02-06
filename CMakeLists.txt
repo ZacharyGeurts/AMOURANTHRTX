@@ -47,7 +47,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 add_compile_options(
-    -Wall -Wextra -Wpedantic -Werror    
+    -Wall -Wextra -Werror    
     -Wno-extra -O3 -march=native -mtune=native
     -flto=auto -ffast-math -Wno-error=unused-but-set-variable
 	-Wno-error=deprecated-declarations -Wno-error=shadow

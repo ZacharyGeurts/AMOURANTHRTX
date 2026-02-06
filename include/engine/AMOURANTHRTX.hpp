@@ -119,10 +119,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
 
     VkInstance inst = VK_NULL_HANDLE;
     VkResult res = vkCreateInstance(&ci, nullptr, &inst);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "vkCreateInstance failed: {}", string_VkResult(res));
-        return VK_NULL_HANDLE;
-    }
+    vkh.checker(res, "vkCreateInstance", "vkCreateInstance failed");
 
     LOG_SUCCESS_CAT("VULKAN", "Instance created — {} extensions, validation {}",
                     extensions.size(), Options::Debug::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF");
@@ -505,11 +502,14 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 
     LOG_INFO_CAT("Memory", "Starting VRAM measurement at {} µs since program start", static_cast<uint64_t>(now_us));
 
-    VkPhysicalDevice phys = rtx().physical;
-    if (phys == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("Memory", "No physical device available — measurement aborted");
-        return VRAMReality{};
-    }
+VkPhysicalDevice phys = rtx().physical;
+
+if (phys == VK_NULL_HANDLE) {
+    vkh.checker(false, "Physical device existence",
+                "No physical device available — measurement aborted");
+    // Optional: return early or log fatal
+    return VRAMReality{};
+}
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(phys, &props);
@@ -661,21 +661,18 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     bci.sharingMode = sharingMode;
 
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkResult res = vkCreateBuffer(dev, &bci, nullptr, &buffer);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("MEMORY", "vkCreateBuffer(chunk) failed: {}", string_VkResult(res));
-        return nullptr;
-    }
+    vkh.checker(
+        vkCreateBuffer(dev, &bci, nullptr, &buffer),
+        "vkCreateBuffer (chunk)",
+        "Failed to create chunk buffer"
+    );
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(dev, buffer, &req);
 
     uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (memType == ~0u) {
-        vkDestroyBuffer(dev, buffer, nullptr);
-        LOG_FATAL_CAT("MEMORY", "No device-local memory type for chunk");
-        return nullptr;
-    }
+    vkh.checker(memType != ~0u, "findMemoryType (chunk)",
+                "No device-local memory type for chunk");
 
     VkMemoryAllocateFlagsInfo flags{};
     flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
@@ -688,20 +685,17 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     mai.memoryTypeIndex = memType;
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    res = vkAllocateMemory(dev, &mai, nullptr, &memory);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("MEMORY", "vkAllocateMemory(chunk) failed: {}", string_VkResult(res));
-        vkDestroyBuffer(dev, buffer, nullptr);
-        return nullptr;
-    }
+    vkh.checker(
+        vkAllocateMemory(dev, &mai, nullptr, &memory),
+        "vkAllocateMemory (chunk)",
+        "Failed to allocate chunk memory"
+    );
 
-    res = vkBindBufferMemory(dev, buffer, memory, 0);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("MEMORY", "vkBindBufferMemory(chunk) failed: {}", string_VkResult(res));
-        vkFreeMemory(dev, memory, nullptr);
-        vkDestroyBuffer(dev, buffer, nullptr);
-        return nullptr;
-    }
+    vkh.checker(
+        vkBindBufferMemory(dev, buffer, memory, 0),
+        "vkBindBufferMemory (chunk)",
+        "Failed to bind chunk memory"
+    );
 
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -734,11 +728,11 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkResult res = vkCreateBuffer(dev, &bci, nullptr, &buffer);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("MEMORY", "vkCreateBuffer(descriptor) failed: {}", string_VkResult(res));
-        return 0;
-    }
+    vkh.checker(
+        vkCreateBuffer(dev, &bci, nullptr, &buffer),
+        "vkCreateBuffer (descriptor)",
+        "Failed to create descriptor buffer"
+    );
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(dev, buffer, &req);
@@ -746,11 +740,8 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     uint32_t memType = findMemoryType(req.memoryTypeBits,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (memType == ~0u) {
-        vkDestroyBuffer(dev, buffer, nullptr);
-        LOG_FATAL_CAT("MEMORY", "No host-visible coherent memory for descriptor buffer");
-        return 0;
-    }
+    vkh.checker(memType != ~0u, "findMemoryType (descriptor)",
+                "No host-visible coherent memory for descriptor buffer");
 
     VkMemoryAllocateFlagsInfo flags{};
     flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
@@ -763,20 +754,17 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     mai.memoryTypeIndex = memType;
 
     VkDeviceMemory memory = VK_NULL_HANDLE;
-    res = vkAllocateMemory(dev, &mai, nullptr, &memory);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("MEMORY", "vkAllocateMemory(descriptor) failed: {}", string_VkResult(res));
-        vkDestroyBuffer(dev, buffer, nullptr);
-        return 0;
-    }
+    vkh.checker(
+        vkAllocateMemory(dev, &mai, nullptr, &memory),
+        "vkAllocateMemory (descriptor)",
+        "Failed to allocate descriptor memory"
+    );
 
-    res = vkBindBufferMemory(dev, buffer, memory, 0);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("MEMORY", "vkBindBufferMemory(descriptor) failed: {}", string_VkResult(res));
-        vkFreeMemory(dev, memory, nullptr);
-        vkDestroyBuffer(dev, buffer, nullptr);
-        return 0;
-    }
+    vkh.checker(
+        vkBindBufferMemory(dev, buffer, memory, 0),
+        "vkBindBufferMemory (descriptor)",
+        "Failed to bind descriptor memory"
+    );
 
     VkBufferDeviceAddressInfo addrInfo{};
     addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -798,39 +786,47 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 [[nodiscard]] inline void* lazyMapDescriptor(uint64_t handle) noexcept {
     auto& buffers = rtx().buffers;
     auto it = buffers.find(handle);
+
     if (it == buffers.end()) {
-        LOG_ERROR_CAT("MEMORY", "lazyMapDescriptor failed — invalid handle {:016x}", handle);
-        return nullptr;
+        std::string msg = std::format("lazyMapDescriptor failed — invalid handle {:016x}", handle);
+        vkh.checker(false, "lazyMapDescriptor handle lookup", msg.c_str());
+        // or return nullptr; or std::abort();
     }
 
     BufferInfo& info = it->second;
-    if ((info.usage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) == 0) {
-        LOG_ERROR_CAT("MEMORY", "lazyMapDescriptor failed — not a descriptor buffer (handle={:016x})", handle);
-        return nullptr;
+
+    bool isDescriptor = (info.usage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) != 0;
+    if (!isDescriptor) {
+        std::string msg = std::format("lazyMapDescriptor failed — not a descriptor buffer (handle={:016x})", handle);
+        vkh.checker(false, "Descriptor buffer usage check", msg.c_str());
+        // or return nullptr;
     }
 
     if (info.mapped != nullptr) return info.mapped;
 
     VkDevice dev = rtx().device;
-
     void* mapped = nullptr;
     VkResult res = vkMapMemory(dev, info.memory, 0, info.size, 0, &mapped);
+
     if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("MEMORY", "vkMapMemory(descriptor) failed for handle {:016x}: {}", handle, string_VkResult(res));
-        return nullptr;
+        std::string msg = std::format("vkMapMemory(descriptor) failed for handle {:016x}", handle);
+        vkh.checker(res, "vkMapMemory (descriptor buffer)", msg.c_str());
     }
 
     info.mapped = mapped;
-    LOG_INFO_CAT("MEMORY", "Descriptor buffer mapped — handle={:016x}, mapped ptr=0x{:x}", handle, reinterpret_cast<uintptr_t>(mapped));
+    LOG_INFO_CAT("MEMORY", "Descriptor buffer mapped — handle={:016x}, mapped ptr=0x{:x}",
+                 handle, reinterpret_cast<uintptr_t>(mapped));
 
     return mapped;
 }
 
 [[nodiscard]] inline uint64_t create(VkDeviceSize size, VkBufferUsageFlags usage,
                                      std::string_view tag = "") noexcept {
+    // Size validation — format outside because of 'tag'
     if (size == 0) {
-        LOG_WARNING_CAT("BUFFER", "create called with size=0 (tag={}) — returning invalid handle", tag);
-        return 0;
+        std::string msg = std::format("create called with size=0 (tag={}) — returning invalid handle", tag);
+        vkh.checker(false, "Buffer size validation", msg.c_str());
+        return 0;  // or abort — adjust your error policy
     }
 
     LOG_INFO_CAT("BUFFER", "Creating buffer: size={} bytes, usage=0x{:x}, tag='{}'", size, usage, tag);
@@ -852,22 +848,30 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     if (fixedUsage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) {
         LOG_INFO_CAT("BUFFER", "Routing to descriptor buffer path");
         uint64_t handle = createDescriptorBuffer(size, tag);
-        if (handle != 0) {
-            LOG_SUCCESS_CAT("BUFFER", "Descriptor buffer created successfully — handle={:016x}", handle);
-        } else {
-            LOG_FATAL_CAT("BUFFER", "Descriptor buffer creation failed (size={}, tag='{}')", size, tag);
+
+        // Handle check — format outside
+        if (handle == 0) {
+            std::string msg = std::format("Descriptor buffer creation failed (size={}, tag='{}')", size, tag);
+            vkh.checker(false, "createDescriptorBuffer", msg.c_str());
+            return 0;  // or abort
         }
+
+        LOG_SUCCESS_CAT("BUFFER", "Descriptor buffer created successfully — handle={:016x}", handle);
         return handle;
     }
 
     // Quick VRAM check before attempting allocation
     VkDeviceSize needed = size + TINY_SAFETY_MARGIN;  // conservative estimate
     VkDeviceSize avail = availableToTake();
+
+    // VRAM check — format outside because of multiple args
     if (avail < needed) {
-        LOG_FATAL_CAT("BUFFER", "Insufficient VRAM — needed ~{} MB, available={} MB (tag='{}')",
-                      needed / (1024 * 1024), avail / (1024 * 1024), tag);
-        return 0;
+        std::string msg = std::format("Insufficient VRAM — needed ~{} MB, available={} MB (tag='{}')",
+                                      needed / (1024 * 1024), avail / (1024 * 1024), tag);
+        vkh.checker(false, "VRAM availability check", msg.c_str());
+        return 0;  // or abort
     }
+
     LOG_INFO_CAT("BUFFER", "VRAM check passed — needed ~{} MB, available={} MB",
                  needed / (1024 * 1024), avail / (1024 * 1024));
 
@@ -907,11 +911,11 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VkBuffer buf{};
-        VkResult res = vkCreateBuffer(rtx().device, &bci, nullptr, &buf);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "vkCreateBuffer(small uniform) failed: {}", string_VkResult(res));
-            return 0;
-        }
+        vkh.checker(
+            vkCreateBuffer(rtx().device, &bci, nullptr, &buf),
+            "vkCreateBuffer (small uniform)",
+            "Failed to create small uniform buffer"
+        );
 
         VkMemoryRequirements req{};
         vkGetBufferMemoryRequirements(rtx().device, buf, &req);
@@ -919,11 +923,8 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         uint32_t memType = findMemoryType(req.memoryTypeBits,
                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        if (memType == ~0u) {
-            vkDestroyBuffer(rtx().device, buf, nullptr);
-            LOG_FATAL_CAT("BUFFER", "No host-visible coherent memory for small uniform");
-            return 0;
-        }
+        vkh.checker(memType != ~0u, "findMemoryType (small uniform)",
+                    "No host-visible coherent memory for small uniform");
 
         VkMemoryAllocateFlagsInfo flags{};
         flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
@@ -936,20 +937,17 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         mai.memoryTypeIndex = memType;
 
         VkDeviceMemory mem{};
-        res = vkAllocateMemory(rtx().device, &mai, nullptr, &mem);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "vkAllocateMemory(small uniform) failed: {}", string_VkResult(res));
-            vkDestroyBuffer(rtx().device, buf, nullptr);
-            return 0;
-        }
+        vkh.checker(
+            vkAllocateMemory(rtx().device, &mai, nullptr, &mem),
+            "vkAllocateMemory (small uniform)",
+            "Failed to allocate small uniform memory"
+        );
 
-        res = vkBindBufferMemory(rtx().device, buf, mem, 0);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "vkBindBufferMemory(small uniform) failed: {}", string_VkResult(res));
-            vkFreeMemory(rtx().device, mem, nullptr);
-            vkDestroyBuffer(rtx().device, buf, nullptr);
-            return 0;
-        }
+        vkh.checker(
+            vkBindBufferMemory(rtx().device, buf, mem, 0),
+            "vkBindBufferMemory (small uniform)",
+            "Failed to bind small uniform memory"
+        );
 
         VkBufferDeviceAddressInfo addrInfo{};
         addrInfo.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -969,13 +967,9 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         info.tag           = std::string(tag);
 
         // Map persistently
-        res = vkMapMemory(rtx().device, mem, 0, size, 0, &info.mapped);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("BUFFER", "vkMapMemory(small uniform) failed: {}", string_VkResult(res));
-            vkFreeMemory(rtx().device, mem, nullptr);
-            vkDestroyBuffer(rtx().device, buf, nullptr);
-            return 0;
-        }
+        VkResult res = vkMapMemory(rtx().device, mem, 0, size, 0, &info.mapped);
+        vkh.checker(res, "vkMapMemory (small uniform persistent)",
+                    "Failed to persistently map small uniform buffer");
 
         rtx().buffers.emplace(handle, std::move(info));
 
@@ -994,9 +988,12 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         LOG_INFO_CAT("BUFFER", "Allocating chunk — size={} bytes, remaining={}", chunkSize, remaining);
 
         Chunk* chunk = createChunk(chunkSize, fixedUsage);
-        if (!chunk) {
-            LOG_FATAL_CAT("BUFFER", "createChunk failed for size={} (tag='{}')", chunkSize, tag);
-            return 0;
+
+        // Chunk creation check — format outside
+        if (chunk == nullptr) {
+            std::string msg = std::format("createChunk failed for size={} (tag='{}')", chunkSize, tag);
+            vkh.checker(false, "createChunk", msg.c_str());
+            return 0;  // or abort
         }
 
         uint64_t chunkHandle = ++rtx().next_buffer_handle;
@@ -1033,15 +1030,21 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_SCRATCH_BIT_KHR,
             "LAS_Scratch_Chunk");
 
+        // Check chunkHandle != 0 — format outside
         if (chunkHandle == 0) {
-            LOG_FATAL_CAT("MEMORY", "Failed to allocate scratch chunk of {} bytes", chunkSize);
-            return 0;
+            std::string msg = std::format("Failed to allocate scratch chunk of {} bytes", chunkSize);
+            vkh.checker(false, "create (scratch chunk)", msg.c_str());
+            // Handle error — return invalid address or abort
+            return 0;  // Adjust to your error policy (e.g. std::abort())
         }
 
         auto it = rtx().buffers.find(chunkHandle);
+
+        // Check iterator validity — format outside
         if (it == rtx().buffers.end()) {
-            LOG_ERROR_CAT("MEMORY", "Allocated scratch chunk {:016x} but not in buffers map", chunkHandle);
-            return 0;
+            std::string msg = std::format("Allocated scratch chunk {:016x} but not in buffers map", chunkHandle);
+            vkh.checker(false, "scratch chunk map lookup", msg.c_str());
+            return 0;  // or abort
         }
 
         VkDeviceAddress chunkAddr = it->second.deviceAddress + it->second.offset;
@@ -1059,22 +1062,29 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
                            VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     auto& buffers = rtx().buffers;
     auto it = buffers.find(handle);
+
+    // Handle lookup check — format outside
     if (it == buffers.end()) {
-        LOG_ERROR_CAT("BUFFER", "uploadToBuffer failed — invalid handle {:016x}", handle);
-        return;
+        std::string msg = std::format("uploadToBuffer failed — invalid handle {:016x}", handle);
+        vkh.checker(false, "uploadToBuffer handle lookup", msg.c_str());
+        return;  // Early exit on invalid handle (adjust if you prefer abort)
     }
 
     BufferInfo& info = it->second;
 
+    // Size validation — format outside (multiple args)
     if (size > info.size) {
-        LOG_ERROR_CAT("BUFFER", "uploadToBuffer failed — size {} exceeds buffer capacity {} (handle={:016x}, tag='{}')",
-                      size, info.size, handle, info.tag);
-        return;
+        std::string msg = std::format("uploadToBuffer failed — size {} exceeds buffer capacity {} (handle={:016x}, tag='{}')",
+                                      size, info.size, handle, info.tag);
+        vkh.checker(false, "upload size validation", msg.c_str());
+        return;  // or abort
     }
 
+    // Buffer validity check — format outside
     if (info.buffer == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("BUFFER", "uploadToBuffer failed — buffer is null (handle={:016x}, tag='{}')", handle, info.tag);
-        return;
+        std::string msg = std::format("uploadToBuffer failed — buffer is null (handle={:016x}, tag='{}')", handle, info.tag);
+        vkh.checker(false, "Target buffer validity", msg.c_str());
+        return;  // or abort
     }
 
     LOG_INFO_CAT("BUFFER", "Starting upload — {} bytes to handle={:016x} (tag='{}', offset={}, mapped={})",
@@ -1105,11 +1115,11 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     stageBci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer stageBuf = VK_NULL_HANDLE;
-    VkResult res = vkCreateBuffer(dev, &stageBci, nullptr, &stageBuf);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("BUFFER", "Transient staging vkCreateBuffer failed: {}", string_VkResult(res));
-        return;
-    }
+    vkh.checker(
+        vkCreateBuffer(dev, &stageBci, nullptr, &stageBuf),
+        "vkCreateBuffer (transient staging)",
+        "Transient staging vkCreateBuffer failed"
+    );
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(dev, stageBuf, &req);
@@ -1117,11 +1127,8 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     uint32_t memType = findMemoryType(req.memoryTypeBits,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (memType == ~0u) {
-        vkDestroyBuffer(dev, stageBuf, nullptr);
-        LOG_FATAL_CAT("BUFFER", "No host-visible coherent memory type for transient staging");
-        return;
-    }
+    vkh.checker(memType != ~0u, "findMemoryType (staging)",
+                "No host-visible coherent memory type for transient staging");
 
     VkMemoryAllocateFlagsInfo flags{};
     flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
@@ -1134,32 +1141,27 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     mai.memoryTypeIndex = memType;
 
     VkDeviceMemory stageMem = VK_NULL_HANDLE;
-    res = vkAllocateMemory(dev, &mai, nullptr, &stageMem);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("BUFFER", "Transient staging vkAllocateMemory failed: {}", string_VkResult(res));
-        vkDestroyBuffer(dev, stageBuf, nullptr);
-        return;
-    }
+    vkh.checker(
+        vkAllocateMemory(dev, &mai, nullptr, &stageMem),
+        "vkAllocateMemory (transient staging)",
+        "Transient staging vkAllocateMemory failed"
+    );
 
-    res = vkBindBufferMemory(dev, stageBuf, stageMem, 0);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("BUFFER", "vkBindBufferMemory(transient staging) failed: {}", string_VkResult(res));
-        vkFreeMemory(dev, stageMem, nullptr);
-        vkDestroyBuffer(dev, stageBuf, nullptr);
-        return;
-    }
+    vkh.checker(
+        vkBindBufferMemory(dev, stageBuf, stageMem, 0),
+        "vkBindBufferMemory (transient staging)",
+        "Failed to bind transient staging memory"
+    );
 
     LOG_SUCCESS_CAT("BUFFER", "Transient staging buffer ready — size={} bytes", stageSize);
 
     // ── Map and copy data to staging ────────────────────────────────────────────
     void* ptr = nullptr;
-    res = vkMapMemory(dev, stageMem, 0, stageSize, 0, &ptr);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("BUFFER", "vkMapMemory(transient staging) failed: {}", string_VkResult(res));
-        vkFreeMemory(dev, stageMem, nullptr);
-        vkDestroyBuffer(dev, stageBuf, nullptr);
-        return;
-    }
+    vkh.checker(
+        vkMapMemory(dev, stageMem, 0, stageSize, 0, &ptr),
+        "vkMapMemory (transient staging)",
+        "vkMapMemory(transient staging) failed"
+    );
 
     std::memcpy(ptr, data, size);
     vkUnmapMemory(dev, stageMem);
@@ -1171,24 +1173,17 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
     if (!usingExternalCmd) {
         VkFenceCreateInfo fenceInfo{};
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        res = vkCreateFence(dev, &fenceInfo, nullptr, &fence);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "vkCreateFence failed: {}", string_VkResult(res));
-            vkFreeMemory(dev, stageMem, nullptr);
-            vkDestroyBuffer(dev, stageBuf, nullptr);
-            return;
-        }
+        vkh.checker(
+            vkCreateFence(dev, &fenceInfo, nullptr, &fence),
+            "vkCreateFence",
+            "vkCreateFence failed"
+        );
     }
 
     // ── Command buffer setup (only if we own it) ────────────────────────────────
     if (!usingExternalCmd) {
-        if (rtx().transient_pool == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("BUFFER", "No transient command pool available for upload");
-            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
-            vkFreeMemory(dev, stageMem, nullptr);
-            vkDestroyBuffer(dev, stageBuf, nullptr);
-            return;
-        }
+        vkh.checker(rtx().transient_pool != VK_NULL_HANDLE, "Transient pool existence",
+                    "No transient command pool available for upload");
 
         LOG_INFO_CAT("BUFFER", "Allocating one-time command buffer from transient pool");
 
@@ -1198,28 +1193,21 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
 
-        res = vkAllocateCommandBuffers(dev, &allocInfo, &uploadCmd);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "Failed to allocate transient cmd buffer: {}", string_VkResult(res));
-            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
-            vkFreeMemory(dev, stageMem, nullptr);
-            vkDestroyBuffer(dev, stageBuf, nullptr);
-            return;
-        }
+        vkh.checker(
+            vkAllocateCommandBuffers(dev, &allocInfo, &uploadCmd),
+            "vkAllocateCommandBuffers (transient upload)",
+            "Failed to allocate transient cmd buffer"
+        );
 
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        res = vkBeginCommandBuffer(uploadCmd, &beginInfo);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "Failed to begin transient cmd buffer: {}", string_VkResult(res));
-            vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
-            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
-            vkFreeMemory(dev, stageMem, nullptr);
-            vkDestroyBuffer(dev, stageBuf, nullptr);
-            return;
-        }
+        vkh.checker(
+            vkBeginCommandBuffer(uploadCmd, &beginInfo),
+            "vkBeginCommandBuffer (transient upload)",
+            "Failed to begin transient cmd buffer"
+        );
 
         LOG_SUCCESS_CAT("BUFFER", "Transient command buffer recording begun");
     } else {
@@ -1238,37 +1226,28 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
     // ── Owned cmd path: end, submit, wait fence, destroy staging ─────────────────
     if (!usingExternalCmd) {
-        res = vkEndCommandBuffer(uploadCmd);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "Failed to end transient cmd buffer: {}", string_VkResult(res));
-            vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
-            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
-            vkFreeMemory(dev, stageMem, nullptr);
-            vkDestroyBuffer(dev, stageBuf, nullptr);
-            return;
-        }
+        vkh.checker(
+            vkEndCommandBuffer(uploadCmd),
+            "vkEndCommandBuffer (transient upload)",
+            "Failed to end transient cmd buffer"
+        );
 
         VkSubmitInfo submit{};
         submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount = 1;
         submit.pCommandBuffers    = &uploadCmd;
 
-        res = vkQueueSubmit(queue, 1, &submit, fence);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("BUFFER", "vkQueueSubmit failed: {}", string_VkResult(res));
-            vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
-            if (fence != VK_NULL_HANDLE) vkDestroyFence(dev, fence, nullptr);
-            vkFreeMemory(dev, stageMem, nullptr);
-            vkDestroyBuffer(dev, stageBuf, nullptr);
-            return;
-        }
+        vkh.checker(
+            vkQueueSubmit(queue, 1, &submit, fence),
+            "vkQueueSubmit (transient upload)",
+            "vkQueueSubmit failed"
+        );
 
         LOG_INFO_CAT("BUFFER", "Upload submitted — waiting on fence");
 
-        res = vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("BUFFER", "vkWaitForFences failed: {}", string_VkResult(res));
-        }
+        VkResult res = vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
+        vkh.checker(res, "vkWaitForFences (upload wait)",
+                    "vkWaitForFences failed");
 
         vkResetFences(dev, 1, &fence);
         vkDestroyFence(dev, fence, nullptr);
@@ -1357,14 +1336,21 @@ inline void init() noexcept {
 ) noexcept {
     // Enumerate physical devices
     uint32_t count = 0;
-    vkEnumeratePhysicalDevices(inst, &count, nullptr);
-    if (count == 0) {
-        LOG_FATAL_CAT("VULKAN", "No Vulkan-capable physical devices found");
-        return VK_NULL_HANDLE;
-    }
+    vkh.checker(
+        vkEnumeratePhysicalDevices(inst, &count, nullptr),
+        "vkEnumeratePhysicalDevices (count)",
+        "Failed to enumerate physical device count"
+    );
+
+    vkh.checker(count > 0, "Physical devices existence",
+                "No Vulkan-capable physical devices found");
 
     std::vector<VkPhysicalDevice> devices(count);
-    vkEnumeratePhysicalDevices(inst, &count, devices.data());
+    vkh.checker(
+        vkEnumeratePhysicalDevices(inst, &count, devices.data()),
+        "vkEnumeratePhysicalDevices (devices)",
+        "Failed to enumerate physical devices"
+    );
 
     // Select best GPU — prefer discrete, ray tracing capable, with good memory
     VkPhysicalDevice selected = VK_NULL_HANDLE;
@@ -1383,9 +1369,18 @@ inline void init() noexcept {
 
         // Extension check
         uint32_t extCount = 0;
-        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr);
+        vkh.checker(
+            vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr),
+            "vkEnumerateDeviceExtensionProperties (count)",
+            "Failed to enumerate device extension count"
+        );
+
         std::vector<VkExtensionProperties> exts(extCount);
-        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data());
+        vkh.checker(
+            vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data()),
+            "vkEnumerateDeviceExtensionProperties (extensions)",
+            "Failed to enumerate device extensions"
+        );
 
         bool has_rt = false;
         bool has_all = true;
@@ -1437,10 +1432,8 @@ inline void init() noexcept {
         }
     }
 
-    if (selected == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("VULKAN", "No suitable GPU found with required queue families and extensions");
-        return VK_NULL_HANDLE;
-    }
+    vkh.checker(selected != VK_NULL_HANDLE, "GPU selection",
+                "No suitable GPU found with required queue families and extensions");
 
     rtx().physical = selected;
 
@@ -1523,9 +1516,18 @@ inline void init() noexcept {
 
     // Optional extensions
     uint32_t extCount = 0;
-    vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, nullptr);
+    vkh.checker(
+        vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, nullptr),
+        "vkEnumerateDeviceExtensionProperties (optional count)",
+        "Failed to enumerate optional device extensions count"
+    );
+
     std::vector<VkExtensionProperties> exts(extCount);
-    vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, exts.data());
+    vkh.checker(
+        vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, exts.data()),
+        "vkEnumerateDeviceExtensionProperties (optional)",
+        "Failed to enumerate optional device extensions"
+    );
 
     std::vector<const char*> enabledExtensions(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end());
 
@@ -1559,12 +1561,11 @@ inline void init() noexcept {
     dev_ci.ppEnabledExtensionNames = enabledExtensions.data();
 
     VkDevice dev = VK_NULL_HANDLE;
-    VkResult res = vkCreateDevice(selected, &dev_ci, nullptr, &dev);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "vkCreateDevice failed: {}", string_VkResult(res));
-        rtx().physical = VK_NULL_HANDLE;
-        return VK_NULL_HANDLE;
-    }
+    vkh.checker(
+        vkCreateDevice(selected, &dev_ci, nullptr, &dev),
+        "vkCreateDevice",
+        "vkCreateDevice failed"
+    );
 
     rtx().device = dev;
 
@@ -1626,11 +1627,9 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     VkPhysicalDevice phys = rtx().physical;
     VkSurfaceKHR surf = rtx().surface;
 
-    if (!dev || !phys || !surf || w == 0 || h == 0) {
-        minimized_ = true;
-        LOG_WARNING_CAT("SWAPCHAIN", "Cannot create swapchain — invalid params or minimized");
-        return;
-    }
+    vkh.checker(dev != VK_NULL_HANDLE && phys != VK_NULL_HANDLE && surf != VK_NULL_HANDLE && w > 0 && h > 0,
+                "Swapchain creation params",
+                "Cannot create swapchain — invalid params or minimized");
 
     vkDeviceWaitIdle(dev);
 
@@ -1645,7 +1644,11 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     minimized_ = false;
 
     VkSurfaceCapabilitiesKHR caps{};
-    ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps);
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps),
+        "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+        "Failed to get surface capabilities"
+    );
 
     VkExtent2D extent{};
     if (caps.currentExtent.width == UINT32_MAX) {
@@ -1655,18 +1658,23 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
         extent = caps.currentExtent;
     }
 
-    if (extent.width == 0 || extent.height == 0) {
-        minimized_ = true;
-        LOG_WARNING_CAT("SWAPCHAIN", "Swapchain extent zero — window minimized");
-        return;
-    }
+    vkh.checker(extent.width > 0 && extent.height > 0, "Swapchain extent validation",
+                "Swapchain extent zero — window minimized");
 
     // ── Surface formats ─────────────────────────────────────────────────────────
     uint32_t fmtCount = 0;
-    ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, nullptr);
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, nullptr),
+        "vkGetPhysicalDeviceSurfaceFormatsKHR (count)",
+        "Failed to get surface format count"
+    );
 
     std::vector<VkSurfaceFormatKHR> formats(fmtCount);
-    ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, formats.data());
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, formats.data()),
+        "vkGetPhysicalDeviceSurfaceFormatsKHR (formats)",
+        "Failed to get surface formats"
+    );
 
     VkSurfaceFormatKHR chosenFormat = formats.empty() ? VkSurfaceFormatKHR{} : formats.front();
 
@@ -1686,14 +1694,23 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     }
 
     LOG_INFO_CAT("SWAPCHAIN", "Chosen format: {} ({})",
-                 string_VkFormat(chosenFormat.format),
-                 string_VkColorSpaceKHR(chosenFormat.colorSpace));
+                 vkh.format(chosenFormat.format),
+                 vkh.colorspace(chosenFormat.colorSpace));
 
     // ── Present modes — spit immediately, we control freshness ourselves ────────
     uint32_t pmCount = 0;
-    ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, nullptr);
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, nullptr),
+        "vkGetPhysicalDeviceSurfacePresentModesKHR (count)",
+        "Failed to get present mode count"
+    );
+
     std::vector<VkPresentModeKHR> supportedModes(pmCount);
-    ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, supportedModes.data());
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, supportedModes.data()),
+        "vkGetPhysicalDeviceSurfacePresentModesKHR (modes)",
+        "Failed to get present modes"
+    );
 
     // Debug: show exactly what the surface offers
     std::string supportedStr = "Supported present modes: ";
@@ -1762,14 +1779,18 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
 
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
         VkImageFormatProperties props{};
-        if (vkGetPhysicalDeviceImageFormatProperties(phys, chosenFormat.format, VK_IMAGE_TYPE_2D,
+        vkh.checker(
+            vkGetPhysicalDeviceImageFormatProperties(phys, chosenFormat.format, VK_IMAGE_TYPE_2D,
                                                      VK_IMAGE_TILING_OPTIMAL,
                                                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                                                     0, &props) == VK_SUCCESS) {
-            directWriteEnabled = true;
-            usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-            LOG_INFO_CAT("SWAPCHAIN", "Direct storage write to swapchain images ENABLED");
-        }
+                                                     0, &props) == VK_SUCCESS,
+            "vkGetPhysicalDeviceImageFormatProperties (storage check)",
+            "Failed to check if storage usage supported for format"
+        );
+
+        directWriteEnabled = true;
+        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        LOG_INFO_CAT("SWAPCHAIN", "Direct storage write to swapchain images ENABLED");
     }
 
     // ── Create swapchain ────────────────────────────────────────────────────────
@@ -1790,13 +1811,11 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     ci.imageUsage      = usage;
 
     VkSwapchainKHR newSwap = VK_NULL_HANDLE;
-    VkResult res = ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
-
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {}", string_VkResult(res));
-        minimized_ = true;
-        return;
-    }
+    vkh.checker(
+        ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap),
+        "vkCreateSwapchainKHR",
+        "vkCreateSwapchainKHR failed"
+    );
 
     swapchain_ = Handle(newSwap);
     swapchainExtent_ = extent;
@@ -1804,9 +1823,18 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
 
     // ── Get images & create views ───────────────────────────────────────────────
     uint32_t count = 0;
-    ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, nullptr);
+    vkh.checker(
+        ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, nullptr),
+        "vkGetSwapchainImagesKHR (count)",
+        "Failed to get swapchain image count"
+    );
+
     swapchainImages_.resize(count);
-    ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, swapchainImages_.data());
+    vkh.checker(
+        ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, swapchainImages_.data()),
+        "vkGetSwapchainImagesKHR (images)",
+        "Failed to get swapchain images"
+    );
 
     swapchainImageViews_.resize(count);
 
@@ -1820,7 +1848,11 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
 
     for (uint32_t i = 0; i < count; ++i) {
         viewCI.image = swapchainImages_[i];
-        vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageViews_[i]);
+        vkh.checker(
+            vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageViews_[i]),
+            "vkCreateImageView (swapchain image)",
+            std::format("Failed to create view for swapchain image {}", i).c_str()
+        );
     }
 
     rtx().images      = swapchainImages_;
@@ -1831,7 +1863,7 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — {} images, {}x{}, format {}, mode {}",
                     isRecreate ? "recreated" : "created",
                     count, extent.width, extent.height,
-                    string_VkFormat(chosenFormat.format), modeDesc);
+                    vkh.format(chosenFormat.format), modeDesc);
 }
 
 [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept {
@@ -1849,15 +1881,14 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     VkSemaphoreCreateInfo semCI{};
     semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    VkResult res = vkCreateSemaphore(dev, &semCI, nullptr, &semaphore);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("SWAPCHAIN", "Failed to create fresh acquire semaphore: {}", string_VkResult(res));
-        *pSemaphoreOut = VK_NULL_HANDLE;
-        return res;
-    }
+    vkh.checker(
+        vkCreateSemaphore(dev, &semCI, nullptr, &semaphore),
+        "vkCreateSemaphore (acquire)",
+        "Failed to create fresh acquire semaphore"
+    );
 
-    res = ext().vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
-                                       semaphore, VK_NULL_HANDLE, pImageIndex);
+    VkResult res = ext().vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
+                                               semaphore, VK_NULL_HANDLE, pImageIndex);
 
     if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) {
         *pSemaphoreOut = semaphore;  // pass to present — destroyed there
@@ -1912,7 +1943,7 @@ static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem
         minimized_ = true;
         LOG_WARNING_CAT("SWAPCHAIN", "Present returned out-of-date/suboptimal — minimized set");
     } else {
-        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", string_VkResult(res));
+        LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", vkh.result(res));
     }
 }
 
@@ -1928,7 +1959,9 @@ static void presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore waitSem
 
     static void cleanup() noexcept {
         VkDevice dev = rtx().device;
-        if (!dev) return;
+        vkh.checker(dev != VK_NULL_HANDLE, "Device validity in cleanup",
+                    "No device available — skipping swapchain cleanup");
+
         vkDeviceWaitIdle(dev);
 
         cleanupImageViews();
@@ -2114,11 +2147,11 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
     std::string warn, err;
 
     std::string baseDir = "assets/models/";
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, std::string(path).c_str(), baseDir.c_str())) {
-        if (!err.empty())  LOG_FATAL_CAT("LAS", "{}", err);
-        if (!warn.empty()) LOG_WARNING_CAT("LAS", "{}", warn);
-        return nullptr;
-    }
+    bool loaded = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, std::string(path).c_str(), baseDir.c_str());
+    vkh.checker(loaded, "tinyobj::LoadObj",
+                std::format("Failed to load OBJ: {}", err.empty() ? "Unknown error" : err).c_str());
+
+    if (!warn.empty()) LOG_WARNING_CAT("LAS", "{}", warn);
 
     auto mesh = std::make_unique<Mesh>();
 
@@ -2140,10 +2173,8 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
         }
     }
 
-    if (glm::any(glm::lessThan(max, min))) {
-        LOG_ERROR_CAT("LAS", "Failed to compute valid AABB from OBJ");
-        return nullptr;
-    }
+    vkh.checker(glm::all(glm::greaterThan(max, min)), "OBJ AABB computation",
+                "Failed to compute valid AABB from OBJ");
 
     mesh->aabbMin = min;
     mesh->aabbMax = max;
@@ -2236,10 +2267,8 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
     // ── Command buffer setup ────────────────────────────────────────────────────
     if (ownsCmd) {
-        if (rtx().transient_pool == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("LAS", "No transient command pool — cannot perform LAS rebuild");
-            return;
-        }
+        vkh.checker(rtx().transient_pool != VK_NULL_HANDLE, "Transient pool existence",
+                    "No transient command pool — cannot perform LAS rebuild");
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -2247,22 +2276,21 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
 
-        VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &localCmd);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "Failed to allocate cmd buffer for LAS rebuild: {}", string_VkResult(res));
-            return;
-        }
+        vkh.checker(
+            vkAllocateCommandBuffers(rtx().device, &allocInfo, &localCmd),
+            "vkAllocateCommandBuffers (LAS rebuild)",
+            "Failed to allocate cmd buffer for LAS rebuild"
+        );
 
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        res = vkBeginCommandBuffer(localCmd, &beginInfo);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "Failed to begin cmd buffer for LAS rebuild: {}", string_VkResult(res));
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
-            return;
-        }
+        vkh.checker(
+            vkBeginCommandBuffer(localCmd, &beginInfo),
+            "vkBeginCommandBuffer (LAS rebuild)",
+            "Failed to begin cmd buffer for LAS rebuild"
+        );
 
         LOG_INFO_CAT("LAS", "Allocated and began temporary cmd buffer for LAS rebuild (owned path)");
     } else {
@@ -2275,8 +2303,6 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     // Helper lambda to upload and collect staging if external
     auto safeUpload = [&](uint64_t bufHandle, const void* srcData, VkDeviceSize uploadSize, const std::string& debugTag) {
         Memory::uploadToBuffer(bufHandle, srcData, uploadSize, localCmd);
-        // If external cmd, staging is left alive — we must collect for cleanup
-        // (Note: you will need to modify uploadToBuffer to return staging handles if you want auto-collection)
         LOG_INFO_CAT("LAS", "Upload recorded for {} — staging cleanup deferred to after submit/wait", debugTag);
     };
 
@@ -2295,11 +2321,8 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
                                                  "LAS_UniversalPrimitives");
 
             if (primHandle == 0) {
-                LOG_FATAL_CAT("TLAS", "Failed to allocate procedural primitives buffer");
-                if (ownsCmd) {
-                    vkEndCommandBuffer(localCmd);
-                    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
-                }
+                std::string msg = "Failed to allocate procedural primitives buffer";
+                vkh.checker(false, "Memory::create (procedural primitives)", msg.c_str());
                 return;
             }
 
@@ -2329,7 +2352,8 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             }
 
             if (mesh.vertexBuffer == 0 || mesh.indexBuffer == 0) {
-                LOG_WARNING_CAT("BLAS", "Mesh #{} missing buffers — skipping BLAS build", i);
+                std::string msg = std::format("Mesh #{} missing buffers — skipping BLAS build", i);
+                vkh.checker(false, "Mesh buffer validity", msg.c_str());
                 continue;
             }
 
@@ -2375,8 +2399,10 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
                 &sizes);
 
             VkDeviceAddress scratchAddr = Memory::allocateScratch(sizes.buildScratchSize);
+
             if (scratchAddr == 0) {
-                LOG_FATAL_CAT("BLAS", "Failed to allocate scratch for BLAS mesh #{}", i);
+                std::string msg = std::format("Failed to allocate scratch for BLAS mesh #{}", i);
+                vkh.checker(false, "allocateScratch (BLAS)", msg.c_str());
                 continue;
             }
 
@@ -2385,46 +2411,40 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             bool blasValid = true;
 
             if (mesh.blas == VK_NULL_HANDLE) {
-                uint64_t blasStorageHandle = 0;
-                blasStorageHandle = Memory::create(sizes.accelerationStructureSize,
-                                                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                   "Mesh_BLAS_Storage_" + std::to_string(i));
+                uint64_t blasStorageHandle = Memory::create(sizes.accelerationStructureSize,
+                                                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                            "Mesh_BLAS_Storage_" + std::to_string(i));
 
                 if (blasStorageHandle == 0) {
-                    LOG_FATAL_CAT("BLAS", "Failed to allocate BLAS storage for mesh #{}", i);
-                    blasValid = false;
-                } else {
-                    auto* storageInfo = Memory::get(blasStorageHandle);
-                    if (!storageInfo) {
-                        Memory::destroy(blasStorageHandle);
-                        blasValid = false;
-                    } else {
-                        mesh.blasStorage = blasStorageHandle;
-
-                        VkAccelerationStructureCreateInfoKHR blasCreate{};
-                        blasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-                        blasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-                        blasCreate.buffer = storageInfo->buffer;
-                        blasCreate.size = sizes.accelerationStructureSize;
-
-                        VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &blasCreate, nullptr, &mesh.blas);
-                        if (res != VK_SUCCESS) {
-                            LOG_FATAL_CAT("BLAS", "vkCreateAccelerationStructureKHR failed for mesh #{}: {}", i, string_VkResult(res));
-                            Memory::destroy(blasStorageHandle);
-                            mesh.blas = VK_NULL_HANDLE;
-                            blasValid = false;
-                        } else {
-                            LOG_SUCCESS_CAT("BLAS", "Created BLAS acceleration structure for mesh #{}", i);
-                        }
-                    }
+                    std::string msg = std::format("Failed to allocate BLAS storage for mesh #{}", i);
+                    vkh.checker(false, "Memory::create (BLAS storage)", msg.c_str());
+                    continue;
                 }
+
+                auto* storageInfo = Memory::get(blasStorageHandle);
+
+                if (storageInfo == nullptr) {
+                    std::string msg = std::format("Failed to get BLAS storage info for mesh #{}", i);
+                    vkh.checker(false, "Memory::get (BLAS storage)", msg.c_str());
+                    continue;
+                }
+
+                VkAccelerationStructureCreateInfoKHR blasCreate{};
+                blasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+                blasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+                blasCreate.buffer = storageInfo->buffer;
+                blasCreate.size = sizes.accelerationStructureSize;
+
+                VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &blasCreate, nullptr, &mesh.blas);
+                std::string msg = std::format("Failed to create BLAS for mesh #{}", i);
+                vkh.checker(res, "vkCreateAccelerationStructureKHR (BLAS)", msg.c_str());
+
+                    LOG_SUCCESS_CAT("BLAS", "Created BLAS acceleration structure for mesh #{}", i);
             }
 
-            if (!blasValid || mesh.blas == VK_NULL_HANDLE) {
-                LOG_WARNING_CAT("BLAS", "Skipping BLAS build for mesh #{} — invalid acceleration structure", i);
-                continue;
-            }
+            vkh.checker(blasValid && mesh.blas != VK_NULL_HANDLE, "BLAS validity check",
+                        "Skipping BLAS build for mesh #{} — invalid acceleration structure");
 
             buildInfo.dstAccelerationStructure = mesh.blas;
 
@@ -2457,19 +2477,15 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         if (instanceSize == 0) instanceSize = 64;
 
         if (rtx().las_instance_buffer == 0) {
-            uint64_t instHandle = 0;
-            instHandle = Memory::create(instanceSize,
-                                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                        "LAS_InstanceBuffer");
+            uint64_t instHandle = Memory::create(instanceSize,
+                                                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                 "LAS_InstanceBuffer");
 
             if (instHandle == 0) {
-                LOG_FATAL_CAT("TLAS", "Failed to allocate TLAS instance buffer");
-                if (ownsCmd) {
-                    vkEndCommandBuffer(localCmd);
-                    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
-                }
+                vkh.checker(false, "Memory::create (LAS instance buffer)",
+                            "Failed to allocate TLAS instance buffer");
                 return;
             }
 
@@ -2550,12 +2566,10 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             &tlasSizes);
 
         VkDeviceAddress tlasScratchAddr = Memory::allocateScratch(tlasSizes.buildScratchSize);
+
         if (tlasScratchAddr == 0) {
-            LOG_FATAL_CAT("TLAS", "Failed to allocate scratch for TLAS build");
-            if (ownsCmd) {
-                vkEndCommandBuffer(localCmd);
-                vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
-            }
+            vkh.checker(false, "allocateScratch (TLAS)",
+                        "Failed to allocate scratch for TLAS build");
             return;
         }
 
@@ -2564,83 +2578,80 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         bool tlasValid = true;
 
         if (rtx().las_tlas == VK_NULL_HANDLE) {
-            uint64_t tlasStorageHandle = 0;
-            tlasStorageHandle = Memory::create(tlasSizes.accelerationStructureSize,
-                                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                "LAS_TLAS_Storage");
+            uint64_t tlasStorageHandle = Memory::create(tlasSizes.accelerationStructureSize,
+                                                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                        "LAS_TLAS_Storage");
 
             if (tlasStorageHandle == 0) {
-                LOG_FATAL_CAT("TLAS", "Failed to allocate TLAS storage buffer");
-                tlasValid = false;
-            } else {
-                rtx().las_tlas_storage = tlasStorageHandle;
-
-                auto* storageInfo = Memory::get(tlasStorageHandle);
-                if (!storageInfo) {
-                    Memory::destroy(tlasStorageHandle);
-                    tlasValid = false;
-                } else {
-                    VkAccelerationStructureCreateInfoKHR tlasCreate{};
-                    tlasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-                    tlasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-                    tlasCreate.buffer = storageInfo->buffer;
-                    tlasCreate.size = tlasSizes.accelerationStructureSize;
-
-                    VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &tlasCreate, nullptr, &rtx().las_tlas);
-                    if (res != VK_SUCCESS) {
-                        LOG_FATAL_CAT("TLAS", "Failed to create TLAS: {}", string_VkResult(res));
-                        Memory::destroy(tlasStorageHandle);
-                        rtx().las_tlas = VK_NULL_HANDLE;
-                        tlasValid = false;
-                    } else {
-                        LOG_SUCCESS_CAT("TLAS", "Created TLAS acceleration structure");
-                    }
-                }
+                vkh.checker(false, "Memory::create (TLAS storage)",
+                            "Failed to allocate TLAS storage buffer");
+                return;
             }
+
+            rtx().las_tlas_storage = tlasStorageHandle;
+
+            auto* storageInfo = Memory::get(tlasStorageHandle);
+
+            if (storageInfo == nullptr) {
+                vkh.checker(false, "Memory::get (TLAS storage)",
+                            "Failed to get TLAS storage info");
+                return;
+            }
+
+            VkAccelerationStructureCreateInfoKHR tlasCreate{};
+            tlasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+            tlasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+            tlasCreate.buffer = storageInfo->buffer;
+            tlasCreate.size = tlasSizes.accelerationStructureSize;
+
+            vkh.checker(
+                ext().vkCreateAccelerationStructureKHR(rtx().device, &tlasCreate, nullptr, &rtx().las_tlas),
+                "vkCreateAccelerationStructureKHR (TLAS)",
+                "Failed to create TLAS"
+            );
+
+            LOG_SUCCESS_CAT("TLAS", "Created TLAS acceleration structure");
         }
 
-        if (!tlasValid || rtx().las_tlas == VK_NULL_HANDLE) {
-            LOG_WARNING_CAT("TLAS", "Skipping TLAS build — invalid acceleration structure");
-        } else {
-            tlasBuild.dstAccelerationStructure = rtx().las_tlas;
+        vkh.checker(tlasValid && rtx().las_tlas != VK_NULL_HANDLE, "TLAS validity check",
+                    "Skipping TLAS build — invalid acceleration structure");
 
-            ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &tlasBuild, &pTlasRange);
+        tlasBuild.dstAccelerationStructure = rtx().las_tlas;
 
-            VkMemoryBarrier tlasBarrier{};
-            tlasBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-            tlasBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-            vkCmdPipelineBarrier(localCmd,
-                                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                                 0, 1, &tlasBarrier, 0, nullptr, 0, nullptr);
+        ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &tlasBuild, &pTlasRange);
 
-            rtx().las_tlas_dirty = false;
-            LOG_SUCCESS_CAT("TLAS", "TLAS rebuilt with {} instances", instanceCount);
-        }
+        VkMemoryBarrier tlasBarrier{};
+        tlasBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        tlasBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        vkCmdPipelineBarrier(localCmd,
+                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                             0, 1, &tlasBarrier, 0, nullptr, 0, nullptr);
+
+        rtx().las_tlas_dirty = false;
+        LOG_SUCCESS_CAT("TLAS", "TLAS rebuilt with {} instances", instanceCount);
     }
 
     // ── Final synchronization & cleanup ─────────────────────────────────────────
     if (ownsCmd) {
-        VkResult res = vkEndCommandBuffer(localCmd);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "Failed to end LAS rebuild cmd buffer: {}", string_VkResult(res));
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
-            return;
-        }
+        vkh.checker(
+            vkEndCommandBuffer(localCmd),
+            "vkEndCommandBuffer (LAS rebuild)",
+            "Failed to end LAS rebuild cmd buffer"
+        );
 
         VkSubmitInfo submit{};
         submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount   = 1;
         submit.pCommandBuffers      = &localCmd;
 
-        res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
-        if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("LAS", "Failed to submit LAS rebuild: {}", string_VkResult(res));
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
-            return;
-        }
+        vkh.checker(
+            vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE),
+            "vkQueueSubmit (LAS rebuild)",
+            "Failed to submit LAS rebuild"
+        );
 
         vkQueueWaitIdle(rtx().graphics_queue);
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
@@ -2649,7 +2660,6 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     } else {
         LOG_INFO_CAT("LAS", "LAS rebuild recorded into external cmd buffer — awaiting caller submission");
 
-        // Reminder for caller (you) to destroy staging after wait
         if (!pendingStaging.empty()) {
             LOG_WARNING_CAT("LAS", "External cmd path — {} pending staging resources must be destroyed after queue wait", pendingStaging.size());
             LOG_WARNING_CAT("LAS", "Add in caller code after vkQueueWaitIdle:");

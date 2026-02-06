@@ -165,7 +165,7 @@ int main(int, char**) {
 
         VkResult res = vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("VULKAN", "Failed to create global transient command pool: {}", string_VkResult(res));
+            LOG_FATAL_CAT("VULKAN", "Failed to create global transient command pool: {}", vkh.result(res));
             vkDestroyDevice(device, nullptr);
             vkDestroySurfaceKHR(instance, surface, nullptr);
             vkDestroyInstance(instance, nullptr);
