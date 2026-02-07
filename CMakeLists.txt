@@ -50,8 +50,8 @@ add_compile_options(
     -Wall -Wextra -Werror    
     -Wno-extra -O3 -march=native -mtune=native
     -flto=auto -ffast-math -Wno-error=unused-but-set-variable
-	-Wno-error=deprecated-declarations -Wno-error=shadow
-	-Wno-error=unused-variable -Wno-error=unused-function
+    -Wno-error=deprecated-declarations -Wno-error=shadow
+    -Wno-error=unused-variable -Wno-error=unused-function
     -g -ggdb
 )
 
@@ -144,7 +144,6 @@ if(IS_LINUX)
     pkg_check_modules(SDL3 REQUIRED sdl3)
     pkg_check_modules(SDL3_TTF REQUIRED sdl3-ttf)
     pkg_check_modules(SDL3_IMAGE REQUIRED sdl3-image)
-    pkg_check_modules(SDL3_MIXER REQUIRED sdl3-mixer)
     pkg_check_modules(HARFBUZZ REQUIRED harfbuzz)
     pkg_check_modules(X11 REQUIRED x11 xext xrandr xcursor xi xscrnsaver xcb)
     pkg_check_modules(GBM REQUIRED gbm)
@@ -152,10 +151,17 @@ if(IS_LINUX)
 endif()
 
 if(IS_WINDOWS)
+    # Save original suffixes and force static libraries only (.a) for SDL3 family
+    set(_old_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+
     find_library(SDL3_LIB NAMES SDL3 PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
     find_library(SDL3_TTF_LIB NAMES SDL3_ttf PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
     find_library(SDL3_IMAGE_LIB NAMES SDL3_image PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
-    find_library(SDL3_MIXER_LIB NAMES SDL3_mixer PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
+
+    # Restore original suffixes
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_old_suffixes})
+    unset(_old_suffixes)
 endif()
 
 # =============================================================================
@@ -218,7 +224,6 @@ if(IS_LINUX)
         ${SDL3_INCLUDE_DIRS}
         ${SDL3_TTF_INCLUDE_DIRS}
         ${SDL3_IMAGE_INCLUDE_DIRS}
-        ${SDL3_MIXER_INCLUDE_DIRS}
         ${HARFBUZZ_INCLUDE_DIRS}
         ${X11_INCLUDE_DIRS}
         ${GBM_INCLUDE_DIRS}
@@ -258,7 +263,6 @@ if(UNIX AND NOT APPLE)  # Linux only
         ${SDL3_LIBRARIES}
         ${SDL3_TTF_LIBRARIES}
         ${SDL3_IMAGE_LIBRARIES}
-        ${SDL3_MIXER_LIBRARIES}
         ${HARFBUZZ_LIBRARIES}
         ${X11_LIBRARIES}
         ${GBM_LIBRARIES}
@@ -269,12 +273,17 @@ elseif(MINGW OR MSVC OR WIN32)  # Windows / MinGW
         ${SDL3_LIB}
         ${SDL3_TTF_LIB}
         ${SDL3_IMAGE_LIB}
-        ${SDL3_MIXER_LIB}
-        # Static linking flags for MinGW (reduces dependencies on MSYS2 DLLs)
-        -static-libgcc
-        -static-libstdc++
+
+        -static             # Static-link all MinGW runtime libs (eliminates libwinpthread-1.dll and any libgcc/libstdc++ DLLs)
+
         -mwindows           # GUI subsystem (no console window)
+
+        # Core Windows system libraries
         kernel32 user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
+
+        # Additional Windows API libraries required by static SDL3
+        setupapi            # SetupDi* functions
+        cfgmgr32            # CM_* functions
     )
 endif()
 
