@@ -22,10 +22,6 @@ A real star is ELLIE.hpp. It is more than full featured when it comes to debuggi
 We track and tell you everything along the way.  
 Filenames, line numbers, function names.  
 Debugging becomes a breeze.  
-<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-02-05%2021-32-45.png" />  
-
-Try to find the issue.  
-<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-02-05%2021-40-57.png" />  
 
 This is RTX. This also is literally Grok designing himself.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
