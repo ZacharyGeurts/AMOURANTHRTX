@@ -524,7 +524,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 
     LOG_INFO_CAT("Memory", "Selected physical device: {}", props.deviceName);
     LOG_INFO_CAT("Memory", "Device ID: {}", props.deviceID);
-    LOG_INFO_CAT("Memory", "Vendor ID: 0x{:x}", props.vendorID);
+    LOG_INFO_CAT("Memory", "Vendor ID: 0x{}", props.vendorID);
     LOG_INFO_CAT("Memory", "Device type: {}", 
                  props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "discrete GPU" :
                  props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "integrated GPU" :
@@ -706,7 +706,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     std::string chunkTag = "Chunk_" + std::to_string(chunks.size());
     chunks.push_back({buffer, memory, chunkSize, baseAddr, 0, chunkTag, {}});
 
-    LOG_SUCCESS_CAT("MEMORY", "Chunk created — tag='{}', size={} bytes, base addr=0x{:x}", chunkTag, chunkSize, baseAddr);
+    LOG_SUCCESS_CAT("MEMORY", "Chunk created — tag='{}', size={} bytes, base addr=0x{}", chunkTag, chunkSize, baseAddr);
 
     return &chunks.back();
 }
@@ -778,7 +778,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         nullptr, usage, std::string(tag)
     });
 
-    LOG_SUCCESS_CAT("MEMORY", "Descriptor buffer created — handle={:016x}, size={} bytes, addr=0x{:x}", handle, size, addr);
+    LOG_SUCCESS_CAT("MEMORY", "Descriptor buffer created — handle={}, size={} bytes, addr=0x{}", handle, size, addr);
 
     return handle;
 }
@@ -788,7 +788,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     auto it = buffers.find(handle);
 
     if (it == buffers.end()) {
-        std::string msg = std::format("lazyMapDescriptor failed — invalid handle {:016x}", handle);
+        std::string msg = std::format("lazyMapDescriptor failed — invalid handle {}", handle);
         vkh.checker(false, "lazyMapDescriptor handle lookup", msg.c_str());
         // or return nullptr; or std::abort();
     }
@@ -1889,7 +1889,7 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     VkDevice dev = rtx().device;
     VkSwapchainKHR sw = swapchain_.get();
 
-    // Fresh semaphore every frame — prevents VUID-03268 (re-use of pending semaphore)
+    // Fresh semaphore every acquire — avoids reuse-after-submit issues
     VkSemaphore semaphore = VK_NULL_HANDLE;
     VkSemaphoreCreateInfo semCI{};
     semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -1898,25 +1898,36 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
     if (createRes != VK_SUCCESS) {
         *pSemaphoreOut = VK_NULL_HANDLE;
         vkh.checker(createRes, "vkCreateSemaphore (acquire)", "Failed to create acquire semaphore");
-        return createRes;  // early exit on creation failure
+        return createRes;
     }
 
-    VkResult res = ext().vkAcquireNextImageKHR(dev, sw, UINT64_MAX,
+    // Use a finite timeout to allow forward progress when images are still pending
+    // 5 seconds is generous; adjust as needed (or use 0 for non-blocking)
+    constexpr uint64_t SAFE_TIMEOUT = 5'000'000'000ULL;  // 5 seconds
+
+    VkResult res = ext().vkAcquireNextImageKHR(dev, sw, SAFE_TIMEOUT,
                                                semaphore, VK_NULL_HANDLE, pImageIndex);
 
     if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) {
-        *pSemaphoreOut = semaphore;  // success → caller owns it (deferred destroy in pew())
-    } else {
-        // Failure → clean up semaphore immediately (never passed to submit/present)
-        vkDestroySemaphore(dev, semaphore, nullptr);
-        *pSemaphoreOut = VK_NULL_HANDLE;
-
-        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
-            minimized_ = true;
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire failed ({}) — minimized set", vkh.result(res));
-        }
+        *pSemaphoreOut = semaphore;  // success → caller owns it (destroy after present)
+        return res;
     }
 
+    *pSemaphoreOut = VK_NULL_HANDLE;
+
+    if (res == VK_TIMEOUT) {
+        // Normal timeout — no image ready yet, caller can retry next frame
+        LOG_INFO_CAT("SWAPCHAIN", "Acquire timed out after 5s — retry next cycle");
+        return VK_TIMEOUT;
+    }
+
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR) {
+        minimized_ = true;
+        LOG_WARNING_CAT("SWAPCHAIN", "Acquire failed ({}) — minimized set", vkh.result(res));
+        return res;
+    }
+
+    LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed critically: {}", vkh.result(res));
     return res;
 }
 
@@ -1949,7 +1960,6 @@ static VkResult presentImage(VkQueue queue, uint32_t imageIndex, VkSemaphore wai
         LOG_ERROR_CAT("SWAPCHAIN", "vkQueuePresentKHR failed: {}", vkh.result(res));
     }
 
-    // Explicit: NO vkDestroySemaphore here — caller (Renderer::pew()) owns lifetime
     return res;
 }
 
