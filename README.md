@@ -1,7 +1,7 @@
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
 We are not minimalist. We added every feature from every forum, efficently.  
 How efficent? Zero cost computing.  
-C++23 Vulkan 1.4+ and SDL3 with inclusion of GLM.  
+gcc-14 C++23 Vulkan 1.4+ and SDL3 with inclusion of GLM.  
 
 https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki  
 
