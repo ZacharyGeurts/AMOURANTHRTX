@@ -152,7 +152,7 @@ inline VkAccelerationStructureKHR create_dummy_tlas() {
 
     rtx().dummy_tlas = as;
 
-    LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS created successfully — handle {:016x}, size {} bytes",
+    LOG_SUCCESS_CAT("PIPELINE", "Dummy TLAS created successfully — handle {}, size {} bytes",
                     (uintptr_t)as, sizeInfo.accelerationStructureSize);
     return as;
 }
@@ -578,7 +578,7 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
     rtx().eternal_sbt_forged = true;
 
-    LOG_SUCCESS_CAT("PIPELINE", "Eternal shader binding table forged successfully — size {} bytes, address 0x{:x}",
+    LOG_SUCCESS_CAT("PIPELINE", "Eternal shader binding table forged successfully — size {} bytes, address 0x{}",
                     sbtSize, sbtAddr);
 }
 
@@ -590,7 +590,7 @@ inline void pipeline_dispatch_living_world(VkCommandBuffer cmd, float totalTime)
     vkh.checker(rtx().compute_pipeline != VK_NULL_HANDLE, "Compute pipeline existence",
                 "No compute pipeline available — skipping living world dispatch");
 
-    LOG_INFO_CAT("PIPELINE", "Dispatching living world compute — time {:.3f}s", totalTime);
+    LOG_INFO_CAT("PIPELINE", "Dispatching living world compute — time {}s", totalTime);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, rtx().compute_pipeline);
 

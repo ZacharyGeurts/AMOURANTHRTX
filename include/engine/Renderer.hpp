@@ -122,8 +122,7 @@ public:
         vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
         vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
 
-        // Final cleanup of deferred resources
-        cleanCompletedResources(true);
+        cleanCompletedResources(true);  // force final cleanup
 
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(defaultMaterialsHandle_);
@@ -151,7 +150,7 @@ public:
         cleanCompletedResources();
 
         if (minimized_ || !Swapchain::swapchain_.valid()) {
-            LOG_INFO_CAT("RENDERER", "Swapchain not ready — timing only ({}s)", total_sec);
+            LOG_INFO_CAT("RENDERER", "Swapchain not ready — timing only ({:.3f}s)", total_sec);
             return;
         }
 
@@ -184,7 +183,7 @@ public:
             return;
         }
 
-        LOG_INFO_CAT("RENDERER", "Frame active — image {}, time {}s", imageIndex, total_sec);
+        LOG_INFO_CAT("RENDERER", "Frame active — image {}, time {:.3f}s", imageIndex, total_sec);
 
         VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
         VkSemaphoreCreateInfo semCI{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
@@ -235,7 +234,7 @@ public:
         pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
         transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
-        VkImage swapImage = Swapchain::swapchainImages_[imageIndex];
+        VkImage swapImage = rtx().images;
         transitionImageLayout(cmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
         VkImageBlit blit{};
@@ -270,13 +269,6 @@ public:
         submit.pSignalSemaphores    = &renderFinishedSemaphore;
 
         VkResult submitRes = vkQueueSubmit(rtx().graphics_queue, 1, &submit, frameFence);
-        if (submitRes == VK_ERROR_DEVICE_LOST) {
-            LOG_FATAL_CAT("RENDERER", "Submit → DEVICE LOST");
-            needsSwapchainRecreate_ = true;
-            vkDestroySemaphore(rtx().device, renderFinishedSemaphore, nullptr);
-            deferredResources_.push_back({acquireSemaphore, frameFence});
-            return;
-        }
         vkh.checker(submitRes, "vkQueueSubmit", "Failed");
 
         VkResult presentRes = Swapchain::presentImage(rtx().graphics_queue, imageIndex, renderFinishedSemaphore);
@@ -328,7 +320,7 @@ private:
                 vkWaitForFences(rtx().device, 1, &it->completionFence, VK_TRUE, 10'000'000ULL);
 
                 if (it->acquireSemaphore != VK_NULL_HANDLE) {
-                    LOG_INFO_CAT("RENDERER", "DESTROYING acquire semaphore {}{}",
+                    LOG_INFO_CAT("RENDERER", "DESTROYING acquire semaphore {:016x}{}",
                                  (uintptr_t)it->acquireSemaphore, force ? " (forced)" : "");
                     vkDestroySemaphore(rtx().device, it->acquireSemaphore, nullptr);
                 }
@@ -445,7 +437,7 @@ private:
 
         Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
 
-        LOG_INFO_CAT("RENDERER", "Camera UBO updated — exposure {}, time {}s", data.exposure, data.totalTime);
+        LOG_INFO_CAT("RENDERER", "Camera UBO updated — exposure {}, time {:.3f}s", data.exposure, data.totalTime);
     }
 
     void updateGlobalDescriptorBuffer() noexcept {

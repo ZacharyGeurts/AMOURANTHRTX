@@ -951,7 +951,7 @@ inline void install_apocalypse_handler() noexcept {
     sigaction(SIGILL,  &sa, nullptr);
     sigaction(SIGBUS,  &sa, nullptr);
 
-    LOG_SUCCESS_CAT("CRASH", "POSIX signal handlers installed — apocalypse ready");
+    LOG_SUCCESS_CAT("Debug", "POSIX signal handlers installed — apocalypse ready");
 #endif
 }
 

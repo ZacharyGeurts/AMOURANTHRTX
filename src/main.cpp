@@ -175,13 +175,17 @@ int main(int, char**) {
 
         LOG_SUCCESS_CAT("VULKAN", "Global transient command pool created and sealed");
     }
-
-    // Create swapchain
+    // Create swapchain — single image only
     Swapchain::create(g_window, Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
-    rtx().images = Swapchain::swapchainImages_;
-    rtx().views = Swapchain::swapchainImageViews_;
-    rtx().extent = Swapchain::swapchainExtent_;
-    rtx().image_count = Swapchain::swapchainImages_.size();
+
+    // Assign the single image and view directly to rtx()
+    rtx().images      = Swapchain::swapchainImage_;      // VkImage (single handle)
+    rtx().views       = Swapchain::swapchainImageView_;  // VkImageView (single handle)
+    rtx().extent      = Swapchain::swapchainExtent_;
+    rtx().image_count = 1;  // fixed — we only ever use one image
+
+    LOG_INFO_CAT("MAIN", "Swapchain created — single image {}, {}x{}", 
+                 (uintptr_t)rtx().images, rtx().extent.width, rtx().extent.height);
 
     // Pipeline initialization — now with guaranteed real pool
     pipeline_initialize();
