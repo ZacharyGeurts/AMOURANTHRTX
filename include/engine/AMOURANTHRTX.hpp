@@ -1621,224 +1621,214 @@ struct Swapchain {
         createOrRecreateSwapchain(w, h, true);
     }
 
-    static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept {
-        VkDevice dev = rtx().device;
-        VkPhysicalDevice phys = rtx().physical;
-        VkSurfaceKHR surf = rtx().surface;
+static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) noexcept {
+    vkh.checker(rtx().device != VK_NULL_HANDLE && rtx().physical != VK_NULL_HANDLE && rtx().surface != VK_NULL_HANDLE && w > 0 && h > 0,
+                "Swapchain creation params",
+                "Cannot create swapchain — invalid params or minimized");
 
-        vkh.checker(dev != VK_NULL_HANDLE && phys != VK_NULL_HANDLE && surf != VK_NULL_HANDLE && w > 0 && h > 0,
-                    "Swapchain creation params",
-                    "Cannot create swapchain — invalid params or minimized");
+    vkDeviceWaitIdle(rtx().device);
 
-        vkDeviceWaitIdle(dev);
-
-        if (isRecreate) {
-            if (swapchainImageView_ != VK_NULL_HANDLE) {
-                vkDestroyImageView(dev, swapchainImageView_, nullptr);
-                swapchainImageView_ = VK_NULL_HANDLE;
-            }
-            if (swapchain_.valid()) {
-                ext().vkDestroySwapchainKHR(dev, swapchain_.get(), nullptr);
-                swapchain_.reset();
-            }
-            swapchainImage_ = VK_NULL_HANDLE;
+    if (isRecreate) {
+        if (rtx().views != VK_NULL_HANDLE) {
+            vkDestroyImageView(rtx().device, rtx().views, nullptr);
+            rtx().views = VK_NULL_HANDLE;
         }
-
-        minimized_ = false;
-
-        VkSurfaceCapabilitiesKHR caps{};
-        vkh.checker(
-            ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, &caps),
-            "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
-            "Failed to get surface capabilities"
-        );
-
-        VkExtent2D extent{};
-        if (caps.currentExtent.width == UINT32_MAX) {
-            extent.width  = std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width);
-            extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
-        } else {
-            extent = caps.currentExtent;
+        if (swapchain_.valid()) {
+            ext().vkDestroySwapchainKHR(rtx().device, swapchain_.get(), nullptr);
+            swapchain_.reset();
         }
-
-        vkh.checker(extent.width > 0 && extent.height > 0, "Swapchain extent validation",
-                    "Swapchain extent zero — window minimized");
-
-        // ── Surface formats ─────────────────────────────────────────────────────────
-        uint32_t fmtCount = 0;
-        vkh.checker(
-            ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, nullptr),
-            "vkGetPhysicalDeviceSurfaceFormatsKHR (count)",
-            "Failed to get surface format count"
-        );
-
-        std::vector<VkSurfaceFormatKHR> formats(fmtCount);
-        vkh.checker(
-            ext().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &fmtCount, formats.data()),
-            "vkGetPhysicalDeviceSurfaceFormatsKHR (formats)",
-            "Failed to get surface formats"
-        );
-
-        VkSurfaceFormatKHR chosenFormat = formats.empty() ? VkSurfaceFormatKHR{} : formats.front();
-
-        constexpr std::array preferredFormats = {
-            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-        };
-
-        for (const auto& pref : preferredFormats) {
-            auto it = std::find_if(formats.begin(), formats.end(),
-                                   [&](const auto& f) { return f.format == pref.format && f.colorSpace == pref.colorSpace; });
-            if (it != formats.end()) {
-                chosenFormat = *it;
-                break;
-            }
-        }
-
-        LOG_INFO_CAT("SWAPCHAIN", "Chosen format: {} ({})",
-                     vkh.format(chosenFormat.format),
-                     vkh.colorspace(chosenFormat.colorSpace));
-
-        // ── Present modes ───────────────────────────────────────────────────────────
-        uint32_t pmCount = 0;
-        vkh.checker(
-            ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, nullptr),
-            "vkGetPhysicalDeviceSurfacePresentModesKHR (count)",
-            "Failed to get present mode count"
-        );
-
-        std::vector<VkPresentModeKHR> supportedModes(pmCount);
-        vkh.checker(
-            ext().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &pmCount, supportedModes.data()),
-            "vkGetPhysicalDeviceSurfacePresentModesKHR (modes)",
-            "Failed to get present modes"
-        );
-
-        VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR; // safe fallback
-
-        // Priority: IMMEDIATE > FIFO_LATEST_READY > FIFO
-        if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != supportedModes.end()) {
-            chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            LOG_SUCCESS_CAT("SWAPCHAIN", "IMMEDIATE selected");
-        } else if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_FIFO_LATEST_READY_EXT) != supportedModes.end()) {
-            chosenPM = VK_PRESENT_MODE_FIFO_LATEST_READY_EXT;
-            LOG_INFO_CAT("SWAPCHAIN", "Using FIFO_LATEST_READY");
-        } else {
-            LOG_WARNING_CAT("SWAPCHAIN", "Falling back to FIFO");
-        }
-
-        // ── Image count ─────────────────────────────────────────────────────────────
-        uint32_t imgCount = 1; // single image only
-
-        // Driver may force higher minImageCount — respect it
-        imgCount = std::max(imgCount, caps.minImageCount);
-
-        if (caps.maxImageCount > 0) {
-            imgCount = std::min(imgCount, caps.maxImageCount);
-        }
-
-        LOG_INFO_CAT("SWAPCHAIN", "Using {} image(s) — single-frame mode", imgCount);
-
-        // ── Usage flags ─────────────────────────────────────────────────────────────
-        directWriteEnabled = false;
-        VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-
-        if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
-            VkImageFormatProperties props{};
-            VkResult formatRes = vkGetPhysicalDeviceImageFormatProperties(
-                phys,
-                chosenFormat.format,
-                VK_IMAGE_TYPE_2D,
-                VK_IMAGE_TILING_OPTIMAL,
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                0,
-                &props
-            );
-
-            if (formatRes == VK_SUCCESS) {
-                directWriteEnabled = true;
-                usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-                LOG_INFO_CAT("SWAPCHAIN", "Storage usage ENABLED");
-            } else {
-                LOG_WARNING_CAT("SWAPCHAIN", "Storage usage NOT enabled — query returned {}", vkh.result(formatRes));
-            }
-        }
-
-        // ── Create swapchain ────────────────────────────────────────────────────────
-        VkSwapchainCreateInfoKHR ci{};
-        ci.sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        ci.surface         = surf;
-        ci.minImageCount   = imgCount;
-        ci.imageFormat     = chosenFormat.format;
-        ci.imageColorSpace = chosenFormat.colorSpace;
-        ci.imageExtent     = extent;
-        ci.imageArrayLayers = 1;
-        ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        ci.preTransform    = caps.currentTransform;
-        ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        ci.presentMode     = chosenPM;
-        ci.clipped         = VK_TRUE;
-        ci.oldSwapchain    = swapchain_.get();
-        ci.imageUsage      = usage;
-
-        VkSwapchainKHR newSwap = VK_NULL_HANDLE;
-        vkh.checker(
-            ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap),
-            "vkCreateSwapchainKHR",
-            "vkCreateSwapchainKHR failed"
-        );
-
-        swapchain_ = Handle(newSwap);
-        swapchainExtent_ = extent;
-        swapchainFormat_ = chosenFormat.format;
-
-        // ── Get single image & create view ──────────────────────────────────────────
-        uint32_t count = 0;
-        vkh.checker(
-            ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, nullptr),
-            "vkGetSwapchainImagesKHR (count)",
-            "Failed to get swapchain image count"
-        );
-
-        if (count != imgCount) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Driver returned {} image(s) — expected {}", count, imgCount);
-        }
-
-        std::vector<VkImage> images(count);
-        vkh.checker(
-            ext().vkGetSwapchainImagesKHR(dev, newSwap, &count, images.data()),
-            "vkGetSwapchainImagesKHR (images)",
-            "Failed to get swapchain images"
-        );
-
-        swapchainImage_ = images[0];  // single image only
-
-        VkImageViewCreateInfo viewCI{};
-        viewCI.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewCI.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-        viewCI.format           = chosenFormat.format;
-        viewCI.components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                   VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-        viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        viewCI.image            = swapchainImage_;
-
-        vkh.checker(
-            vkCreateImageView(dev, &viewCI, nullptr, &swapchainImageView_),
-            "vkCreateImageView (swapchain image)",
-            "Failed to create swapchain image view"
-        );
-
-        rtx().images      = {swapchainImage_};      // single entry
-        rtx().views       = {swapchainImageView_};  // single entry
-        rtx().extent      = extent;
-        rtx().image_count = 1;
-
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — 1 image, {}x{}, format {}, mode {}",
-                        isRecreate ? "recreated" : "created",
-                        extent.width, extent.height,
-                        vkh.format(chosenFormat.format), chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
+        rtx().images = VK_NULL_HANDLE;
     }
+
+    minimized_ = false;
+
+    VkSurfaceCapabilitiesKHR caps{};
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rtx().physical, rtx().surface, &caps),
+        "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+        "Failed to get surface capabilities"
+    );
+
+    VkExtent2D extent{};
+    if (caps.currentExtent.width == UINT32_MAX) {
+        extent.width  = std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width);
+        extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
+    } else {
+        extent = caps.currentExtent;
+    }
+
+    vkh.checker(extent.width > 0 && extent.height > 0, "Swapchain extent validation",
+                "Swapchain extent zero — window minimized");
+
+    // ── Surface formats ─────────────────────────────────────────────────────────
+    uint32_t fmtCount = 0;
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfaceFormatsKHR(rtx().physical, rtx().surface, &fmtCount, nullptr),
+        "vkGetPhysicalDeviceSurfaceFormatsKHR (count)",
+        "Failed to get surface format count"
+    );
+
+    std::vector<VkSurfaceFormatKHR> formats(fmtCount);
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfaceFormatsKHR(rtx().physical, rtx().surface, &fmtCount, formats.data()),
+        "vkGetPhysicalDeviceSurfaceFormatsKHR (formats)",
+        "Failed to get surface formats"
+    );
+
+    VkSurfaceFormatKHR chosenFormat = formats.empty() ? VkSurfaceFormatKHR{} : formats.front();
+
+    constexpr std::array preferredFormats = {
+        VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+        VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+        VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+    };
+
+    for (const auto& pref : preferredFormats) {
+        auto it = std::find_if(formats.begin(), formats.end(),
+                               [&](const auto& f) { return f.format == pref.format && f.colorSpace == pref.colorSpace; });
+        if (it != formats.end()) {
+            chosenFormat = *it;
+            break;
+        }
+    }
+
+    LOG_INFO_CAT("SWAPCHAIN", "Chosen format: {} ({})",
+                 vkh.format(chosenFormat.format),
+                 vkh.colorspace(chosenFormat.colorSpace));
+
+    // ── Present modes ───────────────────────────────────────────────────────────
+    uint32_t pmCount = 0;
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfacePresentModesKHR(rtx().physical, rtx().surface, &pmCount, nullptr),
+        "vkGetPhysicalDeviceSurfacePresentModesKHR (count)",
+        "Failed to get present mode count"
+    );
+
+    std::vector<VkPresentModeKHR> supportedModes(pmCount);
+    vkh.checker(
+        ext().vkGetPhysicalDeviceSurfacePresentModesKHR(rtx().physical, rtx().surface, &pmCount, supportedModes.data()),
+        "vkGetPhysicalDeviceSurfacePresentModesKHR (modes)",
+        "Failed to get present modes"
+    );
+
+    VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR; // safe fallback
+
+    if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != supportedModes.end()) {
+        chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        LOG_SUCCESS_CAT("SWAPCHAIN", "IMMEDIATE selected");
+    } else if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_FIFO_LATEST_READY_EXT) != supportedModes.end()) {
+        chosenPM = VK_PRESENT_MODE_FIFO_LATEST_READY_EXT;
+        LOG_INFO_CAT("SWAPCHAIN", "Using FIFO_LATEST_READY");
+    } else {
+        LOG_WARNING_CAT("SWAPCHAIN", "Falling back to FIFO");
+    }
+
+    // ── Image count ─────────────────────────────────────────────────────────────
+    uint32_t imgCount = 1; // single image only
+
+    imgCount = std::max(imgCount, caps.minImageCount);
+
+    LOG_INFO_CAT("SWAPCHAIN", "Using {} image(s) — single-frame mode", imgCount);
+
+    // ── Usage flags ─────────────────────────────────────────────────────────────
+    directWriteEnabled = false;
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
+        VkImageFormatProperties props{};
+        VkResult formatRes = vkGetPhysicalDeviceImageFormatProperties(
+            rtx().physical,
+            chosenFormat.format,
+            VK_IMAGE_TYPE_2D,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            0,
+            &props
+        );
+
+        if (formatRes == VK_SUCCESS) {
+            directWriteEnabled = true;
+            usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+            LOG_INFO_CAT("SWAPCHAIN", "Storage usage ENABLED");
+        } else {
+            LOG_WARNING_CAT("SWAPCHAIN", "Storage usage NOT enabled — query returned {}", vkh.result(formatRes));
+        }
+    }
+
+    // ── Create swapchain ────────────────────────────────────────────────────────
+    VkSwapchainCreateInfoKHR ci{};
+    ci.sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    ci.surface         = rtx().surface;
+    ci.minImageCount   = imgCount;
+    ci.imageFormat     = chosenFormat.format;
+    ci.imageColorSpace = chosenFormat.colorSpace;
+    ci.imageExtent     = extent;
+    ci.imageArrayLayers = 1;
+    ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ci.preTransform    = caps.currentTransform;
+    ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    ci.presentMode     = chosenPM;
+    ci.clipped         = VK_TRUE;
+    ci.oldSwapchain    = swapchain_.get();
+    ci.imageUsage      = usage;
+
+    VkSwapchainKHR newSwap = VK_NULL_HANDLE;
+    vkh.checker(
+        ext().vkCreateSwapchainKHR(rtx().device, &ci, nullptr, &newSwap),
+        "vkCreateSwapchainKHR",
+        "vkCreateSwapchainKHR failed"
+    );
+
+    swapchain_ = Handle(newSwap);
+    swapchainExtent_ = extent;
+    swapchainFormat_ = chosenFormat.format;
+
+    // ── Get single image & create view ──────────────────────────────────────────
+    uint32_t count = 0;
+    vkh.checker(
+        ext().vkGetSwapchainImagesKHR(rtx().device, newSwap, &count, nullptr),
+        "vkGetSwapchainImagesKHR (count)",
+        "Failed to get swapchain image count"
+    );
+
+    if (count != imgCount) {
+        LOG_WARNING_CAT("SWAPCHAIN", "Driver returned {} image(s) — expected {}", count, imgCount);
+    }
+
+    VkImage singleImage = VK_NULL_HANDLE;
+    vkh.checker(
+        ext().vkGetSwapchainImagesKHR(rtx().device, newSwap, &count, &singleImage),
+        "vkGetSwapchainImagesKHR (single image)",
+        "Failed to get swapchain image"
+    );
+
+    VkImageViewCreateInfo viewCI{};
+    viewCI.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewCI.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+    viewCI.format           = chosenFormat.format;
+    viewCI.components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                               VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    viewCI.image            = singleImage;
+
+    VkImageView singleView = VK_NULL_HANDLE;
+    vkh.checker(
+        vkCreateImageView(rtx().device, &viewCI, nullptr, &singleView),
+        "vkCreateImageView (swapchain image)",
+        "Failed to create swapchain image view"
+    );
+
+    // Store directly in rtx() — no vectors, no remapping
+    rtx().images      = singleImage;
+    rtx().views       = singleView;
+    rtx().extent      = extent;
+    rtx().image_count = 1;
+
+    LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — 1 image, {}x{}, format {}, mode {}",
+                    isRecreate ? "recreated" : "created",
+                    extent.width, extent.height,
+                    vkh.format(chosenFormat.format), chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
+}
 
     [[nodiscard]] static VkResult acquireNextImage(uint32_t* pImageIndex, VkSemaphore* pSemaphoreOut) noexcept {
         *pImageIndex = 0;
