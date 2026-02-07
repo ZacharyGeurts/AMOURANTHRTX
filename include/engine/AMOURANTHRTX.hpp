@@ -480,7 +480,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
             return i;
         }
     }
-    LOG_ERROR_CAT("MEMORY", "No suitable memory type found for filter 0x{:x}, properties 0x{:x}", typeFilter, properties);
+    LOG_ERROR_CAT("MEMORY", "No suitable memory type found for filter 0x{}, properties 0x{}", typeFilter, properties);
     return ~0u;
 }
 
@@ -502,14 +502,14 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 
     LOG_INFO_CAT("Memory", "Starting VRAM measurement at {} µs since program start", static_cast<uint64_t>(now_us));
 
-VkPhysicalDevice phys = rtx().physical;
+    VkPhysicalDevice phys = rtx().physical;
 
-if (phys == VK_NULL_HANDLE) {
-    vkh.checker(false, "Physical device existence",
-                "No physical device available — measurement aborted");
-    // Optional: return early or log fatal
-    return VRAMReality{};
-}
+    if (phys == VK_NULL_HANDLE) {
+        vkh.checker(false, "Physical device existence",
+                    "No physical device available — measurement aborted");
+        // Optional: return early or log fatal
+        return VRAMReality{};
+    }
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(phys, &props);
@@ -651,7 +651,7 @@ if (phys == VK_NULL_HANDLE) {
 
     VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, size);
 
-    LOG_INFO_CAT("MEMORY", "Creating chunk — size={} bytes, usage=0x{:x}, sharing={}",
+    LOG_INFO_CAT("MEMORY", "Creating chunk — size={} bytes, usage=0x{}, sharing={}",
                  chunkSize, usage, sharingMode == VK_SHARING_MODE_EXCLUSIVE ? "exclusive" : "concurrent");
 
     VkBufferCreateInfo bci{};

@@ -106,7 +106,6 @@ set(OUTPUT_DIRS
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/fonts
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/textures
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/models
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/materials
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/scenes
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/audio
     ${CMAKE_BINARY_DIR}/bin/Linux/assets/scripts
@@ -115,7 +114,6 @@ set(OUTPUT_DIRS
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/fonts
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/textures
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/models
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/materials
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/scenes
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/audio
     ${CMAKE_BINARY_DIR}/bin/Windows/assets/scripts
