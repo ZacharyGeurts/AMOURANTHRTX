@@ -88,9 +88,14 @@ public:
         if (destroyed_) return;
         destroyed_ = true;
 
-        LOG_INFO_CAT("RENDERER", "Shutting down");
+        LOG_INFO_CAT("RENDERER", "Shutting down — draining queues before cleanup");
 
+        // Drain **all** queues — prevents pending cmd buffers & fences
         vkDeviceWaitIdle(rtx().device);
+        vkQueueWaitIdle(rtx().graphics_queue);
+        vkQueueWaitIdle(rtx().present_queue);
+        if (rtx().compute_queue != VK_NULL_HANDLE) vkQueueWaitIdle(rtx().compute_queue);
+        if (rtx().transfer_queue != VK_NULL_HANDLE) vkQueueWaitIdle(rtx().transfer_queue);
 
         vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
         vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
@@ -113,10 +118,13 @@ void pew() noexcept {
 
     double total_sec = TotalTime::get().seconds();
 
-    // Always update UBO — time never stops
+    // Quick pre-check: drain queues only if we suspect trouble (release = assume clean)
+    // This is almost free if queues are already idle
+    vkQueueWaitIdle(rtx().graphics_queue);
+    vkQueueWaitIdle(rtx().present_queue);
+
     updateCameraUBO(total_sec);
 
-    // Always do living world + ray trace to HDR output
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -124,18 +132,26 @@ void pew() noexcept {
     allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
 
-    if (vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd) != VK_SUCCESS) {
-        return;  // silent fail — no cmd buffer, no frame
+    VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd);
+    if (res != VK_SUCCESS) {
+        // In release we don't spam logs — just bail quietly
+        return;
     }
 
-    VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    res = vkBeginCommandBuffer(cmd, &beginInfo);
+    if (res != VK_SUCCESS) {
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+        return;
+    }
 
     pipeline_dispatch_living_world(cmd, total_sec);
 
     VkMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
     vkCmdPipelineBarrier(cmd,
@@ -151,22 +167,50 @@ void pew() noexcept {
     pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
     transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
-    vkEndCommandBuffer(cmd);
+    res = vkEndCommandBuffer(cmd);
+    if (res != VK_SUCCESS) {
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+        return;
+    }
 
+    // Fence — we create one every frame in release (cheap)
     VkFence frameFence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fenceCI{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFenceCreateInfo fenceCI{};
+    fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     vkCreateFence(rtx().device, &fenceCI, nullptr, &frameFence);
 
     VkSubmitInfo submit{};
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &cmd;
-    vkQueueSubmit(rtx().graphics_queue, 1, &submit, frameFence);
 
-    // Attempt to blit to swapchain only if we have a valid image
+    res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, frameFence);
+    if (res != VK_SUCCESS) {
+        // Release-friendly: log once, clean up, bail
+        // You can #ifdef _DEBUG or NDEBUG-strip this block later if desired
+        const char* errStr = vkh.result(res);  // your vkh.result helper
+        fprintf(stderr, "[RENDERER ERROR] vkQueueSubmit failed: %s\n", errStr ? errStr : "unknown");
+
+        if (res == VK_ERROR_DEVICE_LOST) {
+            fprintf(stderr, "[FATAL] DEVICE LOST — GPU crash / timeout / out of memory. Restart required.\n");
+            // Optional: set a global flag to show UI message or exit gracefully
+        }
+
+        vkDestroyFence(rtx().device, frameFence, nullptr);
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+        return;
+    }
+
+    // Wait — in release this is the price of safety. No pending cmd buffers.
+    vkWaitForFences(rtx().device, 1, &frameFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(rtx().device, 1, &frameFence);
+    vkDestroyFence(rtx().device, frameFence, nullptr);
+    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+
+    // Blit & present (best effort, no fence — driver handles ordering)
     if (rtx().images != VK_NULL_HANDLE) {
         VkCommandBuffer blitCmd = VK_NULL_HANDLE;
-        vkAllocateCommandBuffers(rtx().device, &allocInfo, &blitCmd);  // reuse allocInfo
+        vkAllocateCommandBuffers(rtx().device, &allocInfo, &blitCmd);
 
         vkBeginCommandBuffer(blitCmd, &beginInfo);
 
@@ -196,18 +240,14 @@ void pew() noexcept {
         blitSubmit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         blitSubmit.commandBufferCount   = 1;
         blitSubmit.pCommandBuffers      = &blitCmd;
+
         vkQueueSubmit(rtx().graphics_queue, 1, &blitSubmit, VK_NULL_HANDLE);
 
-        // Present attempt — best effort, no blocking
-        VkSemaphore dummySem = VK_NULL_HANDLE;  // no wait needed for best-effort present
+        VkSemaphore dummySem = VK_NULL_HANDLE;
         Swapchain::presentImage(rtx().graphics_queue, 0, dummySem);
 
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &blitCmd);
     }
-
-    // Clean up this frame's resources — no tracking
-    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-    vkDestroyFence(rtx().device, frameFence, nullptr);
 }
 
     void onResize(int newWidth, int newHeight) noexcept {
@@ -219,23 +259,39 @@ void pew() noexcept {
 
         if (newWidth == width_ && newHeight == height_) return;
 
+        // Drain queues before touching swapchain or HDR image
+        vkDeviceWaitIdle(rtx().device);
+        vkQueueWaitIdle(rtx().graphics_queue);
+        vkQueueWaitIdle(rtx().present_queue);
+
         width_  = newWidth;
         height_ = newHeight;
         minimized_ = false;
         needsSwapchainRecreate_ = true;
 
         LOG_INFO_CAT("RENDERER", "Resize — {}x{}", width_, height_);
+
+        // Recreate HDR target
+        createOrRecreateHDRImage();
+
+        // Force descriptor update next frame
+        needsDescriptorUpdate_ = true;
     }
 
 private:
     void createOrRecreateHDRImage() noexcept {
         LOG_INFO_CAT("RENDERER", "Creating/recreating HDR image — {}x{}", width_, height_);
 
+        // Already waited in onResize — but belt-and-suspenders
         vkDeviceWaitIdle(rtx().device);
 
         vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
         vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
         vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+
+        hdrOutputView_ = VK_NULL_HANDLE;
+        hdrOutputImage_ = VK_NULL_HANDLE;
+        hdrOutputMemory_ = VK_NULL_HANDLE;
 
         VkImageCreateInfo hdrInfo{};
         hdrInfo.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
