@@ -784,6 +784,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 }
 
 [[nodiscard]] inline void* lazyMapDescriptor(uint64_t handle) noexcept {
+    std::lock_guard<std::mutex> lock(rtx().buffer_mutex);
     auto& buffers = rtx().buffers;
     auto it = buffers.find(handle);
 
@@ -1279,6 +1280,7 @@ inline void destroy(uint64_t handle) noexcept {
 
     if (info.mapped != nullptr) {
         vkUnmapMemory(dev, info.memory);
+        info.mapped = nullptr;
     }
     vkDestroyBuffer(dev, info.buffer, nullptr);
     vkFreeMemory(dev, info.memory, nullptr);
@@ -1622,6 +1624,7 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
                 "Cannot create swapchain — invalid params or minimized");
 
     vkDeviceWaitIdle(rtx().device);
+    vkQueueWaitIdle(rtx().present_queue);
 
     if (isRecreate) {
         if (rtx().views != VK_NULL_HANDLE) {
@@ -1931,6 +1934,7 @@ static void createOrRecreateSwapchain(uint32_t w, uint32_t h, bool isRecreate) n
                     "No device available — skipping swapchain cleanup");
 
         vkDeviceWaitIdle(dev);
+        vkQueueWaitIdle(rtx().present_queue);
 
         if (swapchainImageView_ != VK_NULL_HANDLE) {
             vkDestroyImageView(dev, swapchainImageView_, nullptr);
@@ -2442,7 +2446,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
             if (instHandle == 0) {
                 vkh.checker(false, "Memory::create (LAS instance buffer)",
-                            "Failed to allocate TLAS instance buffer");
+                    "Failed to allocate TLAS instance buffer");
                 return;
             }
 
