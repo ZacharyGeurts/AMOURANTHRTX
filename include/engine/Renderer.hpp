@@ -315,8 +315,6 @@ private:
         data.maxDepth   = 12;
 
         Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
-
-        LOG_INFO_CAT("RENDERER", "Camera UBO updated — exposure {}, time {:.3f}s", data.exposure, data.totalTime);
     }
 
     void updateGlobalDescriptorBuffer() noexcept {
@@ -374,9 +372,6 @@ private:
 
         vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0,
                              0, nullptr, 0, nullptr, 1, &barrier);
-
-        LOG_INFO_CAT("RENDERER", "Transition — {} → {} for {}",
-                     vkh.imageLayout(oldLayout), vkh.imageLayout(newLayout), (uintptr_t)image);
     }
 
 private:

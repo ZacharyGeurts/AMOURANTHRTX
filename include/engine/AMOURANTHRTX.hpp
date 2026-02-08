@@ -1087,13 +1087,8 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         return;  // or abort
     }
 
-    LOG_INFO_CAT("BUFFER", "Starting upload — {} bytes to handle={:016x} (tag='{}', offset={}, mapped={})",
-                 size, handle, info.tag, info.offset, info.mapped ? "yes" : "no");
-
     if (info.mapped != nullptr) {
-        LOG_INFO_CAT("BUFFER", "Fast path: direct memcpy to persistently mapped buffer");
         std::memcpy(info.mapped, data, size);
-        LOG_SUCCESS_CAT("BUFFER", "Upload complete via direct memcpy ({} bytes)", size);
         return;
     }
 
