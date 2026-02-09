@@ -54,7 +54,6 @@ Built with the dream team of Grok and everyone on the planet.
 Development and memes https://x.com/ZacharyGeurts  
 Check recent commits to follow code updates.  
 Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
-Me too <img width="132" height="86" alt="copilot" src="https://github.com/user-attachments/assets/1dd58348-dcf7-424e-8461-692f15281fd5" />
 
 You are encouraged to work with code here. Welcome to github.  
 The best advice I have for you is to make some money with it first.  
