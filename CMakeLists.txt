@@ -174,16 +174,6 @@ FetchContent_MakeAvailable(tinyobjloader)
 set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
 
 # =============================================================================
-# oneTBB (Intel oneAPI Threading Building Blocks)
-# =============================================================================
-FetchContent_Declare(
-    onetbb
-    GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
-    GIT_TAG v2022.0.0
-)
-FetchContent_MakeAvailable(onetbb)
-
-# =============================================================================
 # SOURCE COLLECTION
 # =============================================================================
 file(GLOB_RECURSE SOURCES
@@ -212,9 +202,6 @@ target_include_directories(amouranth_engine PRIVATE
     ${FREETYPE_INCLUDE_DIRS}
     ${glm_INCLUDE_DIRS}
     ${tinyobjloader_SOURCE_DIR}
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/backends
-    ${onetbb_SOURCE_DIR}/include
 )
 
 if(IS_LINUX)
@@ -246,7 +233,6 @@ target_compile_definitions(amouranth_engine PRIVATE
 
 target_link_libraries(amouranth_engine PRIVATE
     Vulkan::Vulkan
-    TBB::tbb
     OpenMP::OpenMP_CXX
     Freetype::Freetype
     atomic              # Needed for some atomics on older GCC/MinGW
@@ -339,14 +325,6 @@ foreach(SRC ${POTENTIAL_SHADERS})
         if(NAME MATCHES "([_.])?comp(\\.glsl)?$")
             set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
             set(STAGE comp)
-        endif()
-    else()
-        if(NAME MATCHES "([_.])?vert(\\.glsl)?$")
-            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
-            set(STAGE vert)
-        elseif(NAME MATCHES "([_.])?frag(\\.glsl)?$")
-            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
-            set(STAGE frag)
         endif()
     endif()
 
