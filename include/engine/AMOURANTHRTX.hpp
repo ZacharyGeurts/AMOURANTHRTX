@@ -1059,15 +1059,21 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     return baseAddr;
 }
 
-inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
-                           VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
+// Returns staging buffer/memory pair if external mode (caller MUST destroy after submit/wait)
+// Returns {VK_NULL_HANDLE, VK_NULL_HANDLE} if owned/internal mode (already cleaned up)
+[[nodiscard]] inline std::pair<VkBuffer, VkDeviceMemory> uploadToBuffer(
+    uint64_t handle,
+    const void* data,
+    VkDeviceSize size,
+    VkCommandBuffer cmd = VK_NULL_HANDLE
+) noexcept {
     auto& buffers = rtx().buffers;
     auto it = buffers.find(handle);
 
     if (it == buffers.end()) {
         std::string msg = std::format("uploadToBuffer failed — invalid handle {:016x}", handle);
         vkh.checker(false, "uploadToBuffer handle lookup", msg.c_str());
-        return;
+        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     }
 
     BufferInfo& info = it->second;
@@ -1076,25 +1082,25 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         std::string msg = std::format("uploadToBuffer failed — size {} exceeds buffer capacity {} (handle={:016x}, tag='{}')",
                                       size, info.size, handle, info.tag);
         vkh.checker(false, "upload size validation", msg.c_str());
-        return;
+        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     }
 
     if (info.buffer == VK_NULL_HANDLE) {
         std::string msg = std::format("uploadToBuffer failed — buffer is null (handle={:016x}, tag='{}')", handle, info.tag);
         vkh.checker(false, "Target buffer validity", msg.c_str());
-        return;
+        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     }
 
     if (info.mapped != nullptr) {
         std::memcpy(info.mapped, data, size);
-        return;
+        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     }
 
     VkDevice dev = rtx().device;
-    VkQueue queue = rtx().graphics_queue;
+    VkQueue queue = rtx().graphics_queue;  // unused in external path now
 
     bool usingExternalCmd = (cmd != VK_NULL_HANDLE);
-    VkCommandBuffer uploadCmd = usingExternalCmd ? cmd : VK_NULL_HANDLE;
+    VkCommandBuffer targetCmd = usingExternalCmd ? cmd : VK_NULL_HANDLE;
 
     // Transient staging buffer creation
     VkDeviceSize stageSize = align_up(size, 256);
@@ -1161,35 +1167,21 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
 
     LOG_INFO_CAT("BUFFER", "Data copied to transient staging — {} bytes", size);
 
-    // Fence for owned cmd path only
-    VkFence fence = VK_NULL_HANDLE;
+    // Record the copy into the target command buffer (owned or external)
+    VkCommandBuffer copyTarget = targetCmd;
+
     if (!usingExternalCmd) {
-        VkFenceCreateInfo fenceInfo{};
-        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        vkh.checker(
-            vkCreateFence(dev, &fenceInfo, nullptr, &fence),
-            "vkCreateFence",
-            "vkCreateFence failed"
-        );
-    }
-
-    // Command buffer setup (only if we own it)
-    VkCommandBufferAllocateInfo allocInfo{};
-    if (!usingExternalCmd) {
-        vkh.checker(rtx().transient_pool != VK_NULL_HANDLE, "Transient pool existence",
-                    "No transient command pool available for upload");
-
-        LOG_INFO_CAT("BUFFER", "Allocating one-time command buffer from transient pool");
-
+        // Owned path: allocate our own cmd
+        VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool        = rtx().transient_pool;
         allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
 
         vkh.checker(
-            vkAllocateCommandBuffers(dev, &allocInfo, &uploadCmd),
-            "vkAllocateCommandBuffers (transient upload)",
-            "Failed to allocate transient cmd buffer"
+            vkAllocateCommandBuffers(dev, &allocInfo, &copyTarget),
+            "vkAllocateCommandBuffers (owned upload)",
+            "Failed to allocate owned upload cmd"
         );
 
         VkCommandBufferBeginInfo beginInfo{};
@@ -1197,131 +1189,68 @@ inline void uploadToBuffer(uint64_t handle, const void* data, VkDeviceSize size,
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
         vkh.checker(
-            vkBeginCommandBuffer(uploadCmd, &beginInfo),
-            "vkBeginCommandBuffer (transient upload)",
-            "Failed to begin transient cmd buffer"
+            vkBeginCommandBuffer(copyTarget, &beginInfo),
+            "vkBeginCommandBuffer (owned upload)",
+            "Failed to begin owned upload cmd"
         );
-
-        LOG_SUCCESS_CAT("BUFFER", "Transient command buffer recording begun");
-    } else {
-        LOG_INFO_CAT("BUFFER", "Recording into external command buffer");
     }
 
-    // Record the copy command
     VkBufferCopy copy{};
     copy.srcOffset = 0;
     copy.dstOffset = info.offset;
     copy.size      = size;
 
-    vkCmdCopyBuffer(uploadCmd, stageBuf, info.buffer, 1, &copy);
+    vkCmdCopyBuffer(copyTarget, stageBuf, info.buffer, 1, &copy);
 
     LOG_INFO_CAT("BUFFER", "Copy command recorded — {} bytes from staging → target", size);
 
-    // Owned cmd path: end, submit, wait fence, destroy staging
+    // Owned path: finish and submit
+    VkFence fence = VK_NULL_HANDLE;
     if (!usingExternalCmd) {
         vkh.checker(
-            vkEndCommandBuffer(uploadCmd),
-            "vkEndCommandBuffer (transient upload)",
-            "Failed to end transient cmd buffer"
+            vkEndCommandBuffer(copyTarget),
+            "vkEndCommandBuffer (owned upload)",
+            "Failed to end owned upload cmd"
+        );
+
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        vkh.checker(
+            vkCreateFence(dev, &fenceInfo, nullptr, &fence),
+            "vkCreateFence (owned upload)",
+            "Failed to create fence"
         );
 
         VkSubmitInfo submit{};
         submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount = 1;
-        submit.pCommandBuffers    = &uploadCmd;
+        submit.pCommandBuffers    = &copyTarget;
 
         vkh.checker(
             vkQueueSubmit(queue, 1, &submit, fence),
-            "vkQueueSubmit (transient upload)",
+            "vkQueueSubmit (owned upload)",
             "vkQueueSubmit failed"
         );
 
-        LOG_INFO_CAT("BUFFER", "Upload submitted — waiting on fence");
-
         VkResult res = vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
-        vkh.checker(res, "vkWaitForFences (upload wait)",
+        vkh.checker(res, "vkWaitForFences (owned upload)",
                     "vkWaitForFences failed");
 
         vkResetFences(dev, 1, &fence);
         vkDestroyFence(dev, fence, nullptr);
-        vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &uploadCmd);
+        vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &copyTarget);
 
-        // Safe to destroy staging now
+        // Clean staging
         vkFreeMemory(dev, stageMem, nullptr);
         vkDestroyBuffer(dev, stageBuf, nullptr);
 
-        LOG_SUCCESS_CAT("BUFFER", "Upload complete (owned cmd) — staging cleaned up");
+        LOG_SUCCESS_CAT("BUFFER", "Owned upload complete — staging cleaned");
+        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     } else {
-        // EXTERNAL CMD: auto-clean staging synchronously with separate copy submit
-        VkCommandBuffer copyCmd = VK_NULL_HANDLE;
-        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool        = rtx().transient_pool;
-        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
-
-        vkh.checker(
-            vkAllocateCommandBuffers(dev, &allocInfo, &copyCmd),
-            "vkAllocateCommandBuffers (external staging copy)",
-            "Failed to allocate staging copy cmd buffer"
-        );
-
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        vkh.checker(
-            vkBeginCommandBuffer(copyCmd, &beginInfo),
-            "vkBeginCommandBuffer (external staging copy)",
-            "Failed to begin staging copy cmd buffer"
-        );
-
-        VkBufferCopy stagingCopy{};
-        stagingCopy.srcOffset = 0;
-        stagingCopy.dstOffset = info.offset;
-        stagingCopy.size = size;
-
-        vkCmdCopyBuffer(copyCmd, stageBuf, info.buffer, 1, &stagingCopy);
-
-        vkh.checker(
-            vkEndCommandBuffer(copyCmd),
-            "vkEndCommandBuffer (external staging copy)",
-            "Failed to end staging copy cmd buffer"
-        );
-
-        VkFence tempFence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fc{};
-        fc.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        vkh.checker(
-            vkCreateFence(dev, &fc, nullptr, &tempFence),
-            "vkCreateFence (external staging copy)",
-            "Failed to create temp fence for staging"
-        );
-
-        VkSubmitInfo quickSubmit{};
-        quickSubmit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        quickSubmit.commandBufferCount = 1;
-        quickSubmit.pCommandBuffers    = &copyCmd;
-
-        vkh.checker(
-            vkQueueSubmit(queue, 1, &quickSubmit, tempFence),
-            "vkQueueSubmit (external staging copy)",
-            "Failed to submit staging copy"
-        );
-
-        VkResult waitRes = vkWaitForFences(dev, 1, &tempFence, VK_TRUE, UINT64_MAX);
-        if (waitRes != VK_SUCCESS) {
-            LOG_ERROR_CAT("BUFFER", "Staging copy wait failed: {}", vkh.result(waitRes));
-        }
-
-        vkDestroyFence(dev, tempFence, nullptr);
-        vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &copyCmd);
-        vkFreeMemory(dev, stageMem, nullptr);
-        vkDestroyBuffer(dev, stageBuf, nullptr);
-
-        LOG_SUCCESS_CAT("BUFFER", "External cmd path — staging auto-cleaned synchronously (no leak)");
+        // External path: caller handles submit/wait on 'cmd' — we return staging for cleanup
+        LOG_INFO_CAT("BUFFER", "External cmd path — staging returned for caller cleanup after submit/wait");
+        return {stageBuf, stageMem};
     }
-
-    LOG_SUCCESS_CAT("BUFFER", "Upload complete ({} bytes → handle={:016x}, tag='{}')", size, handle, info.tag);
 }
 
 inline void destroy(uint64_t handle) noexcept {
@@ -2323,8 +2252,11 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
     // Helper lambda to upload and collect staging if external
     auto safeUpload = [&](uint64_t bufHandle, const void* srcData, VkDeviceSize uploadSize, const std::string& debugTag) {
-        Memory::uploadToBuffer(bufHandle, srcData, uploadSize, localCmd);
+        auto [stgBuf, stgMem] = Memory::uploadToBuffer(bufHandle, srcData, uploadSize, localCmd);
         LOG_INFO_CAT("LAS", "Upload recorded for {} — staging cleanup deferred to after submit/wait", debugTag);
+
+        // Store for later cleanup (even if null — harmless)
+        pendingStaging.emplace_back(stgBuf, stgMem);
     };
 
     // Step 1: Update procedural primitives buffer if dirty
@@ -2549,8 +2481,14 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             instances.push_back(inst);
         }
 
-        Memory::uploadToBuffer(rtx().las_instance_buffer, instances.data(), 
-                               instances.size() * sizeof(VkAccelerationStructureInstanceKHR), localCmd);
+        // Fixed call site — capture staging and add to pending
+        auto [stgBuf, stgMem] = Memory::uploadToBuffer(
+            rtx().las_instance_buffer, 
+            instances.data(), 
+            instances.size() * sizeof(VkAccelerationStructureInstanceKHR), 
+            localCmd
+        );
+        pendingStaging.emplace_back(stgBuf, stgMem);
 
         LOG_SUCCESS_CAT("TLAS", "Uploaded {} TLAS instances to device buffer", instanceCount);
 
@@ -2677,7 +2615,16 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         vkQueueWaitIdle(rtx().graphics_queue);
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
 
-        LOG_SUCCESS_CAT("LAS", "LAS rebuild complete — structures updated and ready (owned cmd path)");
+        // Clean up all staging from uploads
+        for (auto [buf, mem] : pendingStaging) {
+            if (buf != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, buf, nullptr);
+                vkFreeMemory(rtx().device, mem, nullptr);
+            }
+        }
+        pendingStaging.clear();
+
+        LOG_SUCCESS_CAT("LAS", "LAS rebuild complete — structures updated and staging cleaned (owned cmd path)");
     } else {
         LOG_INFO_CAT("LAS", "LAS rebuild recorded into external cmd buffer — awaiting caller submission");
 

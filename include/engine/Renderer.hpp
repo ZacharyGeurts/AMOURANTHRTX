@@ -109,146 +109,145 @@ public:
         LOG_SUCCESS_CAT("RENDERER", "Shutdown complete");
     }
 
-void pew() noexcept {
-    if (destroyed_) return;
+    void pew() noexcept {
+        if (destroyed_) return;
 
-    auto now = std::chrono::steady_clock::now();
-    TotalTime::get().advance(now - last_time_);
-    last_time_ = now;
+        auto now = std::chrono::steady_clock::now();
+        TotalTime::get().advance(now - last_time_);
+        last_time_ = now;
 
-    double total_sec = TotalTime::get().seconds();
+        double total_sec = TotalTime::get().seconds();
 
-    // Quick pre-check: drain queues only if we suspect trouble (release = assume clean)
-    // This is almost free if queues are already idle
-    vkQueueWaitIdle(rtx().graphics_queue);
-    vkQueueWaitIdle(rtx().present_queue);
+        // Quick pre-check: drain queues only if we suspect trouble (release = assume clean)
+        // This is almost free if queues are already idle
+        vkQueueWaitIdle(rtx().graphics_queue);
+        vkQueueWaitIdle(rtx().present_queue);
 
-    updateCameraUBO(total_sec);
+        updateCameraUBO(total_sec);
 
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = rtx().transient_pool;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = rtx().transient_pool;
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
 
-    VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd);
-    if (res != VK_SUCCESS) {
-        // In release we don't spam logs — just bail quietly
-        return;
-    }
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    res = vkBeginCommandBuffer(cmd, &beginInfo);
-    if (res != VK_SUCCESS) {
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-        return;
-    }
-
-    pipeline_dispatch_living_world(cmd, total_sec);
-
-    VkMemoryBarrier barrier{};
-    barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-    if (needsDescriptorUpdate_) {
-        updateGlobalDescriptorBuffer();
-    }
-
-    transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-    pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
-    transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-    res = vkEndCommandBuffer(cmd);
-    if (res != VK_SUCCESS) {
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-        return;
-    }
-
-    // Fence — we create one every frame in release (cheap)
-    VkFence frameFence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fenceCI{};
-    fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    vkCreateFence(rtx().device, &fenceCI, nullptr, &frameFence);
-
-    VkSubmitInfo submit{};
-    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount   = 1;
-    submit.pCommandBuffers      = &cmd;
-
-    res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, frameFence);
-    if (res != VK_SUCCESS) {
-        // Release-friendly: log once, clean up, bail
-        // You can #ifdef _DEBUG or NDEBUG-strip this block later if desired
-        const char* errStr = vkh.result(res);  // your vkh.result helper
-        fprintf(stderr, "[RENDERER ERROR] vkQueueSubmit failed: %s\n", errStr ? errStr : "unknown");
-
-        if (res == VK_ERROR_DEVICE_LOST) {
-            fprintf(stderr, "[FATAL] DEVICE LOST — GPU crash / timeout / out of memory. Restart required.\n");
-            // Optional: set a global flag to show UI message or exit gracefully
+        VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd);
+        if (res != VK_SUCCESS) {
+            // In release we don't spam logs — just bail quietly
+            return;
         }
 
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        res = vkBeginCommandBuffer(cmd, &beginInfo);
+        if (res != VK_SUCCESS) {
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        pipeline_dispatch_living_world(cmd, total_sec);
+
+        VkMemoryBarrier barrier{};
+        barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                             0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+        if (needsDescriptorUpdate_) {
+            updateGlobalDescriptorBuffer();
+        }
+
+        transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
+        transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+        res = vkEndCommandBuffer(cmd);
+        if (res != VK_SUCCESS) {
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        // Fence — we create one every frame in release (cheap)
+        VkFence frameFence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceCI{};
+        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        vkCreateFence(rtx().device, &fenceCI, nullptr, &frameFence);
+
+        VkSubmitInfo submit{};
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &cmd;
+
+        res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, frameFence);
+        if (res != VK_SUCCESS) {
+            // Release-friendly: log once, clean up, bail
+            const char* errStr = vkh.result(res);  // your vkh.result helper
+            fprintf(stderr, "[RENDERER ERROR] vkQueueSubmit failed: %s\n", errStr ? errStr : "unknown");
+
+            if (res == VK_ERROR_DEVICE_LOST) {
+                fprintf(stderr, "[FATAL] DEVICE LOST — GPU crash / timeout / out of memory. Restart required.\n");
+                // Optional: set a global flag to show UI message or exit gracefully
+            }
+
+            vkDestroyFence(rtx().device, frameFence, nullptr);
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        // Wait — in release this is the price of safety. No pending cmd buffers.
+        vkWaitForFences(rtx().device, 1, &frameFence, VK_TRUE, UINT64_MAX);
+        vkResetFences(rtx().device, 1, &frameFence);
         vkDestroyFence(rtx().device, frameFence, nullptr);
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-        return;
+
+        // Blit & present (best effort, no fence — driver handles ordering)
+        if (rtx().images != VK_NULL_HANDLE) {
+            VkCommandBuffer blitCmd = VK_NULL_HANDLE;
+            vkAllocateCommandBuffers(rtx().device, &allocInfo, &blitCmd);
+
+            vkBeginCommandBuffer(blitCmd, &beginInfo);
+
+            VkImage swapImage = rtx().images;
+            transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            VkImageBlit blit{};
+            blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            blit.srcOffsets[0] = {0, 0, 0};
+            blit.srcOffsets[1] = {width_, height_, 1};
+            blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            blit.dstOffsets[0] = {0, 0, 0};
+            blit.dstOffsets[1] = {width_, height_, 1};
+
+            vkCmdBlitImage(blitCmd,
+                           hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &blit, VK_FILTER_LINEAR);
+
+            transitionImageLayout(blitCmd, swapImage,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+            vkEndCommandBuffer(blitCmd);
+
+            VkSubmitInfo blitSubmit{};
+            blitSubmit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            blitSubmit.commandBufferCount   = 1;
+            blitSubmit.pCommandBuffers      = &blitCmd;
+
+            vkQueueSubmit(rtx().graphics_queue, 1, &blitSubmit, VK_NULL_HANDLE);
+
+            VkSemaphore dummySem = VK_NULL_HANDLE;
+            Swapchain::presentImage(rtx().graphics_queue, 0, dummySem);
+
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &blitCmd);
+        }
     }
-
-    // Wait — in release this is the price of safety. No pending cmd buffers.
-    vkWaitForFences(rtx().device, 1, &frameFence, VK_TRUE, UINT64_MAX);
-    vkResetFences(rtx().device, 1, &frameFence);
-    vkDestroyFence(rtx().device, frameFence, nullptr);
-    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-
-    // Blit & present (best effort, no fence — driver handles ordering)
-    if (rtx().images != VK_NULL_HANDLE) {
-        VkCommandBuffer blitCmd = VK_NULL_HANDLE;
-        vkAllocateCommandBuffers(rtx().device, &allocInfo, &blitCmd);
-
-        vkBeginCommandBuffer(blitCmd, &beginInfo);
-
-        VkImage swapImage = rtx().images;
-        transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        VkImageBlit blit{};
-        blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[0] = {0, 0, 0};
-        blit.srcOffsets[1] = {width_, height_, 1};
-        blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[0] = {0, 0, 0};
-        blit.dstOffsets[1] = {width_, height_, 1};
-
-        vkCmdBlitImage(blitCmd,
-                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit, VK_FILTER_LINEAR);
-
-        transitionImageLayout(blitCmd, swapImage,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-        vkEndCommandBuffer(blitCmd);
-
-        VkSubmitInfo blitSubmit{};
-        blitSubmit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        blitSubmit.commandBufferCount   = 1;
-        blitSubmit.pCommandBuffers      = &blitCmd;
-
-        vkQueueSubmit(rtx().graphics_queue, 1, &blitSubmit, VK_NULL_HANDLE);
-
-        VkSemaphore dummySem = VK_NULL_HANDLE;
-        Swapchain::presentImage(rtx().graphics_queue, 0, dummySem);
-
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &blitCmd);
-    }
-}
 
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
@@ -370,7 +369,16 @@ private:
         data.randomSeed = static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count() & 0xFFFFFFFFu);
         data.maxDepth   = 12;
 
-        Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
+        // Fixed: capture staging (even though camera UBO is small/host-visible, we follow the contract)
+        auto [stgBuf, stgMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
+
+        // Since this is typically called inside a recording scope or without external cmd,
+        // and uploadToBuffer handles internal cleanup for owned mode, staging should be null here.
+        // But for consistency/safety, clean if returned (rare case)
+        if (stgBuf != VK_NULL_HANDLE) {
+            vkDestroyBuffer(rtx().device, stgBuf, nullptr);
+            vkFreeMemory(rtx().device, stgMem, nullptr);
+        }
     }
 
     void updateGlobalDescriptorBuffer() noexcept {

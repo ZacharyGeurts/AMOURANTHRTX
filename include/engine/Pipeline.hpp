@@ -442,7 +442,8 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         );
     }
 
-    Memory::uploadToBuffer(sbt_handle, handles.data(), handles.size(), cmd);
+    // Fixed call site — capture staging and clean up after submit/wait
+    auto [stgBuf, stgMem] = Memory::uploadToBuffer(sbt_handle, handles.data(), handles.size(), cmd);
 
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -472,7 +473,20 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
         vkQueueWaitIdle(queue ? queue : rtx().graphics_queue);
 
+        // Clean up staging after wait
+        if (stgBuf != VK_NULL_HANDLE) {
+            vkDestroyBuffer(rtx().device, stgBuf, nullptr);
+            vkFreeMemory(rtx().device, stgMem, nullptr);
+        }
+
         vkFreeCommandBuffers(rtx().device, cmdPool, 1, &cmd);
+    } else {
+        // If external cmd, caller must clean up staging after their submit/wait
+        // For safety, log reminder (remove in final release if desired)
+        if (stgBuf != VK_NULL_HANDLE) {
+            LOG_WARNING_CAT("PIPELINE", "External SBT upload — caller must destroy staging after wait: buf={:016x}, mem={:016x}", 
+                            (uintptr_t)stgBuf, (uintptr_t)stgMem);
+        }
     }
 
     VkDeviceAddress raygenAddr = Memory::align_up(sbtAddr, rtProps.shaderGroupBaseAlignment);
