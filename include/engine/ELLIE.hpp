@@ -631,7 +631,7 @@ private:
             {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM}, {"GBuffer", QUANTUM_FLUX},
             {"Post", NUCLEAR_REACTOR}, {"Buffer", GOLD}, {"Image", LIME_YELLOW},
             {"Texture", SPEARMINT_MINT}, {"Sampler", LILAC_LAVENDER}, {"Descriptor", FUCHSIA_MAGENTA},
-            {"Perf", COSMIC_GOLD}, {"GPU", BLACK_HOLE}, {"VULKAN", ORANGE},
+            {"Perf", COSMIC_GOLD}, {"GPU", BLACK_HOLE}, {"VULKAN", ORANGE}, {"HOT", SUNGLOW_ORANGE},
             {"CPU", PLASMA_FUCHSIA}, {"Input", SPEARMINT_MINT}, {"Audio", OCEAN_TEAL},
             {"Physics", EMERALD_GREEN}, {"SIMULATION", BRONZE_BROWN}, {"MeshLoader", LIME_YELLOW},
             {"GLTF", QUANTUM_PURPLE}, {"Material", PEACHES_AND_CREAM}, {"Debug", ARCTIC_CYAN},

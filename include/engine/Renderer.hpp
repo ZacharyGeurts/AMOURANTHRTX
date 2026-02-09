@@ -109,148 +109,176 @@ public:
         LOG_SUCCESS_CAT("RENDERER", "Shutdown complete");
     }
 
-void pew() noexcept {
-    if (destroyed_) return;
+    void pew() noexcept {
+        if (destroyed_) return;
 
-    auto now = std::chrono::steady_clock::now();
-    TotalTime::get().advance(now - last_time_);
-    last_time_ = now;
+        auto now = std::chrono::steady_clock::now();
+        TotalTime::get().advance(now - last_time_);
+        last_time_ = now;
 
-    double total_sec = TotalTime::get().seconds();
+        double total_sec = TotalTime::get().seconds();
 
-    vkQueueWaitIdle(rtx().graphics_queue);  // Extra safety
-    vkQueueWaitIdle(rtx().present_queue);
+        // Sunset orange ANSI escape: \033[38;2;255;147;41m
+        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame start @ %.3f s\033[0m\n", total_sec);
 
-    updateCameraUBO(total_sec);
+        vkQueueWaitIdle(rtx().graphics_queue);  // Extra safety
+        vkQueueWaitIdle(rtx().present_queue);
 
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = rtx().transient_pool;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+        updateCameraUBO(total_sec);
 
-    VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd);
-    if (res != VK_SUCCESS) return;
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = rtx().transient_pool;
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    res = vkBeginCommandBuffer(cmd, &beginInfo);
-    if (res != VK_SUCCESS) {
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-        return;
-    }
-
-    pipeline_dispatch_living_world(cmd, total_sec);
-
-    VkMemoryBarrier barrier{};
-    barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                         0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-    if (needsDescriptorUpdate_) {
-        updateGlobalDescriptorBuffer();
-    }
-
-    transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-    pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
-    transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-    res = vkEndCommandBuffer(cmd);
-    if (res != VK_SUCCESS) {
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-        return;
-    }
-
-    VkFence frameFence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fenceCI{};
-    fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    vkCreateFence(rtx().device, &fenceCI, nullptr, &frameFence);
-
-    VkSubmitInfo submit{};
-    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount   = 1;
-    submit.pCommandBuffers      = &cmd;
-
-    res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, frameFence);
-    if (res != VK_SUCCESS) {
-        const char* err = vkh.result(res);
-        fprintf(stderr, "[RENDERER FATAL] vkQueueSubmit failed: %s\n", err ? err : "unknown");
-
-        if (res == VK_ERROR_DEVICE_LOST) {
-            fprintf(stderr, "[FATAL] DEVICE LOST — GPU context dead. Restart required.\n");
-            destroyed_ = true;  // Stop all future rendering
+        VkResult res = vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd);
+        if (res != VK_SUCCESS) {
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] Alloc cmd failed: %s\033[0m\n", vkh.result(res));
+            return;
         }
 
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        res = vkBeginCommandBuffer(cmd, &beginInfo);
+        if (res != VK_SUCCESS) {
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] Begin cmd failed: %s\033[0m\n", vkh.result(res));
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        auto t0 = std::chrono::steady_clock::now();
+        pipeline_dispatch_living_world(cmd, total_sec);
+        auto t1 = std::chrono::steady_clock::now();
+        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Dispatch living world: %.2f ms\033[0m\n",
+                std::chrono::duration<double, std::milli>(t1 - t0).count());
+
+        VkMemoryBarrier barrier{};
+        barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                             0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+        if (needsDescriptorUpdate_) {
+            updateGlobalDescriptorBuffer();
+        }
+
+        transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+        t0 = std::chrono::steady_clock::now();
+        pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
+        t1 = std::chrono::steady_clock::now();
+        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Trace rays: %.2f ms\033[0m\n",
+                std::chrono::duration<double, std::milli>(t1 - t0).count());
+
+        transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+        res = vkEndCommandBuffer(cmd);
+        if (res != VK_SUCCESS) {
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] End cmd failed: %s\033[0m\n", vkh.result(res));
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        VkFence frameFence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceCI{};
+        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        vkCreateFence(rtx().device, &fenceCI, nullptr, &frameFence);
+
+        VkSubmitInfo submit{};
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &cmd;
+
+        res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, frameFence);
+        if (res != VK_SUCCESS) {
+            const char* err = vkh.result(res);
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] Submit failed: %s\033[0m\n", err ? err : "unknown");
+
+            if (res == VK_ERROR_DEVICE_LOST) {
+                fprintf(stderr, "\033[38;2;255;147;41m[HOT FATAL] DEVICE LOST on submit — GPU dead\033[0m\n");
+                destroyed_ = true;
+            }
+
+            vkDestroyFence(rtx().device, frameFence, nullptr);
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Submit OK — waiting fence...\033[0m\n");
+
+        // 60-second timeout
+        res = vkWaitForFences(rtx().device, 1, &frameFence, VK_TRUE, 60ULL * 1000'000'000ULL);
+        if (res != VK_SUCCESS) {
+            const char* err = vkh.result(res);
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] Fence wait failed: %s\033[0m\n", err ? err : "unknown");
+
+            if (res == VK_TIMEOUT) {
+                fprintf(stderr, "\033[38;2;255;147;41m[HOT WARNING] Fence TIMEOUT — GPU likely hung\033[0m\n");
+            } else if (res == VK_ERROR_DEVICE_LOST) {
+                fprintf(stderr, "\033[38;2;255;147;41m[HOT FATAL] DEVICE LOST during wait — GPU crashed mid-frame\033[0m\n");
+                destroyed_ = true;
+            }
+        } else {
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] Fence signaled OK\033[0m\n");
+        }
+
+        vkResetFences(rtx().device, 1, &frameFence);
         vkDestroyFence(rtx().device, frameFence, nullptr);
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-        return;
-    }
 
-    // Longer timeout — give GPU time (especially with ray tracing)
-    res = vkWaitForFences(rtx().device, 1, &frameFence, VK_TRUE, 30ULL * 1000'000'000ULL);  // 30 seconds
-    if (res != VK_SUCCESS) {
-        fprintf(stderr, "[RENDERER] Fence wait failed: %s\n", vkh.result(res));
-        if (res == VK_TIMEOUT) {
-            fprintf(stderr, "[WARNING] Fence timeout — GPU may be hung\n");
-        } else if (res == VK_ERROR_DEVICE_LOST) {
-            fprintf(stderr, "[FATAL] DEVICE LOST during wait\n");
-            destroyed_ = true;
+        // Blit & present
+        if (rtx().images != VK_NULL_HANDLE) {
+            VkCommandBuffer blitCmd = VK_NULL_HANDLE;
+            vkAllocateCommandBuffers(rtx().device, &allocInfo, &blitCmd);
+
+            vkBeginCommandBuffer(blitCmd, &beginInfo);
+
+            VkImage swapImage = rtx().images;
+            transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            VkImageBlit blit{};
+            blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            blit.srcOffsets[0] = {0, 0, 0};
+            blit.srcOffsets[1] = {width_, height_, 1};
+            blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            blit.dstOffsets[0] = {0, 0, 0};
+            blit.dstOffsets[1] = {width_, height_, 1};
+
+            vkCmdBlitImage(blitCmd,
+                           hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &blit, VK_FILTER_LINEAR);
+
+            transitionImageLayout(blitCmd, swapImage,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+            vkEndCommandBuffer(blitCmd);
+
+            VkSubmitInfo blitSubmit{};
+            blitSubmit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            blitSubmit.commandBufferCount   = 1;
+            blitSubmit.pCommandBuffers      = &blitCmd;
+
+            vkQueueSubmit(rtx().graphics_queue, 1, &blitSubmit, VK_NULL_HANDLE);
+
+            VkSemaphore dummySem = VK_NULL_HANDLE;
+            Swapchain::presentImage(rtx().graphics_queue, 0, dummySem);
+
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &blitCmd);
+
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame complete — blit & present done\033[0m\n");
+        } else {
+            fprintf(stderr, "\033[38;2;255;147;41m[HOT] No swap image — frame skipped blit/present\033[0m\n");
         }
     }
-
-    vkResetFences(rtx().device, 1, &frameFence);  // Safe now that we waited
-    vkDestroyFence(rtx().device, frameFence, nullptr);
-    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-
-    // Blit & present (best effort)
-    if (rtx().images != VK_NULL_HANDLE) {
-        VkCommandBuffer blitCmd = VK_NULL_HANDLE;
-        vkAllocateCommandBuffers(rtx().device, &allocInfo, &blitCmd);
-
-        vkBeginCommandBuffer(blitCmd, &beginInfo);
-
-        VkImage swapImage = rtx().images;
-        transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        VkImageBlit blit{};
-        blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[0] = {0, 0, 0};
-        blit.srcOffsets[1] = {width_, height_, 1};
-        blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[0] = {0, 0, 0};
-        blit.dstOffsets[1] = {width_, height_, 1};
-
-        vkCmdBlitImage(blitCmd,
-                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit, VK_FILTER_LINEAR);
-
-        transitionImageLayout(blitCmd, swapImage,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-        vkEndCommandBuffer(blitCmd);
-
-        VkSubmitInfo blitSubmit{};
-        blitSubmit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        blitSubmit.commandBufferCount   = 1;
-        blitSubmit.pCommandBuffers      = &blitCmd;
-
-        vkQueueSubmit(rtx().graphics_queue, 1, &blitSubmit, VK_NULL_HANDLE);
-
-        VkSemaphore dummySem = VK_NULL_HANDLE;
-        Swapchain::presentImage(rtx().graphics_queue, 0, dummySem);
-
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &blitCmd);
-    }
-}
 
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
@@ -261,7 +289,6 @@ void pew() noexcept {
 
         if (newWidth == width_ && newHeight == height_) return;
 
-        // Drain queues before touching swapchain or HDR image
         vkDeviceWaitIdle(rtx().device);
         vkQueueWaitIdle(rtx().graphics_queue);
         vkQueueWaitIdle(rtx().present_queue);
@@ -273,10 +300,8 @@ void pew() noexcept {
 
         LOG_INFO_CAT("RENDERER", "Resize — {}x{}", width_, height_);
 
-        // Recreate HDR target
         createOrRecreateHDRImage();
 
-        // Force descriptor update next frame
         needsDescriptorUpdate_ = true;
     }
 
@@ -284,7 +309,6 @@ private:
     void createOrRecreateHDRImage() noexcept {
         LOG_INFO_CAT("RENDERER", "Creating/recreating HDR image — {}x{}", width_, height_);
 
-        // Already waited in onResize — but belt-and-suspenders
         vkDeviceWaitIdle(rtx().device);
 
         vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
@@ -372,12 +396,8 @@ private:
         data.randomSeed = static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count() & 0xFFFFFFFFu);
         data.maxDepth   = 12;
 
-        // Fixed: capture staging (even though camera UBO is small/host-visible, we follow the contract)
         auto [stgBuf, stgMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
 
-        // Since this is typically called inside a recording scope or without external cmd,
-        // and uploadToBuffer handles internal cleanup for owned mode, staging should be null here.
-        // But for consistency/safety, clean if returned (rare case)
         if (stgBuf != VK_NULL_HANDLE) {
             vkDestroyBuffer(rtx().device, stgBuf, nullptr);
             vkFreeMemory(rtx().device, stgMem, nullptr);
