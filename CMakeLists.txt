@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(AMOURANTH_RTX LANGUAGES CXX)
 
 # =============================================================================
-# ENABLE FETCHCONTENT + GIT FOR EXTERNAL DEPENDENCIES
+# FETCHCONTENT + GIT HELPERS
 # =============================================================================
 include(FetchContent)
 find_package(Git REQUIRED)
@@ -24,21 +24,22 @@ function(git_clone_if_missing URL REPO TAG DEST)
 endfunction()
 
 # =============================================================================
-# C++23 TURBO — FULL POWER, NO COMPROMISE
+# C++23 + TOOLCHAIN SELECTION
 # =============================================================================
 if(CMAKE_CROSSCOMPILING)
     find_program(GCC14_BIN x86_64-w64-mingw32-g++)
     if(NOT GCC14_BIN)
         message(FATAL_ERROR "MinGW-w64 GCC 14+ required for cross-compile")
     endif()
-    message(STATUS "Using MinGW-w64 GCC 14+: ${GCC14_BIN}")
+    message(STATUS "Toolchain: MinGW-w64 cross-compile (Windows target)")
 else()
     find_program(GCC14_BIN g++-14)
     if(NOT GCC14_BIN)
         message(FATAL_ERROR "GCC 14+ required for native build")
     endif()
-    message(STATUS "Using native GCC 14+: ${GCC14_BIN}")
+    message(STATUS "Toolchain: Native GCC 14 (Linux target)")
 endif()
+
 set(CMAKE_CXX_COMPILER ${GCC14_BIN})
 
 set(CMAKE_CXX_STANDARD 23)
@@ -46,80 +47,83 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
-add_compile_options(
-    -Wall -Wextra -Werror    
-    -Wno-extra -O3 -march=native -mtune=native
-    -flto=auto -ffast-math -Wno-error=unused-but-set-variable
-    -Wno-error=deprecated-declarations -Wno-error=shadow
-    -Wno-error=unused-variable -Wno-error=unused-function
-    -g -ggdb
-)
-
-option(DISABLE_TRACE_AND_DEBUG_LOGS "Disable trace & debug logging" ON)
-if(DISABLE_TRACE_AND_DEBUG_LOGS)
-    add_definitions(-DDISABLE_TRACE_AND_DEBUG_LOGS)
-endif()
-
-# ======================================
-# ADDRESS SANITIZER COMPLETELY DISABLED
-# ======================================
-# ASan conflicts with intentional pointer obfuscation
-# → NEVER ENABLE IT — EVER
-# Removed: -fsanitize=address,undefined,leak
-# Removed: link options
-# StoneKey now flows pure and undetected
-
 # =============================================================================
-# PLATFORM DETECTION
+# PLATFORM & TARGET DETECTION
 # =============================================================================
 if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "AMOURANTH RTX builds are ONLY supported on Linux hosts.")
 endif()
 
 if(CMAKE_CROSSCOMPILING)
-    set(IS_WINDOWS TRUE)
-    set(IS_LINUX FALSE)
-    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Windows")
+    set(TARGET_PLATFORM "Windows")
     set(EXE_SUFFIX ".exe")
+    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Windows")
 else()
-    set(IS_LINUX TRUE)
-    set(IS_WINDOWS FALSE)
-    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Linux")
+    set(TARGET_PLATFORM "Linux")
     set(EXE_SUFFIX "")
+    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Linux")
+endif()
+
+message(STATUS "Target platform:     ${TARGET_PLATFORM}")
+message(STATUS "Output directory:    ${BIN_DIR}")
+message(STATUS "Executable suffix:   ${EXE_SUFFIX}")
+
+# =============================================================================
+# COMPILER FLAGS — Aggressive & Modern
+# =============================================================================
+add_compile_options(
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion
+    -Wno-unused-but-set-variable -Wno-deprecated-declarations
+    -O3 -flto=auto -ffast-math -march=native -mtune=native
+    -g -ggdb
+)
+
+# Prefer mold linker when available (much faster on Linux host)
+find_program(MOLD_EXECUTABLE mold)
+if(MOLD_EXECUTABLE)
+    add_link_options(-fuse-ld=mold)
+    message(STATUS "Linker: mold")
+endif()
+
+if(TARGET_PLATFORM STREQUAL "Windows")
+    add_compile_options(
+        -mwindows
+        -fstack-protector-strong
+        -fcf-protection=full
+        -D_FORTIFY_SOURCE=3
+        -Wa,-mbig-obj
+        -fno-ident
+    )
+    add_link_options(
+        -static-libgcc -static-libstdc++
+        -Wl,--dynamicbase,--nxcompat,--high-entropy-va
+        -Wl,--build-id
+    )
+endif()
+
+option(DISABLE_TRACE_AND_DEBUG_LOGS "Disable trace & debug logging" ON)
+if(DISABLE_TRACE_AND_DEBUG_LOGS)
+    add_definitions(-DDISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
 # =============================================================================
-# DIRECTORY CREATION
+# DIRECTORY CREATION — Developer-friendly empty folders
 # =============================================================================
-set(SOURCE_DIRS
+set(DEVELOPER_DIRS
     assets/fonts assets/textures assets/models assets/materials assets/scenes
     assets/audio assets/scripts
     shaders/raytracing shaders/compute
 )
-foreach(D ${SOURCE_DIRS})
+
+foreach(D ${DEVELOPER_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
 endforeach()
 
-set(OUTPUT_DIRS
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/raytracing
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/shaders/compute
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/fonts
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/textures
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/models
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/scenes
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/audio
-    ${CMAKE_BINARY_DIR}/bin/Linux/assets/scripts
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/raytracing
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/shaders/compute
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/fonts
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/textures
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/models
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/scenes
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/audio
-    ${CMAKE_BINARY_DIR}/bin/Windows/assets/scripts
-)
-foreach(D ${OUTPUT_DIRS})
-    file(MAKE_DIRECTORY "${D}")
+# Also ensure output directories exist
+foreach(platform IN ITEMS Linux Windows)
+    foreach(sub IN ITEMS shaders/raytracing shaders/compute fonts textures models scenes audio scripts)
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${platform}/assets/${sub}")
+    endforeach()
 endforeach()
 
 # =============================================================================
@@ -138,33 +142,18 @@ find_package(OpenMP REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(glm REQUIRED)
 
-if(IS_LINUX)
+if(TARGET_PLATFORM STREQUAL "Linux")
     pkg_check_modules(SDL3 REQUIRED sdl3)
-    pkg_check_modules(SDL3_TTF REQUIRED sdl3-ttf)
     pkg_check_modules(SDL3_IMAGE REQUIRED sdl3-image)
-    pkg_check_modules(HARFBUZZ REQUIRED harfbuzz)
-    pkg_check_modules(X11 REQUIRED x11 xext xrandr xcursor xi xscrnsaver xcb)
-    pkg_check_modules(GBM REQUIRED gbm)
-    pkg_check_modules(LIBDRM REQUIRED libdrm)
 endif()
 
-if(IS_WINDOWS)
-    # Save original suffixes and force static libraries only (.a) for SDL3 family
-    set(_old_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
+if(TARGET_PLATFORM STREQUAL "Windows")
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-
-    find_library(SDL3_LIB NAMES SDL3 PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
-    find_library(SDL3_TTF_LIB NAMES SDL3_ttf PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
+    find_library(SDL3_LIB      NAMES SDL3      PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
     find_library(SDL3_IMAGE_LIB NAMES SDL3_image PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
-
-    # Restore original suffixes
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_old_suffixes})
-    unset(_old_suffixes)
 endif()
 
-# =============================================================================
 # tinyobjloader
-# =============================================================================
 FetchContent_Declare(
     tinyobjloader
     GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
@@ -174,19 +163,22 @@ FetchContent_MakeAvailable(tinyobjloader)
 set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
 
 # =============================================================================
-# SOURCE COLLECTION
+# SOURCE FILES — Navigator/main.cpp + all .cpp in Navigator/engine/
 # =============================================================================
-file(GLOB_RECURSE SOURCES
-    src/*.cpp
-    src/engine/*.cpp
-    src/engine/SDL3/*.cpp
-    src/engine/Vulkan/*.cpp
-    src/modes/*.cpp
+file(GLOB_RECURSE ENGINE_SOURCES
+    "Navigator/engine/*.cpp"
 )
-list(APPEND SOURCES "${TINYOBJLOADER_SRC}")
-list(REMOVE_DUPLICATES SOURCES)
 
-add_executable(amouranth_engine ${SOURCES})
+set(ALL_SOURCES
+    Navigator/main.cpp
+    ${ENGINE_SOURCES}
+    ${TINYOBJLOADER_SRC}
+)
+
+# Prevent compiling CMake's own compiler ID files
+list(FILTER ALL_SOURCES EXCLUDE REGEX "CMakeFiles/.*CompilerId.*\\.cpp$")
+
+add_executable(amouranth_engine ${ALL_SOURCES})
 set_target_properties(amouranth_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
     OUTPUT_NAME "Navigator"
@@ -194,25 +186,20 @@ set_target_properties(amouranth_engine PROPERTIES
 )
 
 # =============================================================================
-# INCLUDES + DEFINES + LINKING
+# INCLUDES & DEFINES
 # =============================================================================
 target_include_directories(amouranth_engine PRIVATE
-    include include/modes
     ${Vulkan_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
     ${glm_INCLUDE_DIRS}
     ${tinyobjloader_SOURCE_DIR}
+    Navigator/engine
 )
 
-if(IS_LINUX)
+if(TARGET_PLATFORM STREQUAL "Linux")
     target_include_directories(amouranth_engine PRIVATE
         ${SDL3_INCLUDE_DIRS}
-        ${SDL3_TTF_INCLUDE_DIRS}
         ${SDL3_IMAGE_INCLUDE_DIRS}
-        ${HARFBUZZ_INCLUDE_DIRS}
-        ${X11_INCLUDE_DIRS}
-        ${GBM_INCLUDE_DIRS}
-        ${LIBDRM_INCLUDE_DIRS}
     )
 endif()
 
@@ -220,74 +207,45 @@ target_compile_definitions(amouranth_engine PRIVATE
     VK_KHR_ray_tracing_pipeline
     VK_KHR_acceleration_structure
     VK_KHR_deferred_host_operations
-    VK_EXT_descriptor_indexing
     VK_KHR_buffer_device_address
+    VK_EXT_descriptor_indexing
     VK_KHR_ray_query
-    VK_KHR_display
-    VK_EXT_hdr_metadata
 )
 
 # =============================================================================
-# Link libraries — cross-platform safe
+# LINKING
 # =============================================================================
-
 target_link_libraries(amouranth_engine PRIVATE
     Vulkan::Vulkan
     OpenMP::OpenMP_CXX
     Freetype::Freetype
-    atomic              # Needed for some atomics on older GCC/MinGW
 )
 
-# Platform-specific libraries
-if(UNIX AND NOT APPLE)  # Linux only
+if(TARGET_PLATFORM STREQUAL "Linux")
     target_link_libraries(amouranth_engine PRIVATE
-        dl              # libdl for dynamic loading (dlopen)
-        pthread         # POSIX threads
-        m               # math library (libm)
+        dl
+		m
+		pthread
         ${SDL3_LIBRARIES}
-        ${SDL3_TTF_LIBRARIES}
         ${SDL3_IMAGE_LIBRARIES}
-        ${HARFBUZZ_LIBRARIES}
-        ${X11_LIBRARIES}
-        ${GBM_LIBRARIES}
-        ${LIBDRM_LIBRARIES}
     )
-elseif(MINGW OR MSVC OR WIN32)  # Windows / MinGW
+elseif(TARGET_PLATFORM STREQUAL "Windows")
     target_link_libraries(amouranth_engine PRIVATE
         ${SDL3_LIB}
-        ${SDL3_TTF_LIB}
         ${SDL3_IMAGE_LIB}
-
-        -static             # Static-link all MinGW runtime libs (eliminates libwinpthread-1.dll and any libgcc/libstdc++ DLLs)
-
-        -mwindows           # GUI subsystem (no console window)
-
-        # Core Windows system libraries
+        -static
         kernel32 user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
-
-        # Additional Windows API libraries required by static SDL3
-        setupapi            # SetupDi* functions
-        cfgmgr32            # CM_* functions
+        setupapi cfgmgr32
     )
 endif()
 
-# Optional: If you need extra Windows-specific libs (e.g. for MiniDump)
-if(WIN32)
-    target_link_libraries(amouranth_engine PRIVATE dbghelp)
-endif()
-
 # =============================================================================
-# SHADER COMPILATION — FIXED
+# SHADER COMPILATION
 # =============================================================================
-set(SHADER_INCLUDE_FLAGS
-    -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
-)
+set(SHADER_INCLUDE_FLAGS -I${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_DEBUG_FLAGS -g -O0)
 
-file(GLOB_RECURSE POTENTIAL_SHADERS
-    shaders/raytracing/*
-    shaders/compute/*
-)
+file(GLOB_RECURSE POTENTIAL_SHADERS shaders/raytracing/* shaders/compute/*)
 
 set(SPV_OUTPUTS "")
 foreach(SRC ${POTENTIAL_SHADERS})
@@ -302,28 +260,17 @@ foreach(SRC ${POTENTIAL_SHADERS})
 
     set(OUT_DIR "${BIN_DIR}/assets/shaders/${REL_DIR}")
     set(STAGE "")
-    set(TARGET "")
+    set(TARGET_FLAG "")
 
     if(REL_DIR STREQUAL "raytracing")
         if(NAME MATCHES "[_.](rgen|rmiss|rchit|rahit|rint|rcall)(\\.glsl)?$")
-            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
-            if(NAME MATCHES "[_.]rgen(\\.glsl)?$")
-                set(STAGE rgen)
-            elseif(NAME MATCHES "[_.]rmiss(\\.glsl)?$")
-                set(STAGE rmiss)
-            elseif(NAME MATCHES "[_.]rchit(\\.glsl)?$")
-                set(STAGE rchit)
-            elseif(NAME MATCHES "[_.]rahit(\\.glsl)?$")
-                set(STAGE rahit)
-            elseif(NAME MATCHES "[_.]rint(\\.glsl)?$")
-                set(STAGE rint)
-            elseif(NAME MATCHES "[_.]rcall(\\.glsl)?$")
-                set(STAGE rcall)
-            endif()
+            set(TARGET_FLAG --target-spv=spv1.6 --target-env=vulkan1.4)
+            string(REGEX MATCH "[_.](rgen|rmiss|rchit|rahit|rint|rcall)" STAGE_MATCH ${NAME})
+            set(STAGE ${CMAKE_MATCH_1})
         endif()
     elseif(REL_DIR MATCHES "compute")
         if(NAME MATCHES "([_.])?comp(\\.glsl)?$")
-            set(TARGET --target-spv=spv1.6 --target-env=vulkan1.4)
+            set(TARGET_FLAG --target-spv=spv1.6 --target-env=vulkan1.4)
             set(STAGE comp)
         endif()
     endif()
@@ -334,17 +281,12 @@ foreach(SRC ${POTENTIAL_SHADERS})
 
     set(SPV "${OUT_DIR}/${BASE}.spv")
 
-    set(VALIDATION_ENV vulkan1.4)
-    if(REL_DIR STREQUAL "raytracing")
-        set(VALIDATION_ENV vulkan1.4)
-    endif()
-
     add_custom_command(
         OUTPUT ${SPV}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
-        COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${TARGET} ${SHADER_DEBUG_FLAGS}
+        COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${TARGET_FLAG} ${SHADER_DEBUG_FLAGS}
                 -fshader-stage=${STAGE} "${SRC}" -o "${SPV}"
-        COMMAND ${SPIRV_VAL} --target-env ${VALIDATION_ENV} "${SPV}"
+        COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${SPV}"
         DEPENDS "${SRC}"
         COMMENT "Compiling shader: ${REL_DIR}/${NAME} → ${BASE}.spv"
         VERBATIM

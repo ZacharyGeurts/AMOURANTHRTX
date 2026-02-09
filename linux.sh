@@ -14,7 +14,7 @@ W="\033[1;97m"        X="\033[0m"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="build"
-CROSS_BUILD_DIR="build-windows"
+CROSS_BUILD_DIR="build"
 
 banner() {
     echo -e "${DEEP}  █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
