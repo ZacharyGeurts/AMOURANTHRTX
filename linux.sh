@@ -17,7 +17,6 @@ BUILD_DIR="build"
 CROSS_BUILD_DIR="build-windows"
 
 banner() {
-    clear
     echo -e "${DEEP}  █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
     echo -e "${AQUA} ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║${X}"
     echo -e "${TURQ} ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║${X}"
@@ -120,7 +119,7 @@ if [[ "$TARGET" == "windows" ]]; then
         echo -e "${CORAL}        FATAL: x86_64-w64-mingw32-g++ not found${X}"
         exit 1
     fi
-    [[ "$ACTION" == "run" ]] && command -v wine64 >/dev/null 2>&1 && WINE_RUN=true
+    [[ "$ACTION" == "run" ]] && command -v wine >/dev/null 2>&1 && WINE_RUN=true
 fi
 
 # ── BUILD ───────────────────────────────────────────────────────────────────
@@ -146,7 +145,7 @@ else
         -G "$GENERATOR"
 fi
 
-echo -e "${AQUA}        COMPILING — AQUAMARINE PHOTONS FORGING — $BUILD_JOBS THREADS${X}"
+echo -e "${AQUA}        COMPILING — $BUILD_JOBS THREADS${X}"
 cmake --build . -j"$BUILD_JOBS"
 
 # ── BINARY ASCENSION ───────────────────────────────────────────────────────
@@ -158,7 +157,7 @@ echo -e "${GLOW}        BINARY SURFACED → $FINAL_BINARY${X}"
 # ── LAUNCH CEREMONY ────────────────────────────────────────────────────────
 if [[ "$ACTION" == "run" ]]; then
     echo
-    echo -e "${PEARL}        FIRST LIGHT THROUGH WATER — LAUNCHING IN ${TARGET^^} REALM${X}"
+    echo -e "${PEARL}       THROUGH WATER — LAUNCHING IN ${TARGET^^} REALM${X}"
     echo -e "${GLOW}        The ocean crosses dimensions. Dive deep.${X}"
     echo
 
@@ -167,7 +166,7 @@ if [[ "$ACTION" == "run" ]]; then
     if [[ "$TARGET" == "windows" ]]; then
         if $WINE_RUN; then
             echo -e "${WAVE}        DESCENDING THROUGH WINE — WINDOWS REALM SIMULATED${X}"
-            wine64 "$FINAL_BINARY" "${@:2}"
+            wine "$FINAL_BINARY" "${@:2}"
         else
             echo -e "${CORAL}        Wine not found — cannot run .exe on Linux${X}"
             echo -e "${AQUA}        Transfer Navigator.exe to Windows or install wine: sudo apt install wine${X}"
