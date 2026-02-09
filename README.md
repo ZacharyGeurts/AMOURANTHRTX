@@ -9,7 +9,6 @@ Welcome to the community.
 Use the green code button above to download zip.  
 Or, use the preferred method with git.  
 ```
-# CAUTION: WE WILL CLEAR YOUR TERMINAL SCREEN
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 cd AMOURANTHRTX
 chmod +x linux.sh
