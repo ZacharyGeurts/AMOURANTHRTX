@@ -6,8 +6,6 @@
 // Inspired by Ellie Fier
 // =============================================================================
 
-#define GLM_ENABLE_EXPERIMENTAL
-
 #pragma once
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>

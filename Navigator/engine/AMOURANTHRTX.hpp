@@ -608,9 +608,8 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     for (uint32_t i = 0; i < mem.memoryHeapCount; ++i) {
         if (mem.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
             reality.driver_footprint = budget.heapUsage[i];
-            LOG_INFO_CAT("Memory", "Current driver/OS usage on device-local VRAM: {} bytes ({} GB) (budget limit {} GB)",
+            LOG_INFO_CAT("Memory", "Current driver/OS usage on device-local VRAM: {} bytes and budget limit {} GB)",
                          reality.driver_footprint,
-                         reality.driver_footprint / (1024ULL * 1024 * 1024), // 0?
                          budget.heapBudget[i] / (1024ULL * 1024 * 1024));
             break;
         }

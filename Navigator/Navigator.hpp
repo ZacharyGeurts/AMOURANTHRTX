@@ -131,14 +131,10 @@ static inline void showSacrificialSplash() noexcept {
 // Developers link against this header and call navigator_main(argc, argv)
 // =============================================================================
 inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
-    // Install crash handler FIRST — before anything else
+
     install_apocalypse_handler();
-
-    // Start logging immediately after handler — logger is now safe to use
     Logging::Logger::get().startup();
-
-    // Log that we're alive and handler is installed
-    LOG_SUCCESS_CAT("MAIN", "Apocalypse handler installed — logger started — entering pink reality");
+    LOG_SUCCESS_CAT("MAIN", "Apocalypse handler installed — logger started — Handling future events");
 
     // Step 1: Initialize SDL subsystems
     sdl_init_all(Options::Window::DEFAULT_WIDTH,

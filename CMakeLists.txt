@@ -85,9 +85,9 @@ if(MOLD_EXECUTABLE)
     message(STATUS "Linker: mold")
 endif()
 
+# Windows-specific hardening (but keep console subsystem)
 if(TARGET_PLATFORM STREQUAL "Windows")
     add_compile_options(
-        -mwindows
         -fstack-protector-strong
         -fcf-protection=full
         -D_FORTIFY_SOURCE=3
@@ -119,7 +119,6 @@ foreach(D ${DEVELOPER_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
 endforeach()
 
-# Also ensure output directories exist
 foreach(platform IN ITEMS Linux Windows)
     foreach(sub IN ITEMS shaders/raytracing shaders/compute fonts textures models scenes audio scripts)
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${platform}/assets/${sub}")
@@ -163,11 +162,9 @@ FetchContent_MakeAvailable(tinyobjloader)
 set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
 
 # =============================================================================
-# SOURCE FILES — Navigator/main.cpp + all .cpp in Navigator/engine/
+# SOURCE FILES
 # =============================================================================
-file(GLOB_RECURSE ENGINE_SOURCES
-    "Navigator/engine/*.cpp"
-)
+file(GLOB_RECURSE ENGINE_SOURCES "Navigator/engine/*.cpp")
 
 set(ALL_SOURCES
     Navigator/main.cpp
@@ -178,12 +175,25 @@ set(ALL_SOURCES
 # Prevent compiling CMake's own compiler ID files
 list(FILTER ALL_SOURCES EXCLUDE REGEX "CMakeFiles/.*CompilerId.*\\.cpp$")
 
+# =============================================================================
+# EXECUTABLE — Console app (no WIN32!)
+# =============================================================================
 add_executable(amouranth_engine ${ALL_SOURCES})
 set_target_properties(amouranth_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
     OUTPUT_NAME "Navigator"
     SUFFIX "${EXE_SUFFIX}"
 )
+
+# Force console subsystem on Windows/MinGW (fixes WinMain error)
+if(TARGET_PLATFORM STREQUAL "Windows" OR MINGW)
+    target_link_options(amouranth_engine PRIVATE -mconsole)
+endif()
+
+# Disable LTO warnings/noise on MinGW (optional but cleans output)
+if(MINGW)
+    set_target_properties(amouranth_engine PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
+endif()
 
 # =============================================================================
 # INCLUDES & DEFINES
@@ -210,6 +220,10 @@ target_compile_definitions(amouranth_engine PRIVATE
     VK_KHR_buffer_device_address
     VK_EXT_descriptor_indexing
     VK_KHR_ray_query
+    # Add GLM experimental flag globally for consistency
+    GLM_ENABLE_EXPERIMENTAL
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
 )
 
 # =============================================================================
@@ -223,9 +237,7 @@ target_link_libraries(amouranth_engine PRIVATE
 
 if(TARGET_PLATFORM STREQUAL "Linux")
     target_link_libraries(amouranth_engine PRIVATE
-        dl
-		m
-		pthread
+        dl m pthread
         ${SDL3_LIBRARIES}
         ${SDL3_IMAGE_LIBRARIES}
     )
@@ -233,7 +245,6 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
     target_link_libraries(amouranth_engine PRIVATE
         ${SDL3_LIB}
         ${SDL3_IMAGE_LIB}
-        -static
         kernel32 user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
         setupapi cfgmgr32
     )
@@ -327,9 +338,12 @@ foreach(MAP ${ASSET_MAP})
     endif()
 endforeach()
 
-
 message(STATUS "")
 message(STATUS "==================================================================")
 message(STATUS " Target: ${BIN_DIR}/Navigator${EXE_SUFFIX}")
-message(STATUS " Run: ./linux.sh --help")
+if(TARGET_PLATFORM STREQUAL "Windows")
+    message(STATUS " Run: wine ${BIN_DIR}/Navigator.exe --help")
+else()
+    message(STATUS " Run: ./linux.sh --help")
+endif()
 message(STATUS "==================================================================")

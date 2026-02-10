@@ -15,16 +15,17 @@
 #include <fstream>
 
 // Main descriptor bindings — fixed 9 slots (no auto, explicit)
+// Note: binding 5 was missing in original → added placeholder if needed
 static constexpr VkDescriptorSetLayoutBinding kMainBindings[9] = {
     {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR, nullptr},
     {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr},
     {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR, nullptr},
     {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR, nullptr},
     {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR, nullptr},
+    {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR, nullptr}, // placeholder / unused
     {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,              1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr},
     {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
-    {8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr},
-    {9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr}
+    {8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,             1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr}
 };
 
 static constexpr VkShaderStageFlags FULL_PUSH_MASK =
@@ -44,7 +45,7 @@ struct RTDescriptorUpdate {
 };
 
 // =============================================================================
-// Helpers — no pool creation here
+// Helpers
 // =============================================================================
 
 inline VkShaderModule load_shader(const std::string& relativePath) noexcept {
@@ -103,8 +104,10 @@ inline VkAccelerationStructureKHR create_dummy_tlas() noexcept {
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType                                 = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     geometry.geometryType                          = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geometry.flags                                 = VK_GEOMETRY_OPAQUE_BIT_KHR;
     geometry.geometry.instances.sType              = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-    geometry.geometry.instances.data.deviceAddress = 0;
+    geometry.geometry.instances.arrayOfPointers    = VK_FALSE;
+    geometry.geometry.instances.data.deviceAddress = 0; // dummy → no real instances
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
     buildInfo.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -116,15 +119,14 @@ inline VkAccelerationStructureKHR create_dummy_tlas() noexcept {
     VkAccelerationStructureBuildSizesInfoKHR sizeInfo{};
     sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
-    uint32_t primitiveCount = 1;
+    uint32_t primitiveCount = 1; // dummy count
     ext().vkGetAccelerationStructureBuildSizesKHR(
         rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &buildInfo, &primitiveCount, &sizeInfo);
 
     uint64_t buffer_handle = Memory::create(sizeInfo.accelerationStructureSize,
                                             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                             "Dummy_TLAS_Buffer");
 
     vkh.checker(buffer_handle != 0, "Memory::create (Dummy TLAS buffer)", "Failed");
@@ -228,7 +230,7 @@ inline void pipeline_create_pipeline_layout() noexcept {
     VkDescriptorSetLayoutBinding texBinding{};
     texBinding.binding         = 0;
     texBinding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    texBinding.descriptorCount = 1024;
+    texBinding.descriptorCount = 1024; // adjust to your actual max textures
     texBinding.stageFlags      = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
 
     VkDescriptorSetLayoutCreateInfo texInfo{};
@@ -325,6 +327,8 @@ inline void pipeline_create_ray_tracing_pipeline() noexcept {
     VkShaderModule chit   = load("assets/shaders/raytracing/closest_hit.spv");
     VkShaderModule ahit   = load("assets/shaders/raytracing/anyhit.spv");
 
+    vkh.checker(raygen && miss && chit && ahit, "Shader loading", "One or more ray tracing shaders failed to load");
+
     VkPipelineShaderStageCreateInfo stages[4]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
@@ -346,19 +350,32 @@ inline void pipeline_create_ray_tracing_pipeline() noexcept {
     stages[3].module = ahit;
     stages[3].pName  = "main";
 
+    // Corrected shader group setup
     VkRayTracingShaderGroupCreateInfoKHR groups[3]{};
+
+    // Group 0: Raygen (GENERAL)
     groups[0].sType                         = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
     groups[0].type                          = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-    groups[0].generalShader                 = 0;
+    groups[0].generalShader                 = 0; // raygen
+    groups[0].closestHitShader              = VK_SHADER_UNUSED_KHR;
+    groups[0].anyHitShader                  = VK_SHADER_UNUSED_KHR;
+    groups[0].intersectionShader            = VK_SHADER_UNUSED_KHR;
 
+    // Group 1: Miss (GENERAL)
     groups[1].sType                         = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
     groups[1].type                          = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-    groups[1].generalShader                 = 1;
+    groups[1].generalShader                 = 1; // miss
+    groups[1].closestHitShader              = VK_SHADER_UNUSED_KHR;
+    groups[1].anyHitShader                  = VK_SHADER_UNUSED_KHR;
+    groups[1].intersectionShader            = VK_SHADER_UNUSED_KHR;
 
+    // Group 2: Hit group (TRIANGLES_HIT_GROUP)
     groups[2].sType                         = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
     groups[2].type                          = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-    groups[2].closestHitShader              = 2;
-    groups[2].anyHitShader                  = 3;
+    groups[2].generalShader                 = VK_SHADER_UNUSED_KHR;
+    groups[2].closestHitShader              = 2; // closest hit
+    groups[2].anyHitShader                  = 3;  // any hit
+    groups[2].intersectionShader            = VK_SHADER_UNUSED_KHR;
 
     rtx().raygen_group_count = 1;
     rtx().miss_group_count   = 1;
@@ -388,6 +405,8 @@ inline void pipeline_create_ray_tracing_pipeline() noexcept {
     vkDestroyShaderModule(rtx().device, ahit, nullptr);
 
     rtx().rt_pipeline = pipeline;
+
+    LOG_SUCCESS_CAT("PIPELINE", "Ray tracing pipeline created successfully");
 }
 
 inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HANDLE,
@@ -412,9 +431,9 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
     const uint32_t totalGroups = rtx().raygen_group_count + rtx().miss_group_count + rtx().hit_group_count;
 
-    const VkDeviceSize raygenSize = recordStride;
-    const VkDeviceSize missSize   = rtx().miss_group_count * recordStride;
-    const VkDeviceSize hitSize    = rtx().hit_group_count * recordStride;
+    const VkDeviceSize raygenSize = rtx().raygen_group_count * recordStride;
+    const VkDeviceSize missSize   = rtx().miss_group_count   * recordStride;
+    const VkDeviceSize hitSize    = rtx().hit_group_count    * recordStride;
 
     VkDeviceSize sbtSize = raygenSize + missSize + hitSize;
     sbtSize = Memory::align_up(sbtSize, baseAlign);
@@ -464,7 +483,6 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
         );
     }
 
-    // Upload handles to SBT buffer using provided or new command buffer
     auto [stgBuf, stgMem] = Memory::uploadToBuffer(sbt_handle, handles.data(), handles.size(), cmd);
 
     VkMemoryBarrier barrier{};
@@ -495,7 +513,6 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
         vkQueueWaitIdle(queue ? queue : rtx().graphics_queue);
 
-        // Clean up staging buffer/memory after wait
         if (stgBuf != VK_NULL_HANDLE) {
             vkDestroyBuffer(rtx().device, stgBuf, nullptr);
             vkFreeMemory(rtx().device, stgMem, nullptr);
@@ -503,7 +520,6 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
 
         vkFreeCommandBuffers(rtx().device, cmdPool, 1, &cmd);
     } else {
-        // If using provided cmd buffer, caller is responsible for submit/wait and cleanup
         if (stgBuf != VK_NULL_HANDLE) {
             LOG_WARNING_CAT("PIPELINE", "External SBT upload — caller must destroy staging after wait: buf={:016x}, mem={:016x}", 
                             (uintptr_t)stgBuf, (uintptr_t)stgMem);
@@ -522,6 +538,8 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
     rtx().hit_sbt_region    = {hitAddr,    recordStride, hitSize};
 
     rtx().eternal_sbt_forged = true;
+
+    LOG_SUCCESS_CAT("PIPELINE", "Shader binding table created — size={} bytes", sbtSize);
 }
 
 inline void pipeline_dispatch_living_world(VkCommandBuffer cmd, float totalTime) noexcept {
@@ -602,7 +620,7 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
     uint8_t* base = static_cast<uint8_t*>(mapped);
     const VkPhysicalDeviceDescriptorBufferPropertiesEXT& props = rtx().descriptor_props;
 
-    // TLAS
+    // TLAS (binding 0)
     if (update.tlas != VK_NULL_HANDLE) {
         VkAccelerationStructureDeviceAddressInfoKHR info{};
         info.sType                 = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
@@ -618,7 +636,7 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
                                  base + rtx().binding_offsets[0]);
     }
 
-    // Output image
+    // Output image (binding 1)
     if (update.rtOutputView != VK_NULL_HANDLE) {
         VkDescriptorImageInfo img{};
         img.imageView   = update.rtOutputView;
@@ -633,7 +651,7 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
                                  base + rtx().binding_offsets[1]);
     }
 
-    // UBO
+    // UBO (binding 2)
     if (update.ubo != VK_NULL_HANDLE && update.uboSize != 0) {
         VkBufferDeviceAddressInfo info{};
         info.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -654,7 +672,7 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
                                  base + rtx().binding_offsets[2]);
     }
 
-    // Materials
+    // Materials (binding 3)
     if (update.materialsBuffer != VK_NULL_HANDLE && update.materialsSize != 0) {
         VkBufferDeviceAddressInfo info{};
         info.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -675,7 +693,7 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
                                  base + rtx().binding_offsets[3]);
     }
 
-    // Living world (fixed slot 7)
+    // Living world buffer (binding 7)
     if (rtx().living_world_buffer_handle != 0) {
         VkBuffer buf = Memory::getBuffer(rtx().living_world_buffer_handle);
 
@@ -706,6 +724,7 @@ inline void pipeline_shutdown() noexcept {
         if (it != rtx().buffers.end()) {
             vkUnmapMemory(rtx().device, it->second.memory);
         }
+        rtx().descriptor_mapped = nullptr;
     }
 
     Memory::destroy(rtx().descriptor_buffer_handle);
@@ -713,21 +732,37 @@ inline void pipeline_shutdown() noexcept {
 
     if (rtx().main_descriptor_layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(rtx().device, rtx().main_descriptor_layout, nullptr);
+        rtx().main_descriptor_layout = VK_NULL_HANDLE;
     }
     if (rtx().tex_descriptor_layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(rtx().device, rtx().tex_descriptor_layout, nullptr);
+        rtx().tex_descriptor_layout = VK_NULL_HANDLE;
     }
     if (rtx().empty_descriptor_layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(rtx().device, rtx().empty_descriptor_layout, nullptr);
+        rtx().empty_descriptor_layout = VK_NULL_HANDLE;
+    }
+
+    if (rtx().rt_pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(rtx().device, rtx().rt_pipeline, nullptr);
+        rtx().rt_pipeline = VK_NULL_HANDLE;
+    }
+    if (rtx().compute_pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(rtx().device, rtx().compute_pipeline, nullptr);
+        rtx().compute_pipeline = VK_NULL_HANDLE;
+    }
+    if (rtx().pipeline_layout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(rtx().device, rtx().pipeline_layout, nullptr);
+        rtx().pipeline_layout = VK_NULL_HANDLE;
     }
 
     if (rtx().dummy_tlas != VK_NULL_HANDLE) {
         ext().vkDestroyAccelerationStructureKHR(rtx().device, rtx().dummy_tlas, nullptr);
+        rtx().dummy_tlas = VK_NULL_HANDLE;
     }
     if (rtx().dummy_accel_buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(rtx().device, rtx().dummy_accel_buffer, nullptr);
+        rtx().dummy_accel_buffer = VK_NULL_HANDLE;
     }
-    if (rtx().dummy_accel_memory != VK_NULL_HANDLE) {
-        vkFreeMemory(rtx().device, rtx().dummy_accel_memory, nullptr);
-    }
+    // Note: dummy_accel_memory should be managed by Memory::destroy if tracked
 }
