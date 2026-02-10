@@ -1,43 +1,41 @@
+// Filename: assets/shaders/raytracing/closest_hit.glsl
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_scalar_block_layout : require
 
-// PUSH CONSTANT — must be declared in EVERY shader that uses it
-layout(push_constant) uniform PushConstants {
-    float totalTime;
-} pc;
+layout(location = 0) rayPayloadEXT vec3 hitColor;
 
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
+hitAttributeEXT vec3 hitPoint;  // from intersection shader
 
-hitAttributeEXT vec3 attribs; // barycentrics
-
-struct Material {
+layout(set = 0, binding = 3) readonly buffer Materials {
     vec4 albedo;
-    vec4 emissive;
-};
+    vec4 emission;
+    float roughness;
+    float metallic;
+    // ... add more material properties as needed
+} materials[];
 
-layout(set = 0, binding = 3) readonly buffer MaterialBuffer {
-    Material materials[];
-} materialBuffer;
+layout(set = 0, binding = 4) readonly buffer Primitives {
+    vec4 aabbMin;
+    vec4 aabbMax;
+    mat4 transform;
+    uint type;
+    uint materialIndex;
+    float destruction;
+} primitives[];
 
-void main()
-{
-    // Get material from instance custom index
-    uint matIndex = gl_InstanceCustomIndexEXT;
-    vec3 albedo = materialBuffer.materials[matIndex].albedo.rgb;
+void main() {
+    uint primIndex = gl_PrimitiveID;
+    uint matIndex  = primitives[primIndex].materialIndex;
 
-    // Fake normal from ray direction for quick test lighting
-    vec3 normal = normalize(-gl_WorldRayDirectionEXT); // flip for visibility
-    vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-    float ndotl = max(0.0, dot(normal, lightDir));
+    vec3 albedo   = materials[matIndex].albedo.rgb;
+    vec3 emission = materials[matIndex].emission.rgb;
 
-    // Simple lit color + pink tint
-    vec3 color = albedo * (0.2 + 0.8 * ndotl);
-    color += vec3(0.8, 0.2, 0.5) * 0.15; // pink glow
+    // Simple shading (normal from AABB face or procedural normal)
+    // For now, just return albedo + emission
+    hitColor = albedo + emission * 2.0;
 
-    // Modulate with time for breathing (using push constant)
-    float pulse = 0.5 + 0.5 * sin(pc.totalTime * 1.618 + gl_HitTEXT * 10.0);
-    color *= pulse;
-
-    hitValue = color;
+    // Optional: add procedural normal / lighting based on primitive type
+    // e.g. if (primitives[primIndex].type == 1) { /* sphere normal */ }
 }

@@ -1,69 +1,37 @@
+// Filename: assets/shaders/raytracing/raygen.glsl
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_EXT_scalar_block_layout : require
-#extension GL_EXT_buffer_reference2 : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
+layout(location = 0) rayPayloadEXT vec3 hitColor;
 
 layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
 layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
-
-layout(push_constant) uniform PushConstants {
-    float totalTime;
-} pc;
-
-struct CameraSceneData {
+layout(set = 0, binding = 2) uniform SceneUBO {
     mat4 viewInverse;
     mat4 projInverse;
-    mat4 view;
-    mat4 proj;
-    vec4 cameraPos;
-    vec4 prevCameraPos;
-    float exposure;
-    float totalTime;        // duplicated for shader convenience
-    uint randomSeed;
-    uint maxDepth;
-    uint padding[2];
-};
+    vec3 cameraPos;
+    float time;
+    uvec2 imageSize;
+} ubo;
 
-layout(set = 0, binding = 2) uniform CameraUBO {
-    CameraSceneData camera;
-} cameraUBO;
-
-void main()
-{
+void main() {
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    const vec2 inUV        = pixelCenter / vec2(ubo.imageSize);
 
     vec2 d = inUV * 2.0 - 1.0;
-    vec4 target = cameraUBO.camera.projInverse * vec4(d.x, d.y, 1.0, 1.0);
-    vec3 direction = normalize((cameraUBO.camera.viewInverse * vec4(target.xyz, 0.0)).xyz);
-
-    vec3 origin = cameraUBO.camera.cameraPos.xyz;
+    vec4 origin    = ubo.viewInverse * vec4(0,0,0,1);
+    vec4 target    = ubo.projInverse * vec4(d.x, d.y, 1, 1);
+    vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0);
 
     uint rayFlags = gl_RayFlagsOpaqueEXT;
     uint cullMask = 0xff;
-    float tMin = 0.001;
-    float tMax = 10000.0;
+    float tmin    = 0.001;
+    float tmax    = 10000.0;
 
-    traceRayEXT(topLevelAS, rayFlags, cullMask,
-                /* sbtRecordOffset */ 0,
-                /* sbtRecordStride */ 1,
-                /* missIndex */ 0,
-                origin, tMin, direction, tMax, /* payload */ 0);
+    traceRayEXT(topLevelAS, rayFlags, cullMask, 0, 0, 0,
+                origin.xyz, tmin, direction.xyz, tmax, 0);
 
-    // Simple pink test color + time-based breathing
-    vec3 color = hitValue;
-    float pulse = 0.5 + 0.5 * sin(pc.totalTime * 1.618 + inUV.x * 10.0 + inUV.y * 7.0);
-    color = mix(color, vec3(0.9, 0.3, 0.6), pulse * 0.4);
-
-    // Add subtle noise for visibility
-    uint seed = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * 8192u + uint(pc.totalTime * 1000.0);
-    seed = seed * 1664525u + 1013904223u;
-    float noise = float(seed) / 4294967295.0;
-    color += (noise - 0.5) * 0.05;
-
-    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1.0));
+    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(hitColor, 1.0));
 }
