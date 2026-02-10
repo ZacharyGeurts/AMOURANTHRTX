@@ -1547,6 +1547,11 @@ inline void init() noexcept {
 }
 
 // Swapchain — single image, no acquire, direct present index 0 on VSync
+// Goal: tight control over present timing using TotalTime::get() synced to display refresh
+// We render directly into the swapchain image (STORAGE + TRANSFER_DST) when ready,
+// then present exactly when TotalTime indicates the next vsync window.
+// No vkAcquireNextImageKHR — we assume index 0 is always the back buffer (common for minImageCount=1 + FIFO/IMMEDIATE)
+
 struct Swapchain {
     struct Handle {
         VkSwapchainKHR value;
@@ -1564,6 +1569,13 @@ struct Swapchain {
     inline static VkFormat swapchainFormat_{};
     inline static bool minimized_ = false;
     inline static bool directWriteEnabled = false;
+
+    // Last known present target time (seconds since genesis)
+    // Used to decide whether we should present now or wait for next vsync
+    inline static double lastPresentTarget_s = 0.0;
+
+    // Estimated display refresh interval in seconds (updated from actual present timing)
+    inline static double estimatedRefreshInterval_s = 1.0 / 60.0; // start conservative
 
     static void ensureReady(int w, int h) noexcept {
         if (w == 0 || h == 0) {
@@ -1592,6 +1604,8 @@ struct Swapchain {
                 ext().vkDestroySwapchainKHR(rtx().device, swapchain_.get(), nullptr);
                 swapchain_.reset();
             }
+            swapchainImage_ = VK_NULL_HANDLE;
+            swapchainImageView_ = VK_NULL_HANDLE;
             rtx().images = VK_NULL_HANDLE;
         }
 
@@ -1606,7 +1620,6 @@ struct Swapchain {
 
         VkExtent2D extent{};
         if (caps.currentExtent.width == UINT32_MAX) {
-            // Defensive clamp — never pass invalid extent to Vulkan
             extent.width  = std::clamp(static_cast<uint32_t>(w), caps.minImageExtent.width, caps.maxImageExtent.width);
             extent.height = std::clamp(static_cast<uint32_t>(h), caps.minImageExtent.height, caps.maxImageExtent.height);
         } else {
@@ -1667,20 +1680,31 @@ struct Swapchain {
 
         VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
 
+        // Prefer low-latency modes if available
         if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != supportedModes.end()) {
             chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            LOG_SUCCESS_CAT("SWAPCHAIN", "IMMEDIATE selected (tearing OK)");
+            LOG_SUCCESS_CAT("SWAPCHAIN", "IMMEDIATE selected (tearing OK, lowest latency)");
         } else if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_FIFO_LATEST_READY_EXT) != supportedModes.end()) {
             chosenPM = VK_PRESENT_MODE_FIFO_LATEST_READY_EXT;
-            LOG_INFO_CAT("SWAPCHAIN", "Using FIFO_LATEST_READY");
+            LOG_INFO_CAT("SWAPCHAIN", "Using FIFO_LATEST_READY (best effort low-latency VSync)");
+        } else if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != supportedModes.end()) {
+            chosenPM = VK_PRESENT_MODE_MAILBOX_KHR;
+            LOG_INFO_CAT("SWAPCHAIN", "MAILBOX selected (triple buffering, good tear-free low latency)");
         } else {
-            LOG_WARNING_CAT("SWAPCHAIN", "Falling back to FIFO");
+            LOG_WARNING_CAT("SWAPCHAIN", "Falling back to standard FIFO (guaranteed VSync, higher latency)");
         }
 
-        uint32_t imgCount = 3;
+        // We want single buffering for tightest control → try minImageCount = 1
+        uint32_t imgCount = caps.minImageCount;
+        if (chosenPM == VK_PRESENT_MODE_FIFO_KHR || chosenPM == VK_PRESENT_MODE_FIFO_LATEST_READY_EXT) {
+            // FIFO usually requires at least 2 images
+            imgCount = std::max(caps.minImageCount, 2u);
+            imgCount = std::min(imgCount, caps.maxImageCount ? caps.maxImageCount : imgCount);
+        }
 
         VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
+        // Try to enable direct write (STORAGE) so we can render straight into swapchain image
         if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
             VkImageFormatProperties props{};
             VkResult formatRes = vkGetPhysicalDeviceImageFormatProperties(
@@ -1696,10 +1720,14 @@ struct Swapchain {
             if (formatRes == VK_SUCCESS) {
                 directWriteEnabled = true;
                 usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-                LOG_INFO_CAT("SWAPCHAIN", "Storage usage ENABLED — can render directly if desired");
+                LOG_SUCCESS_CAT("SWAPCHAIN", "STORAGE usage ENABLED — direct render to swapchain possible");
             } else {
-                LOG_WARNING_CAT("SWAPCHAIN", "Storage usage NOT enabled — query returned {}", vkh.result(formatRes));
+                LOG_WARNING_CAT("SWAPCHAIN", "STORAGE usage NOT supported — query returned {}", vkh.result(formatRes));
+                directWriteEnabled = false;
             }
+        } else {
+            LOG_WARNING_CAT("SWAPCHAIN", "Surface does not support STORAGE usage — cannot direct render");
+            directWriteEnabled = false;
         }
 
         VkSwapchainCreateInfoKHR ci{};
@@ -1736,7 +1764,7 @@ struct Swapchain {
             "Failed to get swapchain image count"
         );
 
-        vkh.checker(count == 3, "Single image swapchain - 3 minimum",
+        vkh.checker(count == caps.minImageCount, "Single image swapchain",
                     std::format("Driver returned {} images — expected 1", count).c_str());
 
         VkImage singleImage = VK_NULL_HANDLE;
@@ -1762,16 +1790,63 @@ struct Swapchain {
             "Failed to create swapchain image view"
         );
 
-        rtx().images      = singleImage;
-        rtx().views       = singleView;
-        rtx().extent      = extent;
-        rtx().image_count = 1;
+        swapchainImage_      = singleImage;
+        swapchainImageView_  = singleView;
+        rtx().images         = singleImage;
+        rtx().views          = singleView;
+        rtx().extent         = extent;
+        rtx().image_count    = 1;
 
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — single image, {}x{}, format {}, mode {}",
+        // Reset timing state on recreate
+        lastPresentTarget_s = 0.0;
+        estimatedRefreshInterval_s = 1.0 / 60.0;
+
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — single image, {}x{}, format {}, mode {}, direct-write={}",
                         isRecreate ? "recreated" : "created",
                         extent.width, extent.height,
                         vkh.format(chosenFormat.format),
-                        chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" : "FIFO");
+                        chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" :
+                        chosenPM == VK_PRESENT_MODE_FIFO_LATEST_READY_EXT ? "FIFO_LATEST_READY" :
+                        chosenPM == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" : "FIFO",
+                        directWriteEnabled ? "ENABLED" : "disabled");
+    }
+
+    // Decide if we should present NOW based on TotalTime vs last present + refresh estimate
+    // Returns true if we should present this frame, false if we should wait
+    static bool shouldPresentNow() noexcept {
+        double now_s = TotalTime::get().seconds();
+
+        // First frame — always present
+        if (lastPresentTarget_s <= 0.0) {
+            lastPresentTarget_s = now_s;
+            return true;
+        }
+
+        // Calculate next expected vsync time
+        double nextVsync_s = lastPresentTarget_s + estimatedRefreshInterval_s;
+
+        // If we're already past the next vsync window, present immediately (catch-up)
+        if (now_s >= nextVsync_s) {
+            lastPresentTarget_s = now_s;
+            return true;
+        }
+
+        // Otherwise wait — we're early for this frame
+        return false;
+    }
+
+    // Update estimated refresh interval based on actual present-to-present delta
+    static void updateRefreshEstimate(double now_s) noexcept {
+        if (lastPresentTarget_s > 0.0) {
+            double delta = now_s - lastPresentTarget_s;
+            if (delta > 0.001 && delta < 0.1) { // reasonable range: 10–1000 Hz
+                // Simple low-pass filter: 80% old + 20% new
+                estimatedRefreshInterval_s = 0.8 * estimatedRefreshInterval_s + 0.2 * delta;
+                LOG_PERF_CAT("SWAPCHAIN", "Updated refresh estimate: {:.4f} s ({:.1f} Hz)",
+                             estimatedRefreshInterval_s, 1.0 / estimatedRefreshInterval_s);
+            }
+        }
+        lastPresentTarget_s = now_s;
     }
 
     static VkResult presentImage(VkQueue queue) noexcept {
@@ -1779,9 +1854,19 @@ struct Swapchain {
             return VK_SUCCESS;
         }
 
+        double now_s = TotalTime::get().seconds();
+
+        // Only present if we're in/after the vsync window
+        if (!shouldPresentNow()) {
+            // Early return — caller should continue rendering or wait
+            // You can sleep a tiny bit here if you want to reduce CPU spin:
+            // std::this_thread::sleep_for(std::chrono::microseconds(500));
+            return VK_EVENT_SET; // non-error code meaning "not ready yet"
+        }
+
         VkSwapchainKHR sw = swapchain_.get();
 
-        uint32_t imageIndex = 0;
+        uint32_t imageIndex = 0; // always 0 — single image
 
         VkPresentInfoKHR pi{};
         pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1792,7 +1877,8 @@ struct Swapchain {
         VkResult res = ext().vkQueuePresentKHR(queue, &pi);
 
         if (res == VK_SUCCESS) {
-            LOG_INFO_CAT("SWAPCHAIN", "Present successful — single image");
+            updateRefreshEstimate(now_s); // measure actual timing
+            LOG_INFO_CAT("SWAPCHAIN", "Present successful — single image @ {:.6f} s", now_s);
         } else if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             minimized_ = true;
             LOG_WARNING_CAT("SWAPCHAIN", "Present returned out-of-date/suboptimal — minimized set");
@@ -1831,6 +1917,8 @@ struct Swapchain {
         }
 
         swapchainImage_ = VK_NULL_HANDLE;
+        lastPresentTarget_s = 0.0;
+        estimatedRefreshInterval_s = 1.0 / 60.0;
     }
 };
 

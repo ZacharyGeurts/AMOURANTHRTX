@@ -289,7 +289,7 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_VOID_TRACE_CAT(cat) [&]() { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   cat, "[VOID MARKER]"); }();
 
 // ETERNAL LAW
-#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::CHROMIUM_SILVER,       std::format(__VA_ARGS__),     Logging::Color::RESET))
+#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::AMOURANTH,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 
 namespace Logging {
 
@@ -302,8 +302,7 @@ enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error
 // 1. HYPER-VIVID ANSI COLORS
 // ========================================================================
 namespace Color {
-    inline constexpr const char* OKLAHOMA_RED                   = "\033[38;2;153;0;0m";
-    inline constexpr const char* OKLAHOMA_RED_BOLD              = "\033[1;38;2;153;0;0;48;2;255;255;255m";
+    inline constexpr const char* AMOURANTH                      = "\033[1;38;2;153;0;0;48;2;255;255;255m";
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
     inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";
