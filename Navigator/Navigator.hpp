@@ -12,7 +12,7 @@
 #include "engine/ELLIE.hpp"
 #include "engine/AMOURANTHRTX.hpp"
 #include "engine/OptionsMenu.hpp"
-#include "engine/Renderer.hpp"
+#include "engine/RayCanvas.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3_image/SDL_image.h>
@@ -21,8 +21,8 @@
 #include <chrono>
 #include <format>
 
-// Global renderer — owns eternal light and all creation
-inline std::unique_ptr<VulkanRenderer> renderer;
+// Global canvas at display frequency - your screen image rectangle
+inline std::unique_ptr<VulkanRenderer> raycanvas;
 
 // Sacrificial Splash — skippable with any input, non-blocking
 static inline void showSacrificialSplash() noexcept {
@@ -282,7 +282,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     LOG_AMOURANTH("AMOURANTHRTX v0.81 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 
     // Step 7: Create renderer (transient pool + engine buffers exist — safe)
-    renderer = std::make_unique<VulkanRenderer>(
+    raycanvas = std::make_unique<VulkanRenderer>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
         g_window
@@ -310,12 +310,12 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
             break;
         }
 
-        renderer->onResize(w, h);
-        renderer->pew();
+        raycanvas->onResize(w, h);
+        raycanvas->pew();
     }
 
     // Cleanup
-    renderer.reset();
+    raycanvas.reset();
     sdl_cleanup_all();
 
     return 0;
