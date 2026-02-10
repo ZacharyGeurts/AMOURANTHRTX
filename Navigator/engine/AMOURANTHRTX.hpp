@@ -2135,23 +2135,27 @@ inline VkTransformMatrixKHR to_vk_transform(const glm::mat4& m) noexcept {
 
 inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     if (Swapchain::minimized_ || !Swapchain::swapchain_.valid()) {
-        LOG_WARNING_CAT("LAS", "Swapchain minimized or invalid — skipping LAS rebuild completely");
+        LOG_WARNING_CAT("LAS", "Swapchain minimized or invalid — skipping Level Acceleration Structure rebuild");
         return;
     }
 
-    if (rtx().las_initialized && !rtx().las_tlas_dirty && !rtx().las_pending_blas_builds && 
-        !rtx().las_procedural_dirty && rtx().las_tlas != VK_NULL_HANDLE) {
-        LOG_INFO_CAT("LAS", "LAS already up-to-date — no rebuild needed");
+    if (rtx().las_initialized &&
+        !rtx().las_tlas_dirty &&
+        !rtx().las_pending_blas_builds &&
+        !rtx().las_procedural_dirty &&
+        rtx().las_tlas != VK_NULL_HANDLE)
+    {
+        LOG_INFO_CAT("LAS", "Level Acceleration Structure is fully up to date — no rebuild required");
         return;
     }
 
-    LOG_INFO_CAT("LAS", "LAS rebuild required — dirty flags: tlas={}, pending_blas={}, procedural={}",
-                 rtx().las_tlas_dirty ? "dirty" : "clean",
+    LOG_INFO_CAT("LAS", "Level Acceleration Structure rebuild triggered — state: top-level={}, bottom-level={}, procedural={}",
+                 rtx().las_tlas_dirty     ? "dirty"    : "clean",
                  rtx().las_pending_blas_builds ? "pending" : "clean",
-                 rtx().las_procedural_dirty ? "dirty" : "clean");
+                 rtx().las_procedural_dirty ? "dirty"    : "clean");
 
     if (!rtx().las_initialized) {
-        LOG_INFO_CAT("LAS", "Scene not initialized — building default hybrid scene");
+        LOG_INFO_CAT("LAS", "First initialization — building default hybrid scene for Level Acceleration Structure");
         createDefaultHybridScene();
         rtx().las_initialized = true;
     }
@@ -2160,8 +2164,8 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     bool ownsCmd = (cmd == VK_NULL_HANDLE);
 
     if (ownsCmd) {
-        vkh.checker(rtx().transient_pool != VK_NULL_HANDLE, "Transient pool existence",
-                    "No transient command pool — cannot perform LAS rebuild");
+        vkh.checker(rtx().transient_pool != VK_NULL_HANDLE, "Transient pool",
+                    "No transient command pool — cannot rebuild Level Acceleration Structure");
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -2171,8 +2175,8 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
         vkh.checker(
             vkAllocateCommandBuffers(rtx().device, &allocInfo, &localCmd),
-            "vkAllocateCommandBuffers (LAS rebuild)",
-            "Failed to allocate cmd buffer for LAS rebuild"
+            "vkAllocateCommandBuffers",
+            "Failed to allocate command buffer for rebuild"
         );
 
         VkCommandBufferBeginInfo beginInfo{};
@@ -2181,26 +2185,25 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
         vkh.checker(
             vkBeginCommandBuffer(localCmd, &beginInfo),
-            "vkBeginCommandBuffer (LAS rebuild)",
-            "Failed to begin cmd buffer for LAS rebuild"
+            "vkBeginCommandBuffer",
+            "Failed to begin command buffer for rebuild"
         );
 
-        LOG_INFO_CAT("LAS", "Allocated and began temporary cmd buffer for LAS rebuild (owned path)");
+        LOG_INFO_CAT("LAS", "Started fresh temporary command buffer for Level Acceleration Structure rebuild");
     } else {
-        LOG_INFO_CAT("LAS", "Recording LAS rebuild into provided external cmd buffer");
+        LOG_INFO_CAT("LAS", "Recording Level Acceleration Structure rebuild into provided command buffer");
     }
 
     std::vector<std::pair<VkBuffer, VkDeviceMemory>> pendingStaging;
 
-    auto safeUpload = [&](uint64_t bufHandle, const void* srcData, VkDeviceSize uploadSize, const std::string& debugTag) {
-        std::pair<VkBuffer, VkDeviceMemory> staging = Memory::uploadToBuffer(bufHandle, srcData, uploadSize, localCmd);
-        LOG_INFO_CAT("LAS", "Upload recorded for {} — staging cleanup deferred to after submit/wait", debugTag);
-
+    auto safeUpload = [&](uint64_t bufHandle, const void* srcData, VkDeviceSize uploadSize, const std::string& tag) {
+        auto staging = Memory::uploadToBuffer(bufHandle, srcData, uploadSize, localCmd);
+        LOG_INFO_CAT("LAS", "Upload queued for {}", tag);
         pendingStaging.push_back(staging);
     };
 
     if (rtx().las_procedural_dirty) {
-        LOG_INFO_CAT("TLAS", "Procedural primitives dirty — updating device buffer");
+        LOG_INFO_CAT("Procedural", "Procedural geometry changed — refreshing on-device buffer");
 
         VkDeviceSize primSize = rtx().las_procedural_primitives.size() * sizeof(UniversalPrimitive);
         if (primSize == 0) primSize = 16;
@@ -2212,43 +2215,37 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
                                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                  "LAS_UniversalPrimitives");
 
-            if (primHandle == 0) {
-                std::string msg = "Failed to allocate procedural primitives buffer";
-                vkh.checker(false, "Memory::create (procedural primitives)", msg.c_str());
-                return;
-            }
-
+            vkh.checker(primHandle != 0, "Memory::create", "Procedural buffer allocation failed");
             rtx().las_universal_primitives_buffer = primHandle;
         }
 
         safeUpload(rtx().las_universal_primitives_buffer,
                    rtx().las_procedural_primitives.data(),
-                   primSize, "procedural primitives");
+                   primSize, "procedural primitives data");
 
-        LOG_SUCCESS_CAT("TLAS", "Uploaded {} procedural primitives ({} bytes) to device buffer",
+        LOG_SUCCESS_CAT("Procedural", "Uploaded {} procedural primitives ({} bytes)",
                         rtx().las_procedural_primitives.size(), primSize);
         rtx().las_procedural_dirty = false;
     }
 
     if (rtx().las_pending_blas_builds) {
-        LOG_INFO_CAT("BLAS", "Processing {} triangle meshes for BLAS build/update", 
+        LOG_INFO_CAT("BLAS", "Scanning {} meshes for bottom-level acceleration structure updates",
                      rtx().las_triangle_meshes.size());
 
         for (size_t i = 0; i < rtx().las_triangle_meshes.size(); ++i) {
             InternalMesh& mesh = rtx().las_triangle_meshes[i];
 
             if (mesh.blasBuilt) {
-                LOG_INFO_CAT("BLAS", "Mesh #{} already built — skipping", i);
+                LOG_INFO_CAT("BLAS", "Mesh #{} bottom-level acceleration already built — skipping", i);
                 continue;
             }
 
             if (mesh.vertexBuffer == 0 || mesh.indexBuffer == 0) {
-                std::string msg = std::format("Mesh #{} missing buffers — skipping BLAS build", i);
-                vkh.checker(false, "Mesh buffer validity", msg.c_str());
+                LOG_WARNING_CAT("BLAS", "Mesh #{} missing buffers — skipping bottom-level build", i);
                 continue;
             }
 
-            LOG_INFO_CAT("BLAS", "Building BLAS for mesh #{} (vertices={}, primitives={})", 
+            LOG_INFO_CAT("BLAS", "Building bottom-level acceleration structure for mesh #{} ({} vertices, {} primitives)",
                          i, mesh.vertexCount, mesh.primitiveCount);
 
             VkAccelerationStructureGeometryKHR geom{};
@@ -2277,89 +2274,73 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             rangeInfo.firstVertex = 0;
             rangeInfo.transformOffset = 0;
 
-            const VkAccelerationStructureBuildRangeInfoKHR* pRangeInfo = &rangeInfo;
+            const VkAccelerationStructureBuildRangeInfoKHR* pRange = &rangeInfo;
 
             VkAccelerationStructureBuildSizesInfoKHR sizes{};
             sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
             ext().vkGetAccelerationStructureBuildSizesKHR(
-                rtx().device,
-                VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                &buildInfo,
-                &rangeInfo.primitiveCount,
-                &sizes);
+                rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                &buildInfo, &rangeInfo.primitiveCount, &sizes);
 
             VkDeviceAddress scratchAddr = Memory::allocateScratch(sizes.buildScratchSize);
-
             if (scratchAddr == 0) {
-                std::string msg = std::format("Failed to allocate scratch for BLAS mesh #{}", i);
-                vkh.checker(false, "allocateScratch (BLAS)", msg.c_str());
+                LOG_ERROR_CAT("BLAS", "Failed to allocate scratch for mesh #{} bottom-level build — skipping", i);
                 continue;
             }
 
             buildInfo.scratchData.deviceAddress = scratchAddr;
 
-            bool blasValid = true;
-
             if (mesh.blas == VK_NULL_HANDLE) {
-                uint64_t blasStorageHandle = Memory::create(sizes.accelerationStructureSize,
-                                                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                                            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                            "Mesh_BLAS_Storage_" + std::to_string(i));
+                uint64_t storageHandle = Memory::create(sizes.accelerationStructureSize,
+                                                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                        "Mesh_BLAS_Storage_" + std::to_string(i));
 
-                if (blasStorageHandle == 0) {
-                    std::string msg = std::format("Failed to allocate BLAS storage for mesh #{}", i);
-                    vkh.checker(false, "Memory::create (BLAS storage)", msg.c_str());
-                    continue;
-                }
+                vkh.checker(storageHandle != 0, "Memory::create", "Bottom-level storage allocation failed");
 
-                BufferInfo* storageInfo = Memory::get(blasStorageHandle);
+                BufferInfo* storage = Memory::get(storageHandle);
+                vkh.checker(storage != nullptr, "Memory::get", "Failed to access bottom-level storage");
 
-                if (storageInfo == nullptr) {
-                    std::string msg = std::format("Failed to get BLAS storage info for mesh #{}", i);
-                    vkh.checker(false, "Memory::get (BLAS storage)", msg.c_str());
-                    continue;
-                }
+                VkAccelerationStructureCreateInfoKHR blasCI{};
+                blasCI.sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+                blasCI.type   = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+                blasCI.buffer = storage->buffer;
+                blasCI.size   = sizes.accelerationStructureSize;
 
-                VkAccelerationStructureCreateInfoKHR blasCreate{};
-                blasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-                blasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-                blasCreate.buffer = storageInfo->buffer;
-                blasCreate.size = sizes.accelerationStructureSize;
+                vkh.checker(
+                    ext().vkCreateAccelerationStructureKHR(rtx().device, &blasCI, nullptr, &mesh.blas),
+                    "vkCreateAccelerationStructureKHR",
+                    std::format("Mesh #{}", i).c_str()
+                );
 
-                VkResult res = ext().vkCreateAccelerationStructureKHR(rtx().device, &blasCreate, nullptr, &mesh.blas);
-                std::string msg = std::format("Failed to create BLAS for mesh #{}", i);
-                vkh.checker(res, "vkCreateAccelerationStructureKHR (BLAS)", msg.c_str());
-
-                LOG_SUCCESS_CAT("BLAS", "Created BLAS acceleration structure for mesh #{}", i);
+                LOG_SUCCESS_CAT("BLAS", "Created bottom-level acceleration structure for mesh #{}", i);
             }
-
-            vkh.checker(blasValid && mesh.blas != VK_NULL_HANDLE, "BLAS validity check",
-                        "Skipping BLAS build for mesh #{} — invalid acceleration structure");
 
             buildInfo.dstAccelerationStructure = mesh.blas;
 
-            ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &buildInfo, &pRangeInfo);
+            ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &buildInfo, &pRange);
 
             VkMemoryBarrier barrier{};
             barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
             barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
             barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
             vkCmdPipelineBarrier(localCmd,
                                  VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                                  VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                                  0, 1, &barrier, 0, nullptr, 0, nullptr);
 
             mesh.blasBuilt = true;
-            LOG_SUCCESS_CAT("BLAS", "BLAS built/updated for mesh #{} (primitives={})", i, mesh.primitiveCount);
+            LOG_SUCCESS_CAT("BLAS", "Mesh #{} bottom-level acceleration structure updated ({} primitives)", i, mesh.primitiveCount);
         }
 
         rtx().las_pending_blas_builds = false;
-        LOG_SUCCESS_CAT("BLAS", "All pending BLAS builds completed");
+        LOG_SUCCESS_CAT("BLAS", "All bottom-level acceleration structure updates complete");
     }
 
     if (rtx().las_tlas_dirty) {
-        LOG_INFO_CAT("TLAS", "Rebuilding TLAS — {} procedural primitives + {} triangle meshes",
+        LOG_INFO_CAT("TLAS", "Rebuilding top-level acceleration structure — {} procedural + {} mesh instances",
                      rtx().las_procedural_primitives.size(), rtx().las_triangle_meshes.size());
 
         VkDeviceSize instanceCount = rtx().las_procedural_primitives.size() + rtx().las_triangle_meshes.size();
@@ -2373,12 +2354,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
                                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                  "LAS_InstanceBuffer");
 
-            if (instHandle == 0) {
-                vkh.checker(false, "Memory::create (LAS instance buffer)",
-                    "Failed to allocate TLAS instance buffer");
-                return;
-            }
-
+            vkh.checker(instHandle != 0, "Memory::create", "Top-level instance buffer allocation failed");
             rtx().las_instance_buffer = instHandle;
         }
 
@@ -2387,7 +2363,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
         uint32_t instanceId = 0;
 
-        for (const UniversalPrimitive& prim : rtx().las_procedural_primitives) {
+        for (const auto& prim : rtx().las_procedural_primitives) {
             VkAccelerationStructureInstanceKHR inst{};
             inst.transform = to_vk_transform(prim.transform);
             inst.instanceCustomIndex = instanceId++ & 0xFFFFFFu;
@@ -2399,7 +2375,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             instances.push_back(inst);
         }
 
-        for (const InternalMesh& mesh : rtx().las_triangle_meshes) {
+        for (const auto& mesh : rtx().las_triangle_meshes) {
             if (mesh.blas == VK_NULL_HANDLE) continue;
 
             VkAccelerationStructureDeviceAddressInfoKHR addrInfo{};
@@ -2419,14 +2395,14 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         }
 
         auto staging = Memory::uploadToBuffer(
-            rtx().las_instance_buffer, 
-            instances.data(), 
-            instances.size() * sizeof(VkAccelerationStructureInstanceKHR), 
+            rtx().las_instance_buffer,
+            instances.data(),
+            instances.size() * sizeof(VkAccelerationStructureInstanceKHR),
             localCmd
         );
         pendingStaging.push_back(staging);
 
-        LOG_SUCCESS_CAT("TLAS", "Uploaded {} TLAS instances to device buffer", instanceCount);
+        LOG_SUCCESS_CAT("TLAS", "Uploaded {} instances to top-level buffer", instanceCount);
 
         VkAccelerationStructureGeometryKHR tlasGeom{};
         tlasGeom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -2454,23 +2430,15 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         tlasSizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
         ext().vkGetAccelerationStructureBuildSizesKHR(
-            rtx().device,
-            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-            &tlasBuild,
-            &tlasRange.primitiveCount,
-            &tlasSizes);
+            rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &tlasBuild, &tlasRange.primitiveCount, &tlasSizes);
 
         VkDeviceAddress tlasScratchAddr = Memory::allocateScratch(tlasSizes.buildScratchSize);
-
         if (tlasScratchAddr == 0) {
-            vkh.checker(false, "allocateScratch (TLAS)",
-                        "Failed to allocate scratch for TLAS build");
-            return;
+            LOG_ERROR_CAT("TLAS", "Failed to allocate scratch memory for top-level rebuild");
+        } else {
+            tlasBuild.scratchData.deviceAddress = tlasScratchAddr;
         }
-
-        tlasBuild.scratchData.deviceAddress = tlasScratchAddr;
-
-        bool tlasValid = true;
 
         if (rtx().las_tlas == VK_NULL_HANDLE) {
             uint64_t tlasStorageHandle = Memory::create(tlasSizes.accelerationStructureSize,
@@ -2478,39 +2446,26 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
                                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                                         "LAS_TLAS_Storage");
 
-            if (tlasStorageHandle == 0) {
-                vkh.checker(false, "Memory::create (TLAS storage)",
-                            "Failed to allocate TLAS storage buffer");
-                return;
-            }
-
+            vkh.checker(tlasStorageHandle != 0, "Memory::create", "Top-level storage allocation failed");
             rtx().las_tlas_storage = tlasStorageHandle;
 
-            BufferInfo* storageInfo = Memory::get(tlasStorageHandle);
-
-            if (storageInfo == nullptr) {
-                vkh.checker(false, "Memory::get (TLAS storage)",
-                            "Failed to get TLAS storage info");
-                return;
-            }
+            BufferInfo* storage = Memory::get(tlasStorageHandle);
+            vkh.checker(storage != nullptr, "Memory::get", "Failed to access top-level storage");
 
             VkAccelerationStructureCreateInfoKHR tlasCreate{};
             tlasCreate.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-            tlasCreate.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-            tlasCreate.buffer = storageInfo->buffer;
-            tlasCreate.size = tlasSizes.accelerationStructureSize;
+            tlasCreate.type  = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+            tlasCreate.buffer = storage->buffer;
+            tlasCreate.size   = tlasSizes.accelerationStructureSize;
 
             vkh.checker(
                 ext().vkCreateAccelerationStructureKHR(rtx().device, &tlasCreate, nullptr, &rtx().las_tlas),
-                "vkCreateAccelerationStructureKHR (TLAS)",
-                "Failed to create TLAS"
+                "vkCreateAccelerationStructureKHR",
+                "Failed to create top-level acceleration structure"
             );
 
-            LOG_SUCCESS_CAT("TLAS", "Created TLAS acceleration structure");
+            LOG_SUCCESS_CAT("TLAS", "Created fresh top-level acceleration structure");
         }
-
-        vkh.checker(tlasValid && rtx().las_tlas != VK_NULL_HANDLE, "TLAS validity check",
-                    "Skipping TLAS build — invalid acceleration structure");
 
         tlasBuild.dstAccelerationStructure = rtx().las_tlas;
 
@@ -2520,20 +2475,21 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         tlasBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
         tlasBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
         tlasBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
         vkCmdPipelineBarrier(localCmd,
                              VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                              VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                              0, 1, &tlasBarrier, 0, nullptr, 0, nullptr);
 
         rtx().las_tlas_dirty = false;
-        LOG_SUCCESS_CAT("TLAS", "TLAS rebuilt with {} instances", instanceCount);
+        LOG_SUCCESS_CAT("TLAS", "Top-level acceleration structure rebuilt with {} instances", instanceCount);
     }
 
     if (ownsCmd) {
         vkh.checker(
             vkEndCommandBuffer(localCmd),
-            "vkEndCommandBuffer (LAS rebuild)",
-            "Failed to end LAS rebuild cmd buffer"
+            "vkEndCommandBuffer",
+            "Failed to finalize rebuild command buffer"
         );
 
         VkSubmitInfo submit{};
@@ -2543,14 +2499,15 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
         vkh.checker(
             vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE),
-            "vkQueueSubmit (LAS rebuild)",
-            "Failed to submit LAS rebuild"
+            "vkQueueSubmit",
+            "Failed to submit rebuild commands"
         );
 
         vkQueueWaitIdle(rtx().graphics_queue);
+
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
 
-        for (std::pair<VkBuffer, VkDeviceMemory>& p : pendingStaging) {
+        for (auto& p : pendingStaging) {
             if (p.first != VK_NULL_HANDLE) {
                 vkDestroyBuffer(rtx().device, p.first, nullptr);
                 vkFreeMemory(rtx().device, p.second, nullptr);
@@ -2558,16 +2515,19 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         }
         pendingStaging.clear();
 
-        LOG_SUCCESS_CAT("LAS", "LAS rebuild complete — structures updated and staging cleaned (owned cmd path)");
+        LOG_SUCCESS_CAT("LAS", "Level Acceleration Structure rebuild complete — structures updated, resources cleaned");
     } else {
-        LOG_INFO_CAT("LAS", "LAS rebuild recorded into external cmd buffer — awaiting caller submission");
+        LOG_INFO_CAT("LAS", "Level Acceleration Structure rebuild recorded — awaiting submission from caller");
 
         if (!pendingStaging.empty()) {
-            LOG_WARNING_CAT("LAS", "External cmd path — {} pending staging resources must be destroyed after queue wait", pendingStaging.size());
+            LOG_WARNING_CAT("LAS", "{} staging buffers still pending — cleanup required after queue wait",
+                            pendingStaging.size());
         } else {
-            LOG_INFO_CAT("LAS", "No pending staging resources detected in this rebuild");
+            LOG_INFO_CAT("LAS", "No staging buffers created in this rebuild");
         }
     }
+
+    LOG_SUCCESS_CAT("LAS", "Level Acceleration Structure update finished");
 }
 
 // Get top-level acceleration structure
