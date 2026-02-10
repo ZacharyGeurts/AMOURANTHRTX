@@ -38,8 +38,8 @@ struct CameraSceneData {
 
 // =============================================================================
 // VulkanRenderer — Genesis Time Philosophy Edition
-// Pre-acquire two swapchain images at startup/resize, cache timing delta
-// Render to HDR → blit to cached image → present when TotalTime aligns
+// HDR render → blit to cached swapchain image → present when TotalTime aligns
+// No blocking acquires in loop — skip/wank early frames using measured delta
 // No triangles — pure procedural AABB pipeline
 // =============================================================================
 class VulkanRenderer {
@@ -59,8 +59,8 @@ public:
           needsDescriptorUpdate_(true),
           cachedSwapImageIndex_(UINT32_MAX),
           cachedSwapImage_(VK_NULL_HANDLE),
-          lastAcquireTime_s_(0.0),
-          estimatedFrameTime_s_(1.0 / 60.0)
+          lastPresentTime_s_(0.0),
+          smoothedFrameDelta_s_(1.0 / 60.0)
     {
         LOG_INFO_CAT("RENDERER", "Initializing — {}x{}", width, height);
 
@@ -86,7 +86,7 @@ public:
 
         createOrRecreateHDRImage();
 
-        // Pre-acquire two images to cache and measure timing
+        // Safe initial timing estimate
         preAcquireSwapchainImages();
 
         pipeline_initialize();
@@ -132,11 +132,12 @@ public:
             totalTime.seal();
             firstFrame_ = false;
             LOG_AMOURANTH("Genesis sealed — eternal clock starts now 💖");
+            return;  // skip first frame after genesis
         }
 
         double now_sec = totalTime.seconds();
 
-        // Optional: skip render if too early for next frame
+        // Skip/wank if too early for next vsync window
         if (shouldSkipFrame(now_sec)) {
             return;
         }
@@ -179,7 +180,17 @@ public:
         // Blit to cached swapchain image and present
         blitToCachedSwapchainAndPresent();
 
-        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame complete @ %.3f s\033[0m\n", now_sec);
+        // Update timing after successful present
+        double presentNow = totalTime.seconds();
+        double actualDelta = presentNow - lastPresentTime_s_;
+
+        // Exponential moving average (EMA) for smooth adaptation
+        constexpr double alpha = 0.2;
+        smoothedFrameDelta_s_ = alpha * actualDelta + (1.0 - alpha) * smoothedFrameDelta_s_;
+
+        lastPresentTime_s_ = presentNow;
+
+        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame complete @ %.3f s — delta %.4f s\033[0m\n", now_sec, actualDelta);
     }
 
     void onResize(int newWidth, int newHeight) noexcept {
@@ -201,80 +212,70 @@ public:
 
         createOrRecreateHDRImage();
 
-        // Re-acquire after resize
+        // Re-measure timing after resize
         preAcquireSwapchainImages();
 
         needsDescriptorUpdate_ = true;
     }
 
 private:
-    // Pre-acquire two images at startup / resize to cache and measure timing
+    // Safe initial timing estimate (one acquire + present)
     void preAcquireSwapchainImages() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        VkResult res;
-        uint32_t idx;
+        VkSemaphore sem = VK_NULL_HANDLE;
+        VkSemaphoreCreateInfo semCI{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0
+        };
+        vkCreateSemaphore(rtx().device, &semCI, nullptr, &sem);
 
-        // Acquire first image
+        uint32_t idx = UINT32_MAX;
         double t1 = TotalTime::get().seconds();
-        res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
-                                    UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &idx);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("RENDERER", "Initial acquire 1 failed: {}", vkh.result(res));
-            minimized_ = true;
-            return;
+
+        VkResult res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
+                                             500'000'000,  // 0.5 sec timeout
+                                             sem, VK_NULL_HANDLE, &idx);
+
+        if (res == VK_SUCCESS) {
+            VkPresentInfoKHR pi{};
+            pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+            pi.waitSemaphoreCount = 1;
+            pi.pWaitSemaphores = &sem;
+            pi.swapchainCount = 1;
+            VkSwapchainKHR sw = Swapchain::swapchain_.get();
+            pi.pSwapchains = &sw;
+            pi.pImageIndices = &idx;
+
+            vkQueuePresentKHR(rtx().present_queue, &pi);
+
+            double t2 = TotalTime::get().seconds();
+            double delta = t2 - t1;
+            if (delta > 0.005 && delta < 0.1) {
+                smoothedFrameDelta_s_ = delta;
+            }
+            lastPresentTime_s_ = t2;
+
+            LOG_INFO_CAT("RENDERER", "Initial present delta measured: {:.4f}s → using as starting frame time", delta);
+        } else {
+            LOG_WARNING_CAT("RENDERER", "Initial timing acquire failed — using fallback 60 Hz");
+            smoothedFrameDelta_s_ = 1.0 / 60.0;
+            lastPresentTime_s_ = TotalTime::get().seconds();
         }
-        cachedSwapImageIndex_ = idx;
-        cachedSwapImage_ = rtx().images; // assuming rtx().images is updated on acquire
 
-        // Acquire second image and measure delta
-        double t2 = TotalTime::get().seconds();
-        res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
-                                    UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &idx);
-        if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("RENDERER", "Initial acquire 2 failed: {}", vkh.result(res));
-            minimized_ = true;
-            return;
-        }
-
-        estimatedFrameTime_s_ = static_cast<float>(t2 - t1);
-        if (estimatedFrameTime_s_ < 0.005 || estimatedFrameTime_s_ > 0.1) {
-            estimatedFrameTime_s_ = 1.0 / 60.0; // fallback
-        }
-
-        lastAcquireTime_s_ = t2;
-
-        LOG_INFO_CAT("RENDERER", "Pre-acquired swapchain images — estimated frame time {:.4f}s ({:.1f} Hz)",
-                     estimatedFrameTime_s_, 1.0 / estimatedFrameTime_s_);
-
-        // Transition cached image to TRANSFER_DST_OPTIMAL
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (cmd != VK_NULL_HANDLE) {
-            transitionImageLayout(cmd, cachedSwapImage_,
-                                  VK_IMAGE_LAYOUT_UNDEFINED,
-                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            endSubmitAndWait(cmd);
-        }
+        vkDestroySemaphore(rtx().device, sem, nullptr);
     }
 
-    // Decide if we should render/present this frame
+    // Decide if we should render/present this frame or skip/wank
     bool shouldSkipFrame(double now_sec) noexcept {
-        if (lastAcquireTime_s_ <= 0.0) return false;
+        double nextPresent = lastPresentTime_s_ + smoothedFrameDelta_s_;
 
-        double nextPresent = lastAcquireTime_s_ + estimatedFrameTime_s_;
-
-        // Skip if significantly early
-        if (now_sec < nextPresent - 0.002) {
+        // Skip if significantly early (1 ms tolerance)
+        if (now_sec < nextPresent - 0.001) {
             return true;
         }
 
-        // Smoothly update estimate
-        double delta = now_sec - lastAcquireTime_s_;
-        if (delta > 0.005 && delta < 0.1) {
-            estimatedFrameTime_s_ = 0.8 * estimatedFrameTime_s_ + 0.2 * delta;
-        }
-
-        lastAcquireTime_s_ = now_sec;
         return false;
     }
 
@@ -530,7 +531,7 @@ private:
     uint32_t                        cachedSwapImageIndex_;
     VkImage                         cachedSwapImage_;
 
-    // Timing from initial acquires
-    double                          lastAcquireTime_s_;
-    double                          estimatedFrameTime_s_;
+    // Live timing — updated from actual presents
+    double                          lastPresentTime_s_;
+    double                          smoothedFrameDelta_s_;
 };
