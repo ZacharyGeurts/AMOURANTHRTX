@@ -54,8 +54,7 @@ public:
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
-          needsDescriptorUpdate_(true),
-          needsSwapchainRecreate_(false)
+          needsDescriptorUpdate_(true)
     {
         LOG_INFO_CAT("RENDERER", "Initializing — {}x{}", width, height);
 
@@ -96,9 +95,15 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+        if (hdrOutputView_ != VK_NULL_HANDLE) {
+            vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+        }
+        if (hdrOutputImage_ != VK_NULL_HANDLE) {
+            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+        }
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) {
+            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+        }
 
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(defaultMaterialsHandle_);
@@ -180,7 +185,6 @@ public:
         width_  = newWidth;
         height_ = newHeight;
         minimized_ = false;
-        needsSwapchainRecreate_ = true;
 
         LOG_INFO_CAT("RENDERER", "Resize — {}x{}", width_, height_);
 
@@ -275,20 +279,25 @@ private:
 
         endSubmitAndWait(blitCmd);
 
-        // Direct present — no acquire, index 0 only
-        Swapchain::presentImage(rtx().graphics_queue);
+        // Timing-aware present — only when TotalTime says it's time
+        Swapchain::presentImage(rtx().present_queue);
     }
 
     void createOrRecreateHDRImage() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-
-        hdrOutputView_   = VK_NULL_HANDLE;
-        hdrOutputImage_  = VK_NULL_HANDLE;
-        hdrOutputMemory_ = VK_NULL_HANDLE;
+        if (hdrOutputView_ != VK_NULL_HANDLE) {
+            vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+            hdrOutputView_ = VK_NULL_HANDLE;
+        }
+        if (hdrOutputImage_ != VK_NULL_HANDLE) {
+            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+            hdrOutputImage_ = VK_NULL_HANDLE;
+        }
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) {
+            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+            hdrOutputMemory_ = VK_NULL_HANDLE;
+        }
 
         VkImageCreateInfo ci{};
         ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -422,5 +431,4 @@ private:
     VkImageView                     hdrOutputView_      = VK_NULL_HANDLE;
     VkDeviceMemory                  hdrOutputMemory_    = VK_NULL_HANDLE;
     bool                            needsDescriptorUpdate_;
-    bool                            needsSwapchainRecreate_;
 };
