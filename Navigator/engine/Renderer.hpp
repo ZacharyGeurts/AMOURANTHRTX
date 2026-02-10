@@ -219,55 +219,99 @@ public:
     }
 
 private:
-    // Safe initial timing estimate (one acquire + present)
-    void preAcquireSwapchainImages() noexcept {
-        vkDeviceWaitIdle(rtx().device);
+    
+void preAcquireSwapchainImages() noexcept {
+    vkDeviceWaitIdle(rtx().device);
 
-        VkSemaphore sem = VK_NULL_HANDLE;
-        VkSemaphoreCreateInfo semCI{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0
-        };
-        vkCreateSemaphore(rtx().device, &semCI, nullptr, &sem);
+    VkSemaphore sem = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
 
-        uint32_t idx = UINT32_MAX;
-        double t1 = TotalTime::get().seconds();
+    VkSemaphoreCreateInfo semCI = {};
+    semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        VkResult res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
-                                             500'000'000,  // 0.5 sec timeout
-                                             sem, VK_NULL_HANDLE, &idx);
+    VkFenceCreateInfo fenceCI = {};
+    fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
-        if (res == VK_SUCCESS) {
-            VkPresentInfoKHR pi{};
-            pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-            pi.waitSemaphoreCount = 1;
-            pi.pWaitSemaphores = &sem;
-            pi.swapchainCount = 1;
-            VkSwapchainKHR sw = Swapchain::swapchain_.get();
-            pi.pSwapchains = &sw;
-            pi.pImageIndices = &idx;
+    vkCreateSemaphore(rtx().device, &semCI, nullptr, &sem);
+    vkCreateFence(rtx().device, &fenceCI, nullptr, &fence);
 
-            vkQueuePresentKHR(rtx().present_queue, &pi);
+    uint32_t idx = UINT32_MAX;
+    double t1 = TotalTime::get().seconds();
 
-            double t2 = TotalTime::get().seconds();
-            double delta = t2 - t1;
-            if (delta > 0.005 && delta < 0.1) {
-                smoothedFrameDelta_s_ = delta;
-            }
-            lastPresentTime_s_ = t2;
+    VkResult acquireRes = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
+                                                500'000'000,  // 0.5 sec timeout
+                                                sem, VK_NULL_HANDLE, &idx);
 
-            LOG_INFO_CAT("RENDERER", "Initial present delta measured: {:.4f}s → using as starting frame time", delta);
-        } else {
-            LOG_WARNING_CAT("RENDERER", "Initial timing acquire failed — using fallback 60 Hz");
-            smoothedFrameDelta_s_ = 1.0 / 60.0;
-            lastPresentTime_s_ = TotalTime::get().seconds();
+    if (acquireRes == VK_SUCCESS) {
+        // Transition the acquired image to PRESENT_SRC_KHR (fixes VUID-01430)
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        if (cmd != VK_NULL_HANDLE) {
+            VkImageMemoryBarrier barrier = {};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = rtx().images;  // single-image swapchain
+            barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+
+            vkCmdPipelineBarrier(cmd,
+                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+            vkEndCommandBuffer(cmd);
+
+            VkSubmitInfo submit = {};
+            submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit.commandBufferCount = 1;
+            submit.pCommandBuffers = &cmd;
+
+            vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
+            vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
+            vkResetFences(rtx().device, 1, &fence);
+
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
         }
 
-        vkDestroySemaphore(rtx().device, sem, nullptr);
+        // Now safe to present
+        VkPresentInfoKHR pi = {};
+        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        pi.waitSemaphoreCount = 1;
+        pi.pWaitSemaphores = &sem;
+        pi.swapchainCount = 1;
+        VkSwapchainKHR sw = Swapchain::swapchain_.get();
+        pi.pSwapchains = &sw;
+        pi.pImageIndices = &idx;
+
+        vkQueuePresentKHR(rtx().present_queue, &pi);
+
+        // Wait for present to complete before destroying semaphore (fixes VUID-05149)
+        vkQueueWaitIdle(rtx().present_queue);
+
+        double t2 = TotalTime::get().seconds();
+        double delta = t2 - t1;
+        if (delta > 0.005 && delta < 0.1) {
+            smoothedFrameDelta_s_ = delta;
+        } else {
+            smoothedFrameDelta_s_ = 1.0 / 60.0;
+        }
+        lastPresentTime_s_ = t2;
+
+        LOG_INFO_CAT("RENDERER", "Initial present delta measured: {:.4f}s → using as starting frame time", delta);
+    } else {
+        LOG_WARNING_CAT("RENDERER", "Initial timing acquire failed ({}) — using fallback 60 Hz", vkh.result(acquireRes));
+        smoothedFrameDelta_s_ = 1.0 / 60.0;
+        lastPresentTime_s_ = TotalTime::get().seconds();
     }
 
-    // Decide if we should render/present this frame or skip/wank
+    // Safe cleanup
+    vkDestroySemaphore(rtx().device, sem, nullptr);
+    vkDestroyFence(rtx().device, fence, nullptr);
+}
+
     bool shouldSkipFrame(double now_sec) noexcept {
         double nextPresent = lastPresentTime_s_ + smoothedFrameDelta_s_;
 
