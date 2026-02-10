@@ -37,14 +37,15 @@ struct CameraSceneData {
 };
 
 // =============================================================================
-// VulkanRenderer — Genesis Time Philosophy Edition
-// HDR render → blit to cached swapchain image → present when TotalTime aligns
-// No blocking acquires in loop — skip/wank early frames using measured delta
-// No triangles — pure procedural AABB pipeline
+// RayCanvas — Persistent Canvas Updater
+// Progressive ray tracing to persistent HDR target
+// Blit to single cached swapchain image → present only when TotalTime aligns
+// No constant rendering — skips/wanks early, no blocking acquires in loop
+// Pure procedural AABB path tracing — no triangles
 // =============================================================================
-class VulkanRenderer {
+class RayCanvas {
 public:
-    VulkanRenderer(int width, int height, SDL_Window* window)
+    RayCanvas(int width, int height, SDL_Window* window)
         : window_(window),
           width_(width),
           height_(height),
@@ -57,12 +58,10 @@ public:
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
           needsDescriptorUpdate_(true),
-          cachedSwapImageIndex_(UINT32_MAX),
-          cachedSwapImage_(VK_NULL_HANDLE),
           lastPresentTime_s_(0.0),
           smoothedFrameDelta_s_(1.0 / 60.0)
     {
-        LOG_INFO_CAT("RENDERER", "Initializing — {}x{}", width, height);
+        LOG_INFO_CAT("RAYCANVAS", "Initializing canvas — {}x{}", width, height);
 
         // Camera UBO
         cameraUBOHandle_ = Memory::create(sizeof(CameraSceneData),
@@ -82,25 +81,25 @@ public:
         void* mapped = Memory::lazyMapDescriptor(defaultMaterialsHandle_);
         vkh.checker(mapped, "Memory::lazyMapDescriptor (Materials)", "Failed to map");
         std::memcpy(mapped, defaultMats.data(), sizeof(defaultMats));
-        LOG_SUCCESS_CAT("RENDERER", "Default materials uploaded");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded");
 
-        createOrRecreateHDRImage();
+        createPersistentHDR();
 
-        // Safe initial timing estimate
-        preAcquireSwapchainImages();
+        // One-time safe acquire for initial timing baseline (no present)
+        initialTimingAcquire();
 
         pipeline_initialize();
 
         updateGlobalDescriptorBuffer();
 
-        LOG_SUCCESS_CAT("RENDERER", "Renderer genesis complete");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent canvas ready");
     }
 
-    ~VulkanRenderer() {
+    ~RayCanvas() {
         if (destroyed_) return;
         destroyed_ = true;
 
-        LOG_INFO_CAT("RENDERER", "Shutting down — draining queues");
+        LOG_INFO_CAT("RAYCANVAS", "Shutting down — draining queues");
 
         vkDeviceWaitIdle(rtx().device);
 
@@ -119,37 +118,34 @@ public:
 
         pipeline_shutdown();
 
-        LOG_SUCCESS_CAT("RENDERER", "Shutdown complete — returning to the void");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Shutdown complete");
     }
 
-    // ── Single render tick — everything relative to genesis ──────────────────
-    void pew() noexcept {
-        if (destroyed_ || minimized_ || cachedSwapImage_ == VK_NULL_HANDLE) return;
+    // ── Decide if it's time to update the canvas (ray trace + blit)
+    void maybeUpdateCanvas() noexcept {
+        if (destroyed_ || minimized_) return;
 
-        TotalTime& totalTime = TotalTime::get();
+        TotalTime& tt = TotalTime::get();
 
         if (firstFrame_) {
-            totalTime.seal();
+            tt.seal();
             firstFrame_ = false;
-            LOG_AMOURANTH("Genesis sealed — eternal clock starts now 💖");
-            return;  // skip first frame after genesis
-        }
-
-        double now_sec = totalTime.seconds();
-
-        // Skip/wank if too early for next vsync window
-        if (shouldSkipFrame(now_sec)) {
+            LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
             return;
         }
 
-        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame @ genesis %.3f s\033[0m\n", now_sec);
+        double now = tt.seconds();
 
-        updateCameraUBO(now_sec);
+        if (shouldSkip(now)) return;
+
+        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas trace @ %.3f s\033[0m\n", now);
+
+        updateCameraUBO(now);
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (cmd == VK_NULL_HANDLE) return;
+        if (!cmd) return;
 
-        pipeline_dispatch_living_world(cmd, static_cast<float>(now_sec));
+        pipeline_dispatch_living_world(cmd, static_cast<float>(now));
 
         VkMemoryBarrier barrier{};
         barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -177,26 +173,22 @@ public:
 
         endSubmitAndWait(cmd);
 
-        // Blit to cached swapchain image and present
-        blitToCachedSwapchainAndPresent();
+        blitToSwapchain();
 
-        // Update timing after successful present
-        double presentNow = totalTime.seconds();
-        double actualDelta = presentNow - lastPresentTime_s_;
-
-        // Exponential moving average (EMA) for smooth adaptation
+        // Update EMA from real present time
+        double presentNow = tt.seconds();
+        double delta = presentNow - lastPresentTime_s_;
         constexpr double alpha = 0.2;
-        smoothedFrameDelta_s_ = alpha * actualDelta + (1.0 - alpha) * smoothedFrameDelta_s_;
-
+        smoothedFrameDelta_s_ = alpha * delta + (1.0 - alpha) * smoothedFrameDelta_s_;
         lastPresentTime_s_ = presentNow;
 
-        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame complete @ %.3f s — delta %.4f s\033[0m\n", now_sec, actualDelta);
+        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas updated @ %.3f s — delta %.4f s\033[0m\n", now, delta);
     }
 
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
-            LOG_WARNING_CAT("RENDERER", "Window minimized");
+            LOG_WARNING_CAT("RAYCANVAS", "Window minimized");
             return;
         }
 
@@ -208,87 +200,70 @@ public:
         height_ = newHeight;
         minimized_ = false;
 
-        LOG_INFO_CAT("RENDERER", "Resize — {}x{}", width_, height_);
+        LOG_INFO_CAT("RAYCANVAS", "Resize — {}x{}", width_, height_);
 
-        createOrRecreateHDRImage();
+        createPersistentHDR();
 
-        // Re-measure timing after resize
-        preAcquireSwapchainImages();
+        // Re-baseline timing after resize
+        initialTimingAcquire();
 
         needsDescriptorUpdate_ = true;
     }
 
 private:
-    
-void preAcquireSwapchainImages() noexcept {
-    vkDeviceWaitIdle(rtx().device);
+    // One-time safe acquire for initial timing baseline (no present)
+    void initialTimingAcquire() noexcept {
+        vkDeviceWaitIdle(rtx().device);
 
-    // Must provide at least one non-null sync object (semaphore or fence)
-    VkSemaphore dummySem = VK_NULL_HANDLE;
-    VkSemaphoreCreateInfo semCI = {};
-    semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VkSemaphore dummySem = VK_NULL_HANDLE;
+        VkSemaphoreCreateInfo semCI = {};
+        semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    VkResult semRes = vkCreateSemaphore(rtx().device, &semCI, nullptr, &dummySem);
-    if (semRes != VK_SUCCESS) {
-        LOG_WARNING_CAT("RENDERER", "Failed to create dummy semaphore for timing acquire — using fallback");
-        smoothedFrameDelta_s_ = 1.0 / 60.0;
-        lastPresentTime_s_ = TotalTime::get().seconds();
-        return;
-    }
-
-    uint32_t idx = UINT32_MAX;
-    double t1 = TotalTime::get().seconds();
-
-    // Acquire with dummy semaphore (satisfies VUID-01780)
-    VkResult acquireRes = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
-                                                500'000'000,          // 0.5 sec timeout
-                                                dummySem,             // non-null semaphore
-                                                VK_NULL_HANDLE,       // no fence
-                                                &idx);
-
-    // We don't need to wait or present yet — just release the image back to the pool
-    // Vulkan auto-releases acquired images when not presented (safe here)
-
-    double t2 = TotalTime::get().seconds();
-    double delta = t2 - t1;
-
-    if (acquireRes == VK_SUCCESS) {
-        if (delta > 0.005 && delta < 0.1) {
-            smoothedFrameDelta_s_ = delta;
-        } else {
+        VkResult semRes = vkCreateSemaphore(rtx().device, &semCI, nullptr, &dummySem);
+        if (semRes != VK_SUCCESS) {
+            LOG_WARNING_CAT("RAYCANVAS", "Failed to create dummy semaphore — fallback 60 Hz");
             smoothedFrameDelta_s_ = 1.0 / 60.0;
-        }
-        lastPresentTime_s_ = t2;
-
-        LOG_INFO_CAT("RENDERER", "Initial acquire delta measured: {:.4f}s → using as starting frame time", delta);
-    } else {
-        LOG_WARNING_CAT("RENDERER", "Initial timing acquire failed ({}) — using fallback 60 Hz", vkh.result(acquireRes));
-        smoothedFrameDelta_s_ = 1.0 / 60.0;
-        lastPresentTime_s_ = TotalTime::get().seconds();
-    }
-
-    // Clean up dummy semaphore immediately (no pending use)
-    vkDestroySemaphore(rtx().device, dummySem, nullptr);
-}
-
-    bool shouldSkipFrame(double now_sec) noexcept {
-        double nextPresent = lastPresentTime_s_ + smoothedFrameDelta_s_;
-
-        // Skip if significantly early (1 ms tolerance)
-        if (now_sec < nextPresent - 0.001) {
-            return true;
+            lastPresentTime_s_ = TotalTime::get().seconds();
+            return;
         }
 
-        return false;
+        uint32_t idx = UINT32_MAX;
+        double t1 = TotalTime::get().seconds();
+
+        VkResult res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
+                                             500'000'000,  // 0.5 sec timeout
+                                             dummySem, VK_NULL_HANDLE, &idx);
+
+        double t2 = TotalTime::get().seconds();
+        double delta = t2 - t1;
+
+        if (res == VK_SUCCESS) {
+            if (delta > 0.005 && delta < 0.1) {
+                smoothedFrameDelta_s_ = delta;
+            }
+            lastPresentTime_s_ = t2;
+            LOG_INFO_CAT("RAYCANVAS", "Initial acquire delta: {:.4f}s", delta);
+        } else {
+            LOG_WARNING_CAT("RAYCANVAS", "Initial acquire failed — fallback 60 Hz");
+            smoothedFrameDelta_s_ = 1.0 / 60.0;
+            lastPresentTime_s_ = TotalTime::get().seconds();
+        }
+
+        vkDestroySemaphore(rtx().device, dummySem, nullptr);
     }
 
-    void blitToCachedSwapchainAndPresent() noexcept {
-        VkCommandBuffer blitCmd = beginTransientCommandBuffer();
-        if (blitCmd == VK_NULL_HANDLE) return;
+    bool shouldSkip(double now) noexcept {
+        double next = lastPresentTime_s_ + smoothedFrameDelta_s_;
+        return now < next - 0.001;
+    }
 
-        transitionImageLayout(blitCmd, cachedSwapImage_,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL); // already set
+    void blitToSwapchain() noexcept {
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        if (!cmd) return;
+
+        transitionImageLayout(cmd, rtx().images,
+                              VK_IMAGE_LAYOUT_UNDEFINED,  // safe assumption on first blit
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
         VkImageBlit blit{};
         blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -298,49 +273,42 @@ void preAcquireSwapchainImages() noexcept {
         blit.dstOffsets[0] = {0, 0, 0};
         blit.dstOffsets[1] = {width_, height_, 1};
 
-        vkCmdBlitImage(blitCmd,
+        vkCmdBlitImage(cmd,
                        hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       cachedSwapImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       rtx().images, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        1, &blit, VK_FILTER_LINEAR);
 
-        transitionImageLayout(blitCmd, cachedSwapImage_,
+        transitionImageLayout(cmd, rtx().images,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                               VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-        endSubmitAndWait(blitCmd);
+        endSubmitAndWait(cmd);
 
+        VkPresentInfoKHR pi{};
+        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        pi.swapchainCount = 1;
         VkSwapchainKHR sw = Swapchain::swapchain_.get();
+        pi.pSwapchains = &sw;
+        uint32_t idx = 0;  // single image
+        pi.pImageIndices = &idx;
 
-        VkPresentInfoKHR presentInfo{};
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = &sw;
-        presentInfo.pImageIndices = &cachedSwapImageIndex_;
-
-        VkResult res = vkQueuePresentKHR(rtx().present_queue, &presentInfo);
-        if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR) {
+        VkResult res = vkQueuePresentKHR(rtx().present_queue, &pi);
+        if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+            LOG_ERROR_CAT("RAYCANVAS", "Present failed: {}", vkh.result(res));
             minimized_ = true;
-            LOG_WARNING_CAT("RENDERER", "Present suboptimal/out-of-date — needs recreate");
-        } else if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("RENDERER", "Present failed: {}", vkh.result(res));
         }
     }
 
-    void createOrRecreateHDRImage() noexcept {
+    void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_ != VK_NULL_HANDLE) {
-            vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-            hdrOutputView_ = VK_NULL_HANDLE;
-        }
-        if (hdrOutputImage_ != VK_NULL_HANDLE) {
-            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-            hdrOutputImage_ = VK_NULL_HANDLE;
-        }
-        if (hdrOutputMemory_ != VK_NULL_HANDLE) {
-            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-            hdrOutputMemory_ = VK_NULL_HANDLE;
-        }
+        if (hdrOutputView_ != VK_NULL_HANDLE) vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+        if (hdrOutputImage_ != VK_NULL_HANDLE) vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+
+        hdrOutputImage_ = VK_NULL_HANDLE;
+        hdrOutputView_ = VK_NULL_HANDLE;
+        hdrOutputMemory_ = VK_NULL_HANDLE;
 
         VkImageCreateInfo ci{};
         ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -355,7 +323,7 @@ void preAcquireSwapchainImages() noexcept {
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_),
-                    "vkCreateImage (HDR)", "Failed");
+                    "vkCreateImage (persistent HDR)", "Failed");
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &req);
@@ -368,7 +336,7 @@ void preAcquireSwapchainImages() noexcept {
         mai.memoryTypeIndex = memType;
 
         vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_),
-                    "vkAllocateMemory (HDR)", "Failed");
+                    "vkAllocateMemory (persistent HDR)", "Failed");
 
         vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
 
@@ -380,10 +348,10 @@ void preAcquireSwapchainImages() noexcept {
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_),
-                    "vkCreateImageView (HDR)", "Failed");
+                    "vkCreateImageView (persistent HDR)", "Failed");
 
         needsDescriptorUpdate_ = true;
-        LOG_SUCCESS_CAT("RENDERER", "HDR output ready {}x{}", width_, height_);
+        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR canvas ready {}x{}", width_, height_);
     }
 
     void updateCameraUBO(double genesisTime) noexcept {
@@ -410,7 +378,7 @@ void preAcquireSwapchainImages() noexcept {
     void updateGlobalDescriptorBuffer() noexcept {
         VkAccelerationStructureKHR tlas = getTLAS();
         if (tlas == VK_NULL_HANDLE) {
-            LOG_ERROR_CAT("RENDERER", "Cannot update descriptors — no valid TLAS");
+            LOG_ERROR_CAT("RAYCANVAS", "Cannot update descriptors — no valid TLAS");
             return;
         }
 
@@ -425,7 +393,7 @@ void preAcquireSwapchainImages() noexcept {
         pipeline_write_rt_descriptors(upd);
         needsDescriptorUpdate_ = false;
 
-        LOG_SUCCESS_CAT("RENDERER", "Global RT descriptors updated");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Global RT descriptors updated");
     }
 
     void transitionImageLayout(VkCommandBuffer cmd, VkImage img,
@@ -462,7 +430,6 @@ void preAcquireSwapchainImages() noexcept {
         vkCmdPipelineBarrier(cmd, src, dst, 0, 0, nullptr, 0, nullptr, 1, &b);
     }
 
-    // ── Transient command buffer helpers ─────────────────────────────────────
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkCommandBufferAllocateInfo allocInfo{};
@@ -530,11 +497,7 @@ private:
     VkDeviceMemory                  hdrOutputMemory_    = VK_NULL_HANDLE;
     bool                            needsDescriptorUpdate_;
 
-    // Cached pre-acquired swapchain image
-    uint32_t                        cachedSwapImageIndex_;
-    VkImage                         cachedSwapImage_;
-
-    // Live timing — updated from actual presents
+    // Live timing — updated from real presents
     double                          lastPresentTime_s_;
     double                          smoothedFrameDelta_s_;
 };

@@ -22,7 +22,7 @@
 #include <format>
 
 // Global canvas at display frequency - your screen image rectangle
-inline std::unique_ptr<VulkanRenderer> raycanvas;
+inline std::unique_ptr<RayCanvas> raycanvas;
 
 // Sacrificial Splash — skippable with any input, non-blocking
 static inline void showSacrificialSplash() noexcept {
@@ -282,7 +282,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     LOG_AMOURANTH("AMOURANTHRTX v0.81 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 
     // Step 7: Create renderer (transient pool + engine buffers exist — safe)
-    raycanvas = std::make_unique<VulkanRenderer>(
+    raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
         g_window
@@ -311,7 +311,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         }
 
         raycanvas->onResize(w, h);
-        raycanvas->pew();
+        raycanvas->maybeUpdateCanvas();
     }
 
     // Cleanup
