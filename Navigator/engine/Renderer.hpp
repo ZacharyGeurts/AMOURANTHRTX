@@ -12,8 +12,8 @@
 // Simple material (expand later)
 // ─────────────────────────────────────────────────────────────────────────────
 struct Material {
-    glm::vec4 albedo   {1.0f};
-    glm::vec4 emissive {0.0f};
+    glm::vec4 albedo   {1.0};
+    glm::vec4 emissive {0.0};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,8 +28,8 @@ struct CameraSceneData {
     glm::vec4 cameraPos;
     glm::vec4 prevCameraPos;
 
-    float     exposure     = 1.0f;
-    float     genesisTime  = 0.0f;     // seconds since genesis
+    double    exposure     = 1.0;
+    double    genesisTime  = 0.0;     // seconds since genesis
     uint32_t  randomSeed   = 12345u;
     uint32_t  maxDepth     = 12;
 
@@ -38,7 +38,9 @@ struct CameraSceneData {
 
 // =============================================================================
 // VulkanRenderer — Genesis Time Philosophy Edition
-// Single-image swapchain — no acquire, direct blit + present index 0 on VSync
+// Pre-acquire two swapchain images at startup/resize, cache timing delta
+// Render to HDR → blit to cached image → present when TotalTime aligns
+// No triangles — pure procedural AABB pipeline
 // =============================================================================
 class VulkanRenderer {
 public:
@@ -54,11 +56,15 @@ public:
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
-          needsDescriptorUpdate_(true)
+          needsDescriptorUpdate_(true),
+          cachedSwapImageIndex_(UINT32_MAX),
+          cachedSwapImage_(VK_NULL_HANDLE),
+          lastAcquireTime_s_(0.0),
+          estimatedFrameTime_s_(1.0 / 60.0)
     {
         LOG_INFO_CAT("RENDERER", "Initializing — {}x{}", width, height);
 
-        // One true buffer for camera
+        // Camera UBO
         cameraUBOHandle_ = Memory::create(sizeof(CameraSceneData),
                                           VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT |
@@ -67,7 +73,7 @@ public:
 
         vkh.checker(cameraUBOHandle_, "Memory::create (CameraUBO)", "Failed");
 
-        // Default single material
+        // Default material
         std::array<Material, 1> defaultMats{};
         defaultMaterialsHandle_ = Memory::createDescriptorBuffer(sizeof(defaultMats), "DefaultMaterials");
 
@@ -79,6 +85,9 @@ public:
         LOG_SUCCESS_CAT("RENDERER", "Default materials uploaded");
 
         createOrRecreateHDRImage();
+
+        // Pre-acquire two images to cache and measure timing
+        preAcquireSwapchainImages();
 
         pipeline_initialize();
 
@@ -115,27 +124,31 @@ public:
 
     // ── Single render tick — everything relative to genesis ──────────────────
     void pew() noexcept {
-        if (destroyed_ || minimized_) return;
+        if (destroyed_ || minimized_ || cachedSwapImage_ == VK_NULL_HANDLE) return;
 
         TotalTime& totalTime = TotalTime::get();
 
-        // Seal on first real frame (genesis moment captured)
         if (firstFrame_) {
             totalTime.seal();
             firstFrame_ = false;
             LOG_AMOURANTH("Genesis sealed — eternal clock starts now 💖");
         }
 
-        float genesis_sec = static_cast<float>(totalTime.seconds());
+        double now_sec = totalTime.seconds();
 
-        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame @ genesis %.3f s\033[0m\n", genesis_sec);
+        // Optional: skip render if too early for next frame
+        if (shouldSkipFrame(now_sec)) {
+            return;
+        }
 
-        updateCameraUBO(genesis_sec);
+        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame @ genesis %.3f s\033[0m\n", now_sec);
+
+        updateCameraUBO(now_sec);
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (cmd == VK_NULL_HANDLE) return;
 
-        pipeline_dispatch_living_world(cmd, genesis_sec);
+        pipeline_dispatch_living_world(cmd, static_cast<float>(now_sec));
 
         VkMemoryBarrier barrier{};
         barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -163,12 +176,10 @@ public:
 
         endSubmitAndWait(cmd);
 
-        // Blit to swapchain image (index 0) and present on VSync
-        if (rtx().images != VK_NULL_HANDLE) {
-            blitToSwapchainAndPresent();
-        }
+        // Blit to cached swapchain image and present
+        blitToCachedSwapchainAndPresent();
 
-        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame complete @ %.3f s\033[0m\n", genesis_sec);
+        fprintf(stderr, "\033[38;2;255;147;41m[HOT] Frame complete @ %.3f s\033[0m\n", now_sec);
     }
 
     void onResize(int newWidth, int newHeight) noexcept {
@@ -189,76 +200,91 @@ public:
         LOG_INFO_CAT("RENDERER", "Resize — {}x{}", width_, height_);
 
         createOrRecreateHDRImage();
+
+        // Re-acquire after resize
+        preAcquireSwapchainImages();
+
         needsDescriptorUpdate_ = true;
     }
 
 private:
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // Pre-acquire two images at startup / resize to cache and measure timing
+    void preAcquireSwapchainImages() noexcept {
+        vkDeviceWaitIdle(rtx().device);
 
-    VkCommandBuffer beginTransientCommandBuffer() noexcept {
-        VkCommandBuffer cmd = VK_NULL_HANDLE;
-        VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool        = rtx().transient_pool;
-        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
+        VkResult res;
+        uint32_t idx;
 
-        if (vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd) != VK_SUCCESS) {
-            return VK_NULL_HANDLE;
-        }
-
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-            return VK_NULL_HANDLE;
-        }
-
-        return cmd;
-    }
-
-    void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
-        if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-            return;
-        }
-
-        VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fenceCI{};
-        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
-        vkCreateFence(rtx().device, &fenceCI, nullptr, &fence);
-
-        VkSubmitInfo submit{};
-        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.commandBufferCount   = 1;
-        submit.pCommandBuffers      = &cmd;
-
-        VkResult res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
+        // Acquire first image
+        double t1 = TotalTime::get().seconds();
+        res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
+                                    UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &idx);
         if (res != VK_SUCCESS) {
-            if (res == VK_ERROR_DEVICE_LOST) destroyed_ = true;
-            vkDestroyFence(rtx().device, fence, nullptr);
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            LOG_ERROR_CAT("RENDERER", "Initial acquire 1 failed: {}", vkh.result(res));
+            minimized_ = true;
+            return;
+        }
+        cachedSwapImageIndex_ = idx;
+        cachedSwapImage_ = rtx().images; // assuming rtx().images is updated on acquire
+
+        // Acquire second image and measure delta
+        double t2 = TotalTime::get().seconds();
+        res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
+                                    UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &idx);
+        if (res != VK_SUCCESS) {
+            LOG_ERROR_CAT("RENDERER", "Initial acquire 2 failed: {}", vkh.result(res));
+            minimized_ = true;
             return;
         }
 
-        vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, 60'000'000'000ULL);
-        vkResetFences(rtx().device, 1, &fence);
-        vkDestroyFence(rtx().device, fence, nullptr);
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+        estimatedFrameTime_s_ = static_cast<float>(t2 - t1);
+        if (estimatedFrameTime_s_ < 0.005 || estimatedFrameTime_s_ > 0.1) {
+            estimatedFrameTime_s_ = 1.0 / 60.0; // fallback
+        }
+
+        lastAcquireTime_s_ = t2;
+
+        LOG_INFO_CAT("RENDERER", "Pre-acquired swapchain images — estimated frame time {:.4f}s ({:.1f} Hz)",
+                     estimatedFrameTime_s_, 1.0 / estimatedFrameTime_s_);
+
+        // Transition cached image to TRANSFER_DST_OPTIMAL
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        if (cmd != VK_NULL_HANDLE) {
+            transitionImageLayout(cmd, cachedSwapImage_,
+                                  VK_IMAGE_LAYOUT_UNDEFINED,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            endSubmitAndWait(cmd);
+        }
     }
 
-    void blitToSwapchainAndPresent() noexcept {
+    // Decide if we should render/present this frame
+    bool shouldSkipFrame(double now_sec) noexcept {
+        if (lastAcquireTime_s_ <= 0.0) return false;
+
+        double nextPresent = lastAcquireTime_s_ + estimatedFrameTime_s_;
+
+        // Skip if significantly early
+        if (now_sec < nextPresent - 0.002) {
+            return true;
+        }
+
+        // Smoothly update estimate
+        double delta = now_sec - lastAcquireTime_s_;
+        if (delta > 0.005 && delta < 0.1) {
+            estimatedFrameTime_s_ = 0.8 * estimatedFrameTime_s_ + 0.2 * delta;
+        }
+
+        lastAcquireTime_s_ = now_sec;
+        return false;
+    }
+
+    void blitToCachedSwapchainAndPresent() noexcept {
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (blitCmd == VK_NULL_HANDLE) return;
 
-        VkImage swapImage = rtx().images;
-
-        transitionImageLayout(blitCmd, swapImage,
-                              VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        transitionImageLayout(blitCmd, cachedSwapImage_,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL); // already set
 
         VkImageBlit blit{};
         blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -270,17 +296,30 @@ private:
 
         vkCmdBlitImage(blitCmd,
                        hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImage,       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       cachedSwapImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        1, &blit, VK_FILTER_LINEAR);
 
-        transitionImageLayout(blitCmd, swapImage,
+        transitionImageLayout(blitCmd, cachedSwapImage_,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                               VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         endSubmitAndWait(blitCmd);
 
-        // Timing-aware present — only when TotalTime says it's time
-        Swapchain::presentImage(rtx().present_queue);
+        VkSwapchainKHR sw = Swapchain::swapchain_.get();
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = &sw;
+        presentInfo.pImageIndices = &cachedSwapImageIndex_;
+
+        VkResult res = vkQueuePresentKHR(rtx().present_queue, &presentInfo);
+        if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR) {
+            minimized_ = true;
+            LOG_WARNING_CAT("RENDERER", "Present suboptimal/out-of-date — needs recreate");
+        } else if (res != VK_SUCCESS) {
+            LOG_ERROR_CAT("RENDERER", "Present failed: {}", vkh.result(res));
+        }
     }
 
     void createOrRecreateHDRImage() noexcept {
@@ -343,7 +382,7 @@ private:
         LOG_SUCCESS_CAT("RENDERER", "HDR output ready {}x{}", width_, height_);
     }
 
-    void updateCameraUBO(float genesisTime) noexcept {
+    void updateCameraUBO(double genesisTime) noexcept {
         CameraSceneData data{};
 
         data.view       = CAM.view();
@@ -351,11 +390,11 @@ private:
         data.viewInverse = glm::inverse(data.view);
         data.projInverse = glm::inverse(data.proj);
 
-        data.cameraPos     = glm::vec4(CAM.position(), 1.0f);
+        data.cameraPos     = glm::vec4(CAM.position(), 1.0);
 
-        data.exposure      = 1.0f;
+        data.exposure      = 1.0;
         data.genesisTime   = genesisTime;
-        data.randomSeed    = static_cast<uint32_t>(genesisTime * 1'000'000.0f) ^ 0xCAFEBABEu;
+        data.randomSeed    = static_cast<uint32_t>(genesisTime * 1'000'000.0) ^ 0xCAFEBABEu;
 
         auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
         if (stagingBuf != VK_NULL_HANDLE) {
@@ -419,6 +458,61 @@ private:
         vkCmdPipelineBarrier(cmd, src, dst, 0, 0, nullptr, 0, nullptr, 1, &b);
     }
 
+    // ── Transient command buffer helpers ─────────────────────────────────────
+    VkCommandBuffer beginTransientCommandBuffer() noexcept {
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = rtx().transient_pool;
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd) != VK_SUCCESS) {
+            return VK_NULL_HANDLE;
+        }
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return VK_NULL_HANDLE;
+        }
+
+        return cmd;
+    }
+
+    void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
+        if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceCI{};
+        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+        vkCreateFence(rtx().device, &fenceCI, nullptr, &fence);
+
+        VkSubmitInfo submit{};
+        submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount   = 1;
+        submit.pCommandBuffers      = &cmd;
+
+        VkResult res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
+        if (res != VK_SUCCESS) {
+            if (res == VK_ERROR_DEVICE_LOST) destroyed_ = true;
+            vkDestroyFence(rtx().device, fence, nullptr);
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
+
+        vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(rtx().device, fence, nullptr);
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+    }
+
 private:
     SDL_Window*                     window_;
     int                             width_, height_;
@@ -431,4 +525,12 @@ private:
     VkImageView                     hdrOutputView_      = VK_NULL_HANDLE;
     VkDeviceMemory                  hdrOutputMemory_    = VK_NULL_HANDLE;
     bool                            needsDescriptorUpdate_;
+
+    // Cached pre-acquired swapchain image
+    uint32_t                        cachedSwapImageIndex_;
+    VkImage                         cachedSwapImage_;
+
+    // Timing from initial acquires
+    double                          lastAcquireTime_s_;
+    double                          estimatedFrameTime_s_;
 };

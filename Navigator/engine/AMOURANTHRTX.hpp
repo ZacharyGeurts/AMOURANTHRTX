@@ -144,7 +144,7 @@ enum class GeometryType : uint32_t {
     ProceduralD100      = 10,
 };
 
-// Acceleration structure structs
+// Acceleration structure structs — pure procedural AABB only
 struct UniversalPrimitive {
     glm::vec4 aabbMin;
     glm::vec4 aabbMax;
@@ -152,18 +152,6 @@ struct UniversalPrimitive {
     uint32_t type          = 0;
     uint32_t materialIndex = 0;
     float destruction      = 0.0f;
-};
-
-struct InternalMesh {
-    uint64_t vertexBuffer   = 0;
-    uint64_t indexBuffer    = 0;
-    uint32_t primitiveCount = 0;
-    uint32_t vertexCount    = 0;
-    uint32_t materialIndex  = 0;
-    glm::mat4 transform     = glm::mat4(1.0f);
-    VkAccelerationStructureKHR blas = VK_NULL_HANDLE;
-    uint64_t blasStorage    = 0;
-    bool blasBuilt          = false;
 };
 
 // Buffer management structs
@@ -200,7 +188,7 @@ struct VRAMReality {
     uint32_t max_alloc_count      = 0;
 };
 
-// Global RTX context singleton
+// Global RTX context singleton — pure procedural only
 struct RTX {
     VkInstance instance = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -265,22 +253,12 @@ struct RTX {
     uint64_t las_universal_primitives_buffer = 0;
     VkAccelerationStructureKHR las_tlas = VK_NULL_HANDLE;
     uint64_t las_tlas_storage = 0;
-    VkAccelerationStructureKHR las_procedural_blas = VK_NULL_HANDLE;
-    uint64_t las_procedural_blas_storage = 0;
 
-    std::vector<InternalMesh> las_triangle_meshes;
     std::vector<UniversalPrimitive> las_procedural_primitives;
 
     bool las_initialized = false;
     bool las_tlas_dirty = true;
-    bool las_pending_blas_builds = true;
     bool las_procedural_dirty = true;
-
-    VkBuffer mesh_vertex_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory mesh_vertex_memory = VK_NULL_HANDLE;
-    VkBuffer mesh_index_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory mesh_index_memory = VK_NULL_HANDLE;
-    uint32_t mesh_index_count = 0;
 
     std::vector<Chunk> buffer_chunks;
     std::unordered_map<uint64_t, BufferInfo> buffers;
@@ -307,6 +285,7 @@ struct VulkanExtensions {
     PFN_vkCreateSwapchainKHR                      vkCreateSwapchainKHR                      = nullptr;
     PFN_vkDestroySwapchainKHR                     vkDestroySwapchainKHR                     = nullptr;
     PFN_vkGetSwapchainImagesKHR                   vkGetSwapchainImagesKHR                   = nullptr;
+    PFN_vkAcquireNextImageKHR                     vkAcquireNextImageKHR                     = nullptr;
     PFN_vkQueuePresentKHR                         vkQueuePresentKHR                         = nullptr;
 
     // Ray tracing pipeline
@@ -375,7 +354,7 @@ inline VulkanExtensions& ext() noexcept {
 
     if (!deviceLoaded) {
         VkDevice dev = rtx().device;
-        if (dev) {
+        if (dev != VK_NULL_HANDLE) {
             PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
                 SDL_Vulkan_GetVkGetInstanceProcAddr());
 
@@ -384,15 +363,19 @@ inline VulkanExtensions& ext() noexcept {
                     vkGetInstanceProcAddr(rtx().instance, "vkGetDeviceProcAddr"));
 
                 if (vkGetDeviceProcAddr) {
+                    // Swapchain
                     e.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
                         vkGetDeviceProcAddr(dev, "vkCreateSwapchainKHR"));
                     e.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
                         vkGetDeviceProcAddr(dev, "vkDestroySwapchainKHR"));
                     e.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
                         vkGetDeviceProcAddr(dev, "vkGetSwapchainImagesKHR"));
+                    e.vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>(
+                        vkGetDeviceProcAddr(dev, "vkAcquireNextImageKHR"));
                     e.vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(
                         vkGetDeviceProcAddr(dev, "vkQueuePresentKHR"));
 
+                    // Ray tracing pipeline
                     e.vkCreateRayTracingPipelinesKHR = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
                         vkGetDeviceProcAddr(dev, "vkCreateRayTracingPipelinesKHR"));
                     e.vkGetRayTracingShaderGroupHandlesKHR = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
@@ -400,6 +383,7 @@ inline VulkanExtensions& ext() noexcept {
                     e.vkCmdTraceRaysKHR = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
                         vkGetDeviceProcAddr(dev, "vkCmdTraceRaysKHR"));
 
+                    // Acceleration structures — all needed
                     e.vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
                         vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureBuildSizesKHR"));
                     e.vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
@@ -411,9 +395,11 @@ inline VulkanExtensions& ext() noexcept {
                     e.vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
                         vkGetDeviceProcAddr(dev, "vkGetAccelerationStructureDeviceAddressKHR"));
 
+                    // Buffer device address
                     e.vkGetBufferDeviceAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
                         vkGetDeviceProcAddr(dev, "vkGetBufferDeviceAddress"));
 
+                    // Acceleration structure utilities
                     e.vkCmdCopyAccelerationStructureKHR = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(
                         vkGetDeviceProcAddr(dev, "vkCmdCopyAccelerationStructureKHR"));
                     e.vkCmdWriteAccelerationStructuresPropertiesKHR = reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
@@ -421,6 +407,7 @@ inline VulkanExtensions& ext() noexcept {
                     e.vkCmdTraceRaysIndirect2KHR = reinterpret_cast<PFN_vkCmdTraceRaysIndirect2KHR>(
                         vkGetDeviceProcAddr(dev, "vkCmdTraceRaysIndirect2KHR"));
 
+                    // Dynamic rendering
                     e.vkCmdBeginRendering = reinterpret_cast<PFN_vkCmdBeginRendering>(
                         vkGetDeviceProcAddr(dev, "vkCmdBeginRendering"));
                     e.vkCmdEndRendering = reinterpret_cast<PFN_vkCmdEndRendering>(
@@ -430,9 +417,11 @@ inline VulkanExtensions& ext() noexcept {
                     e.vkQueueSubmit2KHR = reinterpret_cast<PFN_vkQueueSubmit2KHR>(
                         vkGetDeviceProcAddr(dev, "vkQueueSubmit2KHR"));
 
+                    // Debug utils
                     e.vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
                         vkGetDeviceProcAddr(dev, "vkSetDebugUtilsObjectNameEXT"));
 
+                    // Descriptor buffer
                     e.vkGetDescriptorSetLayoutSizeEXT = reinterpret_cast<PFN_vkGetDescriptorSetLayoutSizeEXT>(
                         vkGetDeviceProcAddr(dev, "vkGetDescriptorSetLayoutSizeEXT"));
                     e.vkGetDescriptorSetLayoutBindingOffsetEXT = reinterpret_cast<PFN_vkGetDescriptorSetLayoutBindingOffsetEXT>(
@@ -445,15 +434,20 @@ inline VulkanExtensions& ext() noexcept {
                         vkGetDeviceProcAddr(dev, "vkGetDescriptorEXT"));
 
                     deviceLoaded = true;
+                    LOG_SUCCESS_CAT("EXT", "Device extensions loaded successfully");
+                } else {
+                    LOG_ERROR_CAT("EXT", "Failed to get vkGetDeviceProcAddr");
                 }
             }
+        } else {
+            LOG_WARNING_CAT("EXT", "Device not created yet — skipping device extension load");
         }
     }
 
     return e;
 }
 
-// Memory management namespace
+// Memory management namespace — compartmentalized
 namespace Memory {
 
 inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;
@@ -653,6 +647,11 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 [[nodiscard]] inline Chunk* createChunk(VkDeviceSize size, VkBufferUsageFlags usage, VkSharingMode sharingMode = VK_SHARING_MODE_EXCLUSIVE) noexcept {
     VkDevice dev = rtx().device;
 
+    if (dev == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("MEMORY", "Cannot create chunk — device is VK_NULL_HANDLE");
+        return nullptr;
+    }
+
     VkDeviceSize chunkSize = std::min(DEFAULT_CHUNK_SIZE, size);
 
     LOG_INFO_CAT("MEMORY", "Creating chunk — size={} bytes, usage=0x{}, sharing={}",
@@ -719,6 +718,11 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     if (size == 0) size = 4096ULL;
 
     VkDevice dev = rtx().device;
+
+    if (dev == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("MEMORY", "Cannot create descriptor buffer — device is VK_NULL_HANDLE");
+        return 0;
+    }
 
     LOG_INFO_CAT("MEMORY", "Creating descriptor buffer — size={} bytes, tag='{}'", size, tag);
 
@@ -810,6 +814,11 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     if (info.mapped != nullptr) return info.mapped;
 
     VkDevice dev = rtx().device;
+    if (dev == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("MEMORY", "Cannot map descriptor — device is VK_NULL_HANDLE");
+        return nullptr;
+    }
+
     void* mapped = nullptr;
     VkResult res = vkMapMemory(dev, info.memory, 0, info.size, 0, &mapped);
 
@@ -834,6 +843,12 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
     }
 
     LOG_INFO_CAT("BUFFER", "Creating buffer: size={} bytes, usage=0x{:x}, tag='{}'", size, usage, tag);
+
+    VkDevice dev = rtx().device;
+    if (dev == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("MEMORY", "Cannot create buffer — device is VK_NULL_HANDLE");
+        return 0;
+    }
 
     VkBufferUsageFlags fixedUsage = usage;
 
@@ -908,13 +923,13 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 
         VkBuffer buf = VK_NULL_HANDLE;
         vkh.checker(
-            vkCreateBuffer(rtx().device, &bci, nullptr, &buf),
+            vkCreateBuffer(dev, &bci, nullptr, &buf),
             "vkCreateBuffer (small uniform)",
             "Failed to create small uniform buffer"
         );
 
         VkMemoryRequirements req{};
-        vkGetBufferMemoryRequirements(rtx().device, buf, &req);
+        vkGetBufferMemoryRequirements(dev, buf, &req);
 
         uint32_t memType = findMemoryType(req.memoryTypeBits,
                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
@@ -934,13 +949,13 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
 
         VkDeviceMemory mem = VK_NULL_HANDLE;
         vkh.checker(
-            vkAllocateMemory(rtx().device, &mai, nullptr, &mem),
+            vkAllocateMemory(dev, &mai, nullptr, &mem),
             "vkAllocateMemory (small uniform)",
             "Failed to allocate small uniform memory"
         );
 
         vkh.checker(
-            vkBindBufferMemory(rtx().device, buf, mem, 0),
+            vkBindBufferMemory(dev, buf, mem, 0),
             "vkBindBufferMemory (small uniform)",
             "Failed to bind small uniform memory"
         );
@@ -948,7 +963,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         VkBufferDeviceAddressInfo addrInfo{};
         addrInfo.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
         addrInfo.buffer = buf;
-        VkDeviceAddress addr = ext().vkGetBufferDeviceAddress(rtx().device, &addrInfo);
+        VkDeviceAddress addr = ext().vkGetBufferDeviceAddress(dev, &addrInfo);
 
         uint64_t handle = ++rtx().next_buffer_handle;
 
@@ -962,7 +977,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
         info.usage         = fixedUsage;
         info.tag           = std::string(tag);
 
-        VkResult res = vkMapMemory(rtx().device, mem, 0, size, 0, &info.mapped);
+        VkResult res = vkMapMemory(dev, mem, 0, size, 0, &info.mapped);
         vkh.checker(res, "vkMapMemory (small uniform persistent)",
                     "Failed to persistently map small uniform buffer");
 
@@ -1546,12 +1561,7 @@ inline void init() noexcept {
     return dev;
 }
 
-// Swapchain — single image, no acquire, direct present index 0 on VSync
-// Goal: tight control over present timing using TotalTime::get() synced to display refresh
-// We render directly into the swapchain image (STORAGE + TRANSFER_DST) when ready,
-// then present exactly when TotalTime indicates the next vsync window.
-// No vkAcquireNextImageKHR — we assume index 0 is always the back buffer (common for minImageCount=1 + FIFO/IMMEDIATE)
-
+// Swapchain — pre-acquire two images, cache timing delta, present to cached image
 struct Swapchain {
     struct Handle {
         VkSwapchainKHR value;
@@ -1570,12 +1580,14 @@ struct Swapchain {
     inline static bool minimized_ = false;
     inline static bool directWriteEnabled = false;
 
+    // Pre-acquired image index (we cache one)
+    inline static uint32_t cachedImageIndex = UINT32_MAX;
+
     // Last known present target time (seconds since genesis)
-    // Used to decide whether we should present now or wait for next vsync
     inline static double lastPresentTarget_s = 0.0;
 
     // Estimated display refresh interval in seconds (updated from actual present timing)
-    inline static double estimatedRefreshInterval_s = 1.0 / 60.0; // start conservative
+    inline static double estimatedRefreshInterval_s = 1.0 / 60.0;
 
     static void ensureReady(int w, int h) noexcept {
         if (w == 0 || h == 0) {
@@ -1607,6 +1619,7 @@ struct Swapchain {
             swapchainImage_ = VK_NULL_HANDLE;
             swapchainImageView_ = VK_NULL_HANDLE;
             rtx().images = VK_NULL_HANDLE;
+            cachedImageIndex = UINT32_MAX; // invalidate cache
         }
 
         minimized_ = false;
@@ -1680,7 +1693,6 @@ struct Swapchain {
 
         VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
 
-        // Prefer low-latency modes if available
         if (std::find(supportedModes.begin(), supportedModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != supportedModes.end()) {
             chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
             LOG_SUCCESS_CAT("SWAPCHAIN", "IMMEDIATE selected (tearing OK, lowest latency)");
@@ -1694,17 +1706,14 @@ struct Swapchain {
             LOG_WARNING_CAT("SWAPCHAIN", "Falling back to standard FIFO (guaranteed VSync, higher latency)");
         }
 
-        // We want single buffering for tightest control → try minImageCount = 1
         uint32_t imgCount = caps.minImageCount;
         if (chosenPM == VK_PRESENT_MODE_FIFO_KHR || chosenPM == VK_PRESENT_MODE_FIFO_LATEST_READY_EXT) {
-            // FIFO usually requires at least 2 images
             imgCount = std::max(caps.minImageCount, 2u);
             imgCount = std::min(imgCount, caps.maxImageCount ? caps.maxImageCount : imgCount);
         }
 
         VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-        // Try to enable direct write (STORAGE) so we can render straight into swapchain image
         if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
             VkImageFormatProperties props{};
             VkResult formatRes = vkGetPhysicalDeviceImageFormatProperties(
@@ -1764,9 +1773,6 @@ struct Swapchain {
             "Failed to get swapchain image count"
         );
 
-        vkh.checker(count == caps.minImageCount, "Single image swapchain",
-                    std::format("Driver returned {} images — expected 1", count).c_str());
-
         VkImage singleImage = VK_NULL_HANDLE;
         vkh.checker(
             ext().vkGetSwapchainImagesKHR(rtx().device, newSwap, &count, &singleImage),
@@ -1812,7 +1818,6 @@ struct Swapchain {
     }
 
     // Decide if we should present NOW based on TotalTime vs last present + refresh estimate
-    // Returns true if we should present this frame, false if we should wait
     static bool shouldPresentNow() noexcept {
         double now_s = TotalTime::get().seconds();
 
@@ -1839,8 +1844,7 @@ struct Swapchain {
     static void updateRefreshEstimate(double now_s) noexcept {
         if (lastPresentTarget_s > 0.0) {
             double delta = now_s - lastPresentTarget_s;
-            if (delta > 0.001 && delta < 0.1) { // reasonable range: 10–1000 Hz
-                // Simple low-pass filter: 80% old + 20% new
+            if (delta > 0.001 && delta < 0.1) {
                 estimatedRefreshInterval_s = 0.8 * estimatedRefreshInterval_s + 0.2 * delta;
                 LOG_PERF_CAT("SWAPCHAIN", "Updated refresh estimate: {:.4f} s ({:.1f} Hz)",
                              estimatedRefreshInterval_s, 1.0 / estimatedRefreshInterval_s);
@@ -1858,10 +1862,7 @@ struct Swapchain {
 
         // Only present if we're in/after the vsync window
         if (!shouldPresentNow()) {
-            // Early return — caller should continue rendering or wait
-            // You can sleep a tiny bit here if you want to reduce CPU spin:
-            // std::this_thread::sleep_for(std::chrono::microseconds(500));
-            return VK_EVENT_SET; // non-error code meaning "not ready yet"
+            return VK_EVENT_SET; // not ready yet
         }
 
         VkSwapchainKHR sw = swapchain_.get();
@@ -1877,7 +1878,7 @@ struct Swapchain {
         VkResult res = ext().vkQueuePresentKHR(queue, &pi);
 
         if (res == VK_SUCCESS) {
-            updateRefreshEstimate(now_s); // measure actual timing
+            updateRefreshEstimate(now_s);
             LOG_INFO_CAT("SWAPCHAIN", "Present successful — single image @ {:.6f} s", now_s);
         } else if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             minimized_ = true;
@@ -1922,14 +1923,14 @@ struct Swapchain {
     }
 };
 
-// Vertex structure
+// Vertex structure — only used for loading AABB bounds (no triangle rendering)
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 normal;
     glm::vec2 uv;
 };
 
-// Mesh structure
+// Mesh structure — only for loading OBJ to extract AABB
 struct Mesh {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -1954,7 +1955,7 @@ struct Mesh {
     }
 };
 
-// Load OBJ mesh
+// Load OBJ mesh — only to extract AABB, no vertex/index buffers kept
 [[nodiscard]] inline std::unique_ptr<Mesh> loadOBJ(std::string_view path) noexcept {
     LOG_ATTEMPT_CAT("LAS", "Loading OBJ as AABB: {}", path);
 
@@ -2007,7 +2008,7 @@ struct Mesh {
     return mesh;
 }
 
-// Create plane mesh
+// Create plane mesh — only AABB
 [[nodiscard]] inline std::unique_ptr<Mesh> createPlane(float width = 1000.0f, float depth = 1000.0f) noexcept {
     std::unique_ptr<Mesh> mesh = std::make_unique<Mesh>();
 
@@ -2022,7 +2023,7 @@ struct Mesh {
     return mesh;
 }
 
-// Create billboard mesh
+// Create billboard mesh — only AABB
 [[nodiscard]] inline std::unique_ptr<Mesh> createBillboard() noexcept {
     std::unique_ptr<Mesh> mesh = std::make_unique<Mesh>();
 
@@ -2034,7 +2035,7 @@ struct Mesh {
     return mesh;
 }
 
-// Add AABB from mesh
+// Add AABB from mesh (only AABB, no vertex/index buffers)
 inline size_t addAABBFromMesh(std::unique_ptr<Mesh> mesh, uint32_t materialIndex = 0,
                               const glm::mat4& transform = glm::mat4(1.0f)) noexcept {
     if (mesh == nullptr) return rtx().las_procedural_primitives.size();
@@ -2052,7 +2053,6 @@ inline size_t addAABBFromMesh(std::unique_ptr<Mesh> mesh, uint32_t materialIndex
     rtx().las_procedural_primitives.push_back(p);
     rtx().las_procedural_dirty = true;
     rtx().las_tlas_dirty = true;
-    rtx().las_pending_blas_builds = true;
 
     LOG_SUCCESS_CAT("LAS", "Mesh converted to AABB — min: ({},{},{}) | max: ({},{},{}) | material: {}",
                     mesh->aabbMin.x, mesh->aabbMin.y, mesh->aabbMin.z,
@@ -2077,7 +2077,6 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
     rtx().las_procedural_primitives.push_back(p);
     rtx().las_procedural_dirty = true;
     rtx().las_tlas_dirty = true;
-    rtx().las_pending_blas_builds = true;
 
     LOG_INFO_CAT("LAS", "Procedural AABB added — type {}, scale {}, material {}", 
                  static_cast<int>(type), scale, materialIndex);
@@ -2085,7 +2084,7 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
     return rtx().las_procedural_primitives.size() - 1;
 }
 
-// Create default hybrid scene
+// Create default hybrid scene — pure procedural AABBs
 inline void createDefaultHybridScene() noexcept {
     auto ground = createPlane(5000.0f, 5000.0f);
     addAABBFromMesh(std::move(ground), 0);
@@ -2117,7 +2116,6 @@ inline void createDefaultHybridScene() noexcept {
 // On resize handler
 inline void onResize() noexcept {
     rtx().las_tlas_dirty = true;
-    rtx().las_pending_blas_builds = true;
     rtx().las_procedural_dirty = true;
     LOG_INFO_CAT("LAS", "Resize detected — marked dirty for rebuild");
 }
@@ -2141,7 +2139,6 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
 
     if (rtx().las_initialized &&
         !rtx().las_tlas_dirty &&
-        !rtx().las_pending_blas_builds &&
         !rtx().las_procedural_dirty &&
         rtx().las_tlas != VK_NULL_HANDLE)
     {
@@ -2149,13 +2146,12 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         return;
     }
 
-    LOG_INFO_CAT("LAS", "Level Acceleration Structure rebuild triggered — state: top-level={}, bottom-level={}, procedural={}",
-                 rtx().las_tlas_dirty     ? "dirty"    : "clean",
-                 rtx().las_pending_blas_builds ? "pending" : "clean",
-                 rtx().las_procedural_dirty ? "dirty"    : "clean");
+    LOG_INFO_CAT("LAS", "Level Acceleration Structure rebuild triggered — state: top-level={}, procedural={}",
+                 rtx().las_tlas_dirty ? "dirty" : "clean",
+                 rtx().las_procedural_dirty ? "dirty" : "clean");
 
     if (!rtx().las_initialized) {
-        LOG_INFO_CAT("LAS", "First initialization — building default hybrid scene for Level Acceleration Structure");
+        LOG_INFO_CAT("LAS", "First initialization — building default hybrid AABB scene");
         createDefaultHybridScene();
         rtx().las_initialized = true;
     }
@@ -2228,122 +2224,11 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         rtx().las_procedural_dirty = false;
     }
 
-    if (rtx().las_pending_blas_builds) {
-        LOG_INFO_CAT("BLAS", "Scanning {} meshes for bottom-level acceleration structure updates",
-                     rtx().las_triangle_meshes.size());
-
-        for (size_t i = 0; i < rtx().las_triangle_meshes.size(); ++i) {
-            InternalMesh& mesh = rtx().las_triangle_meshes[i];
-
-            if (mesh.blasBuilt) {
-                LOG_INFO_CAT("BLAS", "Mesh #{} bottom-level acceleration already built — skipping", i);
-                continue;
-            }
-
-            if (mesh.vertexBuffer == 0 || mesh.indexBuffer == 0) {
-                LOG_WARNING_CAT("BLAS", "Mesh #{} missing buffers — skipping bottom-level build", i);
-                continue;
-            }
-
-            LOG_INFO_CAT("BLAS", "Building bottom-level acceleration structure for mesh #{} ({} vertices, {} primitives)",
-                         i, mesh.vertexCount, mesh.primitiveCount);
-
-            VkAccelerationStructureGeometryKHR geom{};
-            geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-            geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-            geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-
-            geom.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-            geom.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-            geom.geometry.triangles.vertexData.deviceAddress = Memory::getDeviceAddress(mesh.vertexBuffer);
-            geom.geometry.triangles.maxVertex = mesh.vertexCount;
-            geom.geometry.triangles.vertexStride = sizeof(Vertex);
-            geom.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
-            geom.geometry.triangles.indexData.deviceAddress = Memory::getDeviceAddress(mesh.indexBuffer);
-
-            VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
-            buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-            buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-            buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-            buildInfo.geometryCount = 1;
-            buildInfo.pGeometries = &geom;
-
-            VkAccelerationStructureBuildRangeInfoKHR rangeInfo{};
-            rangeInfo.primitiveCount = mesh.primitiveCount;
-            rangeInfo.primitiveOffset = 0;
-            rangeInfo.firstVertex = 0;
-            rangeInfo.transformOffset = 0;
-
-            const VkAccelerationStructureBuildRangeInfoKHR* pRange = &rangeInfo;
-
-            VkAccelerationStructureBuildSizesInfoKHR sizes{};
-            sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-
-            ext().vkGetAccelerationStructureBuildSizesKHR(
-                rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                &buildInfo, &rangeInfo.primitiveCount, &sizes);
-
-            VkDeviceAddress scratchAddr = Memory::allocateScratch(sizes.buildScratchSize);
-            if (scratchAddr == 0) {
-                LOG_ERROR_CAT("BLAS", "Failed to allocate scratch for mesh #{} bottom-level build — skipping", i);
-                continue;
-            }
-
-            buildInfo.scratchData.deviceAddress = scratchAddr;
-
-            if (mesh.blas == VK_NULL_HANDLE) {
-                uint64_t storageHandle = Memory::create(sizes.accelerationStructureSize,
-                                                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                        "Mesh_BLAS_Storage_" + std::to_string(i));
-
-                vkh.checker(storageHandle != 0, "Memory::create", "Bottom-level storage allocation failed");
-
-                BufferInfo* storage = Memory::get(storageHandle);
-                vkh.checker(storage != nullptr, "Memory::get", "Failed to access bottom-level storage");
-
-                VkAccelerationStructureCreateInfoKHR blasCI{};
-                blasCI.sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-                blasCI.type   = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-                blasCI.buffer = storage->buffer;
-                blasCI.size   = sizes.accelerationStructureSize;
-
-                vkh.checker(
-                    ext().vkCreateAccelerationStructureKHR(rtx().device, &blasCI, nullptr, &mesh.blas),
-                    "vkCreateAccelerationStructureKHR",
-                    std::format("Mesh #{}", i).c_str()
-                );
-
-                LOG_SUCCESS_CAT("BLAS", "Created bottom-level acceleration structure for mesh #{}", i);
-            }
-
-            buildInfo.dstAccelerationStructure = mesh.blas;
-
-            ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &buildInfo, &pRange);
-
-            VkMemoryBarrier barrier{};
-            barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-            barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-
-            vkCmdPipelineBarrier(localCmd,
-                                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                                 0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-            mesh.blasBuilt = true;
-            LOG_SUCCESS_CAT("BLAS", "Mesh #{} bottom-level acceleration structure updated ({} primitives)", i, mesh.primitiveCount);
-        }
-
-        rtx().las_pending_blas_builds = false;
-        LOG_SUCCESS_CAT("BLAS", "All bottom-level acceleration structure updates complete");
-    }
-
     if (rtx().las_tlas_dirty) {
-        LOG_INFO_CAT("TLAS", "Rebuilding top-level acceleration structure — {} procedural + {} mesh instances",
-                     rtx().las_procedural_primitives.size(), rtx().las_triangle_meshes.size());
+        LOG_INFO_CAT("TLAS", "Rebuilding top-level acceleration structure — {} procedural instances",
+                     rtx().las_procedural_primitives.size());
 
-        VkDeviceSize instanceCount = rtx().las_procedural_primitives.size() + rtx().las_triangle_meshes.size();
+        VkDeviceSize instanceCount = rtx().las_procedural_primitives.size();
         VkDeviceSize instanceSize = instanceCount * sizeof(VkAccelerationStructureInstanceKHR);
         if (instanceSize == 0) instanceSize = 64;
 
@@ -2371,25 +2256,6 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             inst.instanceShaderBindingTableRecordOffset = 0;
             inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
             inst.accelerationStructureReference = 0;
-
-            instances.push_back(inst);
-        }
-
-        for (const auto& mesh : rtx().las_triangle_meshes) {
-            if (mesh.blas == VK_NULL_HANDLE) continue;
-
-            VkAccelerationStructureDeviceAddressInfoKHR addrInfo{};
-            addrInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-            addrInfo.accelerationStructure = mesh.blas;
-            VkDeviceAddress blasAddr = ext().vkGetAccelerationStructureDeviceAddressKHR(rtx().device, &addrInfo);
-
-            VkAccelerationStructureInstanceKHR inst{};
-            inst.transform = to_vk_transform(mesh.transform);
-            inst.instanceCustomIndex = instanceId++ & 0xFFFFFFu;
-            inst.mask = 0xFF;
-            inst.instanceShaderBindingTableRecordOffset = 0;
-            inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-            inst.accelerationStructureReference = blasAddr;
 
             instances.push_back(inst);
         }

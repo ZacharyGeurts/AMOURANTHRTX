@@ -1,6 +1,6 @@
 // =============================================================================
 // Navigator.hpp — AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO
-// Combined entry point + globals + initialization (February 09, 2026)
+// Combined entry point + globals + initialization (February 10, 2026)
 // PURE LIGHT — ETERNAL LOOP — STONE SEALING IN ORDER
 // AMOURANTH FOREVER 💖
 // =============================================================================
@@ -127,6 +127,34 @@ static inline void showSacrificialSplash() noexcept {
 }
 
 // =============================================================================
+// Engine-private memory initialization — called AFTER device & swapchain exist
+// This is your isolated VRAM island — developer never sees/touches it
+// =============================================================================
+static inline void EngineMemoryInit() noexcept {
+    // Descriptor buffer — persistent, large enough for all engine bindings
+    rtx().descriptor_buffer_handle = Memory::create(
+        16 * 1024 * 1024,  // 16 MB — adjust as needed
+        VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        "Engine_DescriptorBuffer"
+    );
+
+    // Living world buffer — updated every frame, storage
+    rtx().living_world_buffer_handle = Memory::create(
+        256 * 1024,  // 256 KB — enough for procedural state
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        "Engine_LivingWorld"
+    );
+
+    // Dummy TLAS storage — small fixed size
+    // (actual creation happens in pipeline_initialize, but reserve handle here)
+    // ... other engine buffers (SBT, scratch pool, etc.) go here ...
+
+    LOG_SUCCESS_CAT("MEMORY", "Engine private island sealed — descriptor & living-world buffers allocated");
+}
+
+// =============================================================================
 // Main entry point — called from developer's empty main.cpp
 // Developers link against this header and call navigator_main(argc, argv)
 // =============================================================================
@@ -221,7 +249,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         LOG_SUCCESS_CAT("VULKAN", "Global transient command pool created and sealed");
     }
 
-    // Create swapchain (single image mode)
+    // Step 4: Create swapchain (single image mode)
     Swapchain::create(g_window,
                       Options::Window::DEFAULT_WIDTH,
                       Options::Window::DEFAULT_HEIGHT);
@@ -237,7 +265,10 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                  rtx().extent.width,
                  rtx().extent.height);
 
-    // Pipeline setup
+    // Step 5: Initialize engine-private memory island (your hidden VRAM compartment)
+    EngineMemoryInit();
+
+    // Step 6: Now safe to initialize pipeline (dummy TLAS, SBT, compute/RT pipelines)
     pipeline_initialize();
     pipeline_create_pipeline_layout();
     pipeline_create_ray_tracing_pipeline();
@@ -250,7 +281,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     LOG_AMOURANTH("AMOURANTHRTX v0.81 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 
-    // Create renderer (transient pool exists — safe)
+    // Step 7: Create renderer (transient pool + engine buffers exist — safe)
     renderer = std::make_unique<VulkanRenderer>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
