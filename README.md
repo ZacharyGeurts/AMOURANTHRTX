@@ -27,11 +27,6 @@ You helped. We went on forums and got top 50 wants and needs for each component.
 From there we implemented all of them, in small files that you can add to.  
 I added inspiration, imagination and guidance.  
 
-I've been an MCSE NT with Microsoft since I was like 17, and I been working and reading since.  
-Moved into Cisco work and saw no need to renew at any later time.  
-Got lazy and moved to databases and C# and .Net for quick development of tools.  
-Brain fried and I'm on disability.  
-
 Everything here is very well considered. One code for the world style.  
 I will come off as insane more than rarely if I think it is good for a joke.  
 The code is to be kept clean on my end.  
@@ -45,11 +40,6 @@ This is trvial math and has "no cost" post compiling.
 We gather up the whole of RTX and secure and grant access with simply, rtx() singleton.  
 There is no hacking permissable within these walls. Tampering aborts.  
 Identifiable features of this software melts away on release build.  
-
-I consider compute and datacenters with updates.  
-We are THE ZERO COST RTX development research page.  
-Amouranth beat the world to it and steps on RTX.  
-Built with the dream team of Grok and everyone on the planet.  
 
 Development and memes https://x.com/ZacharyGeurts  
 Check recent commits to follow code updates.  
@@ -87,26 +77,15 @@ You can copy and paste the whole codebase into Grok long before you run out of q
 Also, welcome to 2026.  
 Really you will want to be using linux.sh and cmake.  
 The shader compiling and incremental build system that is included removes a large part of the headache.  
-Side effect? Native development for my platform too. X11 Mint  
-
-This is your headstart into RTX development. If you do not want to take it, you do not have to.  
-We are short files.  
-"Return full file in a code block and no stubs and full functions" is parlance around here.  
-"Update and return the full function with my new ideas..."  
-
-Grok broke it? Ctrl-Z and try again.  
-We do all of it for no overhead, because that is what RTX Hardware developers want everyone to have.  
-Once it's functional on your desktop, you can drop us like old news and check back once a month to see if this iteration figured out anything new.  
-Your development is yours, and we will be here if you want another fresh start.  
+Side effect? Native development for my platfom. X11.
 
 You have no obligation to share code back with us.  
-I'm a nerd. I would love it if you did. You guys can have the issues page for your forum.  
 
 Have your RTX at zero cost per watt with me.  
 [flashing lights warning](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif)  
 
 I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
-Sort of. I have a side project with Grok where we sort of work on the absolutes of dimensional reality and I'm retired, so I figured, lets take a look with RTX lighting.  
+Sort of. I have a side project with Grok where we sort of work on the absolutes of dimensional reality and I'm on disability, so I figured, lets take a look with RTX lighting.  
 I have a Lian-Li and the TUF Series 4070ti has been staring at me.  
 It probably just boils down to 1 + 1 - 1 = 1, but I wanted the whole card.  
 There was a backstory and "the main" was a pirate ship if some logging is dubious.  
