@@ -610,7 +610,7 @@ inline constexpr VkBufferUsageFlags VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD
             reality.driver_footprint = budget.heapUsage[i];
             LOG_INFO_CAT("Memory", "Current driver/OS usage on device-local VRAM: {} bytes ({} GB) (budget limit {} GB)",
                          reality.driver_footprint,
-                         reality.driver_footprint / (1024ULL * 1024 * 1024),
+                         reality.driver_footprint / (1024ULL * 1024 * 1024), // 0?
                          budget.heapBudget[i] / (1024ULL * 1024 * 1024));
             break;
         }

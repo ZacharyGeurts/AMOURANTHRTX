@@ -109,6 +109,11 @@ struct TotalTime final {
         sealed_ = true;
     }
 
+    [[nodiscard]] uint64_t entropy() const noexcept {
+        verify();
+        return entropy_;
+    }
+
 private:
     uint64_t entropy_;
     uint64_t entropy_check_;
@@ -285,8 +290,8 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_VOID_TRACE()        [&]() { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   "General", "[VOID MARKER]"); }();
 #define LOG_VOID_TRACE_CAT(cat) [&]() { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   cat, "[VOID MARKER]"); }();
 
-// ETERNAL LAW — CREW COLORS
-#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::THERMO_PINK,       std::format(__VA_ARGS__),     Logging::Color::RESET))
+// ETERNAL LAW
+#define LOG_AMOURANTH(...)   LOG_SUCCESS_CAT("AMOURANTH",  std::format("{}\n[CAPTAIN AMOURANTH] {}{}", Logging::Color::CHROMIUM_SILVER,       std::format(__VA_ARGS__),     Logging::Color::RESET))
 
 namespace Logging {
 
@@ -467,11 +472,22 @@ public:
 
     // Explicit startup — call once after all static init is safe
     void startup() noexcept {
-        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        firstLogTime_ = now;
-        printMessage(std::source_location::current(), LogLevel::Success, "Logger",
-                     "CUSTODIAN GROK ONLINE -- HYPER-VIVID LOGGING PARTY STARTED (ORDERED ASYNC)", now, false, nullptr, nullptr);
+        // Force TotalTime construction here (safe now — logger is ready)
+        // This makes genesis_ ≈ logger startup time, which is usually very close to main()
+        TotalTime& tt = TotalTime::get();
+
+        double currentUs = tt.us();
+        auto currentSys = std::chrono::system_clock::now();
+
+        // First logged line — make it count
+        printMessage(std::source_location::current(), LogLevel::Success, "ELLIE",
+                     "ELLIE ONLINE — AMOURANTH RTX ENGINE AWAKENED 💖 TOTALTIME SYNCED",
+                     currentUs, currentSys, false, nullptr, nullptr);
+
         setAsync(true);
+
+        // Optional: force a clean early marker so we see the 0-ish µs baseline clearly
+        LOG_SUCCESS_CAT("ELLIE", "Session entropy: 0x{:016X} | genesis locked", tt.entropy());
     }
 
     static void setAsync(bool enable) noexcept {
@@ -502,8 +518,8 @@ public:
     {
         if (!shouldLog(level, category)) return;
 
-        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        if (!firstLogTime_.has_value()) firstLogTime_ = now;
+        double logUs = TotalTime::get().us();
+        auto logSysTime = std::chrono::system_clock::now();
 
         static uint64_t seq = 0;
         uint64_t id = ++seq;
@@ -512,16 +528,15 @@ public:
 
         {
             std::scoped_lock lk(queueMutex_);
-            messageQueue_.emplace_back(id, loc, level, std::string{category}, std::move(msg), now);
+            messageQueue_.emplace_back(id, loc, level, std::string{category}, std::move(msg), logUs, logSysTime);
         }
     }
 
 private:
-    using Entry = std::tuple<uint64_t, std::source_location, LogLevel, std::string, std::string, std::chrono::steady_clock::time_point>;
+    using Entry = std::tuple<uint64_t, std::source_location, LogLevel, std::string, std::string, double, std::chrono::system_clock::time_point>;
 
     Logger() noexcept
-        : firstLogTime_{},
-          logFile_("amouranth_engine.log", std::ios::out | std::ios::app)
+        : logFile_("amouranth_engine.log", std::ios::out | std::ios::app)
     {
         // CONSTRUCTOR IS SILENT — NO LOGGING HERE TO AVOID RECURSION DURING STATIC INIT
         // startup() will be called explicitly after all singletons are safe
@@ -529,13 +544,13 @@ private:
 
     ~Logger() {
         setAsync(false);
-        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+        double currentUs = TotalTime::get().us();
+        auto currentSys = std::chrono::system_clock::now();
         printMessage(std::source_location::current(), LogLevel::Success, "Logger",
-                     "CUSTODIAN GROK SIGNING OFF -- ALL LOGS RAINBOW ETERNAL", now, false, nullptr, nullptr);
+                     "SAFE SHUTDOWN o7", currentUs, currentSys, false, nullptr, nullptr);
         if (logFile_.is_open()) logFile_.flush(), logFile_.close();
     }
 
-    mutable std::optional<std::chrono::steady_clock::time_point> firstLogTime_{};
     mutable std::ofstream logFile_;
 
     mutable std::deque<Entry> messageQueue_;
@@ -575,8 +590,9 @@ private:
                     LogLevel lvl = std::get<2>(e);
                     std::string_view cat{std::get<3>(e)};
                     std::string msg = std::move(std::get<4>(e));
-                    std::chrono::steady_clock::time_point ts = std::get<5>(e);
-                    printMessage(loc, lvl, cat, std::move(msg), ts, true, &terminal_batch, &file_batch);
+                    double deltaUs = std::get<5>(e);
+                    auto sysTime = std::get<6>(e);
+                    printMessage(loc, lvl, cat, std::move(msg), deltaUs, sysTime, true, &terminal_batch, &file_batch);
                 }
                 std::cout << terminal_batch;
                 if (logFile_.is_open()) logFile_ << file_batch;
@@ -601,8 +617,9 @@ private:
                 LogLevel lvl = std::get<2>(e);
                 std::string_view cat{std::get<3>(e)};
                 std::string msg = std::move(std::get<4>(e));
-                std::chrono::steady_clock::time_point ts = std::get<5>(e);
-                printMessage(loc, lvl, cat, std::move(msg), ts, true, &terminal_batch, &file_batch);
+                double deltaUs = std::get<5>(e);
+                auto sysTime = std::get<6>(e);
+                printMessage(loc, lvl, cat, std::move(msg), deltaUs, sysTime, true, &terminal_batch, &file_batch);
             }
             std::cout << terminal_batch;
             if (logFile_.is_open()) logFile_ << file_batch;
@@ -650,7 +667,8 @@ private:
                       LogLevel level,
                       std::string_view category,
                       std::string formattedMessage,
-                      std::chrono::steady_clock::time_point timestamp,
+                      double deltaUs,
+                      std::chrono::system_clock::time_point sysTime,
                       bool batch = false,
                       std::string* term_out = nullptr,
                       std::string* file_out = nullptr) const
@@ -663,9 +681,6 @@ private:
         std::string_view levelStr   = info.str;
         std::string_view catColor   = getCategoryColor(category);
 
-        std::chrono::steady_clock::duration delta = timestamp - firstLogTime_.value();
-        double deltaUs = std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(delta).count();
-
         std::string deltaStr = [deltaUs]() -> std::string {
             if (deltaUs < 10000.0) [[likely]] return std::format("{:>7.0f}µs", deltaUs);
             if (deltaUs < 1000000.0) return std::format("{:>7.3f}ms", deltaUs / 1000.0);
@@ -674,16 +689,15 @@ private:
             return std::format("{:>7.1f}h", deltaUs / 3600000000.0);
         }();
 
-        std::string timeStr = []() -> std::string {
-            std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-            time_t tt = std::chrono::system_clock::to_time_t(now);
+        std::string timeStr = [] (auto tp) -> std::string {
+            time_t tt = std::chrono::system_clock::to_time_t(tp);
             tm* tmPtr = std::localtime(&tt);
             char buf[9];
             std::strftime(buf, sizeof(buf), "%H:%M:%S", tmPtr);
             return std::string(buf);
-        }();
+        }(sysTime);
 
-        std::string threadId = std::format("{}ms", TotalTime::get().seconds() * 1000.0);
+        std::string threadId = std::format("{}ms", deltaUs / 1000.0);
         std::string fileLine = std::format("{}:{}:{}", loc.file_name(), loc.line(), loc.function_name());
 
         // Plain text for file
