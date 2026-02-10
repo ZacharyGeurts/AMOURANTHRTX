@@ -52,7 +52,7 @@ inline VkShaderModule load_shader(const std::string& relativePath) noexcept {
 
     std::array<std::string, 3> paths = {
         std::format("build/bin/Linux/{}", relativePath),
-        std::format("build-windows/bin/Windows/{}", relativePath),
+        std::format("build/bin/Windows/{}", relativePath),
         std::format("assets/shaders/{}", relativePath)
     };
 
