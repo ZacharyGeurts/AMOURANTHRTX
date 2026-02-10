@@ -21,7 +21,7 @@
 #include <chrono>
 #include <format>
 
-// Global canvas at display frequency - your screen image rectangle
+// Global canvas — your persistent screen rectangle updater
 inline std::unique_ptr<RayCanvas> raycanvas;
 
 // Sacrificial Splash — skippable with any input, non-blocking
@@ -147,10 +147,6 @@ static inline void EngineMemoryInit() noexcept {
         "Engine_LivingWorld"
     );
 
-    // Dummy TLAS storage — small fixed size
-    // (actual creation happens in pipeline_initialize, but reserve handle here)
-    // ... other engine buffers (SBT, scratch pool, etc.) go here ...
-
     LOG_SUCCESS_CAT("MEMORY", "Engine private island sealed — descriptor & living-world buffers allocated");
 }
 
@@ -265,10 +261,10 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                  rtx().extent.width,
                  rtx().extent.height);
 
-    // Step 5: Initialize engine-private memory island (your hidden VRAM compartment)
+    // Step 5: Initialize engine-private memory island
     EngineMemoryInit();
 
-    // Step 6: Now safe to initialize pipeline (dummy TLAS, SBT, compute/RT pipelines)
+    // Step 6: Pipeline setup
     pipeline_initialize();
     pipeline_create_pipeline_layout();
     pipeline_create_ray_tracing_pipeline();
@@ -279,9 +275,9 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     rtx().rt_pipeline      = rtx().rt_pipeline;
     rtx().pipeline_layout  = rtx().pipeline_layout;
 
-    LOG_AMOURANTH("AMOURANTHRTX v0.81 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
+    LOG_AMOURANTH("AMOURANTHRTX v0.91 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 
-    // Step 7: Create renderer (transient pool + engine buffers exist — safe)
+    // Step 7: Create RayCanvas (transient pool + engine buffers exist — safe)
     raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
@@ -291,11 +287,14 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     // Explicitly reset camera after all init
     CAM.reset();
 
-    // Final genesis log — everything is fully constructed and safe
+    // Final genesis log
     LOG_AMOURANTH("Genesis sealed — eternal clock starts now 💖");
 
+    // Status speedometer timer
+    double lastStatusPrint_s = TotalTime::get().seconds();
+
     // ────────────────────────────────────────────────
-    // Eternal render loop
+    // Eternal loop
     // ────────────────────────────────────────────────
     while (true) {
         int w = 0, h = 0;
@@ -312,6 +311,31 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
         raycanvas->onResize(w, h);
         raycanvas->maybeUpdateCanvas();
+
+        // Every ~1 second: print speedometer-style status line
+        double now_s = TotalTime::get().seconds();
+        if (now_s - lastStatusPrint_s >= 1.0) {
+            double genesisTime = now_s;
+            double elapsed = now_s - lastStatusPrint_s;
+
+            fprintf(stderr, "\033[38;2;100;255;100m[%.3fs | +%.3fs] \033[0m"
+                            "Canvas: %dx%d %s | Δ: %.4fs (%.0f Hz) | Last: %.3fs | "
+                            "VRAM: %llu/%llu MB | LAS: %s %s %s | Prims: %zu\n",
+                    genesisTime, elapsed,
+                    raycanvas->getWidth(), raycanvas->getHeight(),
+                    raycanvas->isMinimized() ? "[MIN]" : "",
+                    raycanvas->getSmoothedDelta(),
+                    1.0 / raycanvas->getSmoothedDelta(),
+                    raycanvas->getLastPresentTime(),
+                    rtx().vram_reality.usable / (1024ULL * 1024),
+                    rtx().vram_reality.remaining / (1024ULL * 1024),
+                    rtx().las_initialized ? "INIT" : "no",
+                    rtx().las_tlas_dirty ? "[TLAS!]" : "",
+                    rtx().las_procedural_dirty ? "[PROC!]" : "",
+                    rtx().las_procedural_primitives.size());
+
+            lastStatusPrint_s = now_s;
+        }
     }
 
     // Cleanup

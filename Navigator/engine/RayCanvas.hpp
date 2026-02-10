@@ -210,6 +210,13 @@ public:
         needsDescriptorUpdate_ = true;
     }
 
+    int getWidth() const noexcept { return width_; }
+    int getHeight() const noexcept { return height_; }
+    bool isMinimized() const noexcept { return minimized_; }
+    bool isDestroyed() const noexcept { return destroyed_; }
+    double getSmoothedDelta() const noexcept { return smoothedFrameDelta_s_; }
+    double getLastPresentTime() const noexcept { return lastPresentTime_s_; }
+
 private:
     // One-time safe acquire for initial timing baseline (no present)
     void initialTimingAcquire() noexcept {
