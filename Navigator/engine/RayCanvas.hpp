@@ -57,9 +57,7 @@ public:
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
-          needsDescriptorUpdate_(true),
-          lastPresentTime_s_(0.0),
-          smoothedFrameDelta_s_(1.0 / 60.0)
+          needsDescriptorUpdate_(true)
     {
         LOG_INFO_CAT("RAYCANVAS", "Initializing canvas — {}x{}", width, height);
 
@@ -112,9 +110,6 @@ public:
 
         createPersistentHDR();
 
-        // Establish initial timing baseline
-        initialTimingAcquire();
-
         pipeline_initialize();
 
         updateGlobalDescriptorBuffer();
@@ -163,9 +158,12 @@ public:
             return;
         }
 
-        double now = tt.seconds();
+        if (!Swapchain::shouldPresentNow()) {
+            // Skip trace/blit — not time yet
+            return;
+        }
 
-        if (shouldSkip(now)) return;
+        double now = tt.seconds();
 
         fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas trace @ %.3f s\033[0m\n", now);
 
@@ -204,14 +202,7 @@ public:
 
         blitToSwapchain();
 
-        // Update smoothed frame time from actual present
-        double presentNow = tt.seconds();
-        double delta = presentNow - lastPresentTime_s_;
-        constexpr double alpha = 0.2;
-        smoothedFrameDelta_s_ = alpha * delta + (1.0 - alpha) * smoothedFrameDelta_s_;
-        lastPresentTime_s_ = presentNow;
-
-        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas updated @ %.3f s — Δ %.4f s\033[0m\n", now, delta);
+        Swapchain::tryPresent(rtx().present_queue);
     }
 
     void onResize(int newWidth, int newHeight) noexcept {
@@ -231,9 +222,9 @@ public:
 
         LOG_INFO_CAT("RAYCANVAS", "Resize → {}x{}", width_, height_);
 
-        createPersistentHDR();
+        Swapchain::recreate(width_, height_);
 
-        initialTimingAcquire();
+        createPersistentHDR();
 
         needsDescriptorUpdate_ = true;
     }
@@ -243,58 +234,8 @@ public:
     int    getHeight()          const noexcept { return height_; }
     bool   isMinimized()        const noexcept { return minimized_; }
     bool   isDestroyed()        const noexcept { return destroyed_; }
-    double getSmoothedDelta()   const noexcept { return smoothedFrameDelta_s_; }
-    double getLastPresentTime() const noexcept { return lastPresentTime_s_; }
 
 private:
-    void initialTimingAcquire() noexcept {
-        vkDeviceWaitIdle(rtx().device);
-
-        VkSemaphore dummySem = VK_NULL_HANDLE;
-        VkSemaphoreCreateInfo semCI{};
-        semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-        VkResult semRes = vkCreateSemaphore(rtx().device, &semCI, nullptr, &dummySem);
-        if (semRes != VK_SUCCESS) {
-            LOG_WARNING_CAT("RAYCANVAS", "Dummy semaphore failed — using 60 Hz fallback");
-            smoothedFrameDelta_s_ = 1.0 / 60.0;
-            lastPresentTime_s_ = TotalTime::get().seconds();
-            return;
-        }
-
-        uint32_t idx = 0;
-        double t1 = TotalTime::get().seconds();
-
-        // Direct access — Swapchain does not have static get() in current implementation
-        VkSwapchainKHR swap = Swapchain::swapchain.value;
-
-        VkResult res = vkAcquireNextImageKHR(rtx().device, swap,
-                                             500'000'000ULL,
-                                             dummySem, VK_NULL_HANDLE, &idx);
-
-        double t2 = TotalTime::get().seconds();
-        double delta = t2 - t1;
-
-        if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) {
-            if (delta > 0.005 && delta < 0.1) {
-                smoothedFrameDelta_s_ = delta;
-            }
-            lastPresentTime_s_ = t2;
-            LOG_INFO_CAT("RAYCANVAS", "Initial timing baseline acquired — Δ {:.4f} s", delta);
-        } else {
-            LOG_WARNING_CAT("RAYCANVAS", "Initial acquire failed ({}) — 60 Hz fallback", vkh.result(res));
-            smoothedFrameDelta_s_ = 1.0 / 60.0;
-            lastPresentTime_s_ = TotalTime::get().seconds();
-        }
-
-        vkDestroySemaphore(rtx().device, dummySem, nullptr);
-    }
-
-    bool shouldSkip(double now) noexcept {
-        double next = lastPresentTime_s_ + smoothedFrameDelta_s_;
-        return now < next - 0.001;
-    }
-
     void blitToSwapchain() noexcept {
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
@@ -321,23 +262,6 @@ private:
                               VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         endSubmitAndWait(cmd);
-
-        VkPresentInfoKHR pi{};
-        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        pi.swapchainCount = 1;
-
-        // Direct access — Swapchain does not have static get()
-        VkSwapchainKHR sw = Swapchain::swapchain.value;
-        pi.pSwapchains = &sw;
-
-        uint32_t idx = 0;
-        pi.pImageIndices = &idx;
-
-        VkResult res = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
-        if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-            LOG_ERROR_CAT("RAYCANVAS", "Present failed: {}", vkh.result(res));
-            minimized_ = true;
-        }
     }
 
     void createPersistentHDR() noexcept {
@@ -555,7 +479,4 @@ private:
     VkImageView                     hdrOutputView_              = VK_NULL_HANDLE;
     VkDeviceMemory                  hdrOutputMemory_            = VK_NULL_HANDLE;
     bool                            needsDescriptorUpdate_      = true;
-
-    double                          lastPresentTime_s_          = 0.0;
-    double                          smoothedFrameDelta_s_       = 1.0 / 60.0;
 };

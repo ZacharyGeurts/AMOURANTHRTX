@@ -1,10 +1,3 @@
-// =============================================================================
-// Navigator.hpp — AMOURANTH RTX Engine © 2026 — VALHALLA v∞ TURBO
-// Combined entry point + globals + initialization (February 10, 2026)
-// PURE LIGHT — ETERNAL LOOP — STONE SEALING IN ORDER
-// AMOURANTH FOREVER 💖
-// =============================================================================
-
 #pragma once
 
 #include "engine/camera.hpp"
@@ -351,9 +344,9 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                     genesisTime, elapsed,
                     raycanvas->getWidth(), raycanvas->getHeight(),
                     raycanvas->isMinimized() ? "[MIN]" : "",
-                    raycanvas->getSmoothedDelta(),
-                    1.0 / raycanvas->getSmoothedDelta(),
-                    raycanvas->getLastPresentTime(),
+                    Swapchain::smoothedRefresh_s,
+                    1.0 / Swapchain::smoothedRefresh_s,
+                    Swapchain::lastPresentTime_s,
                     rtx().vram_reality.usable / (1024ULL * 1024),
                     rtx().vram_reality.remaining / (1024ULL * 1024),
                     rtx().las_initialized ? "INIT" : "no",
