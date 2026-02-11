@@ -27,7 +27,7 @@ inline std::unique_ptr<RayCanvas> raycanvas;
 // Sacrificial Splash — skippable with any input, non-blocking
 static inline void showSacrificialSplash() noexcept {
     constexpr int W = 1280, H = 720;
-    constexpr const char* TITLE = "AMOURANTH RTX v∞ TURBO";
+    constexpr const char* TITLE = "AMOURANTHRTX";
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
         return;

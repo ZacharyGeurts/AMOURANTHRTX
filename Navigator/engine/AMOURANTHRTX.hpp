@@ -42,7 +42,7 @@
 #define VK_EXT_descriptor_buffer 1
 #define VK_EXT_present_mode_fifo_latest_ready 1
 
-// Required Vulkan device extensions
+// Required Vulkan device extensions (core ones, timing is optional)
 inline constexpr std::array<const char*, 8> requiredDeviceExtensions = {{
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -53,6 +53,9 @@ inline constexpr std::array<const char*, 8> requiredDeviceExtensions = {{
     VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
     VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
 }};
+
+// Optional extensions
+inline constexpr const char* optionalTimingExtension = VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME;
 
 // Vulkan queue family indices structure
 struct QueueFamilyIndices {
@@ -299,6 +302,9 @@ struct VulkanExtensions {
     PFN_vkCmdBindDescriptorBuffersEXT             vkCmdBindDescriptorBuffersEXT             = nullptr;
     PFN_vkCmdSetDescriptorBufferOffsetsEXT        vkCmdSetDescriptorBufferOffsetsEXT        = nullptr;
     PFN_vkGetDescriptorEXT                        vkGetDescriptorEXT                        = nullptr;
+
+    PFN_vkGetRefreshCycleDurationGOOGLE           vkGetRefreshCycleDurationGOOGLE           = nullptr;
+    PFN_vkGetPastPresentationTimingGOOGLE         vkGetPastPresentationTimingGOOGLE         = nullptr;
 };
 
 inline VulkanExtensions& ext() noexcept {
@@ -379,6 +385,9 @@ inline VulkanExtensions& ext() noexcept {
     e.vkCmdBindDescriptorBuffersEXT = reinterpret_cast<PFN_vkCmdBindDescriptorBuffersEXT>(vkGetDeviceProcAddr(dev, "vkCmdBindDescriptorBuffersEXT"));
     e.vkCmdSetDescriptorBufferOffsetsEXT = reinterpret_cast<PFN_vkCmdSetDescriptorBufferOffsetsEXT>(vkGetDeviceProcAddr(dev, "vkCmdSetDescriptorBufferOffsetsEXT"));
     e.vkGetDescriptorEXT = reinterpret_cast<PFN_vkGetDescriptorEXT>(vkGetDeviceProcAddr(dev, "vkGetDescriptorEXT"));
+
+    e.vkGetRefreshCycleDurationGOOGLE = reinterpret_cast<PFN_vkGetRefreshCycleDurationGOOGLE>(vkGetDeviceProcAddr(dev, "vkGetRefreshCycleDurationGOOGLE"));
+    e.vkGetPastPresentationTimingGOOGLE = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(vkGetDeviceProcAddr(dev, "vkGetPastPresentationTimingGOOGLE"));
 
     loaded = true;
     LOG_SUCCESS_CAT("EXT", "All Vulkan extensions loaded successfully");
@@ -788,7 +797,7 @@ inline void init() noexcept {
         std::vector<VkExtensionProperties> exts(extCount);
         vkh.checker(vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data()), "Extension list", "Failed");
 
-        bool has_all = true;
+        bool has_all_required = true;
         for (const char* req : requiredDeviceExtensions) {
             bool found = false;
             for (const auto& avail : exts) {
@@ -798,11 +807,11 @@ inline void init() noexcept {
                 }
             }
             if (!found) {
-                has_all = false;
+                has_all_required = false;
                 break;
             }
         }
-        if (!has_all) continue;
+        if (!has_all_required) continue;
 
         int score = 0;
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 100000;
@@ -868,6 +877,21 @@ inline void init() noexcept {
 
     std::vector<const char*> enabledExtensions(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end());
 
+    // Check and enable optional timing extension if supported
+    uint32_t extCount = 0;
+    vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, nullptr);
+    std::vector<VkExtensionProperties> exts(extCount);
+    vkEnumerateDeviceExtensionProperties(selected, nullptr, &extCount, exts.data());
+
+    bool timingSupported = false;
+    for (const auto& avail : exts) {
+        if (strcmp(avail.extensionName, optionalTimingExtension) == 0) {
+            enabledExtensions.push_back(optionalTimingExtension);
+            timingSupported = true;
+            break;
+        }
+    }
+
     VkDeviceCreateInfo dev_ci{};
     dev_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dev_ci.pNext = &desc_buf;
@@ -877,7 +901,11 @@ inline void init() noexcept {
     dev_ci.ppEnabledExtensionNames = enabledExtensions.data();
 
     VkDevice dev = VK_NULL_HANDLE;
-    vkh.checker(vkCreateDevice(selected, &dev_ci, nullptr, &dev), "vkCreateDevice", "Failed");
+    VkResult res = vkCreateDevice(selected, &dev_ci, nullptr, &dev);
+    if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("VULKAN", "vkCreateDevice failed: {}", vkh.result(res));
+        return VK_NULL_HANDLE;
+    }
 
     rtx().device = dev;
 

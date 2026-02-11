@@ -407,7 +407,7 @@ private:
         }
 
         needsDescriptorUpdate_ = true;
-        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR target created — {}×{}", width_, height_);
+        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR target created — {}x{}", width_, height_);
     }
 
     void updateCameraUBO(double genesisTime) noexcept {
