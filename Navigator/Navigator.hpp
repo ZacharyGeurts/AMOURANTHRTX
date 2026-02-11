@@ -132,22 +132,37 @@ static inline void showSacrificialSplash() noexcept {
 // =============================================================================
 static inline void EngineMemoryInit() noexcept {
     // Descriptor buffer — persistent, large enough for all engine bindings
-    rtx().descriptor_buffer_handle = Memory::create(
-        16 * 1024 * 1024,  // 16 MB — adjust as needed
+    rtx().descriptor_buffer_handle = Memory::createBuffer(
+        16 * 1024 * 1024,  // 16 MiB — generous starting point
         VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "Engine_DescriptorBuffer"
+        "Engine_DescriptorBuffer",
+        Memory::MemoryHint::DescriptorBuffer
     );
 
-    // Living world buffer — updated every frame, storage
-    rtx().living_world_buffer_handle = Memory::create(
-        256 * 1024,  // 256 KB — enough for procedural state
+    // Living world buffer — updated every frame, storage for procedural/live state
+    rtx().living_world_buffer_handle = Memory::createBuffer(
+        256 * 1024,  // 256 KiB — sufficient for most dynamic world data
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         "Engine_LivingWorld"
     );
 
-    LOG_SUCCESS_CAT("MEMORY", "Engine private island sealed — descriptor & living-world buffers allocated");
+    if (rtx().descriptor_buffer_handle == 0 || rtx().living_world_buffer_handle == 0) {
+        LOG_FATAL_CAT("MEMORY", "Critical failure: Engine core buffers could not be allocated");
+        std::abort();
+    }
+
+    // Optional: immediately map the descriptor buffer if you plan persistent mapping
+    if (auto* descInfo = Memory::get(rtx().descriptor_buffer_handle)) {
+        rtx().descriptor_mapped = descInfo->mapped;
+        rtx().descriptor_buffer_address = descInfo->deviceAddress;
+        LOG_SUCCESS_CAT("MEMORY", "Descriptor buffer mapped @ {:p}, device address 0x{:016x}",
+                        rtx().descriptor_mapped, rtx().descriptor_buffer_address);
+    }
+
+    LOG_SUCCESS_CAT("MEMORY", "Engine private VRAM island sealed — descriptor & living-world buffers ready");
 }
 
 // =============================================================================
@@ -245,39 +260,51 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         LOG_SUCCESS_CAT("VULKAN", "Global transient command pool created and sealed");
     }
 
-    // Step 4: Create swapchain (single image mode)
+    // Step 4: Create swapchain (single image mode for minimal latency / control)
     Swapchain::create(g_window,
                       Options::Window::DEFAULT_WIDTH,
                       Options::Window::DEFAULT_HEIGHT);
 
-    // Seal swapchain resources directly
-    rtx().images      = Swapchain::swapchainImage_;
-    rtx().views       = Swapchain::swapchainImageView_;
-    rtx().extent      = Swapchain::swapchainExtent_;
+    // Seal swapchain resources using proper accessors
+    rtx().images      = Swapchain::getImage();
+    rtx().views       = Swapchain::getView();
+    rtx().extent      = Swapchain::getExtent();
     rtx().image_count = 1;
 
-    LOG_INFO_CAT("MAIN", "Swapchain created — single image 0x{:x}, {}x{}",
+    if (rtx().images == VK_NULL_HANDLE || rtx().views == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed — null image/view");
+        vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
+        vkDestroyDevice(device, nullptr);
+        vkDestroySurfaceKHR(instance, surface, nullptr);
+        vkDestroyInstance(instance, nullptr);
+        sdl_cleanup_all();
+        return 1;
+    }
+
+    LOG_INFO_CAT("MAIN", "Swapchain sealed — single image 0x{:x}, view 0x{:x}, {}x{} format {}",
                  (uintptr_t)rtx().images,
+                 (uintptr_t)rtx().views,
                  rtx().extent.width,
-                 rtx().extent.height);
+                 rtx().extent.height,
+                 vkh.format(Swapchain::getFormat()));
 
     // Step 5: Initialize engine-private memory island
     EngineMemoryInit();
 
-    // Step 6: Pipeline setup
+    // Step 6: Pipeline setup (assuming these functions exist in your pipeline code)
     pipeline_initialize();
     pipeline_create_pipeline_layout();
     pipeline_create_ray_tracing_pipeline();
     pipeline_create_compute_pipeline();
     pipeline_create_shader_binding_table();
 
-    rtx().compute_pipeline = rtx().compute_pipeline;
+    rtx().compute_pipeline = rtx().compute_pipeline;  // redundant but kept for clarity
     rtx().rt_pipeline      = rtx().rt_pipeline;
     rtx().pipeline_layout  = rtx().pipeline_layout;
 
     LOG_AMOURANTH("AMOURANTHRTX v0.91 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
 
-    // Step 7: Create RayCanvas (transient pool + engine buffers exist — safe)
+    // Step 7: Create RayCanvas (now safe — transient pool + engine buffers exist)
     raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,

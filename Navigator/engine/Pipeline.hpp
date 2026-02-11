@@ -126,12 +126,14 @@ inline VkAccelerationStructureKHR create_dummy_tlas() noexcept {
         rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &build, &dummyCount, &sizes);
 
-    uint64_t bufHandle = Memory::create(sizes.accelerationStructureSize,
-                                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                        "Dummy_TLAS_Storage");
+    uint64_t bufHandle = Memory::createBuffer(
+        sizes.accelerationStructureSize,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        "Dummy_TLAS_Storage"
+    );
 
-    vkh.checker(bufHandle != 0, "Memory::create", "Dummy TLAS storage allocation failed");
+    vkh.checker(bufHandle != 0, "Memory::createBuffer", "Dummy TLAS storage allocation failed");
 
     VkBuffer buf = Memory::getBuffer(bufHandle);
     vkh.checker(buf != VK_NULL_HANDLE, "Memory::getBuffer", "Dummy TLAS buffer invalid");
@@ -199,11 +201,13 @@ inline void pipeline_initialize() noexcept {
 
     rtx().dummy_tlas = create_dummy_tlas();
 
-    uint64_t lwHandle = Memory::create(64,
-                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                       "LivingWorldBuffer");
+    uint64_t lwHandle = Memory::createBuffer(
+        64,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        "LivingWorldBuffer"
+    );
 
     rtx().living_world_buffer_handle = lwHandle;
 
@@ -345,7 +349,7 @@ inline void pipeline_create_ray_tracing_pipeline() noexcept {
 
     VkRayTracingShaderGroupCreateInfoKHR groups[3]{};
 
-    // Raygen group (GENERAL) — unused fields must be VK_SHADER_UNUSED_KHR
+    // Raygen group (GENERAL)
     groups[0].sType             = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
     groups[0].type              = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
     groups[0].generalShader     = 0;
@@ -353,7 +357,7 @@ inline void pipeline_create_ray_tracing_pipeline() noexcept {
     groups[0].anyHitShader      = VK_SHADER_UNUSED_KHR;
     groups[0].intersectionShader = VK_SHADER_UNUSED_KHR;
 
-    // Miss group (GENERAL) — unused fields must be VK_SHADER_UNUSED_KHR
+    // Miss group (GENERAL)
     groups[1].sType             = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
     groups[1].type              = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
     groups[1].generalShader     = 1;
@@ -428,13 +432,15 @@ inline void pipeline_create_shader_binding_table(VkCommandPool pool = VK_NULL_HA
     VkDeviceSize totalSize = raygenSize + missSize + hitSize;
     totalSize = Memory::align_up(totalSize, alignBase);
 
-    uint64_t sbtHandle = Memory::create(totalSize,
-                                         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
-                                         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                         "EternalSBT");
+    uint64_t sbtHandle = Memory::createBuffer(
+        totalSize,
+        VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        "EternalSBT"
+    );
 
-    vkh.checker(sbtHandle != 0, "Memory::create", "SBT allocation failed");
+    vkh.checker(sbtHandle != 0, "Memory::createBuffer", "SBT allocation failed");
 
     VkDeviceAddress sbtAddr = Memory::getDeviceAddress(sbtHandle);
 
@@ -568,7 +574,14 @@ inline void pipeline_write_rt_descriptors(const RTDescriptorUpdate& update) noex
     uint64_t handle = rtx().descriptor_buffer_handle;
     if (handle == 0) {
         constexpr VkDeviceSize INITIAL = 4096ULL * 4;
-        handle = Memory::create(INITIAL, VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT, "EternalDescriptorBuffer");
+        handle = Memory::createBuffer(
+            INITIAL,
+            VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            "EternalDescriptorBuffer",
+            Memory::MemoryHint::DescriptorBuffer
+        );
+
         rtx().descriptor_buffer_handle = handle;
         rtx().descriptor_buffer_address = Memory::getDeviceAddress(handle);
     }

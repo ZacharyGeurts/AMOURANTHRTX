@@ -9,15 +9,15 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Simple material (expand later)
+// Simple material (expand later as needed)
 // ─────────────────────────────────────────────────────────────────────────────
 struct Material {
-    glm::vec4 albedo   {1.0};
-    glm::vec4 emissive {0.0};
+    glm::vec4 albedo   {1.0f, 1.0f, 1.0f, 1.0f};
+    glm::vec4 emissive {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Camera UBO sent to shaders — time is genesis-relative
+// Camera uniform data block — sent to shaders
 // ─────────────────────────────────────────────────────────────────────────────
 struct CameraSceneData {
     glm::mat4 viewInverse;
@@ -29,7 +29,7 @@ struct CameraSceneData {
     glm::vec4 prevCameraPos;
 
     double    exposure     = 1.0;
-    double    genesisTime  = 0.0;     // seconds since genesis
+    double    genesisTime  = 0.0;     // seconds since engine start
     uint32_t  randomSeed   = 12345u;
     uint32_t  maxDepth     = 12;
 
@@ -37,11 +37,11 @@ struct CameraSceneData {
 };
 
 // =============================================================================
-// RayCanvas — Persistent Canvas Updater
-// Progressive ray tracing to persistent HDR target
-// Blit to single cached swapchain image → present only when TotalTime aligns
-// No constant rendering — skips/wanks early, no blocking acquires in loop
-// Pure procedural AABB path tracing — no triangles
+// RayCanvas — Persistent progressive path tracing canvas
+//   • Renders to HDR storage image
+//   • Blits to swapchain image when timing allows
+//   • Single-image swapchain + controlled present timing
+//   • Procedural AABB geometry only (no triangle meshes)
 // =============================================================================
 class RayCanvas {
 public:
@@ -63,43 +63,70 @@ public:
     {
         LOG_INFO_CAT("RAYCANVAS", "Initializing canvas — {}x{}", width, height);
 
-        // Camera UBO
-        cameraUBOHandle_ = Memory::create(sizeof(CameraSceneData),
-                                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                          "CameraUBO");
+        // Camera uniform buffer (typically host-visible + coherent)
+        cameraUBOHandle_ = Memory::createBuffer(
+            sizeof(CameraSceneData),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            "CameraUBO"
+        );
 
-        vkh.checker(cameraUBOHandle_, "Memory::create (CameraUBO)", "Failed");
+        if (cameraUBOHandle_ == 0) {
+            LOG_FATAL_CAT("RAYCANVAS", "Failed to allocate Camera UBO");
+            std::abort();
+        }
 
-        // Default material
+        // Default materials — descriptor buffer style
         std::array<Material, 1> defaultMats{};
-        defaultMaterialsHandle_ = Memory::createDescriptorBuffer(sizeof(defaultMats), "DefaultMaterials");
+        defaultMaterialsHandle_ = Memory::createBuffer(
+            sizeof(defaultMats),
+            VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            "DefaultMaterials",
+            Memory::MemoryHint::DescriptorBuffer
+        );
 
-        vkh.checker(defaultMaterialsHandle_, "Memory::createDescriptorBuffer (Materials)", "Failed");
+        if (defaultMaterialsHandle_ == 0) {
+            LOG_FATAL_CAT("RAYCANVAS", "Failed to allocate default materials buffer");
+            std::abort();
+        }
 
-        void* mapped = Memory::lazyMapDescriptor(defaultMaterialsHandle_);
-        vkh.checker(mapped, "Memory::lazyMapDescriptor (Materials)", "Failed to map");
-        std::memcpy(mapped, defaultMats.data(), sizeof(defaultMats));
-        LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded");
+        // Upload materials (prefer persistent map if available)
+        if (auto* info = Memory::get(defaultMaterialsHandle_)) {
+            if (info->mapped) {
+                std::memcpy(info->mapped, defaultMats.data(), sizeof(defaultMats));
+                LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded (persistent mapping)");
+            } else {
+                // Fallback: staging copy
+                auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(
+                    defaultMaterialsHandle_, defaultMats.data(), sizeof(defaultMats));
+                if (stagingBuf != VK_NULL_HANDLE) {
+                    vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
+                    vkFreeMemory(rtx().device, stagingMem, nullptr);
+                }
+                LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded via staging");
+            }
+        }
 
         createPersistentHDR();
 
-        // One-time safe acquire for initial timing baseline (no present)
+        // Establish initial timing baseline
         initialTimingAcquire();
 
         pipeline_initialize();
 
         updateGlobalDescriptorBuffer();
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent canvas ready");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent canvas initialized successfully");
     }
 
     ~RayCanvas() {
         if (destroyed_) return;
         destroyed_ = true;
 
-        LOG_INFO_CAT("RAYCANVAS", "Shutting down — draining queues");
+        LOG_INFO_CAT("RAYCANVAS", "Shutting down — waiting for device idle");
 
         vkDeviceWaitIdle(rtx().device);
 
@@ -121,7 +148,9 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Shutdown complete");
     }
 
-    // ── Decide if it's time to update the canvas (ray trace + blit)
+    // ────────────────────────────────────────────────────────────────
+    // Decide whether to trace + blit this frame
+    // ────────────────────────────────────────────────────────────────
     void maybeUpdateCanvas() noexcept {
         if (destroyed_ || minimized_) return;
 
@@ -175,14 +204,14 @@ public:
 
         blitToSwapchain();
 
-        // Update EMA from real present time
+        // Update smoothed frame time from actual present
         double presentNow = tt.seconds();
         double delta = presentNow - lastPresentTime_s_;
         constexpr double alpha = 0.2;
         smoothedFrameDelta_s_ = alpha * delta + (1.0 - alpha) * smoothedFrameDelta_s_;
         lastPresentTime_s_ = presentNow;
 
-        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas updated @ %.3f s — delta %.4f s\033[0m\n", now, delta);
+        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas updated @ %.3f s — Δ %.4f s\033[0m\n", now, delta);
     }
 
     void onResize(int newWidth, int newHeight) noexcept {
@@ -200,58 +229,60 @@ public:
         height_ = newHeight;
         minimized_ = false;
 
-        LOG_INFO_CAT("RAYCANVAS", "Resize — {}x{}", width_, height_);
+        LOG_INFO_CAT("RAYCANVAS", "Resize → {}x{}", width_, height_);
 
         createPersistentHDR();
 
-        // Re-baseline timing after resize
         initialTimingAcquire();
 
         needsDescriptorUpdate_ = true;
     }
 
-    int getWidth() const noexcept { return width_; }
-    int getHeight() const noexcept { return height_; }
-    bool isMinimized() const noexcept { return minimized_; }
-    bool isDestroyed() const noexcept { return destroyed_; }
-    double getSmoothedDelta() const noexcept { return smoothedFrameDelta_s_; }
+    // Getters
+    int    getWidth()           const noexcept { return width_; }
+    int    getHeight()          const noexcept { return height_; }
+    bool   isMinimized()        const noexcept { return minimized_; }
+    bool   isDestroyed()        const noexcept { return destroyed_; }
+    double getSmoothedDelta()   const noexcept { return smoothedFrameDelta_s_; }
     double getLastPresentTime() const noexcept { return lastPresentTime_s_; }
 
 private:
-    // One-time safe acquire for initial timing baseline (no present)
     void initialTimingAcquire() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
         VkSemaphore dummySem = VK_NULL_HANDLE;
-        VkSemaphoreCreateInfo semCI = {};
+        VkSemaphoreCreateInfo semCI{};
         semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
         VkResult semRes = vkCreateSemaphore(rtx().device, &semCI, nullptr, &dummySem);
         if (semRes != VK_SUCCESS) {
-            LOG_WARNING_CAT("RAYCANVAS", "Failed to create dummy semaphore — fallback 60 Hz");
+            LOG_WARNING_CAT("RAYCANVAS", "Dummy semaphore failed — using 60 Hz fallback");
             smoothedFrameDelta_s_ = 1.0 / 60.0;
             lastPresentTime_s_ = TotalTime::get().seconds();
             return;
         }
 
-        uint32_t idx = UINT32_MAX;
+        uint32_t idx = 0;
         double t1 = TotalTime::get().seconds();
 
-        VkResult res = vkAcquireNextImageKHR(rtx().device, Swapchain::swapchain_.get(),
-                                             500'000'000,  // 0.5 sec timeout
+        // Direct access — Swapchain does not have static get() in current implementation
+        VkSwapchainKHR swap = Swapchain::swapchain.value;
+
+        VkResult res = vkAcquireNextImageKHR(rtx().device, swap,
+                                             500'000'000ULL,
                                              dummySem, VK_NULL_HANDLE, &idx);
 
         double t2 = TotalTime::get().seconds();
         double delta = t2 - t1;
 
-        if (res == VK_SUCCESS) {
+        if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR) {
             if (delta > 0.005 && delta < 0.1) {
                 smoothedFrameDelta_s_ = delta;
             }
             lastPresentTime_s_ = t2;
-            LOG_INFO_CAT("RAYCANVAS", "Initial acquire delta: {:.4f}s", delta);
+            LOG_INFO_CAT("RAYCANVAS", "Initial timing baseline acquired — Δ {:.4f} s", delta);
         } else {
-            LOG_WARNING_CAT("RAYCANVAS", "Initial acquire failed — fallback 60 Hz");
+            LOG_WARNING_CAT("RAYCANVAS", "Initial acquire failed ({}) — 60 Hz fallback", vkh.result(res));
             smoothedFrameDelta_s_ = 1.0 / 60.0;
             lastPresentTime_s_ = TotalTime::get().seconds();
         }
@@ -269,7 +300,7 @@ private:
         if (!cmd) return;
 
         transitionImageLayout(cmd, rtx().images,
-                              VK_IMAGE_LAYOUT_UNDEFINED,  // safe assumption on first blit
+                              VK_IMAGE_LAYOUT_UNDEFINED,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
         VkImageBlit blit{};
@@ -282,7 +313,7 @@ private:
 
         vkCmdBlitImage(cmd,
                        hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       rtx().images, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       rtx().images,    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        1, &blit, VK_FILTER_LINEAR);
 
         transitionImageLayout(cmd, rtx().images,
@@ -294,12 +325,15 @@ private:
         VkPresentInfoKHR pi{};
         pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.swapchainCount = 1;
-        VkSwapchainKHR sw = Swapchain::swapchain_.get();
+
+        // Direct access — Swapchain does not have static get()
+        VkSwapchainKHR sw = Swapchain::swapchain.value;
         pi.pSwapchains = &sw;
-        uint32_t idx = 0;  // single image
+
+        uint32_t idx = 0;
         pi.pImageIndices = &idx;
 
-        VkResult res = vkQueuePresentKHR(rtx().present_queue, &pi);
+        VkResult res = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
         if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
             LOG_ERROR_CAT("RAYCANVAS", "Present failed: {}", vkh.result(res));
             minimized_ = true;
@@ -309,13 +343,19 @@ private:
     void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_ != VK_NULL_HANDLE) vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        if (hdrOutputImage_ != VK_NULL_HANDLE) vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-
-        hdrOutputImage_ = VK_NULL_HANDLE;
-        hdrOutputView_ = VK_NULL_HANDLE;
-        hdrOutputMemory_ = VK_NULL_HANDLE;
+        // Cleanup previous HDR resources
+        if (hdrOutputView_ != VK_NULL_HANDLE) {
+            vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+            hdrOutputView_ = VK_NULL_HANDLE;
+        }
+        if (hdrOutputImage_ != VK_NULL_HANDLE) {
+            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+            hdrOutputImage_ = VK_NULL_HANDLE;
+        }
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) {
+            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+            hdrOutputMemory_ = VK_NULL_HANDLE;
+        }
 
         VkImageCreateInfo ci{};
         ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -329,21 +369,28 @@ private:
         ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_),
-                    "vkCreateImage (persistent HDR)", "Failed");
+        if (vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_) != VK_SUCCESS) {
+            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImage (HDR output) failed");
+            return;
+        }
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &req);
 
-        uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        uint32_t memType = Memory::findMemoryType(req.memoryTypeBits,
+                                                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         VkMemoryAllocateInfo mai{};
         mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         mai.allocationSize  = req.size;
         mai.memoryTypeIndex = memType;
 
-        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_),
-                    "vkAllocateMemory (persistent HDR)", "Failed");
+        if (vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_) != VK_SUCCESS) {
+            LOG_ERROR_CAT("RAYCANVAS", "vkAllocateMemory (HDR output) failed");
+            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+            hdrOutputImage_ = VK_NULL_HANDLE;
+            return;
+        }
 
         vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
 
@@ -354,11 +401,13 @@ private:
         vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_),
-                    "vkCreateImageView (persistent HDR)", "Failed");
+        if (vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_) != VK_SUCCESS) {
+            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImageView (HDR output) failed");
+            return;
+        }
 
         needsDescriptorUpdate_ = true;
-        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR canvas ready {}x{}", width_, height_);
+        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR target created — {}×{}", width_, height_);
     }
 
     void updateCameraUBO(double genesisTime) noexcept {
@@ -369,12 +418,14 @@ private:
         data.viewInverse = glm::inverse(data.view);
         data.projInverse = glm::inverse(data.proj);
 
-        data.cameraPos     = glm::vec4(CAM.position(), 1.0);
+        data.cameraPos     = glm::vec4(CAM.position(), 1.0f);
+        // prevCameraPos intentionally left unchanged here — update if reprojection needed
 
         data.exposure      = 1.0;
         data.genesisTime   = genesisTime;
         data.randomSeed    = static_cast<uint32_t>(genesisTime * 1'000'000.0) ^ 0xCAFEBABEu;
 
+        // Properly handle the return value (staging buffer/memory) to avoid warning
         auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
         if (stagingBuf != VK_NULL_HANDLE) {
             vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
@@ -385,22 +436,22 @@ private:
     void updateGlobalDescriptorBuffer() noexcept {
         VkAccelerationStructureKHR tlas = getTLAS();
         if (tlas == VK_NULL_HANDLE) {
-            LOG_ERROR_CAT("RAYCANVAS", "Cannot update descriptors — no valid TLAS");
+            LOG_ERROR_CAT("RAYCANVAS", "Cannot update RT descriptors — TLAS invalid");
             return;
         }
 
         RTDescriptorUpdate upd{};
         upd.tlas            = tlas;
         upd.rtOutputView    = hdrOutputView_;
-        upd.ubo             = rtx().buffers[cameraUBOHandle_].buffer;
+        upd.ubo             = Memory::getBuffer(cameraUBOHandle_);
         upd.uboSize         = sizeof(CameraSceneData);
-        upd.materialsBuffer = rtx().buffers[defaultMaterialsHandle_].buffer;
-        upd.materialsSize   = sizeof(Material) * 1;
+        upd.materialsBuffer = Memory::getBuffer(defaultMaterialsHandle_);
+        upd.materialsSize   = sizeof(Material);   // × number of materials if array grows
 
         pipeline_write_rt_descriptors(upd);
         needsDescriptorUpdate_ = false;
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Global RT descriptors updated");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Global ray-tracing descriptors refreshed");
     }
 
     void transitionImageLayout(VkCommandBuffer cmd, VkImage img,
@@ -439,21 +490,21 @@ private:
 
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
-        VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool        = rtx().transient_pool;
-        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
+        VkCommandBufferAllocateInfo alloc{};
+        alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc.commandPool        = rtx().transient_pool;
+        alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc.commandBufferCount = 1;
 
-        if (vkAllocateCommandBuffers(rtx().device, &allocInfo, &cmd) != VK_SUCCESS) {
+        if (vkAllocateCommandBuffers(rtx().device, &alloc, &cmd) != VK_SUCCESS) {
             return VK_NULL_HANDLE;
         }
 
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        VkCommandBufferBeginInfo begin{};
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
             vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
             return VK_NULL_HANDLE;
         }
@@ -492,19 +543,19 @@ private:
     }
 
 private:
-    SDL_Window*                     window_;
-    int                             width_, height_;
-    bool                            minimized_;
-    bool                            destroyed_;
-    bool                            firstFrame_;
-    uint64_t                        defaultMaterialsHandle_;
-    uint64_t                        cameraUBOHandle_;
-    VkImage                         hdrOutputImage_     = VK_NULL_HANDLE;
-    VkImageView                     hdrOutputView_      = VK_NULL_HANDLE;
-    VkDeviceMemory                  hdrOutputMemory_    = VK_NULL_HANDLE;
-    bool                            needsDescriptorUpdate_;
+    SDL_Window*                     window_                     = nullptr;
+    int                             width_                      = 0;
+    int                             height_                     = 0;
+    bool                            minimized_                  = false;
+    bool                            destroyed_                  = false;
+    bool                            firstFrame_                 = true;
+    uint64_t                        defaultMaterialsHandle_     = 0;
+    uint64_t                        cameraUBOHandle_            = 0;
+    VkImage                         hdrOutputImage_             = VK_NULL_HANDLE;
+    VkImageView                     hdrOutputView_              = VK_NULL_HANDLE;
+    VkDeviceMemory                  hdrOutputMemory_            = VK_NULL_HANDLE;
+    bool                            needsDescriptorUpdate_      = true;
 
-    // Live timing — updated from real presents
-    double                          lastPresentTime_s_;
-    double                          smoothedFrameDelta_s_;
+    double                          lastPresentTime_s_          = 0.0;
+    double                          smoothedFrameDelta_s_       = 1.0 / 60.0;
 };
