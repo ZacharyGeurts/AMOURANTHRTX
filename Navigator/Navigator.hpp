@@ -6,6 +6,7 @@
 #include "engine/AMOURANTHRTX.hpp"
 #include "engine/OptionsMenu.hpp"
 #include "engine/RayCanvas.hpp"
+#include "engine/Pipeline.hpp"  // ← make sure this includes the namespace version
 
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3_image/SDL_image.h>
@@ -14,7 +15,7 @@
 #include <chrono>
 #include <format>
 
-// Global canvas — your persistent screen rectangle updater
+// Global canvas — your persistent compute-driven screen updater
 inline std::unique_ptr<RayCanvas> raycanvas;
 
 // Sacrificial Splash — skippable with any input, non-blocking
@@ -121,41 +122,9 @@ static inline void showSacrificialSplash() noexcept {
 
 // =============================================================================
 // Engine-private memory initialization — called AFTER device & swapchain exist
-// This is your isolated VRAM island — developer never sees/touches it
 // =============================================================================
 static inline void EngineMemoryInit() noexcept {
-    // Descriptor buffer — persistent, large enough for all engine bindings
-    rtx().descriptor_buffer_handle = Memory::createBuffer(
-        16 * 1024 * 1024,  // 16 MiB — generous starting point
-        VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        "Engine_DescriptorBuffer",
-        Memory::MemoryHint::DescriptorBuffer
-    );
-
-    // Living world buffer — updated every frame, storage for procedural/live state
-    rtx().living_world_buffer_handle = Memory::createBuffer(
-        256 * 1024,  // 256 KiB — sufficient for most dynamic world data
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        "Engine_LivingWorld"
-    );
-
-    if (rtx().descriptor_buffer_handle == 0 || rtx().living_world_buffer_handle == 0) {
-        LOG_FATAL_CAT("MEMORY", "Critical failure: Engine core buffers could not be allocated");
-        std::abort();
-    }
-
-    // Optional: immediately map the descriptor buffer if you plan persistent mapping
-    if (auto* descInfo = Memory::get(rtx().descriptor_buffer_handle)) {
-        rtx().descriptor_mapped = descInfo->mapped;
-        rtx().descriptor_buffer_address = descInfo->deviceAddress;
-        LOG_SUCCESS_CAT("MEMORY", "Descriptor buffer mapped @ {:p}, device address 0x{:016x}",
-                        rtx().descriptor_mapped, rtx().descriptor_buffer_address);
-    }
-
-    LOG_SUCCESS_CAT("MEMORY", "Engine private VRAM island sealed — descriptor & living-world buffers ready");
+    LOG_SUCCESS_CAT("MEMORY", "Engine memory ready (no global buffers needed for single-shader mode)");
 }
 
 // =============================================================================
@@ -166,7 +135,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     install_apocalypse_handler();
     Logging::Logger::get().startup();
-    LOG_SUCCESS_CAT("MAIN", "Apocalypse handler installed — logger started — Handling future events");
+    LOG_SUCCESS_CAT("MAIN", "Apocalypse handler installed — logger started");
 
     // Step 1: Initialize SDL subsystems
     sdl_init_all(Options::Window::DEFAULT_WIDTH,
@@ -174,7 +143,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                  "AMOURANTHRTX");
 
     if (!g_window) {
-        LOG_FATAL_CAT("MAIN", "SDL window creation failed — aborting");
+        LOG_FATAL_CAT("MAIN", "SDL window creation failed");
         sdl_cleanup_all();
         return 1;
     }
@@ -219,7 +188,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     vkGetDeviceQueue(device, compute_family,   0, &compute_queue);
     vkGetDeviceQueue(device, transfer_family,  0, &transfer_queue);
 
-    // Seal core Vulkan objects directly into rtx()
+    // Seal core Vulkan objects
     rtx().instance         = instance;
     rtx().device           = device;
     rtx().surface          = surface;
@@ -232,7 +201,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     rtx().transfer_family  = transfer_family;
     rtx().compute_family   = compute_family;
 
-    // Global transient command pool — created EARLY and EXPLICITLY
+    // Global transient command pool
     {
         VkCommandPoolCreateInfo poolInfo{};
         poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -242,7 +211,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
         VkResult res = vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
         if (res != VK_SUCCESS) {
-            LOG_FATAL_CAT("VULKAN", "Failed to create global transient command pool: {}", vkh.result(res));
+            LOG_FATAL_CAT("VULKAN", "Failed to create transient command pool: {}", vkh.result(res));
             vkDestroyDevice(device, nullptr);
             vkDestroySurfaceKHR(instance, surface, nullptr);
             vkDestroyInstance(instance, nullptr);
@@ -250,22 +219,21 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
             return 1;
         }
 
-        LOG_SUCCESS_CAT("VULKAN", "Global transient command pool created and sealed");
+        LOG_SUCCESS_CAT("VULKAN", "Transient command pool created");
     }
 
-    // Step 4: Create swapchain (single image mode for minimal latency / control)
+    // Step 4: Create swapchain (single image)
     Swapchain::create(g_window,
                       Options::Window::DEFAULT_WIDTH,
                       Options::Window::DEFAULT_HEIGHT);
 
-    // Seal swapchain resources using proper accessors
     rtx().images      = Swapchain::getImage();
     rtx().views       = Swapchain::getView();
     rtx().extent      = Swapchain::getExtent();
     rtx().image_count = 1;
 
     if (rtx().images == VK_NULL_HANDLE || rtx().views == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed — null image/view");
+        LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed");
         vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
         vkDestroyDevice(device, nullptr);
         vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -274,43 +242,31 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         return 1;
     }
 
-    LOG_INFO_CAT("MAIN", "Swapchain sealed — single image 0x{:x}, view 0x{:x}, {}x{} format {}",
-                 (uintptr_t)rtx().images,
-                 (uintptr_t)rtx().views,
-                 rtx().extent.width,
-                 rtx().extent.height,
-                 vkh.format(Swapchain::getFormat()));
+    LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", rtx().extent.width, rtx().extent.height);
 
-    // Step 5: Initialize engine-private memory island
+    // Step 5: Engine memory init (minimal now)
     EngineMemoryInit();
 
-    // Step 6: Pipeline setup (assuming these functions exist in your pipeline code)
-    pipeline_initialize();
-    pipeline_create_pipeline_layout();
-    pipeline_create_ray_tracing_pipeline();
-    pipeline_create_compute_pipeline();
-    pipeline_create_shader_binding_table();
+    // Step 6: Pipeline setup — single compute shader only
+    Pipeline::initialize();
+    Pipeline::create_pipeline_layout();
+    Pipeline::create_canvas_pipeline();  // eager creation — ensures it's ready before RayCanvas
 
-    rtx().compute_pipeline = rtx().compute_pipeline;  // redundant but kept for clarity
-    rtx().rt_pipeline      = rtx().rt_pipeline;
-    rtx().pipeline_layout  = rtx().pipeline_layout;
+    LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
 
-    LOG_AMOURANTH("AMOURANTHRTX v0.91 — FINAL RTX SEAL FORGED — FULL ACCESS GRANTED — ALL RESOURCES LOCKED");
-
-    // Step 7: Create RayCanvas (now safe — transient pool + engine buffers exist)
+    // Step 7: Create RayCanvas
     raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
         g_window
     );
 
-    // Explicitly reset camera after all init
+    // Reset camera
     CAM.reset();
 
-    // Final genesis log
-    LOG_AMOURANTH("Genesis sealed — eternal clock starts now 💖");
+    LOG_AMOURANTH("Genesis sealed — eternal compute begins");
 
-    // Status speedometer timer
+    // Status print timer (~1 Hz)
     double lastStatusPrint_s = TotalTime::get().seconds();
 
     // ────────────────────────────────────────────────
@@ -332,7 +288,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         raycanvas->onResize(w, h);
         raycanvas->maybeUpdateCanvas();
 
-        // Every ~1 second: print speedometer-style status line
+        // Periodic status line (~1 Hz)
         double now_s = TotalTime::get().seconds();
         if (now_s - lastStatusPrint_s >= 1.0) {
             double genesisTime = now_s;
@@ -340,7 +296,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
             fprintf(stderr, "\033[38;2;100;255;100m[%.3fs | +%.3fs] \033[0m"
                             "Canvas: %dx%d %s | Δ: %.4fs (%.0f Hz) | Last: %.3fs | "
-                            "VRAM: %llu/%llu MB | LAS: %s %s %s | Prims: %zu\n",
+                            "VRAM: %llu/%llu MB\n",
                     genesisTime, elapsed,
                     raycanvas->getWidth(), raycanvas->getHeight(),
                     raycanvas->isMinimized() ? "[MIN]" : "",
@@ -348,11 +304,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                     1.0 / Swapchain::smoothedRefresh_s,
                     Swapchain::lastPresentTime_s,
                     rtx().vram_reality.usable / (1024ULL * 1024),
-                    rtx().vram_reality.remaining / (1024ULL * 1024),
-                    rtx().las_initialized ? "INIT" : "no",
-                    rtx().las_tlas_dirty ? "[TLAS!]" : "",
-                    rtx().las_procedural_dirty ? "[PROC!]" : "",
-                    rtx().las_procedural_primitives.size());
+                    rtx().vram_reality.remaining / (1024ULL * 1024));
 
             lastStatusPrint_s = now_s;
         }
@@ -360,6 +312,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     // Cleanup
     raycanvas.reset();
+    Pipeline::shutdown();  // clean up the single pipeline
     sdl_cleanup_all();
 
     return 0;

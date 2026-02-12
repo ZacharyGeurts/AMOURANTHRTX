@@ -17,7 +17,7 @@ struct Material {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Camera uniform data block — sent to shaders
+// Camera uniform data block — sent to the single compute shader
 // ─────────────────────────────────────────────────────────────────────────────
 struct CameraSceneData {
     glm::mat4 viewInverse;
@@ -29,7 +29,7 @@ struct CameraSceneData {
     glm::vec4 prevCameraPos;
 
     double    exposure     = 1.0;
-    double    genesisTime  = 0.0;     // seconds since engine start
+    double    genesisTime  = 0.0;
     uint32_t  randomSeed   = 12345u;
     uint32_t  maxDepth     = 12;
 
@@ -37,9 +37,9 @@ struct CameraSceneData {
 };
 
 // =============================================================================
-// RayCanvas — Persistent progressive path tracing canvas
-//   • Renders to HDR storage image
-//   • Blits to swapchain image when timing allows
+// RayCanvas — Persistent progressive compute canvas
+//   • Single compute shader renders to HDR storage image
+//   • Blits to swapchain when timing allows
 //   • Single-image swapchain + controlled present timing
 //   • Procedural AABB geometry only (no triangle meshes)
 // =============================================================================
@@ -57,11 +57,12 @@ public:
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
-          needsDescriptorUpdate_(true)
+          descriptorPool_(VK_NULL_HANDLE),
+          descriptorSet_(VK_NULL_HANDLE)
     {
-        LOG_INFO_CAT("RAYCANVAS", "Initializing canvas — {}x{}", width, height);
+        LOG_INFO_CAT("RAYCANVAS", "Initializing single-shader compute canvas — {}x{}", width, height);
 
-        // Camera uniform buffer (typically host-visible + coherent)
+        // Camera uniform buffer (host-visible + coherent)
         cameraUBOHandle_ = Memory::createBuffer(
             sizeof(CameraSceneData),
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
@@ -75,15 +76,14 @@ public:
             std::abort();
         }
 
-        // Default materials — descriptor buffer style
+        // Optional: default materials buffer (can be removed if not used in shader)
         std::array<Material, 1> defaultMats{};
         defaultMaterialsHandle_ = Memory::createBuffer(
             sizeof(defaultMats),
-            VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT |
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            "DefaultMaterials",
-            Memory::MemoryHint::DescriptorBuffer
+            "DefaultMaterials"
         );
 
         if (defaultMaterialsHandle_ == 0) {
@@ -91,13 +91,12 @@ public:
             std::abort();
         }
 
-        // Upload materials (prefer persistent map if available)
+        // Upload default materials (persistent map preferred)
         if (auto* info = Memory::get(defaultMaterialsHandle_)) {
             if (info->mapped) {
                 std::memcpy(info->mapped, defaultMats.data(), sizeof(defaultMats));
-                LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded (persistent mapping)");
+                LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded (persistent map)");
             } else {
-                // Fallback: staging copy
                 auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(
                     defaultMaterialsHandle_, defaultMats.data(), sizeof(defaultMats));
                 if (stagingBuf != VK_NULL_HANDLE) {
@@ -109,12 +108,12 @@ public:
         }
 
         createPersistentHDR();
+        createDescriptorPoolAndSet();
+        Pipeline::initialize();
+        Pipeline::create_pipeline_layout();
+        Pipeline::create_canvas_pipeline();
 
-        pipeline_initialize();
-
-        updateGlobalDescriptorBuffer();
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent canvas initialized successfully");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Single-shader compute canvas initialized");
     }
 
     ~RayCanvas() {
@@ -124,6 +123,16 @@ public:
         LOG_INFO_CAT("RAYCANVAS", "Shutting down — waiting for device idle");
 
         vkDeviceWaitIdle(rtx().device);
+
+        // Destroy descriptor set / pool
+        if (descriptorSet_ != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
+            descriptorSet_ = VK_NULL_HANDLE;
+        }
+        if (descriptorPool_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
+            descriptorPool_ = VK_NULL_HANDLE;
+        }
 
         if (hdrOutputView_ != VK_NULL_HANDLE) {
             vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
@@ -138,13 +147,14 @@ public:
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(defaultMaterialsHandle_);
 
-        pipeline_shutdown();
+        // Shutdown the single pipeline
+        Pipeline::shutdown();
 
         LOG_SUCCESS_CAT("RAYCANVAS", "Shutdown complete");
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Decide whether to trace + blit this frame
+    // Decide whether to dispatch canvas shader this frame
     // ────────────────────────────────────────────────────────────────
     void maybeUpdateCanvas() noexcept {
         if (destroyed_ || minimized_) return;
@@ -154,46 +164,39 @@ public:
         if (firstFrame_) {
             tt.seal();
             firstFrame_ = false;
-            LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
+            LOG_AMOURANTH("Genesis sealed — eternal single-shader canvas begins 💖");
             return;
         }
 
         if (!Swapchain::shouldPresentNow()) {
-            // Skip trace/blit — not time yet
             return;
         }
 
         double now = tt.seconds();
 
-        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas trace @ %.3f s\033[0m\n", now);
+        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas dispatch @ %.3f s\033[0m\n", now);
 
         updateCameraUBO(now);
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
-        pipeline_dispatch_living_world(cmd, static_cast<float>(now));
+        // Update descriptor set with current camera UBO + HDR view
+        updateDescriptorSet();
 
-        VkMemoryBarrier barrier{};
-        barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT;
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                             0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-        if (needsDescriptorUpdate_) {
-            updateGlobalDescriptorBuffer();
-        }
-
+        // Transition HDR to GENERAL for shader write
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED,
                               VK_IMAGE_LAYOUT_GENERAL);
 
-        pipeline_trace_rays(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_));
+        // Bind descriptor set and dispatch the ONE shader
+        VkDescriptorSet set = descriptorSet_;
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
 
+        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), static_cast<float>(now));
+
+        // Transition HDR to TRANSFER_SRC for blit
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_GENERAL,
                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -226,16 +229,109 @@ public:
 
         createPersistentHDR();
 
-        needsDescriptorUpdate_ = true;
+        // Re-update descriptor set with new HDR view
+        updateDescriptorSet();
     }
 
     // Getters
-    int    getWidth()           const noexcept { return width_; }
-    int    getHeight()          const noexcept { return height_; }
-    bool   isMinimized()        const noexcept { return minimized_; }
-    bool   isDestroyed()        const noexcept { return destroyed_; }
+    int    getWidth()  const noexcept { return width_; }
+    int    getHeight() const noexcept { return height_; }
+    bool   isMinimized() const noexcept { return minimized_; }
+    bool   isDestroyed() const noexcept { return destroyed_; }
 
 private:
+    // ────────────────────────────────────────────────────────────────
+    // Create descriptor pool + one set (called once in constructor)
+    // ────────────────────────────────────────────────────────────────
+    void createDescriptorPoolAndSet() noexcept {
+        VkDescriptorPoolSize poolSizes[3] = {
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  1},   // binding 0
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},   // binding 1
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}    // binding 2
+        };
+
+        VkDescriptorPoolCreateInfo poolCI{};
+        poolCI.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolCI.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolCI.maxSets       = 1;
+        poolCI.poolSizeCount = 3;
+        poolCI.pPoolSizes    = poolSizes;
+
+        vkh.checker(vkCreateDescriptorPool(rtx().device, &poolCI, nullptr, &descriptorPool_),
+                    "vkCreateDescriptorPool", "Failed");
+
+        VkDescriptorSetAllocateInfo allocCI{};
+        allocCI.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocCI.descriptorPool     = descriptorPool_;
+        allocCI.descriptorSetCount = 1;
+        allocCI.pSetLayouts        = &Pipeline::main_descriptor_layout;
+
+        vkh.checker(vkAllocateDescriptorSets(rtx().device, &allocCI, &descriptorSet_),
+                    "vkAllocateDescriptorSets", "Failed");
+
+        LOG_SUCCESS_CAT("RAYCANVAS", "Descriptor pool + set created for canvas");
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Update descriptor set — now matches Pipeline.hpp bindings exactly
+    //   0: Storage Image (hdrCanvas)
+    //   1: Uniform Buffer (camera UBO)
+    //   2: Storage Buffer (LivingWorldBuffer)
+    // ────────────────────────────────────────────────────────────────
+    void updateDescriptorSet() noexcept {
+        VkWriteDescriptorSet writes[3]{};
+
+        // 0: HDR storage image
+        VkDescriptorImageInfo hdrImageInfo{};
+        hdrImageInfo.imageView   = hdrOutputView_;
+        hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        hdrImageInfo.sampler     = VK_NULL_HANDLE;
+
+        writes[0].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet           = descriptorSet_;
+        writes[0].dstBinding       = 0;
+        writes[0].dstArrayElement  = 0;
+        writes[0].descriptorCount  = 1;
+        writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].pImageInfo       = &hdrImageInfo;
+
+        // 1: Camera UBO
+        VkDescriptorBufferInfo camBufferInfo{};
+        camBufferInfo.buffer = Memory::getBuffer(cameraUBOHandle_);
+        camBufferInfo.offset = 0;
+        camBufferInfo.range  = sizeof(CameraSceneData);
+
+        writes[1].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet           = descriptorSet_;
+        writes[1].dstBinding       = 1;
+        writes[1].dstArrayElement  = 0;
+        writes[1].descriptorCount  = 1;
+        writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[1].pBufferInfo      = &camBufferInfo;
+
+        // 2: Living World storage buffer (using rtx().living_world_buffer_handle)
+        VkDescriptorBufferInfo worldBufferInfo{};
+        if (rtx().living_world_buffer_handle != 0) {
+            worldBufferInfo.buffer = Memory::getBuffer(rtx().living_world_buffer_handle);
+            worldBufferInfo.offset = 0;
+            worldBufferInfo.range  = 64;  // exact size of your LivingWorldBuffer
+        } else {
+            worldBufferInfo.buffer = VK_NULL_HANDLE;
+            worldBufferInfo.range  = VK_WHOLE_SIZE;
+        }
+        writes[2].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet           = descriptorSet_;
+        writes[2].dstBinding       = 2;
+        writes[2].dstArrayElement  = 0;
+        writes[2].descriptorCount  = 1;
+        writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[2].pBufferInfo      = &worldBufferInfo;
+
+        vkUpdateDescriptorSets(rtx().device, 3, writes, 0, nullptr);
+
+        LOG_DEBUG_CAT("RAYCANVAS", "Descriptor set updated for frame (bindings 0=img, 1=cam, 2=world)");
+    }
+
     void blitToSwapchain() noexcept {
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
@@ -267,7 +363,6 @@ private:
     void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        // Cleanup previous HDR resources
         if (hdrOutputView_ != VK_NULL_HANDLE) {
             vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
             hdrOutputView_ = VK_NULL_HANDLE;
@@ -294,7 +389,7 @@ private:
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         if (vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImage (HDR output) failed");
+            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImage (HDR) failed");
             return;
         }
 
@@ -310,7 +405,7 @@ private:
         mai.memoryTypeIndex = memType;
 
         if (vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkAllocateMemory (HDR output) failed");
+            LOG_ERROR_CAT("RAYCANVAS", "vkAllocateMemory (HDR) failed");
             vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
             hdrOutputImage_ = VK_NULL_HANDLE;
             return;
@@ -326,56 +421,32 @@ private:
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         if (vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImageView (HDR output) failed");
+            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImageView (HDR) failed");
             return;
         }
 
-        needsDescriptorUpdate_ = true;
-        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR target created — {}x{}", width_, height_);
+        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR canvas created — {}x{}", width_, height_);
     }
 
     void updateCameraUBO(double genesisTime) noexcept {
         CameraSceneData data{};
 
-        data.view       = CAM.view();
-        data.proj       = CAM.projection(static_cast<float>(width_) / static_cast<float>(height_));
+        data.view        = CAM.view();
+        data.proj        = CAM.projection(static_cast<float>(width_) / static_cast<float>(height_));
         data.viewInverse = glm::inverse(data.view);
         data.projInverse = glm::inverse(data.proj);
 
-        data.cameraPos     = glm::vec4(CAM.position(), 1.0f);
-        // prevCameraPos intentionally left unchanged here — update if reprojection needed
+        data.cameraPos    = glm::vec4(CAM.position(), 1.0f);
 
-        data.exposure      = 1.0;
-        data.genesisTime   = genesisTime;
-        data.randomSeed    = static_cast<uint32_t>(genesisTime * 1'000'000.0) ^ 0xCAFEBABEu;
+        data.exposure     = 1.0;
+        data.genesisTime  = genesisTime;
+        data.randomSeed   = static_cast<uint32_t>(genesisTime * 1'000'000.0) ^ 0xCAFEBABEu;
 
-        // Properly handle the return value (staging buffer/memory) to avoid warning
         auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
         if (stagingBuf != VK_NULL_HANDLE) {
             vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
             vkFreeMemory(rtx().device, stagingMem, nullptr);
         }
-    }
-
-    void updateGlobalDescriptorBuffer() noexcept {
-        VkAccelerationStructureKHR tlas = getTLAS();
-        if (tlas == VK_NULL_HANDLE) {
-            LOG_ERROR_CAT("RAYCANVAS", "Cannot update RT descriptors — TLAS invalid");
-            return;
-        }
-
-        RTDescriptorUpdate upd{};
-        upd.tlas            = tlas;
-        upd.rtOutputView    = hdrOutputView_;
-        upd.ubo             = Memory::getBuffer(cameraUBOHandle_);
-        upd.uboSize         = sizeof(CameraSceneData);
-        upd.materialsBuffer = Memory::getBuffer(defaultMaterialsHandle_);
-        upd.materialsSize   = sizeof(Material);   // × number of materials if array grows
-
-        pipeline_write_rt_descriptors(upd);
-        needsDescriptorUpdate_ = false;
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Global ray-tracing descriptors refreshed");
     }
 
     void transitionImageLayout(VkCommandBuffer cmd, VkImage img,
@@ -396,11 +467,11 @@ private:
 
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
             b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            dst = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+            dst = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
             b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
             b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            src = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+            src = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
             dst = VK_PIPELINE_STAGE_TRANSFER_BIT;
         } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
             b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -478,5 +549,7 @@ private:
     VkImage                         hdrOutputImage_             = VK_NULL_HANDLE;
     VkImageView                     hdrOutputView_              = VK_NULL_HANDLE;
     VkDeviceMemory                  hdrOutputMemory_            = VK_NULL_HANDLE;
-    bool                            needsDescriptorUpdate_      = true;
+
+    VkDescriptorPool                descriptorPool_            = VK_NULL_HANDLE;
+    VkDescriptorSet                 descriptorSet_             = VK_NULL_HANDLE;
 };

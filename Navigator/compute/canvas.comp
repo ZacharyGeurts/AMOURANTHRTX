@@ -2,46 +2,67 @@
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_scalar_block_layout : require
 
-layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 // ────────────────────────────────────────────────────────────────
-// Living World Buffer — 64 bytes exactly, scalar layout
-// This is the only persistent global state written per frame
+// HDR Canvas Output — binding 0
 // ────────────────────────────────────────────────────────────────
-layout(set = 0, binding = 7, scalar) buffer restrict writeonly LivingWorldBuffer
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrCanvas;
+
+// ────────────────────────────────────────────────────────────────
+// Camera Uniform Buffer — binding 1
+// ────────────────────────────────────────────────────────────────
+layout(set = 0, binding = 1) uniform CameraUBO {
+    mat4  view;
+    mat4  proj;
+    mat4  viewProj;
+    vec3  position;
+    float near;
+    float far;
+    vec3  forward;
+    float fovY;
+    // ... expand as needed
+} camera;
+
+// ────────────────────────────────────────────────────────────────
+// Living World Buffer — binding 2, now readable + writable
+// ────────────────────────────────────────────────────────────────
+layout(set = 0, binding = 2, scalar) buffer restrict coherent LivingWorldBuffer
 {
-    vec4  sunDirAndIntensity;     // .xyz = normalized sun direction, .w = intensity [0.0–1.8]
-    vec4  windDirAndSpeed;        // .xyz = normalized wind direction, .w = speed [m/s]
-    float temperature;            // °C (−15 .. +38 realistic outdoor range)
-    float humidity;               // [0.0–1.0]
-    float airPressure;            // hPa (≈990–1030)
-    float cloudDensity;           // [0.0–1.0] — controls sky scattering & coverage
-    uint  frameSeed;              // pseudo-random seed for noise/dither in other shaders
-    uint  padding;                // pad to exactly 64 bytes
+    vec4  sunDirAndIntensity;
+    vec4  windDirAndSpeed;
+    float temperature;
+    float humidity;
+    float airPressure;
+    float cloudDensity;
+    uint  frameSeed;
+    uint  padding;
 } world;
 
 // ────────────────────────────────────────────────────────────────
-// Push constant — only totalTime (4 bytes, matches your current usage)
+// Push constant
 // ────────────────────────────────────────────────────────────────
 layout(push_constant) uniform PushConstants
 {
-    float totalTime;              // absolute engine time in seconds
+    float totalTime;
 } pc;
 
 void main()
 {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 canvasSize = imageSize(hdrCanvas);
+
+    if (pixel.x >= canvasSize.x || pixel.y >= canvasSize.y) return;
+
     float t = pc.totalTime;
 
-    // ── Realistic day/night cycle ───────────────────────────────────
-    // 86400 seconds = 24h
-    float dayPhase   = fract(t / 86400.0);                    // [0,1)
-    float solarAngle = dayPhase * 6.283185307179586;          // 2π
+    // ── Day/night cycle (unchanged) ───────────────────────────────
+    float dayPhase   = fract(t / 86400.0);
+    float solarAngle = dayPhase * 6.283185307179586;
 
-    // Approximate solar declination (simple sine for seasons)
-    float declination = 0.409 * sin( (t / 86400.0 - 81.0) * 0.0172 ); // rough yearly cycle
+    float declination = 0.409 * sin( (t / 86400.0 - 81.0) * 0.0172 );
 
-    // Hour angle → elevation & azimuth approximation
-    float elevation = asin(sin(declination) * sin(0.0) +   // latitude ~0 for simplicity
+    float elevation = asin(sin(declination) * sin(0.0) +
                            cos(declination) * cos(0.0) * cos(solarAngle));
     float cosAz     = (sin(elevation) * sin(0.0) - sin(declination)) /
                       (cos(elevation) * cos(0.0));
@@ -53,14 +74,13 @@ void main()
         cos(elevation) * cos(azimuth)
     ));
 
-    // Intensity: zero below horizon, peak ~1.8 at high noon
     float sunHeight   = max(0.0, elevation);
-    float intensity   = sunHeight * sunHeight * 1.6 + 0.18;   // quadratic falloff + ambient
-    intensity        *= (1.0 + 0.12 * sin(solarAngle * 12.0)); // subtle daily variation
+    float intensity   = sunHeight * sunHeight * 1.6 + 0.18;
+    intensity        *= (1.0 + 0.12 * sin(solarAngle * 12.0));
 
     world.sunDirAndIntensity = vec4(sunDir, clamp(intensity, 0.0, 1.8));
 
-    // ── Wind: layered coherent noise ────────────────────────────────
+    // Wind, temp, humidity, pressure, clouds, seed (unchanged)
     float slow   = t * 0.00075;
     float medium = t * 0.0065;
     float fast   = t * 0.018;
@@ -78,26 +98,19 @@ void main()
     );
 
     vec3 windDir = normalize(windBase + windGust * 0.6);
-    float windSpeed = 4.5 +                        // base
-                      sin(t * 0.00095) * 5.0 +     // daily variation
-                      sin(t * 0.095) * 6.0;        // gusts
+    float windSpeed = 4.5 + sin(t * 0.00095) * 5.0 + sin(t * 0.095) * 6.0;
 
     world.windDirAndSpeed = vec4(windDir, clamp(windSpeed, 0.0, 18.0));
 
-    // ── Temperature & humidity (diurnal + seasonal) ─────────────────
-    float diurnalTemp   = sin(solarAngle - 0.6) * 14.0;           // afternoon peak
-    float seasonalDrift = sin((t / 86400.0 - 172.0) * 0.0172) * 8.0; // rough yearly swing
-
+    float diurnalTemp   = sin(solarAngle - 0.6) * 14.0;
+    float seasonalDrift = sin((t / 86400.0 - 172.0) * 0.0172) * 8.0;
     world.temperature = 17.0 + diurnalTemp + seasonalDrift;
 
-    // Humidity: inverse to temperature + rain events
     float baseHumid = 0.48 + (1.0 - abs(diurnalTemp / 14.0)) * 0.42;
     float rainPulse = fract(sin(t * 0.000142) * 43758.5453 + 12.9898);
     float rainMod   = (rainPulse > 0.92) ? (rainPulse - 0.92) * 12.5 : 0.0;
-
     world.humidity = clamp(baseHumid + rainMod * 0.55 - 0.15, 0.05, 0.98);
 
-    // ── Air pressure & cloud density ────────────────────────────────
     world.airPressure  = 1013.0 + sin(t * 0.000195) * 18.0 +
                                  cos(t * 0.00115) * 4.5;
 
@@ -105,10 +118,24 @@ void main()
                                sin(t * 0.00051 + 3.7) * 0.31 +
                                (rainPulse > 0.88 ? 0.4 : 0.0);
 
-    // ── Frame seed (LCG — good enough for most noise needs) ─────────
     uint seed = uint(t * 98765.4321);
     seed = seed * 1664525u + 1013904223u;
     world.frameSeed = seed;
 
-    // Exactly 64 bytes written — ready for consumption by ray-marcher / sky shader
+    // ── Simple test output with noise using frameSeed (now readable) ─────
+    vec2 uv = vec2(pixel) / vec2(canvasSize);
+    vec3 col = 0.5 + 0.5 * cos(t + uv.xyx + vec3(0,2,4));
+
+    // Noise using frameSeed (now legal)
+    uint n = world.frameSeed ^ (pixel.x + pixel.y * 73856093u);
+    n ^= n >> 16;
+    n *= 0x85ebca6bu;
+    n ^= n >> 13;
+    n *= 0xc2b2ae35u;
+    n ^= n >> 16;
+    float noise = float(n) / 4294967295.0;
+
+    col += (noise - 0.5) * 0.1;
+
+    imageStore(hdrCanvas, pixel, vec4(col, 1.0));
 }

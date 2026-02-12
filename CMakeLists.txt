@@ -111,19 +111,36 @@ endif()
 # =============================================================================
 set(DEVELOPER_DIRS
     assets/fonts assets/textures assets/models assets/materials assets/scenes
-    assets/audio assets/scripts
-    shaders/raytracing shaders/compute
+    assets/audio assets/scripts Navigator/compute
 )
 
 foreach(D ${DEVELOPER_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
 endforeach()
 
-foreach(platform IN ITEMS Linux Windows)
-    foreach(sub IN ITEMS shaders/raytracing shaders/compute fonts textures models scenes audio scripts)
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${platform}/assets/${sub}")
-    endforeach()
-endforeach()
+file(MAKE_DIRECTORY "${BIN_DIR}/compute")
+
+# =============================================================================
+# COPY ASSETS TO OUTPUT DIRECTORY
+# =============================================================================
+set(ASSETS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+set(ASSETS_DEST_DIR "${BIN_DIR}/assets")
+
+# Use a marker file to track whether assets have been copied
+add_custom_command(
+    OUTPUT "${ASSETS_DEST_DIR}/.assets_copied"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ASSETS_DEST_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ASSETS_SRC_DIR}" "${ASSETS_DEST_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${ASSETS_DEST_DIR}/.assets_copied"
+    DEPENDS "${ASSETS_SRC_DIR}"  # Re-copy if source assets change
+    COMMENT "Copying assets/ → ${ASSETS_DEST_DIR}"
+    VERBATIM
+)
+
+add_custom_target(copy_assets ALL
+    DEPENDS "${ASSETS_DEST_DIR}/.assets_copied"
+)
 
 # =============================================================================
 # DEPENDENCIES
@@ -152,7 +169,7 @@ if(TARGET_PLATFORM STREQUAL "Windows")
     find_library(SDL3_IMAGE_LIB NAMES SDL3_image PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
 endif()
 
-# tinyobjloader
+# tinyobjloader (optional — keep if you still use OBJ AABB extraction)
 FetchContent_Declare(
     tinyobjloader
     GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
@@ -164,11 +181,8 @@ set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
 # =============================================================================
 # SOURCE FILES
 # =============================================================================
-file(GLOB_RECURSE ENGINE_SOURCES "Navigator/engine/*.cpp")
-
 set(ALL_SOURCES
     Navigator/main.cpp
-    ${ENGINE_SOURCES}
     ${TINYOBJLOADER_SRC}
 )
 
@@ -185,12 +199,12 @@ set_target_properties(amouranth_engine PROPERTIES
     SUFFIX "${EXE_SUFFIX}"
 )
 
-# Force console subsystem on Windows/MinGW (fixes WinMain error)
+# Force console subsystem on Windows/MinGW
 if(TARGET_PLATFORM STREQUAL "Windows" OR MINGW)
     target_link_options(amouranth_engine PRIVATE -mconsole)
 endif()
 
-# Disable LTO warnings/noise on MinGW (optional but cleans output)
+# Disable LTO warnings/noise on MinGW (optional)
 if(MINGW)
     set_target_properties(amouranth_engine PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
 endif()
@@ -214,13 +228,6 @@ if(TARGET_PLATFORM STREQUAL "Linux")
 endif()
 
 target_compile_definitions(amouranth_engine PRIVATE
-    VK_KHR_ray_tracing_pipeline
-    VK_KHR_acceleration_structure
-    VK_KHR_deferred_host_operations
-    VK_KHR_buffer_device_address
-    VK_EXT_descriptor_indexing
-    VK_KHR_ray_query
-    # Add GLM experimental flag globally for consistency
     GLM_ENABLE_EXPERIMENTAL
     GLM_FORCE_RADIANS
     GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -251,99 +258,44 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
 endif()
 
 # =============================================================================
-# SHADER COMPILATION
+# SINGLE SHADER COMPILATION
 # =============================================================================
-set(SHADER_INCLUDE_FLAGS -I${CMAKE_CURRENT_SOURCE_DIR}/shaders)
-set(SHADER_DEBUG_FLAGS -g -O0)
+set(SHADER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/compute/canvas.comp")
+set(SHADER_OUT "${BIN_DIR}/compute/canvas.spv")
 
-file(GLOB_RECURSE POTENTIAL_SHADERS shaders/raytracing/* shaders/compute/*)
-
-set(SPV_OUTPUTS "")
-foreach(SRC ${POTENTIAL_SHADERS})
-    if(IS_DIRECTORY "${SRC}")
-        continue()
-    endif()
-
-    get_filename_component(NAME ${SRC} NAME)
-    get_filename_component(BASE ${SRC} NAME_WE)
-    get_filename_component(DIR ${SRC} DIRECTORY)
-    get_filename_component(REL_DIR ${DIR} NAME)
-
-    set(OUT_DIR "${BIN_DIR}/assets/shaders/${REL_DIR}")
-    set(STAGE "")
-    set(TARGET_FLAG "")
-
-    if(REL_DIR STREQUAL "raytracing")
-        if(NAME MATCHES "[_.](rgen|rmiss|rchit|rahit|rint|rcall)(\\.glsl)?$")
-            set(TARGET_FLAG --target-spv=spv1.6 --target-env=vulkan1.4)
-            string(REGEX MATCH "[_.](rgen|rmiss|rchit|rahit|rint|rcall)" STAGE_MATCH ${NAME})
-            set(STAGE ${CMAKE_MATCH_1})
-        endif()
-    elseif(REL_DIR MATCHES "compute")
-        if(NAME MATCHES "([_.])?comp(\\.glsl)?$")
-            set(TARGET_FLAG --target-spv=spv1.6 --target-env=vulkan1.4)
-            set(STAGE comp)
-        endif()
-    endif()
-
-    if(NOT STAGE)
-        continue()
-    endif()
-
-    set(SPV "${OUT_DIR}/${BASE}.spv")
-
-    add_custom_command(
-        OUTPUT ${SPV}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${OUT_DIR}
-        COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${TARGET_FLAG} ${SHADER_DEBUG_FLAGS}
-                -fshader-stage=${STAGE} "${SRC}" -o "${SPV}"
-        COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${SPV}"
-        DEPENDS "${SRC}"
-        COMMENT "Compiling shader: ${REL_DIR}/${NAME} → ${BASE}.spv"
-        VERBATIM
-    )
-    list(APPEND SPV_OUTPUTS ${SPV})
-endforeach()
-
-add_custom_target(shaders ALL DEPENDS ${SPV_OUTPUTS})
-add_dependencies(amouranth_engine shaders)
-
-# =============================================================================
-# ASSET COPY
-# =============================================================================
-set(ASSET_MAP
-    "fonts:*.ttf,*.otf,*.ttc,*.woff,*.woff2,*.eot"
-    "textures:*.png,*.jpg,*.jpeg,*.jpe,*.jfif,*.exr,*.hdr,*.dds,*.ktx,*.ktx2,*.tga,*.bmp,*.gif,*.webp,*.jp2,*.svg,*.ico"
-    "models:*.obj,*.gltf,*.glb,*.fbx,*.dae,*.stl,*.ply,*.blend,*.3ds,*.abc"
-    "materials:*.json,*.mtl,*.xml,*.yaml,*.yml"
-    "scenes:*.json,*.xml,*.yaml,*.yml,*.scene,*.scn"
-    "audio:*.wav,*.ogg,*.mp3,*.flac,*.aac,*.m4a,*.wma,*.opus"
-    "scripts:*.lua,*.py,*.js,*.ts,*.glsl,*.hlsl,*.cs,*.gd"
+add_custom_command(
+    OUTPUT "${SHADER_OUT}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/compute"
+    COMMAND ${GLSLC}
+            -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
+            -g -O0
+            --target-spv=spv1.6 --target-env=vulkan1.4
+            -fshader-stage=comp
+            "${SHADER_SRC}" -o "${SHADER_OUT}"
+    COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${SHADER_OUT}"
+    DEPENDS "${SHADER_SRC}"
+    COMMENT "Compiling single compute shader → compute/canvas.spv"
+    VERBATIM
 )
-foreach(MAP ${ASSET_MAP})
-    string(REPLACE ":" ";" PAIR ${MAP})
-    list(GET PAIR 0 TYPE)
-    list(GET PAIR 1 EXTS)
-    string(REPLACE "," ";" EXT_LIST ${EXTS})
-    set(FILES "")
-    foreach(E ${EXT_LIST})
-        file(GLOB TEMP "assets/${TYPE}/${E}")
-        list(APPEND FILES ${TEMP})
-    endforeach()
-    if(FILES)
-        add_custom_command(TARGET amouranth_engine POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILES} "${BIN_DIR}/assets/${TYPE}/"
-            COMMENT "Copying ${TYPE} assets"
-        )
-    endif()
-endforeach()
 
+add_custom_target(shaders ALL DEPENDS "${SHADER_OUT}")
+
+# =============================================================================
+# MAKE EXECUTABLE DEPEND ON ASSETS + SHADERS
+# =============================================================================
+add_dependencies(amouranth_engine copy_assets shaders)
+
+# =============================================================================
+# FINAL STATUS
+# =============================================================================
 message(STATUS "")
 message(STATUS "==================================================================")
 message(STATUS " Target: ${BIN_DIR}/Navigator${EXE_SUFFIX}")
 if(TARGET_PLATFORM STREQUAL "Windows")
-    message(STATUS " Run: wine ${BIN_DIR}/Navigator.exe --help")
+    message(STATUS " Run: wine ${BIN_DIR}/Navigator.exe")
 else()
-    message(STATUS " Run: ./linux.sh --help")
+    message(STATUS " Run: ${BIN_DIR}/Navigator")
 endif()
+message(STATUS " Assets copied to: ${BIN_DIR}/assets/")
+message(STATUS " Single shader: ${SHADER_OUT}")
 message(STATUS "==================================================================")

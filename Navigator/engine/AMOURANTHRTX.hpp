@@ -92,9 +92,9 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTH RTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 0, 81, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 0, 91, 0);
     appInfo.pEngineName        = "VALHALLA";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 0, 81, 0);
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 0, 91, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlCount = 0;
