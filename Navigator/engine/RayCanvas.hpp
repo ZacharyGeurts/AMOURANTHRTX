@@ -147,6 +147,11 @@ public:
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(defaultMaterialsHandle_);
 
+        // If we created a dummy world buffer, clean it up
+        if (dummyWorldBufferHandle_ != 0) {
+            Memory::destroy(dummyWorldBufferHandle_);
+        }
+
         // Shutdown the single pipeline
         Pipeline::shutdown();
 
@@ -273,12 +278,47 @@ private:
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Update descriptor set — now matches Pipeline.hpp bindings exactly
-    //   0: Storage Image (hdrCanvas)
-    //   1: Uniform Buffer (camera UBO)
-    //   2: Storage Buffer (LivingWorldBuffer)
+    // Ensure we always have a valid storage buffer for binding 2
+    // ────────────────────────────────────────────────────────────────
+    void ensureValidWorldBuffer() noexcept {
+        if (rtx().living_world_buffer_handle != 0) {
+            return; // real world buffer already exists → use it
+        }
+
+        if (dummyWorldBufferHandle_ == 0) {
+            // Create tiny dummy buffer — matches your previous range comment
+            dummyWorldBufferHandle_ = Memory::createBuffer(
+                64,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                "DummyLivingWorld"
+            );
+
+            if (dummyWorldBufferHandle_ == 0) {
+                LOG_ERROR_CAT("RAYCANVAS", "Failed to create dummy world buffer — validation errors incoming");
+                return;
+            }
+
+            // Zero it out
+            char zero[64] = {};
+            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(
+                dummyWorldBufferHandle_, zero, sizeof(zero));
+            if (stagingBuf != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
+                vkFreeMemory(rtx().device, stagingMem, nullptr);
+            }
+
+            LOG_INFO_CAT("RAYCANVAS", "Created dummy 64-byte world buffer to satisfy validation");
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Update descriptor set — now always uses valid buffers
     // ────────────────────────────────────────────────────────────────
     void updateDescriptorSet() noexcept {
+        ensureValidWorldBuffer();  // guarantees a valid buffer for binding 2
+
         VkWriteDescriptorSet writes[3]{};
 
         // 0: HDR storage image
@@ -309,16 +349,16 @@ private:
         writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         writes[1].pBufferInfo      = &camBufferInfo;
 
-        // 2: Living World storage buffer (using rtx().living_world_buffer_handle)
+        // 2: World storage buffer — always valid now
         VkDescriptorBufferInfo worldBufferInfo{};
-        if (rtx().living_world_buffer_handle != 0) {
-            worldBufferInfo.buffer = Memory::getBuffer(rtx().living_world_buffer_handle);
-            worldBufferInfo.offset = 0;
-            worldBufferInfo.range  = 64;  // exact size of your LivingWorldBuffer
-        } else {
-            worldBufferInfo.buffer = VK_NULL_HANDLE;
-            worldBufferInfo.range  = VK_WHOLE_SIZE;
-        }
+        uint64_t worldHandle = (rtx().living_world_buffer_handle != 0)
+            ? rtx().living_world_buffer_handle
+            : dummyWorldBufferHandle_;
+
+        worldBufferInfo.buffer = Memory::getBuffer(worldHandle);
+        worldBufferInfo.offset = 0;
+        worldBufferInfo.range  = 64;  // keep consistent with dummy size
+
         writes[2].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[2].dstSet           = descriptorSet_;
         writes[2].dstBinding       = 2;
@@ -546,6 +586,7 @@ private:
     bool                            firstFrame_                 = true;
     uint64_t                        defaultMaterialsHandle_     = 0;
     uint64_t                        cameraUBOHandle_            = 0;
+    uint64_t                        dummyWorldBufferHandle_     = 0;  // ← new: fallback buffer
     VkImage                         hdrOutputImage_             = VK_NULL_HANDLE;
     VkImageView                     hdrOutputView_              = VK_NULL_HANDLE;
     VkDeviceMemory                  hdrOutputMemory_            = VK_NULL_HANDLE;
