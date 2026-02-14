@@ -6,7 +6,7 @@
 #include "engine/AMOURANTHRTX.hpp"
 #include "engine/OptionsMenu.hpp"
 #include "engine/RayCanvas.hpp"
-#include "engine/Pipeline.hpp"  // ← make sure this includes the namespace version
+#include "engine/Pipeline.hpp"
 
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3_image/SDL_image.h>
@@ -15,7 +15,7 @@
 #include <chrono>
 #include <format>
 
-// Global canvas — your persistent compute-driven screen updater
+// Global canvas — persistent compute-driven screen updater
 inline std::unique_ptr<RayCanvas> raycanvas;
 
 // Sacrificial Splash — skippable with any input, non-blocking
@@ -23,7 +23,7 @@ static inline void showSacrificialSplash() noexcept {
     constexpr int W = 1280, H = 720;
     constexpr const char* TITLE = "AMOURANTHRTX";
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
         return;
     }
 
@@ -248,13 +248,25 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     EngineMemoryInit();
 
     // Step 6: Pipeline setup — single compute shader only
-    Pipeline::initialize();
-    Pipeline::create_pipeline_layout();
-    Pipeline::create_canvas_pipeline();  // eager creation — ensures it's ready before RayCanvas
+    // Must be called BEFORE RayCanvas constructor (provides main_descriptor_layout)
+    Pipeline::initialize();               // creates descriptor layout
+    Pipeline::create_pipeline_layout();   // creates pipeline layout with push constants
+    // create_canvas_pipeline() can be lazy, but calling it here is safer during bring-up
+    Pipeline::create_canvas_pipeline();
+
+    if (Pipeline::canvas_pipeline == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "Failed to create canvas compute pipeline");
+        vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
+        vkDestroyDevice(device, nullptr);
+        vkDestroySurfaceKHR(instance, surface, nullptr);
+        vkDestroyInstance(instance, nullptr);
+        sdl_cleanup_all();
+        return 1;
+    }
 
     LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
 
-    // Step 7: Create RayCanvas
+    // Step 7: Create RayCanvas (now safe — layout exists)
     raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
@@ -312,7 +324,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     // Cleanup
     raycanvas.reset();
-    Pipeline::shutdown();  // clean up the single pipeline
+    Pipeline::shutdown();
     sdl_cleanup_all();
 
     return 0;

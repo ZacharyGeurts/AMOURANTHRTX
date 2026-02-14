@@ -41,7 +41,6 @@ struct CameraSceneData {
 //   • Single compute shader renders to HDR storage image
 //   • Blits to swapchain when timing allows
 //   • Single-image swapchain + controlled present timing
-//   • Procedural AABB geometry only (no triangle meshes)
 // =============================================================================
 class RayCanvas {
 public:
@@ -76,7 +75,7 @@ public:
             std::abort();
         }
 
-        // Optional: default materials buffer (can be removed if not used in shader)
+        // Optional default materials buffer
         std::array<Material, 1> defaultMats{};
         defaultMaterialsHandle_ = Memory::createBuffer(
             sizeof(defaultMats),
@@ -91,11 +90,10 @@ public:
             std::abort();
         }
 
-        // Upload default materials (persistent map preferred)
+        // Upload defaults (prefer persistent map)
         if (auto* info = Memory::get(defaultMaterialsHandle_)) {
             if (info->mapped) {
                 std::memcpy(info->mapped, defaultMats.data(), sizeof(defaultMats));
-                LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded (persistent map)");
             } else {
                 auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(
                     defaultMaterialsHandle_, defaultMats.data(), sizeof(defaultMats));
@@ -103,12 +101,13 @@ public:
                     vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
                     vkFreeMemory(rtx().device, stagingMem, nullptr);
                 }
-                LOG_SUCCESS_CAT("RAYCANVAS", "Default materials uploaded via staging");
             }
         }
 
         createPersistentHDR();
         createDescriptorPoolAndSet();
+
+        // Pipeline setup now safe (main_descriptor_layout created in Pipeline::initialize)
         Pipeline::initialize();
         Pipeline::create_pipeline_layout();
         Pipeline::create_canvas_pipeline();
@@ -120,18 +119,13 @@ public:
         if (destroyed_) return;
         destroyed_ = true;
 
-        LOG_INFO_CAT("RAYCANVAS", "Shutting down — waiting for device idle");
-
         vkDeviceWaitIdle(rtx().device);
 
-        // Destroy descriptor set / pool
         if (descriptorSet_ != VK_NULL_HANDLE) {
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
-            descriptorSet_ = VK_NULL_HANDLE;
         }
         if (descriptorPool_ != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
-            descriptorPool_ = VK_NULL_HANDLE;
         }
 
         if (hdrOutputView_ != VK_NULL_HANDLE) {
@@ -147,20 +141,15 @@ public:
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(defaultMaterialsHandle_);
 
-        // If we created a dummy world buffer, clean it up
         if (dummyWorldBufferHandle_ != 0) {
             Memory::destroy(dummyWorldBufferHandle_);
         }
 
-        // Shutdown the single pipeline
         Pipeline::shutdown();
 
         LOG_SUCCESS_CAT("RAYCANVAS", "Shutdown complete");
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Decide whether to dispatch canvas shader this frame
-    // ────────────────────────────────────────────────────────────────
     void maybeUpdateCanvas() noexcept {
         if (destroyed_ || minimized_) return;
 
@@ -173,47 +162,46 @@ public:
             return;
         }
 
-        if (!Swapchain::shouldPresentNow()) {
-            return;
-        }
+        // Temporarily force every frame during debug (comment out when stable)
+        // if (!Swapchain::shouldPresentNow()) return;
 
         double now = tt.seconds();
 
-        fprintf(stderr, "\033[38;2;255;147;41m[UPDATE] Canvas dispatch @ %.3f s\033[0m\n", now);
-
         updateCameraUBO(now);
 
+        // Update descriptors BEFORE beginning command buffer
         updateDescriptorSet();
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
-        // Transition HDR to GENERAL for shader write
+        // Transition HDR image to GENERAL (shader write)
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED,
                               VK_IMAGE_LAYOUT_GENERAL);
 
-        // Bind descriptor set and dispatch the ONE shader
+        // Bind and dispatch
         VkDescriptorSet set = descriptorSet_;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                 Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
 
-        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), static_cast<float>(now));
+        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_), 
+                                 static_cast<uint32_t>(height_), static_cast<float>(now));
 
-        // Post-dispatch barrier
-        VkImageMemoryBarrier postComputeBarrier{};
-        postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        postComputeBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        postComputeBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        postComputeBarrier.image = hdrOutputImage_;
-        postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1};
+        // Critical: barrier after compute write before blit/transition
+        VkImageMemoryBarrier postDispatchBarrier{};
+        postDispatchBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postDispatchBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        postDispatchBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        postDispatchBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        postDispatchBarrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        postDispatchBarrier.image         = hdrOutputImage_;
+        postDispatchBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdPipelineBarrier(cmd,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0,nullptr, 0,nullptr, 1, &postComputeBarrier);
+                             0, 0, nullptr, 0, nullptr, 1, &postDispatchBarrier);
 
         endSubmitAndWait(cmd);
 
@@ -225,7 +213,6 @@ public:
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
-            LOG_WARNING_CAT("RAYCANVAS", "Window minimized");
             return;
         }
 
@@ -237,31 +224,23 @@ public:
         height_ = newHeight;
         minimized_ = false;
 
-        LOG_INFO_CAT("RAYCANVAS", "Resize → {}x{}", width_, height_);
-
         Swapchain::recreate(width_, height_);
-
         createPersistentHDR();
 
-        // Re-update descriptor set with new HDR view
         updateDescriptorSet();
     }
 
-    // Getters
     int    getWidth()  const noexcept { return width_; }
     int    getHeight() const noexcept { return height_; }
     bool   isMinimized() const noexcept { return minimized_; }
     bool   isDestroyed() const noexcept { return destroyed_; }
 
 private:
-    // ────────────────────────────────────────────────────────────────
-    // Create descriptor pool + one set (called once in constructor)
-    // ────────────────────────────────────────────────────────────────
     void createDescriptorPoolAndSet() noexcept {
         VkDescriptorPoolSize poolSizes[3] = {
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  1},   // binding 0
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},   // binding 1
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}    // binding 2
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1}
         };
 
         VkDescriptorPoolCreateInfo poolCI{};
@@ -272,7 +251,7 @@ private:
         poolCI.pPoolSizes    = poolSizes;
 
         vkh.checker(vkCreateDescriptorPool(rtx().device, &poolCI, nullptr, &descriptorPool_),
-                    "vkCreateDescriptorPool", "Failed");
+                    "vkCreateDescriptorPool", "RayCanvas");
 
         VkDescriptorSetAllocateInfo allocCI{};
         allocCI.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -281,104 +260,73 @@ private:
         allocCI.pSetLayouts        = &Pipeline::main_descriptor_layout;
 
         vkh.checker(vkAllocateDescriptorSets(rtx().device, &allocCI, &descriptorSet_),
-                    "vkAllocateDescriptorSets", "Failed");
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Descriptor pool + set created for canvas");
+                    "vkAllocateDescriptorSets", "RayCanvas");
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Ensure we always have a valid storage buffer for binding 2
-    // ────────────────────────────────────────────────────────────────
     void ensureValidWorldBuffer() noexcept {
-        if (rtx().living_world_buffer_handle != 0) {
-            return; // real world buffer already exists → use it
-        }
+        if (rtx().living_world_buffer_handle != 0) return;
 
         if (dummyWorldBufferHandle_ == 0) {
-            // Create tiny dummy buffer — matches your previous range comment
             dummyWorldBufferHandle_ = Memory::createBuffer(
                 64,
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                "DummyLivingWorld"
+                "DummyWorld"
             );
 
-            if (dummyWorldBufferHandle_ == 0) {
-                LOG_ERROR_CAT("RAYCANVAS", "Failed to create dummy world buffer — validation errors incoming");
-                return;
-            }
-
-            // Zero it out
             char zero[64] = {};
-            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(
-                dummyWorldBufferHandle_, zero, sizeof(zero));
-            if (stagingBuf != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
-                vkFreeMemory(rtx().device, stagingMem, nullptr);
+            auto [sb, sm] = Memory::uploadToBuffer(dummyWorldBufferHandle_, zero, sizeof(zero));
+            if (sb != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, sb, nullptr);
+                vkFreeMemory(rtx().device, sm, nullptr);
             }
-
-            LOG_INFO_CAT("RAYCANVAS", "Created dummy 64-byte world buffer to satisfy validation");
         }
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Update descriptor set — now always uses valid buffers
-    // ────────────────────────────────────────────────────────────────
     void updateDescriptorSet() noexcept {
-        ensureValidWorldBuffer();  // guarantees a valid buffer for binding 2
+        ensureValidWorldBuffer();
 
         VkWriteDescriptorSet writes[3]{};
 
-        // 0: HDR storage image
-        VkDescriptorImageInfo hdrImageInfo{};
-        hdrImageInfo.imageView   = hdrOutputView_;
-        hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        hdrImageInfo.sampler     = VK_NULL_HANDLE;
+        // 0: Storage image (HDR)
+        VkDescriptorImageInfo imgInfo{};
+        imgInfo.imageView   = hdrOutputView_;
+        imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         writes[0].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet           = descriptorSet_;
         writes[0].dstBinding       = 0;
-        writes[0].dstArrayElement  = 0;
         writes[0].descriptorCount  = 1;
         writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[0].pImageInfo       = &hdrImageInfo;
+        writes[0].pImageInfo       = &imgInfo;
 
-        // 1: Camera UBO
-        VkDescriptorBufferInfo camBufferInfo{};
-        camBufferInfo.buffer = Memory::getBuffer(cameraUBOHandle_);
-        camBufferInfo.offset = 0;
-        camBufferInfo.range  = sizeof(CameraSceneData);
+        // 1: Uniform buffer (camera)
+        VkDescriptorBufferInfo uboInfo{};
+        uboInfo.buffer = Memory::getBuffer(cameraUBOHandle_);
+        uboInfo.range  = sizeof(CameraSceneData);
 
         writes[1].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[1].dstSet           = descriptorSet_;
         writes[1].dstBinding       = 1;
-        writes[1].dstArrayElement  = 0;
         writes[1].descriptorCount  = 1;
         writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[1].pBufferInfo      = &camBufferInfo;
+        writes[1].pBufferInfo      = &uboInfo;
 
-        // 2: World storage buffer — always valid now
-        VkDescriptorBufferInfo worldBufferInfo{};
-        uint64_t worldHandle = (rtx().living_world_buffer_handle != 0)
-            ? rtx().living_world_buffer_handle
-            : dummyWorldBufferHandle_;
-
-        worldBufferInfo.buffer = Memory::getBuffer(worldHandle);
-        worldBufferInfo.offset = 0;
-        worldBufferInfo.range  = 64;  // keep consistent with dummy size
+        // 2: Storage buffer (world/dummy)
+        VkDescriptorBufferInfo bufInfo{};
+        uint64_t worldHandle = rtx().living_world_buffer_handle ? rtx().living_world_buffer_handle : dummyWorldBufferHandle_;
+        bufInfo.buffer = Memory::getBuffer(worldHandle);
+        bufInfo.range  = 64;
 
         writes[2].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[2].dstSet           = descriptorSet_;
         writes[2].dstBinding       = 2;
-        writes[2].dstArrayElement  = 0;
         writes[2].descriptorCount  = 1;
         writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].pBufferInfo      = &worldBufferInfo;
+        writes[2].pBufferInfo      = &bufInfo;
 
         vkUpdateDescriptorSets(rtx().device, 3, writes, 0, nullptr);
-
-        LOG_DEBUG_CAT("RAYCANVAS", "Descriptor set updated for frame (bindings 0=img, 1=cam, 2=world)");
     }
 
     void blitToSwapchain() noexcept {
@@ -391,10 +339,8 @@ private:
 
         VkImageBlit blit{};
         blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[0] = {0, 0, 0};
         blit.srcOffsets[1] = {width_, height_, 1};
         blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[0] = {0, 0, 0};
         blit.dstOffsets[1] = {width_, height_, 1};
 
         vkCmdBlitImage(cmd,
@@ -412,18 +358,13 @@ private:
     void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_ != VK_NULL_HANDLE) {
-            vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-            hdrOutputView_ = VK_NULL_HANDLE;
-        }
-        if (hdrOutputImage_ != VK_NULL_HANDLE) {
-            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-            hdrOutputImage_ = VK_NULL_HANDLE;
-        }
-        if (hdrOutputMemory_ != VK_NULL_HANDLE) {
-            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-            hdrOutputMemory_ = VK_NULL_HANDLE;
-        }
+        if (hdrOutputView_)   vkDestroyImageView  (rtx().device, hdrOutputView_,   nullptr);
+        if (hdrOutputImage_)  vkDestroyImage      (rtx().device, hdrOutputImage_,  nullptr);
+        if (hdrOutputMemory_) vkFreeMemory        (rtx().device, hdrOutputMemory_, nullptr);
+
+        hdrOutputView_ = VK_NULL_HANDLE;
+        hdrOutputImage_ = VK_NULL_HANDLE;
+        hdrOutputMemory_ = VK_NULL_HANDLE;
 
         VkImageCreateInfo ci{};
         ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -456,7 +397,6 @@ private:
         if (vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_) != VK_SUCCESS) {
             LOG_ERROR_CAT("RAYCANVAS", "vkAllocateMemory (HDR) failed");
             vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-            hdrOutputImage_ = VK_NULL_HANDLE;
             return;
         }
 
@@ -486,7 +426,6 @@ private:
         data.projInverse = glm::inverse(data.proj);
 
         data.cameraPos    = glm::vec4(CAM.position(), 1.0f);
-
         data.exposure     = 1.0;
         data.genesisTime  = genesisTime;
         data.randomSeed   = static_cast<uint32_t>(genesisTime * 1'000'000.0) ^ 0xCAFEBABEu;
@@ -511,25 +450,25 @@ private:
         b.image            = img;
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        VkPipelineStageFlags src = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-        VkPipelineStageFlags dst = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
             b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            dst = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            dstStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
             b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
             b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            src = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            dst = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            srcStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
             b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
             b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-            src = VK_PIPELINE_STAGE_TRANSFER_BIT;
-            dst = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+            srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         }
 
-        vkCmdPipelineBarrier(cmd, src, dst, 0, 0, nullptr, 0, nullptr, 1, &b);
+        vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b);
     }
 
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
@@ -595,7 +534,7 @@ private:
     bool                            firstFrame_                 = true;
     uint64_t                        defaultMaterialsHandle_     = 0;
     uint64_t                        cameraUBOHandle_            = 0;
-    uint64_t                        dummyWorldBufferHandle_     = 0;  // ← new: fallback buffer
+    uint64_t                        dummyWorldBufferHandle_     = 0;
     VkImage                         hdrOutputImage_             = VK_NULL_HANDLE;
     VkImageView                     hdrOutputView_              = VK_NULL_HANDLE;
     VkDeviceMemory                  hdrOutputMemory_            = VK_NULL_HANDLE;
