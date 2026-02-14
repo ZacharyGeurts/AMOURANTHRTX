@@ -39,8 +39,7 @@ struct CameraSceneData {
 // =============================================================================
 // RayCanvas — Persistent progressive compute canvas
 //   • Single compute shader renders to HDR storage image
-//   • Blits to swapchain when timing allows
-//   • Single-image swapchain + controlled present timing
+//   • Blits directly to the acquired swapchain image
 // =============================================================================
 class RayCanvas {
 public:
@@ -162,52 +161,122 @@ public:
             return;
         }
 
-        // Temporarily force every frame during debug (comment out when stable)
-        // if (!Swapchain::shouldPresentNow()) return;
-
         double now = tt.seconds();
 
         updateCameraUBO(now);
-
-        // Update descriptors BEFORE beginning command buffer
         updateDescriptorSet();
 
+        // ── ACQUIRE NEXT IMAGE ──────────────────────────────────────────────
+        uint32_t imageIndex;
+
+        VkFence acquireFence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fenceCI{};
+        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        vkCreateFence(rtx().device, &fenceCI, nullptr, &acquireFence);
+
+        VkResult acquireRes = ext().vkAcquireNextImageKHR(
+            rtx().device,
+            Swapchain::get(),
+            UINT64_MAX,
+            VK_NULL_HANDLE,
+            acquireFence,
+            &imageIndex
+        );
+
+        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR) {
+            minimized_ = true;
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — needs recreate");
+            vkDestroyFence(rtx().device, acquireFence, nullptr);
+            return;
+        }
+
+        if (acquireRes != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "vkAcquireNextImageKHR failed: {}", vkh.result(acquireRes));
+            vkDestroyFence(rtx().device, acquireFence, nullptr);
+            return;
+        }
+
+        // Wait for acquire fence before using the image
+        vkWaitForFences(rtx().device, 1, &acquireFence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(rtx().device, acquireFence, nullptr);
+
+        // ── Render to HDR ───────────────────────────────────────────────────
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
-        // Transition HDR image to GENERAL (shader write)
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED,
                               VK_IMAGE_LAYOUT_GENERAL);
 
-        // Bind and dispatch
         VkDescriptorSet set = descriptorSet_;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                 Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
 
-        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_), 
-                                 static_cast<uint32_t>(height_), static_cast<float>(now));
+        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_),
+                                  static_cast<uint32_t>(height_), static_cast<float>(now));
 
-        // Critical: barrier after compute write before blit/transition
-        VkImageMemoryBarrier postDispatchBarrier{};
-        postDispatchBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        postDispatchBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        postDispatchBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        postDispatchBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-        postDispatchBarrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        postDispatchBarrier.image         = hdrOutputImage_;
-        postDispatchBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImageMemoryBarrier postBarrier{};
+        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        postBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        postBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        postBarrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        postBarrier.image         = hdrOutputImage_;
+        postBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdPipelineBarrier(cmd,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &postDispatchBarrier);
+                             0, 0, nullptr, 0, nullptr, 1, &postBarrier);
 
         endSubmitAndWait(cmd);
 
-        blitToSwapchain();
+        // ── Blit HDR → acquired swapchain image ─────────────────────────────
+        VkCommandBuffer blitCmd = beginTransientCommandBuffer();
+        if (!blitCmd) return;
 
-        Swapchain::tryPresent(rtx().present_queue);
+        VkImage swapImage = Swapchain::images[imageIndex];
+
+        transitionImageLayout(blitCmd, swapImage,
+                              VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        VkImageBlit blit{};
+        blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {width_, height_, 1};
+        blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        blit.dstOffsets[0] = {0, 0, 0};
+        blit.dstOffsets[1] = {width_, height_, 1};
+
+        vkCmdBlitImage(blitCmd,
+                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImage,       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit, VK_FILTER_LINEAR);
+
+        transitionImageLayout(blitCmd, swapImage,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+        endSubmitAndWait(blitCmd);
+
+        // ── Present ─────────────────────────────────────────────────────────
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains    = &Swapchain::swapchain.value;
+        presentInfo.pImageIndices  = &imageIndex;
+
+        VkResult presentRes = ext().vkQueuePresentKHR(rtx().present_queue, &presentInfo);
+
+        if (presentRes == VK_SUCCESS) {
+            Swapchain::updateRefreshEstimate(now);
+        } else if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR) {
+            minimized_ = true;
+            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal");
+        } else {
+            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(presentRes));
+        }
     }
 
     void onResize(int newWidth, int newHeight) noexcept {
@@ -289,7 +358,6 @@ private:
 
         VkWriteDescriptorSet writes[3]{};
 
-        // 0: Storage image (HDR)
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView   = hdrOutputView_;
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -301,7 +369,6 @@ private:
         writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[0].pImageInfo       = &imgInfo;
 
-        // 1: Uniform buffer (camera)
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = Memory::getBuffer(cameraUBOHandle_);
         uboInfo.range  = sizeof(CameraSceneData);
@@ -313,7 +380,6 @@ private:
         writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         writes[1].pBufferInfo      = &uboInfo;
 
-        // 2: Storage buffer (world/dummy)
         VkDescriptorBufferInfo bufInfo{};
         uint64_t worldHandle = rtx().living_world_buffer_handle ? rtx().living_world_buffer_handle : dummyWorldBufferHandle_;
         bufInfo.buffer = Memory::getBuffer(worldHandle);
@@ -327,32 +393,6 @@ private:
         writes[2].pBufferInfo      = &bufInfo;
 
         vkUpdateDescriptorSets(rtx().device, 3, writes, 0, nullptr);
-    }
-
-    void blitToSwapchain() noexcept {
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (!cmd) return;
-
-        transitionImageLayout(cmd, rtx().images,
-                              VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        VkImageBlit blit{};
-        blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[1] = {width_, height_, 1};
-        blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[1] = {width_, height_, 1};
-
-        vkCmdBlitImage(cmd,
-                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       rtx().images,    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit, VK_FILTER_LINEAR);
-
-        transitionImageLayout(cmd, rtx().images,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-        endSubmitAndWait(cmd);
     }
 
     void createPersistentHDR() noexcept {
@@ -466,6 +506,11 @@ private:
             b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
             srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+            b.srcAccessMask = 0;
+            b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         }
 
         vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b);

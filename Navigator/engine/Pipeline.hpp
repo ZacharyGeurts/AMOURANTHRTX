@@ -185,9 +185,6 @@ inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height
     uint32_t dispatchY = (height + 15) / 16;
 
     vkCmdDispatch(cmd, dispatchX, dispatchY, 1);
-
-    LOG_DEBUG_CAT("PIPELINE", "Dispatched canvas compute — {}×{} grid for {}×{} pixels @ t={:.3f}",
-                  dispatchX, dispatchY, width, height, totalTime);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

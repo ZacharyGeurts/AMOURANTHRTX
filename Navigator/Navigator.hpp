@@ -222,17 +222,15 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         LOG_SUCCESS_CAT("VULKAN", "Transient command pool created");
     }
 
-    // Step 4: Create swapchain (single image)
+    // Step 4: Create swapchain
     Swapchain::create(g_window,
                       Options::Window::DEFAULT_WIDTH,
                       Options::Window::DEFAULT_HEIGHT);
 
-    rtx().images      = Swapchain::getImage();
-    rtx().views       = Swapchain::getView();
-    rtx().extent      = Swapchain::getExtent();
-    rtx().image_count = 1;
+    // No more rtx().images / rtx().views assignment needed
+    // Swapchain now manages images[] and views[] internally
 
-    if (rtx().images == VK_NULL_HANDLE || rtx().views == VK_NULL_HANDLE) {
+    if (!Swapchain::swapchain.valid()) {
         LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed");
         vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
         vkDestroyDevice(device, nullptr);
@@ -242,7 +240,8 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         return 1;
     }
 
-    LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", rtx().extent.width, rtx().extent.height);
+    LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", 
+                 Swapchain::getExtent().width, Swapchain::getExtent().height);
 
     // Step 5: Engine memory init (minimal now)
     EngineMemoryInit();
@@ -251,8 +250,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     // Must be called BEFORE RayCanvas constructor (provides main_descriptor_layout)
     Pipeline::initialize();               // creates descriptor layout
     Pipeline::create_pipeline_layout();   // creates pipeline layout with push constants
-    // create_canvas_pipeline() can be lazy, but calling it here is safer during bring-up
-    Pipeline::create_canvas_pipeline();
+    Pipeline::create_canvas_pipeline();   // creates the actual compute pipeline
 
     if (Pipeline::canvas_pipeline == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("PIPELINE", "Failed to create canvas compute pipeline");

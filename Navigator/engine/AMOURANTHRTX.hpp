@@ -194,8 +194,6 @@ struct RTX {
 
     SDL_Window* window = nullptr;
 
-    VkImage images = VK_NULL_HANDLE;
-    VkImageView views = VK_NULL_HANDLE;
     VkExtent2D extent{};
     uint32_t image_count = 0;
 
@@ -916,8 +914,8 @@ struct Swapchain {
     };
 
     inline static Handle swapchain;
-    inline static VkImage image = VK_NULL_HANDLE;
-    inline static VkImageView view = VK_NULL_HANDLE;
+    inline static std::vector<VkImage> images;
+    inline static std::vector<VkImageView> views;
     inline static VkExtent2D extent{};
     inline static VkFormat format{};
     inline static bool minimized = false;
@@ -939,17 +937,15 @@ struct Swapchain {
         vkQueueWaitIdle(rtx().present_queue);
 
         if (isRecreate) {
-            if (view != VK_NULL_HANDLE) {
-                vkDestroyImageView(dev, view, nullptr);
-                view = VK_NULL_HANDLE;
+            for (auto& v : views) {
+                vkDestroyImageView(dev, v, nullptr);
             }
+            views.clear();
+            images.clear();
             if (swapchain.valid()) {
                 ext().vkDestroySwapchainKHR(dev, swapchain.get(), nullptr);
                 swapchain.reset();
             }
-            image = VK_NULL_HANDLE;
-            rtx().images = VK_NULL_HANDLE;
-            rtx().views = VK_NULL_HANDLE;
             minimized = false;
         }
 
@@ -1036,12 +1032,22 @@ struct Swapchain {
         ci.imageExtent     = extent;
         ci.imageArrayLayers = 1;
         ci.imageUsage      = usage;
-        ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         ci.preTransform    = caps.currentTransform;
         ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         ci.presentMode     = chosenPM;
         ci.clipped         = VK_TRUE;
         ci.oldSwapchain    = swapchain;
+
+        if (rtx().graphics_family != rtx().present_family) {
+            static uint32_t families[2] = {rtx().graphics_family, rtx().present_family};
+            ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            ci.queueFamilyIndexCount = 2;
+            ci.pQueueFamilyIndices = families;
+        } else {
+            ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            ci.queueFamilyIndexCount = 0;
+            ci.pQueueFamilyIndices = nullptr;
+        }
 
         VkSwapchainKHR newSwap = VK_NULL_HANDLE;
         if (ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap) != VK_SUCCESS) {
@@ -1054,39 +1060,40 @@ struct Swapchain {
 
         uint32_t actualCount = 0;
         ext().vkGetSwapchainImagesKHR(dev, newSwap, &actualCount, nullptr);
-        std::vector<VkImage> images(actualCount);
+        images.resize(actualCount);
         ext().vkGetSwapchainImagesKHR(dev, newSwap, &actualCount, images.data());
 
-        image = images[0];
-        rtx().images = image;
+        rtx().image_count = actualCount;
 
-        VkImageViewCreateInfo viewCI{};
-        viewCI.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewCI.image            = image;
-        viewCI.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-        viewCI.format           = format;
-        viewCI.components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                   VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-        viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        views.resize(actualCount);
+        for (uint32_t i = 0; i < actualCount; ++i) {
+            VkImageViewCreateInfo viewCI{};
+            viewCI.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewCI.image            = images[i];
+            viewCI.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+            viewCI.format           = format;
+            viewCI.components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                       VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+            viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        if (vkCreateImageView(dev, &viewCI, nullptr, &view) != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "vkCreateImageView failed");
-            minimized = true;
-            return;
+            if (vkCreateImageView(dev, &viewCI, nullptr, &views[i]) != VK_SUCCESS) {
+                LOG_ERROR_CAT("SWAPCHAIN", "vkCreateImageView failed");
+                minimized = true;
+                return;
+            }
         }
-
-        rtx().views = view;
 
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
 
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — {}x{}, format {}, mode {}, storage={}",
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — {}x{}, format {}, mode {}, storage={}, images={}",
                         isRecreate ? "recreated" : "created",
                         extent.width, extent.height,
                         vkh.format(format),
                         chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" :
                         chosenPM == VK_PRESENT_MODE_MAILBOX_KHR   ? "MAILBOX" : "FIFO",
-                        supportsStorage ? "yes" : "no");
+                        supportsStorage ? "yes" : "no",
+                        actualCount);
     }
 
     static bool shouldPresentNow() noexcept {
@@ -1164,17 +1171,17 @@ struct Swapchain {
         vkDeviceWaitIdle(dev);
         vkQueueWaitIdle(rtx().present_queue);
 
-        if (view != VK_NULL_HANDLE) {
-            vkDestroyImageView(dev, view, nullptr);
-            view = VK_NULL_HANDLE;
+        for (auto& v : views) {
+            vkDestroyImageView(dev, v, nullptr);
         }
+        views.clear();
+        images.clear();
 
         if (swapchain.valid()) {
             ext().vkDestroySwapchainKHR(dev, swapchain.get(), nullptr);
             swapchain.reset();
         }
 
-        image = VK_NULL_HANDLE;
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
     }
@@ -1183,8 +1190,6 @@ struct Swapchain {
     static bool canDirectWrite() noexcept { return supportsStorage; }
     static VkExtent2D getExtent() noexcept { return extent; }
     static VkFormat getFormat() noexcept { return format; }
-    static VkImage getImage() noexcept { return image; }
-    static VkImageView getView() noexcept { return view; }
     static VkSwapchainKHR get() noexcept { return swapchain.value; }
 
     static double getSmoothedRefresh() noexcept { return smoothedRefresh_s; }
