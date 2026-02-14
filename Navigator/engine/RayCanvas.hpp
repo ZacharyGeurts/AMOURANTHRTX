@@ -183,11 +183,10 @@ public:
 
         updateCameraUBO(now);
 
+        updateDescriptorSet();
+
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
-
-        // Update descriptor set with current camera UBO + HDR view
-        updateDescriptorSet();
 
         // Transition HDR to GENERAL for shader write
         transitionImageLayout(cmd, hdrOutputImage_,
@@ -201,10 +200,20 @@ public:
 
         Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), static_cast<float>(now));
 
-        // Transition HDR to TRANSFER_SRC for blit
-        transitionImageLayout(cmd, hdrOutputImage_,
-                              VK_IMAGE_LAYOUT_GENERAL,
-                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        // Post-dispatch barrier
+        VkImageMemoryBarrier postComputeBarrier{};
+        postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        postComputeBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        postComputeBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        postComputeBarrier.image = hdrOutputImage_;
+        postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,1,0,1};
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0,nullptr, 0,nullptr, 1, &postComputeBarrier);
 
         endSubmitAndWait(cmd);
 

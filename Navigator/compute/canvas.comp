@@ -124,18 +124,7 @@ void main()
 
     // ── Simple test output with noise using frameSeed (now readable) ─────
     vec2 uv = vec2(pixel) / vec2(canvasSize);
-    vec3 col = 0.5 + 0.5 * cos(t + uv.xyx + vec3(0,2,4));
-
-    // Noise using frameSeed (now legal)
-    uint n = world.frameSeed ^ (pixel.x + pixel.y * 73856093u);
-    n ^= n >> 16;
-    n *= 0x85ebca6bu;
-    n ^= n >> 13;
-    n *= 0xc2b2ae35u;
-    n ^= n >> 16;
-    float noise = float(n) / 4294967295.0;
-
-    col += (noise - 0.5) * 0.1;
+    vec3 col = vec3(1.0, 0.0, 1.0); // Hardcoded bright pink for debug
 
     imageStore(hdrCanvas, pixel, vec4(col, 1.0));
 }
