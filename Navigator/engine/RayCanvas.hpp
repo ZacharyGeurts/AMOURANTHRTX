@@ -41,6 +41,15 @@ struct CameraSceneData {
 //   • Single compute shader renders to HDR storage image
 //   • Blits directly to the acquired swapchain image
 // =============================================================================
+// Note: BLAS/TLAS support was partially added but caused duplicate definitions
+//       and many follow-on errors. It has been removed for now.
+//       When ready to integrate RT:
+//         - Use existing GeometryType / UniversalPrimitive from AMOURANTHRTX.hpp
+//         - Add private members: blas_, tlas_, buffers, dirty flag
+//         - Implement buildAccelerationStructures() with proper vkCmdBuild...
+//         - Bind TLAS to descriptor set (new binding)
+//         - Trace rays in the compute shader
+// =============================================================================
 class RayCanvas {
 public:
     RayCanvas(int width, int height, SDL_Window* window)
@@ -167,12 +176,17 @@ public:
         updateDescriptorSet();
 
         // ── ACQUIRE NEXT IMAGE ──────────────────────────────────────────────
-        uint32_t imageIndex;
+        uint32_t imageIndex = 0;
 
         VkFence acquireFence = VK_NULL_HANDLE;
         VkFenceCreateInfo fenceCI{};
         fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        vkCreateFence(rtx().device, &fenceCI, nullptr, &acquireFence);
+
+        VkResult fenceRes = vkCreateFence(rtx().device, &fenceCI, nullptr, &acquireFence);
+        if (fenceRes != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Failed to create acquire fence: {}", vkh.result(fenceRes));
+            return;
+        }
 
         VkResult acquireRes = ext().vkAcquireNextImageKHR(
             rtx().device,
@@ -216,7 +230,7 @@ public:
                                   static_cast<uint32_t>(height_), static_cast<float>(now));
 
         VkImageMemoryBarrier postBarrier{};
-        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postBarrier.sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         postBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         postBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         postBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
@@ -243,11 +257,11 @@ public:
 
         VkImageBlit blit{};
         blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[0] = {0, 0, 0};
-        blit.srcOffsets[1] = {width_, height_, 1};
+        blit.srcOffsets[0]  = {0, 0, 0};
+        blit.srcOffsets[1]  = {width_, height_, 1};
         blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[0] = {0, 0, 0};
-        blit.dstOffsets[1] = {width_, height_, 1};
+        blit.dstOffsets[0]  = {0, 0, 0};
+        blit.dstOffsets[1]  = {width_, height_, 1};
 
         vkCmdBlitImage(blitCmd,
                        hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -262,7 +276,7 @@ public:
 
         // ── Present ─────────────────────────────────────────────────────────
         VkPresentInfoKHR presentInfo{};
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.sType          = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains    = &Swapchain::swapchain.value;
         presentInfo.pImageIndices  = &imageIndex;
@@ -457,7 +471,7 @@ private:
         LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR canvas created — {}x{}", width_, height_);
     }
 
-    void updateCameraUBO(double genesisTime) noexcept {
+    void updateCameraUBO(double now) noexcept {
         CameraSceneData data{};
 
         data.view        = CAM.view();
@@ -467,8 +481,8 @@ private:
 
         data.cameraPos    = glm::vec4(CAM.position(), 1.0f);
         data.exposure     = 1.0;
-        data.genesisTime  = genesisTime;
-        data.randomSeed   = static_cast<uint32_t>(genesisTime * 1'000'000.0) ^ 0xCAFEBABEu;
+        data.genesisTime  = now;
+        data.randomSeed   = static_cast<uint32_t>(now * 1'000'000.0) ^ 0xCAFEBABEu;
 
         auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
         if (stagingBuf != VK_NULL_HANDLE) {
