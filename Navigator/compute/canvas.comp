@@ -7,7 +7,7 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 // HDR output
 layout(set = 0, binding = 0, rgba32f) uniform image2D hdrCanvas;
 
-// Camera uniforms (with inverses)
+// Camera uniforms
 layout(set = 0, binding = 1) uniform CameraUBO {
     mat4  view;
     mat4  proj;
@@ -21,34 +21,33 @@ layout(set = 0, binding = 1) uniform CameraUBO {
     float fovY;
 } camera;
 
-// Living world state
+// Living world
 layout(set = 0, binding = 2, scalar) buffer restrict readonly LivingWorldBuffer {
-    vec4  sunDirAndIntensity;     // .xyz = direction, .w = intensity (0..1+)
+    vec4  sunDirAndIntensity;     // .xyz = direction, .w = intensity
     vec4  windDirAndSpeed;
     float temperature;
     float humidity;
     float airPressure;
     float cloudDensity;
+    float fogDensity;             // ← added to match host
     uint  frameSeed;
-    uint  padding;
+    uint  padding[2];
 } world;
 
-// Push constant: total engine time in seconds
+// Push constant: total time
 layout(push_constant) uniform PushConstants {
     float totalTime;
 } pc;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Constants
-// ─────────────────────────────────────────────────────────────────────────────
 const float PI          = 3.14159265359;
-const float DAY_LENGTH  = 1200.0;       // 20 minutes full cycle (1200 seconds)
-const vec3  NIGHT_SKY   = vec3(0.01, 0.02, 0.08);
-const vec3  SUN_COLOR   = vec3(1.0, 0.95, 0.85);
-const vec3  MOON_COLOR  = vec3(0.9, 0.95, 1.0);
-const float GROUND_Y    = -0.5;         // world-space ground plane height
+const float DAY_LENGTH  = 1200.0;
+const vec3  NIGHT_SKY   = vec3(0.005, 0.01, 0.04);
+const vec3  SUN_COLOR   = vec3(1.0, 0.96, 0.88);
+const float GROUND_Y    = -0.5;
+const float EXPOSURE    = 1.8;          // adjust if still too dark/bright
 
-// Simple hash for noise (used for clouds & stars)
+// Hash noise
 float hash(vec2 p) {
     p = fract(p * vec2(123.456, 789.101));
     p += dot(p, p + 45.67);
@@ -63,76 +62,60 @@ void main() {
 
     float t = pc.totalTime;
 
-    // ── Normalized day time ────────────────────────────────────────────────
-    float dayFrac   = mod(t, DAY_LENGTH) / DAY_LENGTH;          // 0..1 over one day
-    float sunAngle  = dayFrac * 2.0 * PI - PI * 0.5;            // sunrise at bottom
-    vec3 sunDir     = normalize(vec3(cos(sunAngle), sin(sunAngle), 0.4 * sin(sunAngle * 2.0)));
+    // Day/night
+    float dayFrac   = mod(t, DAY_LENGTH) / DAY_LENGTH;
+    float sunAngle  = dayFrac * 2.0 * PI - PI * 0.5;
+    vec3 sunDir     = normalize(vec3(cos(sunAngle), sin(sunAngle)*0.8 + 0.2, sin(sunAngle*1.5)*0.3));
 
-    // Night → day → night transition helpers
-    float sunHeight = sunDir.y;
-    float dayFactor = smoothstep(-0.1, 0.3, sunHeight);         // 0 at night, 1 at day
-    float nightFactor = smoothstep(0.0, -0.15, sunHeight);      // 0 at day, 1 at deep night
+    float sunHeight = max(0.0, sunDir.y);
+    float dayFactor = smoothstep(0.0, 0.4, sunHeight);
 
-    // ── Compute ray direction from camera ──────────────────────────────────
+    // Ray direction
     vec2 uv   = (vec2(pixel) + 0.5) / vec2(size);
     vec2 ndc  = uv * 2.0 - 1.0;
     vec4 targ = camera.projInverse * vec4(ndc, -1.0, 1.0);
     targ     /= targ.w;
     vec3 rayDir = normalize((camera.viewInverse * targ).xyz);
 
-    // ── Sky color base ─────────────────────────────────────────────────────
     float upDot = max(0.0, rayDir.y);
-    vec3 skyDay   = mix(vec3(0.6, 0.8, 1.0), vec3(0.1, 0.4, 0.9), upDot);
-    vec3 skyNight = mix(NIGHT_SKY, vec3(0.05, 0.1, 0.2), upDot * upDot);
-    vec3 sky      = mix(skyNight, skyDay, dayFactor);
 
-    // ── Sun / sunset glow ──────────────────────────────────────────────────
-    float sunCos   = dot(rayDir, sunDir);
-    float sunDisk  = smoothstep(0.9995, 1.0, sunCos) * 15.0 * dayFactor;
-    float sunHalo  = pow(max(0.0, sunCos), 32.0) * 4.0 * dayFactor;
+    // Sky
+    vec3 skyDay = mix(vec3(0.6, 0.85, 1.0), vec3(0.2, 0.5, 0.95), upDot);
+    vec3 sky    = mix(NIGHT_SKY, skyDay, dayFactor);
 
-    vec3 sunContrib = SUN_COLOR * (sunDisk + sunHalo) * world.sunDirAndIntensity.w;
+    // Sun
+    float sunCos  = dot(rayDir, sunDir);
+    float sunDisk = smoothstep(0.997, 1.0, sunCos) * 30.0 * dayFactor;
+    float sunHalo = pow(max(0.0, sunCos), 64.0) * 6.0 * dayFactor;
+    vec3 sunContrib = SUN_COLOR * (sunDisk + sunHalo) * world.sunDirAndIntensity.w * 2.0;
 
-    // Sunset / sunrise warm rim
-    float horizonGlow = smoothstep(0.0, 0.15, 1.0 - abs(rayDir.y)) * (1.0 - dayFactor);
-    vec3 sunset = vec3(1.0, 0.6, 0.3) * horizonGlow * 2.5;
+    // Horizon glow
+    float horizon = smoothstep(0.0, 0.2, 1.0 - abs(rayDir.y));
+    vec3 sunset = vec3(1.0, 0.5, 0.2) * horizon * 3.0 * (1.0 - dayFactor);
 
-    // ── Moon at night ──────────────────────────────────────────────────────
-    vec3 moonDir = -sunDir;  // opposite to sun
-    float moonCos = dot(rayDir, moonDir);
-    float moon = smoothstep(0.998, 1.0, moonCos) * 2.0 * nightFactor;
-    vec3 moonContrib = MOON_COLOR * moon * 0.6;
+    // Clouds
+    vec2 cloudUV = uv * 4.0 + vec2(t * 0.015, t * 0.01) + world.windDirAndSpeed.xy * t * 0.008;
+    float cloud  = 0.0;
+    cloud += smoothstep(0.4, 0.6, sin(cloudUV.x * 8.0 + hash(uv * 12.0) * 4.0));
+    cloud += smoothstep(0.38, 0.62, sin(cloudUV.y * 6.0 + hash(uv * 18.0) * 3.0)) * 0.7;
+    cloud = clamp(cloud * world.cloudDensity * 2.0, 0.0, 1.0);
+    vec3 clouds = vec3(1.0) * cloud * mix(0.8, 1.3, dayFactor);
 
-    // ── Simple animated clouds ─────────────────────────────────────────────
-    float cloud = 0.0;
-    vec2 cloudUV = uv * 5.0 + vec2(t * 0.02, t * 0.015) + world.windDirAndSpeed.xy * t * 0.005;
-    cloud += smoothstep(0.45, 0.55, sin(cloudUV.x * 6.0 + hash(uv * 10.0) * 3.0));
-    cloud += smoothstep(0.42, 0.58, sin(cloudUV.y * 5.0 + hash(uv * 15.0) * 2.5)) * 0.6;
-    cloud = clamp(cloud * world.cloudDensity * 1.8, 0.0, 1.0);
-    vec3 clouds = vec3(1.0) * cloud * mix(0.7, 1.2, dayFactor);
+    // Composition
+    vec3 col = sky + sunContrib + sunset + clouds;
 
-    // ── Ground plane intersection (simple fog + ground color) ──────────────
+    // Ground plane + fog
     float groundHit = (GROUND_Y - camera.position.y) / rayDir.y;
-    vec3 groundColor = vec3(0.18, 0.35, 0.12); // dark green grass
     if (groundHit > 0.0 && rayDir.y < 0.0) {
-        vec3 hitPos = camera.position + rayDir * groundHit;
-        float distFade = exp(-groundHit * 0.0008); // fog
-        groundColor *= mix(vec3(0.4), vec3(1.0), dayFactor); // brighter in day
-        sky = mix(sky, groundColor, distFade * (1.0 - upDot));
+        float dist = groundHit;
+        float fog = exp(-dist * world.fogDensity * 0.8);
+        vec3 ground = mix(vec3(0.08, 0.12, 0.06), vec3(0.25, 0.45, 0.15), dayFactor);
+        col = mix(col, ground, (1.0 - fog) * 0.7);
     }
 
-    // ── Final composition ──────────────────────────────────────────────────
-    vec3 col = sky + sunContrib + sunset + moonContrib + clouds;
-
-    // Night sky subtle stars
-    if (nightFactor > 0.6) {
-        vec2 starUV = rayDir.xz * 50.0;
-        float stars = step(0.98, hash(starUV + floor(starUV * 0.3))) * nightFactor * 0.4;
-        col += vec3(stars);
-    }
-
-    // Very subtle ambient from world temperature/humidity
-    col *= mix(1.0, 1.15, world.temperature * 0.01);
+    // Exposure + simple tonemap
+    col *= EXPOSURE;
+    col = col / (col + 1.0);
 
     imageStore(hdrCanvas, pixel, vec4(col, 1.0));
 }
