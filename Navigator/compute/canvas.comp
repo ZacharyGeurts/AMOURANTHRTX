@@ -45,7 +45,7 @@ const float DAY_LENGTH  = 1200.0;
 const vec3  NIGHT_SKY   = vec3(0.005, 0.01, 0.04);
 const vec3  SUN_COLOR   = vec3(1.0, 0.96, 0.88);
 const float GROUND_Y    = -0.5;
-const float EXPOSURE    = 1.8;          // adjust if still too dark/bright
+const float EXPOSURE    = 0.1;
 
 // Hash noise
 float hash(vec2 p) {
