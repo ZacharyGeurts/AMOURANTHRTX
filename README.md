@@ -95,7 +95,7 @@ Period.
 
 OptionsMenu.hpp might be exciting to some.  
 
-AMOURANTH RTX © 2025 by Zachary Geurts gzac5314@gmail.com  
+AMOURANTHRTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
 Commercial is subject to 3% license.  
 
