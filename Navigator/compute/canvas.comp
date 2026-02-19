@@ -1,5 +1,5 @@
 #version 460
-#extension GL_EXT_shader_explicit_arithmetic_types_float : enable
+#extension GL_EXT_scalar_block_layout : enable
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
@@ -27,7 +27,7 @@ layout(set = 0, binding = 2, std140) readonly buffer LivingWorldData {
     vec4 skyNight;
     vec4 groundColorDay;
     vec4 groundColorNight;
-    float dayNightFactor;        // 0.0 = full night, 1.0 = full day
+    float dayNightFactor;
     float cloudDensity;
     float fogDensity;
     float temperature;
@@ -35,13 +35,42 @@ layout(set = 0, binding = 2, std140) readonly buffer LivingWorldData {
     uint padding[3];
 } world;
 
+struct Material {
+    vec4 albedo;
+    vec4 emissive;
+    float metallic;
+    float roughness;
+    float ior;
+    uint type;          // 0: diffuse, 1: emissive, 2: metallic, 3: dielectric
+};
+
+layout(set = 0, binding = 3, std140) readonly buffer Materials {
+    Material mats[];
+} materials;
+
+struct UniversalPrimitive {
+    vec4 aabbMin;
+    vec4 aabbMax;
+    mat4 transform;
+    uint type;          // 0: plane, 1: sphere, 2: cylinder, 3: cone, etc.
+    uint materialIndex;
+    float destruction;
+};
+
+layout(set = 0, binding = 4, std140) readonly buffer Primitives {
+    UniversalPrimitive prims[];
+} primitives;
+
 layout(push_constant) uniform Push {
     float totalTime;
 } push;
 
-#define PI  3.1415926535897932384626433832795
-#define EPS 0.001
-#define INF 1e20
+#define PI         3.1415926535897932384626433832795
+#define TWO_PI     6.283185307179586
+#define EPS        0.001
+#define INF        1e20
+#define MAX_DEPTH  12
+#define MAX_PRIMS  1024
 
 // ───────────────────────────────────────────────
 // RNG
@@ -62,144 +91,244 @@ float rand(inout uvec2 state) {
     return float(state.x) / float(0xFFFFFFFFu);
 }
 
+// Random point inside unit sphere
+vec3 randomInUnitSphere(inout uvec2 state) {
+    vec3 p;
+    do {
+        p = vec3(rand(state), rand(state), rand(state)) * 2.0 - 1.0;
+    } while (dot(p, p) >= 1.0);
+    return p;
+}
+
+// Random direction in hemisphere
+vec3 randomHemisphere(vec3 normal, inout uvec2 state) {
+    vec3 randDir = randomInUnitSphere(state);
+    if (dot(randDir, normal) < 0.0) randDir = -randDir;
+    return normalize(randDir);
+}
+
 // ───────────────────────────────────────────────
-// Sky with sun + moon
+// Sky with moving sun + moon + clouds
 // ───────────────────────────────────────────────
 vec3 getSky(vec3 dir) {
-    vec3 sunDir = normalize(world.sunDirAndIntensity.xyz);
+    float dayProgress = mod(push.totalTime / 86400.0, 1.0);
+    float sunAngle = dayProgress * TWO_PI - PI * 0.5;
+
+    vec3 sunDir = normalize(vec3(
+        cos(sunAngle),
+        sin(sunAngle) * 0.8 + 0.2,
+        sin(sunAngle * 1.5) * 0.3
+    ));
+
     float sunCos = dot(dir, sunDir);
-    
-    // Moon opposite sun
     vec3 moonDir = -sunDir;
     float moonCos = dot(dir, moonDir);
 
-    // Day sky gradient
     vec3 daySky = mix(world.skyDayHorizon.rgb, world.skyDayTop.rgb, pow(max(dir.y, 0.0), 0.6));
-    
-    // Night sky (darker blue)
     vec3 nightSky = world.skyNight.rgb * 0.4;
-
     vec3 sky = mix(nightSky, daySky, world.dayNightFactor);
 
-    // Sun disc + glow
     float sunDisc  = smoothstep(0.9995, 1.0, sunCos) * world.sunDirAndIntensity.w * 30.0;
     float sunGlow  = pow(max(sunCos, 0.0), 6.0) * world.sunDirAndIntensity.w * 4.0;
     vec3 sunColor  = vec3(1.0, 0.96, 0.82) * (sunDisc + sunGlow);
 
-    // Moon disc + glow
     float moonDisc = smoothstep(0.998, 1.0, moonCos) * (1.0 - world.dayNightFactor) * 8.0;
     float moonGlow = pow(max(moonCos, 0.0), 12.0) * (1.0 - world.dayNightFactor) * 1.5;
     vec3 moonColor = vec3(0.9, 0.95, 1.0) * (moonDisc + moonGlow);
+
+    // Clouds
+    if (world.cloudDensity > 0.0 && dir.y > 0.0) {
+        vec3 p = dir * (100.0 / dir.y) + vec3(push.totalTime * 0.05, 0.0, 0.0);
+        float n = sin(p.x * 0.1) * sin(p.y * 0.1) * sin(p.z * 0.1) + 0.5;
+        float clouds = smoothstep(0.5, 0.6, n) * world.cloudDensity * 0.8;
+        sky = mix(sky, vec3(1.0), clouds);
+    }
 
     return sky + sunColor + moonColor;
 }
 
 // ───────────────────────────────────────────────
-// Green grass ground + rain wetness + fog
+// Ground: uniform green grass + rain + fog
 // ───────────────────────────────────────────────
 vec3 getGround(vec3 pos, vec3 viewDir) {
-    // Base saturated green grass (like the previous version you liked)
-    vec3 baseGrass = vec3(0.18, 0.55, 0.12);  // rich green
-    
-    // Add natural-looking variation using position-based noise
-    float variation = 
-        sin(pos.x * 0.8 + pos.z * 1.2) * 0.08 +
-        sin(pos.x * 2.3 + pos.z * 3.1) * 0.04 +
-        sin(pos.x * 5.7 + pos.z * 4.9) * 0.02;
-    
-    vec3 grass = baseGrass * (1.0 + variation);
+    vec3 grass = vec3(0.18, 0.55, 0.12);  // clean, rich green
 
-    // Blend with day/night ground colors from options
-    vec3 dayGround   = world.groundColorDay.rgb;
-    vec3 nightGround = world.groundColorNight.rgb;
-    vec3 ground = mix(nightGround, grass * 1.3, world.dayNightFactor);
+    vec3 dayG   = world.groundColorDay.rgb;
+    vec3 nightG = world.groundColorNight.rgb;
+    vec3 ground = mix(nightG, grass * 1.3, world.dayNightFactor);
 
-    // Rain wetness (darker + subtle blue tint when raining)
-    float rainAmount = smoothstep(0.3, 0.8, world.cloudDensity);
-    ground = mix(ground, ground * 0.65 + vec3(0.1, 0.15, 0.25) * 0.4, rainAmount * 0.7);
+    float rainAmt = smoothstep(0.3, 0.8, world.cloudDensity);
+    ground = mix(ground, ground * 0.65 + vec3(0.1,0.15,0.25)*0.4, rainAmt * 0.7);
 
-    // Fog blending toward sky
     float dist = length(pos.xz);
     float fog = exp(-dist * world.fogDensity * 0.008);
-    vec3 fogged = mix(getSky(viewDir), ground, fog);
-
-    return fogged;
+    return mix(getSky(viewDir), ground, fog);
 }
 
 // ───────────────────────────────────────────────
 // Screen-space rain streaks
 // ───────────────────────────────────────────────
 vec3 addRain(vec3 color, vec2 uv, float time) {
-    float rainSpeed    = 15.0;
-    float rainDensity  = 40.0;
-    float rainThickness = 0.003;
+    float speed = 15.0;
+    float dens  = 40.0;
+    float thick = 0.003;
 
-    vec2 rainUV = uv * vec2(1.0, 4.0);            // stretch vertically
-    rainUV.y += time * rainSpeed;                 // fall downward
-    rainUV.x += sin(rainUV.y * 12.0) * 0.1;       // gentle wave
+    vec2 ruv = uv * vec2(1.0, 4.0);
+    ruv.y += time * speed;
+    ruv.x += sin(ruv.y * 12.0) * 0.1;
 
-    float rain = fract(rainUV.y * rainDensity);
-    rain = smoothstep(0.0, rainThickness, rain) * 
-           (1.0 - smoothstep(rainThickness, rainThickness * 2.0, rain));
+    float rain = fract(ruv.y * dens);
+    rain = smoothstep(0.0, thick, rain) * (1.0 - smoothstep(thick, thick*2.0, rain));
 
-    // Rain only in upper ~70% of screen (avoid ground)
-    float rainMask = smoothstep(0.3, 0.7, 1.0 - uv.y);
+    float mask = smoothstep(0.3, 0.7, 1.0 - uv.y);
+    float amt  = smoothstep(0.4, 0.9, world.cloudDensity);
 
-    // Strength controlled by cloudDensity
-    float rainAmount = smoothstep(0.4, 0.9, world.cloudDensity);
-
-    return mix(color, color * 0.75 + vec3(0.6, 0.7, 0.9) * 0.8, rain * rainMask * rainAmount * 0.7);
+    return mix(color, color * 0.75 + vec3(0.6,0.7,0.9)*0.8, rain * mask * amt * 0.7);
 }
 
 // ───────────────────────────────────────────────
-// Simple ray trace — infinite flat ground
+// AABB intersection
 // ───────────────────────────────────────────────
-vec3 traceRay(vec3 ro, vec3 rd) {
-    if (rd.y > 0.0) {
-        return getSky(rd);
+bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tnear, out float tfar) {
+    vec3 inv = 1.0 / rd;
+    vec3 t0 = (bmin - ro) * inv;
+    vec3 t1 = (bmax - ro) * inv;
+    vec3 tmin = min(t0, t1);
+    vec3 tmax = max(t0, t1);
+    tnear = max(max(tmin.x, tmin.y), tmin.z);
+    tfar  = min(min(tmax.x, tmax.y), tmax.z);
+    return tnear <= tfar && tfar > 0.0;
+}
+
+// ───────────────────────────────────────────────
+// Sphere intersection
+// ───────────────────────────────────────────────
+bool intersectSphere(vec3 ro, vec3 rd, vec3 center, float r, out float t, out vec3 nrm) {
+    vec3 oc = ro - center;
+    float b = dot(oc, rd);
+    float c = dot(oc, oc) - r*r;
+    float h = b*b - c;
+    if (h < 0.0) return false;
+    h = sqrt(h);
+    t = -b - h;
+    if (t < EPS) t = -b + h;
+    if (t < EPS) return false;
+    vec3 p = ro + t * rd;
+    nrm = normalize(p - center);
+    return true;
+}
+
+// ───────────────────────────────────────────────
+// Scene intersection — ground + AABB objects
+// ───────────────────────────────────────────────
+bool intersectScene(vec3 ro, vec3 rd, out float t, out vec3 normal, out uint matId) {
+    t = INF;
+    matId = 0u;  // default ground material
+
+    // Ground plane (y=0)
+    if (rd.y < -EPS) {
+        float gt = -ro.y / rd.y;
+        if (gt > EPS && gt < t) {
+            t = gt;
+            normal = vec3(0,1,0);
+        }
     }
 
-    float t = -ro.y / rd.y;
-    if (t > 0.0) {
-        vec3 hitPos = ro + rd * t;
-        return getGround(hitPos, rd);
+    // Check procedural objects
+    for (uint i = 0u; i < primitives.prims.length(); ++i) {
+        UniversalPrimitive p = primitives.prims[i];
+        mat4 invT = inverse(p.transform);
+        vec3 lro = (invT * vec4(ro, 1.0)).xyz;
+        vec3 lrd = (invT * vec4(rd, 0.0)).xyz;
+
+        float tn, tf;
+        if (!intersectAABB(lro, lrd, p.aabbMin.xyz, p.aabbMax.xyz, tn, tf)) continue;
+        if (tn >= t) continue;
+
+        float hitT = INF;
+        vec3 hitN = vec3(0);
+
+        // Sphere
+        if (p.type == 1u) {
+            vec3 center = (p.aabbMin.xyz + p.aabbMax.xyz) * 0.5;
+            float radius = length(p.aabbMax.xyz - center) * 0.5;
+            vec3 lnrm;
+            if (intersectSphere(lro, lrd, center, radius, hitT, lnrm)) {
+                hitN = lnrm;
+            }
+        }
+        // Add cylinder (type 2), cone (type 3), etc. later
+
+        if (hitT < INF && hitT < t) {
+            t = hitT;
+            normal = normalize((transpose(invT) * vec4(hitN, 0.0)).xyz);
+            matId = p.materialIndex;
+        }
     }
 
-    return vec3(0.0);
+    return t < INF;
+}
+
+// ───────────────────────────────────────────────
+// Path tracing
+// ───────────────────────────────────────────────
+vec3 pathTrace(vec3 ro, vec3 rd, inout uvec2 rng) {
+    vec3 L = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+
+    for (uint bounce = 0u; bounce < camera.maxDepth; ++bounce) {
+        float t;
+        vec3 nrm;
+        uint matIdx;
+        if (!intersectScene(ro, rd, t, nrm, matIdx)) {
+            L += throughput * getSky(rd);
+            break;
+        }
+
+        vec3 hit = ro + t * rd;
+        Material m = materials.mats[matIdx];
+
+        L += throughput * m.emissive.rgb;
+
+        // Simple diffuse bounce for now (extend with metallic/dielectric later)
+        vec3 nextDir = normalize(nrm + randomInUnitSphere(rng));
+        throughput *= m.albedo.rgb;
+
+        ro = hit + nrm * EPS;
+        rd = nextDir;
+    }
+
+    return L;
 }
 
 void main() {
-    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size  = imageSize(hdrImage);
-    if (any(greaterThanEqual(coord, size))) return;
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 res = imageSize(hdrImage);
+    if (any(greaterThanEqual(pix, res))) return;
 
-    uvec2 rngState = uvec2(coord) ^ camera.randomSeed ^ world.frameSeed ^ uvec2(push.totalTime * 1000.0);
+    uvec2 rng = uvec2(pix) ^ camera.randomSeed ^ world.frameSeed ^ uvec2(push.totalTime * 1000.0);
 
-    vec2 jitter = vec2(rand(rngState), rand(rngState)) - 0.5;
-    vec2 uv = (vec2(coord) + jitter) / vec2(size);
+    vec2 jitter = vec2(rand(rng), rand(rng)) - 0.5;
+    vec2 uv = (vec2(pix) + jitter) / vec2(res);
     uv = uv * 2.0 - 1.0;
-    uv.y = -uv.y;  // Vulkan clip space
+    uv.y = -uv.y;
 
-    vec4 rayClip = vec4(uv, 1.0, 1.0);
-    vec4 rayEye  = camera.projInverse * rayClip;
-    rayEye       = vec4(rayEye.xy / rayEye.w, -1.0, 0.0);
-    vec3 rd = normalize((camera.viewInverse * rayEye).xyz);
+    vec4 clip = vec4(uv, 1.0, 1.0);
+    vec4 eye  = camera.projInverse * clip;
+    eye /= eye.w;
+    eye.z = -1.0;
+    vec3 rd = normalize((camera.viewInverse * eye).xyz);
     vec3 ro = camera.cameraPos.xyz;
 
-    vec3 rawColor = traceRay(ro, rd);
+    vec3 color = pathTrace(ro, rd, rng);
 
-    // Apply rain effect (screen-space)
-    vec3 rainedColor = addRain(rawColor, uv * 0.5 + 0.5, push.totalTime);
+    vec3 rained = addRain(color, uv * 0.5 + 0.5, push.totalTime);
 
-    // Accumulation for progressive rendering
-    vec4 prev = (camera.frameCount == 0u) ? vec4(0.0) : imageLoad(hdrImage, coord);
-    vec4 accum = (prev * float(camera.frameCount) + vec4(rainedColor, 1.0)) / float(camera.frameCount + 1u);
+    vec4 prev = (camera.frameCount == 0u) ? vec4(0.0) : imageLoad(hdrImage, pix);
+    vec4 accum = (prev * float(camera.frameCount) + vec4(rained, 1.0)) / float(camera.frameCount + 1u);
 
-    // Exposure
     accum.rgb *= float(camera.exposure);
-
-    // Reinhard tonemapping
     accum.rgb = accum.rgb / (accum.rgb + vec3(1.0));
 
-    imageStore(hdrImage, coord, accum);
+    imageStore(hdrImage, pix, accum);
 }

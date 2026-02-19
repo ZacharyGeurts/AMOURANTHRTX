@@ -1324,13 +1324,20 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
 
 // Default hybrid scene
 inline void createDefaultHybridScene() noexcept {
+    // Ground plane
     addAABBFromMesh(createPlane(5000.0f, 5000.0f), 0);
-    addAABBFromMesh(createBillboard(), 1);
 
+    // Amouranth billboard
+    addAABBFromMesh(createBillboard(), 1, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, -10.0f)));
+
+    // Central sphere
     addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(0,5,0), 2.0f, 2);
+
+    // Surrounding spheres
     addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(4,5,4), 1.5f, 3);
     addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(-4,5,-4), 1.5f, 4);
 
+    // Ring of D6 dice
     float ringRadius = 10.0f;
     for (int i = 0; i < 6; ++i) {
         float angle = static_cast<float>(i) * (3.14159f * 2.0f / 6.0f);
@@ -1339,9 +1346,11 @@ inline void createDefaultHybridScene() noexcept {
                           glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0,1,0)));
     }
 
+    // Large D100
     addProceduralAABB(GeometryType::ProceduralD100, glm::vec3(0,7,-14), 4.0f, 11,
                       glm::rotate(glm::mat4(1.0f), 0.25f, glm::vec3(0,1,0)));
 
+    // Cylinder and cone
     addProceduralAABB(GeometryType::ProceduralCylinder, glm::vec3(-15,10,-15), 2.0f, 6);
     addProceduralAABB(GeometryType::ProceduralCone, glm::vec3(0,15,0), 5.0f, 7);
 

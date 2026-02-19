@@ -19,15 +19,19 @@
 namespace Pipeline {
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bindings — matches your compute shader exactly
+// Bindings — matches the current shader (5 bindings)
 // 0: storage image (HDR write)
 // 1: uniform buffer (camera)
 // 2: storage buffer (living world)
+// 3: storage buffer (materials)
+// 4: storage buffer (primitives / scene objects)
 // ─────────────────────────────────────────────────────────────────────────────
-inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[3] = {
+inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[5] = {
     {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 0: HDR output
     {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 1: Camera UBO
     {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 2: LivingWorldBuffer
+    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 3: Materials buffer
+    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 4: Primitives buffer
 };
 
 inline constexpr VkShaderStageFlags COMPUTE_PUSH_MASK = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -48,7 +52,7 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
     std::array<std::string, 7> search_paths = {
         "compute/canvas.spv",
         "build/bin/Linux/compute/canvas.spv",
-		"build/bin/Windows/compute/canvas.spv"
+        "build/bin/Windows/compute/canvas.spv"
     };
 
     std::vector<uint32_t> code;
@@ -66,7 +70,6 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
         file.read(reinterpret_cast<char*>(code.data()), size_bytes);
 
         if (file.good() && !file.fail()) {
-            // Cast to int64_t to avoid fpos formatting crash
             int64_t printable_size = static_cast<int64_t>(size_bytes);
             LOG_SUCCESS_CAT("PIPELINE", "Loaded canvas.spv ({} bytes) from {}", 
                             printable_size, path);
@@ -105,13 +108,13 @@ inline void initialize() noexcept {
     layoutCI.pBindings    = kCanvasBindings;
 
     vkh.checker(vkCreateDescriptorSetLayout(rtx().device, &layoutCI, nullptr, &main_descriptor_layout),
-                "vkCreateDescriptorSetLayout", "canvas main layout");
+                "vkCreateDescriptorSetLayout", "canvas main layout (5 bindings)");
 
-    LOG_SUCCESS_CAT("PIPELINE", "Descriptor layout created");
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor layout created with 5 bindings");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Create pipeline layout with push constants (public — called from RayCanvas & main)
+// Create pipeline layout with push constants
 // ─────────────────────────────────────────────────────────────────────────────
 inline void create_pipeline_layout() noexcept {
     if (pipeline_layout != VK_NULL_HANDLE) return;
@@ -121,7 +124,7 @@ inline void create_pipeline_layout() noexcept {
     VkPushConstantRange push{};
     push.stageFlags = COMPUTE_PUSH_MASK;
     push.offset     = 0;
-    push.size       = sizeof(float);  // matches shader: float totalTime
+    push.size       = sizeof(float);  // totalTime
 
     VkPipelineLayoutCreateInfo plCI{};
     plCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -133,7 +136,7 @@ inline void create_pipeline_layout() noexcept {
     vkh.checker(vkCreatePipelineLayout(rtx().device, &plCI, nullptr, &pipeline_layout),
                 "vkCreatePipelineLayout", "canvas");
 
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout with push constants created");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created with push constants");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,7 +170,9 @@ inline void create_canvas_pipeline() noexcept {
     vkDestroyShaderModule(rtx().device, shader, nullptr);
 
     if (canvas_pipeline != VK_NULL_HANDLE) {
-        LOG_SUCCESS_CAT("PIPELINE", "Canvas compute pipeline created");
+        LOG_SUCCESS_CAT("PIPELINE", "Canvas compute pipeline created successfully");
+    } else {
+        LOG_FATAL_CAT("PIPELINE", "vkCreateComputePipelines failed — check validation layers");
     }
 }
 
