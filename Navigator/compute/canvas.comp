@@ -61,23 +61,12 @@ float rand(inout uvec2 state) {
 
 // Sky color
 vec3 getSky(vec3 dir) {
-    float sun = max(0.0, dot(dir, world.sunDirAndIntensity.xyz));
-    sun = pow(sun, 32.0) * world.sunDirAndIntensity.w;
-
-    vec3 daySky = mix(world.skyDayHorizon.xyz, world.skyDayTop.xyz, dir.y * 0.5 + 0.5);
-    vec3 nightSky = world.skyNight.xyz;
-    vec3 sky = mix(nightSky, daySky, world.dayNightFactor);
-
-    return sky + vec3(1.0, 0.9, 0.8) * sun;
+    return vec3(0.0, 0.0, 1.0);  // Blue sky
 }
 
 // Ground color
 vec3 getGround(vec3 pos, vec3 dir) {
-    vec3 dayGround = world.groundColorDay.xyz;
-    vec3 nightGround = world.groundColorNight.xyz;
-    vec3 ground = mix(nightGround, dayGround, world.dayNightFactor);
-
-    return ground;
+    return vec3(0.0, 1.0, 0.0);  // Green ground
 }
 
 vec3 traceRay(vec3 ro, vec3 rd) {
