@@ -1,9 +1,10 @@
 #version 460
-#extension GL_EXT_shader_explicit_arithmetic_types_float : enable  // If needed for precision
+#extension GL_EXT_shader_explicit_arithmetic_types_float : enable
 
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;  // Matches your dispatch (width+15)/16, etc.
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;  // Storage image for read/write
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
+
 layout(set = 0, binding = 1) uniform CameraUBO {
     mat4 viewInverse;
     mat4 projInverse;
@@ -20,13 +21,13 @@ layout(set = 0, binding = 1) uniform CameraUBO {
 } camera;
 
 layout(set = 0, binding = 2, std140) readonly buffer LivingWorldData {
-    vec4 sunDirAndIntensity;
+    vec4 sunDirAndIntensity;     // .xyz = sun direction, .w = sun intensity
     vec4 skyDayTop;
     vec4 skyDayHorizon;
     vec4 skyNight;
     vec4 groundColorDay;
     vec4 groundColorNight;
-    float dayNightFactor;
+    float dayNightFactor;        // 0.0 = full night, 1.0 = full day
     float cloudDensity;
     float fogDensity;
     float temperature;
@@ -38,55 +39,139 @@ layout(push_constant) uniform Push {
     float totalTime;
 } push;
 
-#define PI 3.1415926535897932384626433832795
+#define PI  3.1415926535897932384626433832795
 #define EPS 0.001
-#define INF 1e10
+#define INF 1e20
 
-// RNG - PCG hash
+// ───────────────────────────────────────────────
+// RNG
+// ───────────────────────────────────────────────
 uvec2 pcg2d(uvec2 v) {
     v = v * 1664525u + 1013904223u;
     v.x += v.y * 1664525u;
     v.y += v.x * 1664525u;
-    v = v ^ (v >> 16u);
+    v = v ^ (v>>16u);
     v.x += v.y * 1664525u;
     v.y += v.x * 1664525u;
-    v = v ^ (v >> 16u);
+    v = v ^ (v>>16u);
     return v;
 }
 
 float rand(inout uvec2 state) {
     state = pcg2d(state);
-    return float(state.x) / float(0xffffffffu);
+    return float(state.x) / float(0xFFFFFFFFu);
 }
 
-// Sky color
+// ───────────────────────────────────────────────
+// Sky with sun + moon
+// ───────────────────────────────────────────────
 vec3 getSky(vec3 dir) {
-    return vec3(0.0, 0.0, 1.0);  // Blue sky
+    vec3 sunDir = normalize(world.sunDirAndIntensity.xyz);
+    float sunCos = dot(dir, sunDir);
+    
+    // Moon opposite sun
+    vec3 moonDir = -sunDir;
+    float moonCos = dot(dir, moonDir);
+
+    // Day sky gradient
+    vec3 daySky = mix(world.skyDayHorizon.rgb, world.skyDayTop.rgb, pow(max(dir.y, 0.0), 0.6));
+    
+    // Night sky (darker blue)
+    vec3 nightSky = world.skyNight.rgb * 0.4;
+
+    vec3 sky = mix(nightSky, daySky, world.dayNightFactor);
+
+    // Sun disc + glow
+    float sunDisc  = smoothstep(0.9995, 1.0, sunCos) * world.sunDirAndIntensity.w * 30.0;
+    float sunGlow  = pow(max(sunCos, 0.0), 6.0) * world.sunDirAndIntensity.w * 4.0;
+    vec3 sunColor  = vec3(1.0, 0.96, 0.82) * (sunDisc + sunGlow);
+
+    // Moon disc + glow
+    float moonDisc = smoothstep(0.998, 1.0, moonCos) * (1.0 - world.dayNightFactor) * 8.0;
+    float moonGlow = pow(max(moonCos, 0.0), 12.0) * (1.0 - world.dayNightFactor) * 1.5;
+    vec3 moonColor = vec3(0.9, 0.95, 1.0) * (moonDisc + moonGlow);
+
+    return sky + sunColor + moonColor;
 }
 
-// Ground color
-vec3 getGround(vec3 pos, vec3 dir) {
-    return vec3(0.0, 1.0, 0.0);  // Green ground
+// ───────────────────────────────────────────────
+// Green grass ground + rain wetness + fog
+// ───────────────────────────────────────────────
+vec3 getGround(vec3 pos, vec3 viewDir) {
+    // Base saturated green grass (like the previous version you liked)
+    vec3 baseGrass = vec3(0.18, 0.55, 0.12);  // rich green
+    
+    // Add natural-looking variation using position-based noise
+    float variation = 
+        sin(pos.x * 0.8 + pos.z * 1.2) * 0.08 +
+        sin(pos.x * 2.3 + pos.z * 3.1) * 0.04 +
+        sin(pos.x * 5.7 + pos.z * 4.9) * 0.02;
+    
+    vec3 grass = baseGrass * (1.0 + variation);
+
+    // Blend with day/night ground colors from options
+    vec3 dayGround   = world.groundColorDay.rgb;
+    vec3 nightGround = world.groundColorNight.rgb;
+    vec3 ground = mix(nightGround, grass * 1.3, world.dayNightFactor);
+
+    // Rain wetness (darker + subtle blue tint when raining)
+    float rainAmount = smoothstep(0.3, 0.8, world.cloudDensity);
+    ground = mix(ground, ground * 0.65 + vec3(0.1, 0.15, 0.25) * 0.4, rainAmount * 0.7);
+
+    // Fog blending toward sky
+    float dist = length(pos.xz);
+    float fog = exp(-dist * world.fogDensity * 0.008);
+    vec3 fogged = mix(getSky(viewDir), ground, fog);
+
+    return fogged;
 }
 
+// ───────────────────────────────────────────────
+// Screen-space rain streaks
+// ───────────────────────────────────────────────
+vec3 addRain(vec3 color, vec2 uv, float time) {
+    float rainSpeed    = 15.0;
+    float rainDensity  = 40.0;
+    float rainThickness = 0.003;
+
+    vec2 rainUV = uv * vec2(1.0, 4.0);            // stretch vertically
+    rainUV.y += time * rainSpeed;                 // fall downward
+    rainUV.x += sin(rainUV.y * 12.0) * 0.1;       // gentle wave
+
+    float rain = fract(rainUV.y * rainDensity);
+    rain = smoothstep(0.0, rainThickness, rain) * 
+           (1.0 - smoothstep(rainThickness, rainThickness * 2.0, rain));
+
+    // Rain only in upper ~70% of screen (avoid ground)
+    float rainMask = smoothstep(0.3, 0.7, 1.0 - uv.y);
+
+    // Strength controlled by cloudDensity
+    float rainAmount = smoothstep(0.4, 0.9, world.cloudDensity);
+
+    return mix(color, color * 0.75 + vec3(0.6, 0.7, 0.9) * 0.8, rain * rainMask * rainAmount * 0.7);
+}
+
+// ───────────────────────────────────────────────
+// Simple ray trace — infinite flat ground
+// ───────────────────────────────────────────────
 vec3 traceRay(vec3 ro, vec3 rd) {
     if (rd.y > 0.0) {
         return getSky(rd);
-    } else {
-        float t = -ro.y / rd.y;
-        if (t > 0.0) {
-            vec3 hitP = ro + rd * t;
-            return getGround(hitP, rd);
-        } else {
-            return vec3(0.0);
-        }
     }
+
+    float t = -ro.y / rd.y;
+    if (t > 0.0) {
+        vec3 hitPos = ro + rd * t;
+        return getGround(hitPos, rd);
+    }
+
+    return vec3(0.0);
 }
 
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(hdrImage);
-    if (coord.x >= size.x || coord.y >= size.y) return;
+    ivec2 size  = imageSize(hdrImage);
+    if (any(greaterThanEqual(coord, size))) return;
 
     uvec2 rngState = uvec2(coord) ^ camera.randomSeed ^ world.frameSeed ^ uvec2(push.totalTime * 1000.0);
 
@@ -96,19 +181,24 @@ void main() {
     uv.y = -uv.y;  // Vulkan clip space
 
     vec4 rayClip = vec4(uv, 1.0, 1.0);
-    vec4 rayEye = camera.projInverse * rayClip;
-    rayEye = vec4(rayEye.xy, -1.0, 0.0);
+    vec4 rayEye  = camera.projInverse * rayClip;
+    rayEye       = vec4(rayEye.xy / rayEye.w, -1.0, 0.0);
     vec3 rd = normalize((camera.viewInverse * rayEye).xyz);
     vec3 ro = camera.cameraPos.xyz;
 
-    vec3 currentSample = traceRay(ro, rd);
+    vec3 rawColor = traceRay(ro, rd);
 
-    vec4 prev = (camera.frameCount == 0) ? vec4(0.0) : imageLoad(hdrImage, coord);
-    vec4 accum = (prev * float(camera.frameCount) + vec4(currentSample, 1.0)) / float(camera.frameCount + 1);
+    // Apply rain effect (screen-space)
+    vec3 rainedColor = addRain(rawColor, uv * 0.5 + 0.5, push.totalTime);
 
+    // Accumulation for progressive rendering
+    vec4 prev = (camera.frameCount == 0u) ? vec4(0.0) : imageLoad(hdrImage, coord);
+    vec4 accum = (prev * float(camera.frameCount) + vec4(rainedColor, 1.0)) / float(camera.frameCount + 1u);
+
+    // Exposure
     accum.rgb *= float(camera.exposure);
 
-    // Simple tonemap
+    // Reinhard tonemapping
     accum.rgb = accum.rgb / (accum.rgb + vec3(1.0));
 
     imageStore(hdrImage, coord, accum);
