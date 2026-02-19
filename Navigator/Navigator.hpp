@@ -1,5 +1,14 @@
 #pragma once
 
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
+// AMOURANTH FOREVER 💖
+//
+// Main entry point — called from developer's empty main.cpp
+// Developers link against this header and call navigator_main(argc, argv)
+// =============================================================================
+
 #include "engine/camera.hpp"
 #include "engine/SDL3.hpp"
 #include "engine/ELLIE.hpp"
@@ -227,9 +236,6 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                       Options::Window::DEFAULT_WIDTH,
                       Options::Window::DEFAULT_HEIGHT);
 
-    // No more rtx().images / rtx().views assignment needed
-    // Swapchain now manages images[] and views[] internally
-
     if (!Swapchain::swapchain.valid()) {
         LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed");
         vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
@@ -247,7 +253,6 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     EngineMemoryInit();
 
     // Step 6: Pipeline setup — single compute shader only
-    // Must be called BEFORE RayCanvas constructor (provides main_descriptor_layout)
     Pipeline::initialize();               // creates descriptor layout
     Pipeline::create_pipeline_layout();   // creates pipeline layout with push constants
     Pipeline::create_canvas_pipeline();   // creates the actual compute pipeline
@@ -264,7 +269,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
 
-    // Step 7: Create RayCanvas (now safe — layout exists)
+    // Step 7: Create RayCanvas
     raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,

@@ -38,7 +38,7 @@ struct CameraSceneData {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Living world state — dynamic environment parameters
+// Living world state — dynamic environment parameters (matches shader)
 // ─────────────────────────────────────────────────────────────────────────────
 struct LivingWorldData {
     glm::vec4 sunDirAndIntensity;      // .xyz = normalized direction, .w = intensity (0..5+)
@@ -92,14 +92,14 @@ public:
             std::abort();
         }
 
-        // Living world buffer (small, host-visible for frequent updates)
+        // Living world buffer — small, host-visible for frequent updates
         livingWorldHandle_ = Memory::createBuffer(
             sizeof(LivingWorldData),
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             "LivingWorld",
-            Memory::MemoryHint::HostVisible
+            Memory::MemoryHint::HostVisible  // allows direct memcpy when mapped
         );
 
         if (livingWorldHandle_ == 0) {
@@ -107,7 +107,7 @@ public:
             std::abort();
         }
 
-        // Default materials buffer (optional)
+        // Default materials buffer (optional, expand later)
         std::array<Material, 1> defaultMats{};
         defaultMaterialsHandle_ = Memory::createBuffer(
             sizeof(defaultMats),
@@ -139,10 +139,15 @@ public:
         createPersistentHDR();
         createDescriptorPoolAndSet();
 
-        // Pipeline setup
+        // Pipeline setup — single compute shader only
         Pipeline::initialize();
         Pipeline::create_pipeline_layout();
         Pipeline::create_canvas_pipeline();
+
+        if (Pipeline::canvas_pipeline == VK_NULL_HANDLE) {
+            LOG_FATAL_CAT("RAYCANVAS", "Failed to create canvas compute pipeline");
+            std::abort();
+        }
 
         LOG_SUCCESS_CAT("RAYCANVAS", "Single-shader compute canvas initialized");
     }
@@ -192,12 +197,13 @@ public:
             tt.seal();
             firstFrame_ = false;
             LOG_AMOURANTH("Genesis sealed — eternal single-shader canvas begins 💖");
+            return;
         }
 
         double now = tt.seconds();
 
         updateCameraUBO(now);
-        updateLivingWorldBuffer(now);   // day/night + sun movement
+        updateLivingWorldBuffer(now);   // day/night + sun + living world
         updateDescriptorSet();
 
         // ── ACQUIRE NEXT IMAGE ──────────────────────────────────────────────
@@ -269,7 +275,7 @@ public:
 
         endSubmitAndWait(cmd);
 
-        // ── Blit HDR → swapchain ────────────────────────────────────────────
+        // ── Blit HDR → acquired swapchain image ─────────────────────────────
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
 
@@ -333,6 +339,7 @@ public:
 
         Swapchain::recreate(width_, height_);
         createPersistentHDR();
+
         updateDescriptorSet();
     }
 
@@ -415,41 +422,42 @@ private:
     void updateLivingWorldBuffer(double now) noexcept {
         LivingWorldData data{};
 
-        // Day/night cycle (20-minute full cycle)
-        constexpr float DAY_LENGTH = 1200.0f; // seconds
-        float dayFrac = fmodf(static_cast<float>(now), DAY_LENGTH) / DAY_LENGTH;
-        float sunAngle = dayFrac * 2.0f * glm::pi<float>() - glm::pi<float>() * 0.5f;
+        // Day/night cycle (20-minute full cycle by default, tunable in Options)
+        float dayLength = Options::Sky::DAY_LENGTH_SECONDS;
+        float dayFrac   = fmodf(static_cast<float>(now), dayLength) / dayLength;
+        float sunAngle  = dayFrac * 2.0f * glm::pi<float>() - glm::pi<float>() * 0.5f;
 
-        // Sun path: rises in east, high at noon, sets in west
+        // Sun path: rises east, high noon, sets west
         glm::vec3 sunDir = glm::normalize(glm::vec3(
-            cosf(sunAngle),                     // x (east-west)
-            sinf(sunAngle) * 0.8f + 0.2f,       // y (height) — never fully below horizon
-            sinf(sunAngle * 2.0f) * 0.3f        // z (slight north-south tilt)
+            cosf(sunAngle),
+            sinf(sunAngle) * 0.8f + 0.2f,       // never fully below horizon
+            sinf(sunAngle * 1.5f) * 0.3f        // slight tilt
         ));
 
         float sunHeight = sunDir.y;
         float dayFactor = glm::smoothstep(-0.1f, 0.3f, sunHeight);
-        float intensity = glm::max(0.0f, sunHeight) * 4.0f + 0.1f; // bright at noon
+        float intensity = glm::max(0.0f, sunHeight) * 4.0f + 0.1f;
 
-        // Colors
+        // Fill world data from Options + dynamic values
         data.sunDirAndIntensity      = glm::vec4(sunDir, intensity);
-        data.skyDayTop               = glm::vec4(0.1f, 0.4f, 0.9f, 1.0f);
-        data.skyDayHorizon           = glm::vec4(0.6f, 0.8f, 1.0f, 1.0f);
-        data.skyNight                = glm::vec4(0.01f, 0.02f, 0.08f, 1.0f);
-        data.groundColorDay          = glm::vec4(0.18f, 0.35f, 0.12f, 1.0f); // grass
-        data.groundColorNight        = glm::vec4(0.08f, 0.12f, 0.18f, 1.0f); // dark
+        data.skyDayTop               = Options::Sky::SKY_ZENITH_DAY;
+        data.skyDayHorizon           = Options::Sky::SKY_HORIZON_DAY;
+        data.skyNight                = Options::Sky::SKY_ZENITH_NIGHT;
+        data.groundColorDay          = Options::Sky::GROUND_COLOR_DAY;
+        data.groundColorNight        = Options::Sky::GROUND_COLOR_NIGHT;
         data.dayNightFactor          = dayFactor;
-        data.cloudDensity            = 0.4f + 0.3f * sinf(static_cast<float>(now) * 0.01f);
-        data.fogDensity              = 0.0008f; // affects ground fade distance
+        data.cloudDensity            = Options::Sky::CLOUD_DENSITY;
+        data.fogDensity              = Options::Sky::FOG_DENSITY;
         data.temperature             = 20.0f + 10.0f * sinf(dayFrac * 2.0f * glm::pi<float>());
+        data.frameSeed               = static_cast<uint32_t>(now * 1000.0f);
 
         // Upload to buffer
         auto* info = Memory::get(livingWorldHandle_);
         if (info && info->mapped) {
-            // Fast path: persistently mapped host-visible buffer
+            // Fast path: persistently mapped
             std::memcpy(info->mapped, &data, sizeof(data));
         } else {
-            // Slow path: staging copy (device-local buffer)
+            // Slow path: staging copy
             auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(
                 livingWorldHandle_, &data, sizeof(data));
             if (stagingBuf != VK_NULL_HANDLE) {
@@ -530,7 +538,7 @@ private:
         data.projInverse = glm::inverse(data.proj);
 
         data.cameraPos    = glm::vec4(CAM.position(), 1.0f);
-        data.exposure     = 1.0;
+        data.exposure     = Options::Rendering::EXPOSURE;  // ← from Options
         data.genesisTime  = now;
         data.randomSeed   = static_cast<uint32_t>(now * 1'000'000.0) ^ 0xCAFEBABEu;
 

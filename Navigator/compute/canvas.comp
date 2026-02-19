@@ -29,7 +29,7 @@ layout(set = 0, binding = 2, scalar) buffer restrict readonly LivingWorldBuffer 
     float humidity;
     float airPressure;
     float cloudDensity;
-    float fogDensity;             // ← added to match host
+    float fogDensity;
     uint  frameSeed;
     uint  padding[2];
 } world;
@@ -45,13 +45,30 @@ const float DAY_LENGTH  = 1200.0;
 const vec3  NIGHT_SKY   = vec3(0.005, 0.01, 0.04);
 const vec3  SUN_COLOR   = vec3(1.0, 0.96, 0.88);
 const float GROUND_Y    = -0.5;
-const float EXPOSURE    = 0.1;
+const float EXPOSURE    = 1.0;
 
-// Hash noise
-float hash(vec2 p) {
-    p = fract(p * vec2(123.456, 789.101));
-    p += dot(p, p + 45.67);
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+// Better hash (2D → 1D)
+float hash12(vec2 p) {
+    vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+// Fractional Brownian Motion (multi-octave noise) — no more ugly tiling
+float fbm(vec2 uv, float time) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    vec2 shift = vec2(100.0);  // offset to avoid repetition
+
+    for (int i = 0; i < 5; ++i) {  // 5 octaves
+        float n = hash12(uv * frequency + shift + time * 0.1);
+        value += amplitude * n;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+        shift = shift * 2.0 + vec2(17.7, 31.3);  // pseudo-random shift
+    }
+    return value;
 }
 
 void main() {
@@ -62,7 +79,7 @@ void main() {
 
     float t = pc.totalTime;
 
-    // Day/night
+    // Day/night cycle
     float dayFrac   = mod(t, DAY_LENGTH) / DAY_LENGTH;
     float sunAngle  = dayFrac * 2.0 * PI - PI * 0.5;
     vec3 sunDir     = normalize(vec3(cos(sunAngle), sin(sunAngle)*0.8 + 0.2, sin(sunAngle*1.5)*0.3));
@@ -79,27 +96,32 @@ void main() {
 
     float upDot = max(0.0, rayDir.y);
 
-    // Sky
+    // Sky gradient (day)
     vec3 skyDay = mix(vec3(0.6, 0.85, 1.0), vec3(0.2, 0.5, 0.95), upDot);
     vec3 sky    = mix(NIGHT_SKY, skyDay, dayFactor);
 
-    // Sun
+    // Sun disk + halo (brighter, more visible)
     float sunCos  = dot(rayDir, sunDir);
-    float sunDisk = smoothstep(0.997, 1.0, sunCos) * 30.0 * dayFactor;
-    float sunHalo = pow(max(0.0, sunCos), 64.0) * 6.0 * dayFactor;
-    vec3 sunContrib = SUN_COLOR * (sunDisk + sunHalo) * world.sunDirAndIntensity.w * 2.0;
+    float sunDisk = smoothstep(0.997, 1.0, sunCos) * 40.0 * dayFactor;
+    float sunHalo = pow(max(0.0, sunCos), 32.0) * 8.0 * dayFactor;
+    vec3 sunContrib = SUN_COLOR * (sunDisk + sunHalo) * world.sunDirAndIntensity.w * 2.5;
 
-    // Horizon glow
-    float horizon = smoothstep(0.0, 0.2, 1.0 - abs(rayDir.y));
-    vec3 sunset = vec3(1.0, 0.5, 0.2) * horizon * 3.0 * (1.0 - dayFactor);
+    // Horizon glow (sunset/sunrise)
+    float horizon = smoothstep(0.0, 0.18, 1.0 - abs(rayDir.y));
+    vec3 sunset = vec3(1.0, 0.55, 0.25) * horizon * 4.0 * (1.0 - dayFactor);
 
-    // Clouds
-    vec2 cloudUV = uv * 4.0 + vec2(t * 0.015, t * 0.01) + world.windDirAndSpeed.xy * t * 0.008;
-    float cloud  = 0.0;
-    cloud += smoothstep(0.4, 0.6, sin(cloudUV.x * 8.0 + hash(uv * 12.0) * 4.0));
-    cloud += smoothstep(0.38, 0.62, sin(cloudUV.y * 6.0 + hash(uv * 18.0) * 3.0)) * 0.7;
-    cloud = clamp(cloud * world.cloudDensity * 2.0, 0.0, 1.0);
-    vec3 clouds = vec3(1.0) * cloud * mix(0.8, 1.3, dayFactor);
+    // Improved clouds — layered FBM + wind + time evolution
+    vec2 windOffset = world.windDirAndSpeed.xy * t * 0.02;
+    vec2 cloudUV = (uv * 5.0 + windOffset) + hash12(uv) * 10.0;  // per-pixel variation
+
+    float cloud = 0.0;
+    cloud += fbm(cloudUV + vec2(t * 0.015), t * 0.03) * 0.6;
+    cloud += fbm(cloudUV * 2.0 + vec2(t * 0.025), t * 0.05) * 0.3;
+    cloud += fbm(cloudUV * 4.0 + vec2(t * 0.04), t * 0.08) * 0.1;
+    cloud = smoothstep(0.35, 0.65, cloud);
+    cloud = clamp(cloud * world.cloudDensity * 2.5, 0.0, 1.0);
+
+    vec3 clouds = vec3(1.0) * cloud * mix(0.75, 1.4, dayFactor);
 
     // Composition
     vec3 col = sky + sunContrib + sunset + clouds;
@@ -108,12 +130,12 @@ void main() {
     float groundHit = (GROUND_Y - camera.position.y) / rayDir.y;
     if (groundHit > 0.0 && rayDir.y < 0.0) {
         float dist = groundHit;
-        float fog = exp(-dist * world.fogDensity * 0.8);
+        float fog = exp(-dist * world.fogDensity * 1.2);
         vec3 ground = mix(vec3(0.08, 0.12, 0.06), vec3(0.25, 0.45, 0.15), dayFactor);
-        col = mix(col, ground, (1.0 - fog) * 0.7);
+        col = mix(col, ground, (1.0 - fog) * 0.8);
     }
 
-    // Exposure + simple tonemap
+    // Final exposure + tonemap (Reinhard — prevents blowout)
     col *= EXPOSURE;
     col = col / (col + 1.0);
 

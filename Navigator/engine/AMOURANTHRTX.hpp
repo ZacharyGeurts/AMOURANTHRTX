@@ -125,7 +125,7 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     return inst;
 }
 
-// Geometry type enum
+// Geometry type enum (used for procedural BLAS)
 enum class GeometryType : uint32_t {
     ProceduralPlane     = 0,
     ProceduralSphere    = 1,
@@ -140,14 +140,14 @@ enum class GeometryType : uint32_t {
     ProceduralD100      = 10,
 };
 
-// Universal primitive
+// Universal primitive (for BLAS procedural geometry)
 struct UniversalPrimitive {
     glm::vec4 aabbMin;
     glm::vec4 aabbMax;
     glm::mat4 transform;
-    uint32_t type          = 0;
-    uint32_t materialIndex = 0;
-    float destruction      = 0.0f;
+    uint32_t  type          = 0;   // GeometryType
+    uint32_t  materialIndex = 0;
+    float     destruction   = 0.0f;
 };
 
 // Buffer info
@@ -163,7 +163,7 @@ struct BufferInfo {
     std::string        tag;
 };
 
-// VRAM reality
+// VRAM reality tracking
 struct VRAMReality {
     VkDeviceSize total            = 0;
     VkDeviceSize driver_footprint = 0;
@@ -171,7 +171,7 @@ struct VRAMReality {
     VkDeviceSize usable           = 0;
     VkDeviceSize remaining        = 0;
     VkDeviceSize max_alloc_size   = 0;
-    uint32_t max_alloc_count      = 0;
+    uint32_t     max_alloc_count  = 0;
 };
 
 // Global RTX context
@@ -523,7 +523,6 @@ enum class MemoryHint : uint8_t {
 
     uint32_t memType = findMemoryType(req.memoryTypeBits, required, preferred);
     if (memType == ~0u && wantHostVisible) {
-        // Explicit fallback: host-visible + coherent only (no device-local preference)
         VkMemoryPropertyFlags fallbackProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         memType = findMemoryType(req.memoryTypeBits, fallbackProps);
     }
@@ -901,7 +900,7 @@ inline void init() noexcept {
     return dev;
 }
 
-// Swapchain — single-image, timing controlled by TotalTime only
+// Swapchain — multi-image support
 struct Swapchain {
     struct Handle {
         VkSwapchainKHR value;
@@ -937,9 +936,7 @@ struct Swapchain {
         vkQueueWaitIdle(rtx().present_queue);
 
         if (isRecreate) {
-            for (auto& v : views) {
-                vkDestroyImageView(dev, v, nullptr);
-            }
+            for (auto& v : views) vkDestroyImageView(dev, v, nullptr);
             views.clear();
             images.clear();
             if (swapchain.valid()) {
@@ -1383,6 +1380,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         rtx().las_initialized = true;
     }
 
+    VkDevice dev = rtx().device;
     VkCommandBuffer localCmd = cmd;
     bool ownsCmd = (cmd == VK_NULL_HANDLE);
 
@@ -1392,7 +1390,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         allocInfo.commandPool = rtx().transient_pool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
-        vkAllocateCommandBuffers(rtx().device, &allocInfo, &localCmd);
+        vkAllocateCommandBuffers(dev, &allocInfo, &localCmd);
 
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1470,7 +1468,7 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
 
         VkAccelerationStructureBuildSizesInfoKHR sizes{};
-        sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;  // FIXED: explicit sType
+        sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
         ext().vkGetAccelerationStructureBuildSizesKHR(rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                                                       &buildInfo, &range.primitiveCount, &sizes);

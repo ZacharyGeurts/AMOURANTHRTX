@@ -1,10 +1,10 @@
+#pragma once
+
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 // =============================================================================
-
-#pragma once
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -19,14 +19,14 @@
 #include "OptionsMenu.hpp"
 
 // ────────────────────────────────────────────────
-// Camera state (constexpr-friendly, genesis-aware)
+// Camera state (genesis-aware, transition-friendly)
 // ────────────────────────────────────────────────
 struct CameraState {
-    glm::vec3   position       {0.0f, 1.8f, 5.0f};
+    glm::vec3   position       {Options::Camera::START_POSITION};
     glm::quat   orientation    {1.0f, 0.0f, 0.0f, 0.0f};
-    float       fov            {75.0f};
-    float       aperture       {2.8f};
-    float       focusDistance  {8.0f};
+    float       fov            {Options::Camera::DEFAULT_FOV};
+    float       aperture       {Options::Camera::DEFAULT_APERTURE};
+    float       focusDistance  {Options::Camera::DEFAULT_FOCUS_DISTANCE};
 
     constexpr CameraState() = default;
     constexpr CameraState(const glm::vec3& pos, const glm::quat& ori, float f, float a, float fd) noexcept
@@ -35,7 +35,7 @@ struct CameraState {
 
 // ────────────────────────────────────────────────
 // THE ONE TRUE CAMERA — thread-safe, genesis-timed singleton
-// All motion is relative to sealed genesis clock
+// All motion relative to sealed genesis clock
 // ────────────────────────────────────────────────
 class Camera final {
 public:
@@ -49,12 +49,12 @@ public:
         return instance;
     }
 
-    // Reset to defaults from OptionsMenu (genesis moment)
+    // Reset to defaults from Options::Camera (genesis moment)
     void reset() noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
         currentState_ = CameraState(
             Options::Camera::START_POSITION,
-            glm::quat(glm::vec3(0.0f, glm::radians(-90.0f), 0.0f)),
+            glm::quat(glm::vec3(0.0f, glm::radians(-90.0f), 0.0f)), // looking forward along -Z
             Options::Camera::DEFAULT_FOV,
             Options::Camera::DEFAULT_APERTURE,
             Options::Camera::DEFAULT_FOCUS_DISTANCE
@@ -150,7 +150,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         double now = TotalTime::get().seconds();
         float scaled = amount * Options::Camera::DOLLY_SPEED * static_cast<float>(now - lastUpdateGenesis_);
-        currentState_.position += currentState_.orientation * glm::vec3(0, 0, -scaled);
+        currentState_.position += currentState_.orientation * glm::vec3(0.0f, 0.0f, -scaled);
         targetState_.position = currentState_.position;
         lastUpdateGenesis_ = now;
         invalidateCache();
@@ -160,7 +160,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         double now = TotalTime::get().seconds();
         float scaled = amount * Options::Camera::CRANE_SPEED * static_cast<float>(now - lastUpdateGenesis_);
-        currentState_.position += glm::vec3(0, scaled, 0);
+        currentState_.position += glm::vec3(0.0f, scaled, 0.0f);
         targetState_.position = currentState_.position;
         lastUpdateGenesis_ = now;
         invalidateCache();
@@ -176,28 +176,28 @@ public:
     // Internal movement helpers
     void moveForward(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
-        currentState_.position += currentState_.orientation * glm::vec3(0, 0, -amount);
+        currentState_.position += currentState_.orientation * glm::vec3(0.0f, 0.0f, -amount);
         targetState_.position = currentState_.position;
         invalidateCache();
     }
 
     void moveRight(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
-        currentState_.position += currentState_.orientation * glm::vec3(amount, 0, 0);
+        currentState_.position += currentState_.orientation * glm::vec3(amount, 0.0f, 0.0f);
         targetState_.position = currentState_.position;
         invalidateCache();
     }
 
     void moveUp(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
-        currentState_.position += glm::vec3(0, amount, 0);
+        currentState_.position += glm::vec3(0.0f, amount, 0.0f);
         targetState_.position = currentState_.position;
         invalidateCache();
     }
 
     void lookAt(const glm::vec3& target, bool instant = false) noexcept {
         glm::vec3 dir = glm::normalize(target - currentState_.position);
-        glm::quat ori = glm::quatLookAt(dir, glm::vec3(0,1,0));
+        glm::quat ori = glm::quatLookAt(dir, glm::vec3(0.0f, 1.0f, 0.0f));
         std::lock_guard<std::mutex> lock(mtx_);
         if (instant) {
             currentState_.orientation = targetState_.orientation = ori;
@@ -225,9 +225,9 @@ public:
     // Getters — const, thread-safe, genesis-safe
     // ────────────────────────────────────────────────
     [[nodiscard]] glm::vec3 position()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.position; }
-    [[nodiscard]] glm::vec3 forward()     const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0,0,-1); }
-    [[nodiscard]] glm::vec3 right()       const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(1,0,0); }
-    [[nodiscard]] glm::vec3 up()          const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0,1,0); }
+    [[nodiscard]] glm::vec3 forward()     const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0.0f, 0.0f, -1.0f); }
+    [[nodiscard]] glm::vec3 right()       const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(1.0f, 0.0f, 0.0f); }
+    [[nodiscard]] glm::vec3 up()          const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0.0f, 1.0f, 0.0f); }
     [[nodiscard]] float     fov()         const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.fov; }
     [[nodiscard]] float     aperture()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.aperture; }
     [[nodiscard]] float     focusDistance() const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.focusDistance; }
@@ -256,8 +256,8 @@ private:
         if (cachedGeneration_ != gen) {
             std::lock_guard<std::mutex> lock(mtx_);
             if (cachedGeneration_ != gen) {
-                glm::vec3 fwd = currentState_.orientation * glm::vec3(0,0,-1);
-                glm::vec3 up  = currentState_.orientation * glm::vec3(0,1,0);
+                glm::vec3 fwd = currentState_.orientation * glm::vec3(0.0f, 0.0f, -1.0f);
+                glm::vec3 up  = currentState_.orientation * glm::vec3(0.0f, 1.0f, 0.0f);
                 viewCache_ = glm::lookAt(currentState_.position, currentState_.position + fwd, up);
                 cachedGeneration_ = gen;
             }

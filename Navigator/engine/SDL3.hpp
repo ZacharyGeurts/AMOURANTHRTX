@@ -200,9 +200,9 @@ inline bool sdl_audio_init() noexcept {
     }
 
     SDL_AudioSpec desired{};
-    desired.freq     = Options::Audio::AUDIO_SAMPLE_RATE;
+    desired.freq     = Options::Audio::SAMPLE_RATE;
     desired.format   = SDL_AUDIO_F32;
-    desired.channels = Options::Audio::AUDIO_CHANNELS;
+    desired.channels = Options::Audio::CHANNELS;
 
     g_audio_stream = SDL_CreateAudioStream(&desired, nullptr);
     if (g_audio_stream == nullptr) {

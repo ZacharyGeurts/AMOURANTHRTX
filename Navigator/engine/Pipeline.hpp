@@ -4,8 +4,6 @@
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
-//
-// SINGLE COMPUTE SHADER PIPELINE — canvas.spv is the ONLY shader
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -21,59 +19,54 @@
 namespace Pipeline {
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bindings — storage image first (most frequent access)
+// Bindings — matches your compute shader exactly
+// 0: storage image (HDR write)
+// 1: uniform buffer (camera)
+// 2: storage buffer (living world)
 // ─────────────────────────────────────────────────────────────────────────────
 inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[3] = {
-    {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 0: HDR output (write)
+    {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 0: HDR output
     {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 1: Camera UBO
-    {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 2: World / primitives buffer
+    {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 2: LivingWorldBuffer
 };
 
 inline constexpr VkShaderStageFlags COMPUTE_PUSH_MASK = VK_SHADER_STAGE_COMPUTE_BIT;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Namespace-local pipeline objects
+// Exposed pipeline objects & functions
 // ─────────────────────────────────────────────────────────────────────────────
-namespace {
-    VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
-    VkPipelineLayout      pipeline_layout        = VK_NULL_HANDLE;
-    VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
-}
+inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
+inline VkPipelineLayout      pipeline_layout        = VK_NULL_HANDLE;
+inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Load the single compute shader: canvas.spv
+// Load canvas.spv — single compute shader
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] inline VkShaderModule load_canvas_shader() noexcept {
     constexpr std::string_view shader_name = "canvas.spv";
 
-    std::array<std::string, 5> search_roots = {
-        "compute/", "build/bin/Linux/compute/", "build/bin/Windows/compute/",
-        "shaders/", "./"
+    std::array<std::string, 7> search_paths = {
+        "compute/canvas.spv",
+        "build/bin/Linux/compute/canvas.spv",
+		"build/bin/Windows/compute/canvas.spv"
     };
 
     std::vector<uint32_t> code;
 
-    for (const auto& root : search_roots) {
-        std::string path = root + std::string(shader_name);
+    for (const auto& path : search_paths) {
         std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file.is_open() || !file.good()) continue;
+        if (!file.is_open()) continue;
 
-        // Get size safely
-        file.seekg(0, std::ios::end);
-        auto pos = file.tellg();
+        auto size_bytes = file.tellg();
+        if (size_bytes <= 0 || size_bytes % 4 != 0) continue;
+
         file.seekg(0, std::ios::beg);
-
-        if (pos <= 0 || pos % 4 != 0) {
-            continue;
-        }
-
-        auto size_bytes = static_cast<std::streamsize>(pos);
         code.resize(static_cast<size_t>(size_bytes / 4));
 
         file.read(reinterpret_cast<char*>(code.data()), size_bytes);
 
         if (file.good() && !file.fail()) {
-            // SAFE: cast to int64_t before formatting
+            // Cast to int64_t to avoid fpos formatting crash
             int64_t printable_size = static_cast<int64_t>(size_bytes);
             LOG_SUCCESS_CAT("PIPELINE", "Loaded canvas.spv ({} bytes) from {}", 
                             printable_size, path);
@@ -81,11 +74,10 @@ namespace {
         }
 
         code.clear();
-        file.close();
     }
 
     if (code.empty()) {
-        LOG_ERROR_CAT("PIPELINE", "canvas.spv not found or corrupted in any search path");
+        LOG_FATAL_CAT("PIPELINE", "canvas.spv not found or corrupted in any search path");
         return VK_NULL_HANDLE;
     }
 
@@ -102,7 +94,7 @@ namespace {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// One-time initialization — creates descriptor layout + pipeline layout
+// Initialize descriptor layout (called once)
 // ─────────────────────────────────────────────────────────────────────────────
 inline void initialize() noexcept {
     if (main_descriptor_layout != VK_NULL_HANDLE) return;
@@ -113,7 +105,18 @@ inline void initialize() noexcept {
     layoutCI.pBindings    = kCanvasBindings;
 
     vkh.checker(vkCreateDescriptorSetLayout(rtx().device, &layoutCI, nullptr, &main_descriptor_layout),
-                "vkCreateDescriptorSetLayout", "main canvas layout");
+                "vkCreateDescriptorSetLayout", "canvas main layout");
+
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor layout created");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Create pipeline layout with push constants (public — called from RayCanvas & main)
+// ─────────────────────────────────────────────────────────────────────────────
+inline void create_pipeline_layout() noexcept {
+    if (pipeline_layout != VK_NULL_HANDLE) return;
+
+    initialize(); // ensure descriptor layout exists
 
     VkPushConstantRange push{};
     push.stageFlags = COMPUTE_PUSH_MASK;
@@ -130,19 +133,22 @@ inline void initialize() noexcept {
     vkh.checker(vkCreatePipelineLayout(rtx().device, &plCI, nullptr, &pipeline_layout),
                 "vkCreatePipelineLayout", "canvas");
 
-    LOG_SUCCESS_CAT("PIPELINE", "Descriptor layout + pipeline layout created");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout with push constants created");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Create the single compute pipeline (lazy — called on first dispatch)
+// Lazy-create the compute pipeline
 // ─────────────────────────────────────────────────────────────────────────────
 inline void create_canvas_pipeline() noexcept {
     if (canvas_pipeline != VK_NULL_HANDLE) return;
 
-    initialize();  // ensure layout exists
+    create_pipeline_layout();  // ensure layout exists
 
     VkShaderModule shader = load_canvas_shader();
-    if (shader == VK_NULL_HANDLE) return;
+    if (shader == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("PIPELINE", "Cannot create pipeline — shader load failed");
+        return;
+    }
 
     VkPipelineShaderStageCreateInfo stage{};
     stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -156,24 +162,25 @@ inline void create_canvas_pipeline() noexcept {
     ci.layout = pipeline_layout;
 
     vkh.checker(vkCreateComputePipelines(rtx().device, VK_NULL_HANDLE, 1, &ci, nullptr, &canvas_pipeline),
-                "vkCreateComputePipelines", "canvas compute pipeline");
+                "vkCreateComputePipelines", "canvas");
 
     vkDestroyShaderModule(rtx().device, shader, nullptr);
 
-    LOG_SUCCESS_CAT("PIPELINE", "Single canvas compute pipeline created");
+    if (canvas_pipeline != VK_NULL_HANDLE) {
+        LOG_SUCCESS_CAT("PIPELINE", "Canvas compute pipeline created");
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dispatch the canvas shader — called from RayCanvas
+// Dispatch — called from RayCanvas::maybeUpdateCanvas()
 // ─────────────────────────────────────────────────────────────────────────────
 inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height, float totalTime) noexcept {
     if (canvas_pipeline == VK_NULL_HANDLE) {
         create_canvas_pipeline();
-    }
-
-    if (canvas_pipeline == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("PIPELINE", "Cannot dispatch — pipeline creation failed");
-        return;
+        if (canvas_pipeline == VK_NULL_HANDLE) {
+            LOG_ERROR_CAT("PIPELINE", "Dispatch aborted — pipeline creation failed");
+            return;
+        }
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
@@ -191,43 +198,22 @@ inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height
 // Cleanup — called from RayCanvas destructor
 // ─────────────────────────────────────────────────────────────────────────────
 inline void shutdown() noexcept {
-    if (canvas_pipeline) {
+    if (canvas_pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
         canvas_pipeline = VK_NULL_HANDLE;
     }
 
-    if (pipeline_layout) {
+    if (pipeline_layout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(rtx().device, pipeline_layout, nullptr);
         pipeline_layout = VK_NULL_HANDLE;
     }
 
-    if (main_descriptor_layout) {
+    if (main_descriptor_layout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(rtx().device, main_descriptor_layout, nullptr);
         main_descriptor_layout = VK_NULL_HANDLE;
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Single compute pipeline shutdown complete");
-}
-
-inline void create_pipeline_layout() noexcept {
-    if (pipeline_layout != VK_NULL_HANDLE) return;
-
-    VkPushConstantRange push{};
-    push.stageFlags = COMPUTE_PUSH_MASK;
-    push.offset     = 0;
-    push.size       = sizeof(float);  // totalTime
-
-    VkPipelineLayoutCreateInfo plCI{};
-    plCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    plCI.setLayoutCount         = 1;
-    plCI.pSetLayouts            = &main_descriptor_layout;
-    plCI.pushConstantRangeCount = 1;
-    plCI.pPushConstantRanges    = &push;
-
-    vkh.checker(vkCreatePipelineLayout(rtx().device, &plCI, nullptr, &pipeline_layout),
-                "vkCreatePipelineLayout", "canvas");
-
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout with push constants created");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline shutdown complete");
 }
 
 } // namespace Pipeline
