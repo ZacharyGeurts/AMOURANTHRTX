@@ -17,7 +17,7 @@ chmod +x linux.sh
 ./linux.sh --help
 ```
 
-Pre-Alpha Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
+Beta Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 There are pretty much two states, working and non. Things move fast here.  
 A real star is ELLIE.hpp. It is more than full featured when it comes to debugging and logging.  
 We track and tell you everything along the way.  
