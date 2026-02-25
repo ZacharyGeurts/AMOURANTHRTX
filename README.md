@@ -1,5 +1,6 @@
 No demons permitted.  
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
+[Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-02-24%2014-08-36.png" />  
 We are not minimalist. We added every feature from every forum, efficently.  
 How efficent? Zero cost computing.  
