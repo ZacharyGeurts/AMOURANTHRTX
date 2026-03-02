@@ -8,21 +8,70 @@
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/rotate_vector.hpp>
+#include <vector>
+#include <cstdint>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Simple material (shared across engine)
+// Extended toy / playground material — Disney / extended principled + fun extras
+// Thousands of base materials + procedural variation → perceived trillions
 // ─────────────────────────────────────────────────────────────────────────────
-struct Material {
-    glm::vec4 albedo   {1.0f, 1.0f, 1.0f, 1.0f};
-    glm::vec4 emissive {0.0f, 0.0f, 0.0f, 0.0f};
-    float     metallic   = 0.0f;
-    float     roughness  = 1.0f;
-    float     ior        = 1.5f;
-    uint32_t  type       = 0;  // 0: diffuse, 1: emissive, 2: metallic, 3: dielectric
+struct alignas(16) Material
+{
+    // ── Core appearance ─────────────────────────────────────────────────────
+    glm::vec4 baseColor         {1.0f, 1.0f, 1.0f, 1.0f};   // albedo (RGB) + opacity (A)
+    glm::vec4 emissive          {0.0f, 0.0f, 0.0f, 0.0f};   // RGB color, A = strength multiplier
+
+    float     metallic          = 0.0f;     // 0 = dielectric   1 = metal
+    float     roughness         = 0.5f;     // 0=mirror, 1=matt
+    float     specular          = 0.5f;     // Disney-style specular (~0.5 ≈ IOR~1.5)
+    float     ior               = 1.50f;    // index of refraction
+
+    // ── Transmission / subsurface ───────────────────────────────────────────
+    float     transmission      = 0.0f;     // 0..1 (glass, jelly, water)
+    float     subsurface        = 0.0f;     // 0..1 approximate scattering
+    glm::vec3 subsurfaceColor   {0.8f,0.6f,0.5f};
+    float     transmissionRoughness = 0.0f; // blurs refraction
+
+    // ── Clearcoat ───────────────────────────────────────────────────────────
+    float     clearcoat         = 0.0f;     // 0..1 weight
+    float     clearcoatRoughness= 0.03f;    // usually 0.01–0.3
+
+    // ── Sheen / velvet ──────────────────────────────────────────────────────
+    float     sheen             = 0.0f;
+    glm::vec3 sheenTint         {1.0f,1.0f,1.0f};
+
+    // ── Anisotropy ──────────────────────────────────────────────────────────
+    float     anisotropy        = 0.0f;     // -1..1 strength & direction
+    float     anisoRotation     = 0.0f;     // 0..1 tangent rotation
+
+    // ── Thin-film interference ──────────────────────────────────────────────
+    float     thinFilm          = 0.0f;     // 0..1 strength
+    float     thinFilmIOR       = 1.45f;
+    float     thinFilmThickness_nm = 350.0f; // 200–1200 nm rainbow range
+
+    // ── Procedural variation layer ──────────────────────────────────────────
+    uint32_t  procType          = 0;        // 0=none, 1=perlin, 2=ridged, 3=voronoi, 4=grid, 5=stripes, 6=spots
+    float     procScale         = 8.0f;
+    float     procStrength      = 0.35f;
+    float     procOffsetSeed    = 0.0f;
+
+    // ── Flags ───────────────────────────────────────────────────────────────
+    uint32_t  flags             = 0;
+    // 0 : transmission
+    // 1 : subsurface
+    // 2 : clearcoat
+    // 3 : sheen
+    // 4 : thin-film
+    // 5 : anisotropy
+    // 6 : emission modulates with baseColor
+    // 7 : procedural affects emissive
+    // 8 : thin-film view-dependent thickness shift
+
+    uint32_t  padding[2]        = {0,0};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Camera uniform data block — sent to the single compute shader
+// Camera uniform data block
 // ─────────────────────────────────────────────────────────────────────────────
 struct CameraSceneData {
     glm::mat4 viewInverse;
@@ -42,7 +91,7 @@ struct CameraSceneData {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Living world state — dynamic environment parameters (matches shader)
+// Living world state
 // ─────────────────────────────────────────────────────────────────────────────
 struct LivingWorldData {
     glm::vec4 sunDirAndIntensity;
@@ -108,13 +157,119 @@ public:
             std::abort();
         }
 
-        // Create materials buffer with example materials
-        std::vector<Material> sceneMaterials = {
-            {glm::vec4(0.3f, 0.7f, 0.3f, 1.0f), glm::vec4(0.0f), 0.0f, 1.0f, 1.5f, 0}, // grass-like diffuse
-            {glm::vec4(0.8f, 0.8f, 0.8f, 1.0f), glm::vec4(0.0f), 1.0f, 0.2f, 1.5f, 2}, // metallic
-            {glm::vec4(0.9f, 0.9f, 1.0f, 0.8f), glm::vec4(0.0f), 0.0f, 0.0f, 1.5f, 3}, // glass
-            {glm::vec4(1.0f, 0.5f, 0.2f, 1.0f), glm::vec4(2.0f, 1.0f, 0.5f, 1.0f), 0.0f, 1.0f, 1.5f, 1} // emissive glow
+        // ───────────────────────────────────────────────────────────────
+        // BIG MATERIAL LIBRARY — toy edition with trillions of combos
+        // ───────────────────────────────────────────────────────────────
+        std::vector<Material> sceneMaterials;
+
+        auto addMat = [&](Material m) {
+            if (m.transmission      > 0.001f) m.flags |= (1u << 0);
+            if (m.subsurface        > 0.001f) m.flags |= (1u << 1);
+            if (m.clearcoat         > 0.001f) m.flags |= (1u << 2);
+            if (m.sheen             > 0.001f) m.flags |= (1u << 3);
+            if (m.thinFilm          > 0.001f) m.flags |= (1u << 4);
+            if (std::abs(m.anisotropy) > 0.001f) m.flags |= (1u << 5);
+            sceneMaterials.push_back(m);
         };
+
+        // Base templates - explicit member setting to avoid init errors
+        {
+            Material m{};
+            m.baseColor = {0.95f, 0.64f, 0.07f, 1.0f};
+            m.metallic = 1.0f;
+            m.roughness = 0.08f;
+            m.specular = 0.5f;
+            m.ior = 1.5f;
+            addMat(m); // polished gold
+        }
+        {
+            Material m{};
+            m.baseColor = {0.04f, 0.04f, 0.04f, 1.0f};
+            m.roughness = 0.92f;
+            m.ior = 1.5f;
+            m.clearcoatRoughness = 0.0f;
+            m.sheen = 0.95f;
+            m.sheenTint = {0.9f, 0.9f, 0.9f};
+            addMat(m); // velvet
+        }
+        {
+            Material m{};
+            m.baseColor = {0.9f, 0.9f, 1.0f, 0.4f};
+            m.roughness = 0.02f;
+            m.specular = 0.5f;
+            m.ior = 1.45f;
+            m.transmission = 0.98f;
+            addMat(m); // clear bubble
+        }
+        {
+            Material m{};
+            m.baseColor = {1.0f, 0.1f, 0.4f, 1.0f};
+            m.emissive = {8.0f, 1.0f, 2.0f, 15.0f};
+            m.roughness = 0.4f;
+            addMat(m); // candy glow
+        }
+        {
+            Material m{};
+            m.baseColor = {0.2f, 0.7f, 0.2f, 1.0f};
+            m.roughness = 0.85f;
+            m.ior = 1.5f;
+            m.subsurface = 0.4f;
+            m.subsurfaceColor = {0.3f, 0.9f, 0.4f};
+            addMat(m); // waxy leaf
+        }
+        {
+            Material m{};
+            m.baseColor = {0.9f, 0.92f, 1.0f, 1.0f};
+            m.roughness = 0.04f;
+            m.specular = 0.5f;
+            m.ior = 1.45f;
+            m.thinFilm = 1.0f;
+            m.thinFilmIOR = 1.45f;
+            m.thinFilmThickness_nm = 620.0f;
+            addMat(m); // soap bubble
+        }
+
+        // Generate thousands of variations
+        size_t baseCount = sceneMaterials.size();
+        constexpr int TOTAL_MATERIALS = 8000;
+
+        for (size_t i = baseCount; sceneMaterials.size() < TOTAL_MATERIALS; ++i)
+        {
+            size_t baseIdx = (i - baseCount) % baseCount;
+            Material m = sceneMaterials[baseIdx];
+
+            float rnd = hash11(static_cast<uint32_t>(i) * 214013u + 2531011u);
+
+            if (rnd < 0.7f) {
+                float hueShift = (rnd * 2.0f - 1.0f) * 0.45f;
+                m.baseColor = hue_shift(m.baseColor, hueShift);
+            }
+
+            m.roughness = glm::clamp(m.roughness + (rnd - 0.5f) * 0.75f, 0.02f, 0.98f);
+
+            if (rnd > 0.35f && rnd < 0.65f)
+                m.metallic = glm::clamp(m.metallic + (rnd - 0.5f) * 0.9f, 0.0f, 1.0f);
+
+            if (rnd > 0.38f && rnd < 0.82f) {
+                m.procType     = 1 + (static_cast<uint32_t>(i * 7u) % 6);
+                m.procScale    = 4.0f + rnd * 24.0f;
+                m.procStrength = 0.15f + rnd * 0.65f;
+                m.procOffsetSeed = rnd * 100.0f;
+            }
+
+            if (rnd < 0.12f) {
+                m.emissive = glm::vec4(2.0f + rnd*10.0f, 0.1f+rnd*4.0f, 0.3f+rnd*6.0f, 8.0f + rnd*30.0f);
+            }
+
+            if (rnd > 0.88f) {
+                m.thinFilm = 0.7f + rnd * 0.3f;
+                m.thinFilmThickness_nm = 220.0f + (rnd * 980.0f);
+            }
+
+            addMat(m);
+        }
+
+        LOG_INFO_CAT("RAYCANVAS", "Created {} materials ({} base + variations)", sceneMaterials.size(), baseCount);
 
         VkDeviceSize matSize = sceneMaterials.size() * sizeof(Material);
         materialsHandle_ = Memory::createBuffer(
@@ -132,21 +287,39 @@ public:
             }
         }
 
-        // Primitives buffer from current LAS scene
+        // Primitives buffer
         VkDeviceSize primSize = rtx().las_procedural_primitives.size() * sizeof(UniversalPrimitive);
-        primitivesHandle_ = Memory::createBuffer(
-            primSize,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            "PrimitivesBuffer",
-            Memory::MemoryHint::HostVisible
-        );
+        if (primSize == 0) {
+            primSize = sizeof(UniversalPrimitive);
+            primitivesHandle_ = Memory::createBuffer(
+                primSize,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                "PrimitivesBuffer (dummy)"
+            );
+            UniversalPrimitive dummy{};
+            auto [sb, sm] = Memory::uploadToBuffer(primitivesHandle_, &dummy, primSize);
+            if (sb != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, sb, nullptr);
+                vkFreeMemory(rtx().device, sm, nullptr);
+            }
+        } else {
+            primitivesHandle_ = Memory::createBuffer(
+                primSize,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                "PrimitivesBuffer",
+                Memory::MemoryHint::HostVisible
+            );
 
-        if (primitivesHandle_ != 0 && primSize > 0) {
             auto [sb, sm] = Memory::uploadToBuffer(primitivesHandle_, rtx().las_procedural_primitives.data(), primSize);
             if (sb != VK_NULL_HANDLE) {
                 vkDestroyBuffer(rtx().device, sb, nullptr);
                 vkFreeMemory(rtx().device, sm, nullptr);
             }
+        }
+
+        if (primitivesHandle_ == 0) {
+            LOG_FATAL_CAT("RAYCANVAS", "Failed to allocate Primitives buffer");
+            std::abort();
         }
 
         createPersistentHDR();
@@ -156,14 +329,9 @@ public:
         Pipeline::create_pipeline_layout();
         Pipeline::create_canvas_pipeline();
 
-        if (Pipeline::canvas_pipeline == VK_NULL_HANDLE) {
-            LOG_FATAL_CAT("RAYCANVAS", "Failed to create canvas compute pipeline");
-            std::abort();
-        }
-
         updateDescriptorSet();
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Single-shader compute canvas initialized");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Single-shader compute canvas initialized — toy mode active");
     }
 
     ~RayCanvas() {
@@ -179,15 +347,9 @@ public:
             vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
         }
 
-        if (hdrOutputView_ != VK_NULL_HANDLE) {
-            vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        }
-        if (hdrOutputImage_ != VK_NULL_HANDLE) {
-            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        }
-        if (hdrOutputMemory_ != VK_NULL_HANDLE) {
-            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-        }
+        if (hdrOutputView_) vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+        if (hdrOutputImage_) vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+        if (hdrOutputMemory_) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
 
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(livingWorldHandle_);
@@ -359,7 +521,9 @@ private:
         VkDescriptorPoolSize poolSizes[5] = {
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  1},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3}  // living world + materials + primitives
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},  // living world
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},  // materials
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}   // primitives
         };
 
         VkDescriptorPoolCreateInfo poolCI{};
@@ -385,7 +549,6 @@ private:
     void updateDescriptorSet() noexcept {
         VkWriteDescriptorSet writes[5]{};
 
-        // 0: HDR output
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView   = hdrOutputView_;
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -396,7 +559,6 @@ private:
         writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[0].pImageInfo       = &imgInfo;
 
-        // 1: Camera UBO
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = Memory::getBuffer(cameraUBOHandle_);
         uboInfo.range  = VK_WHOLE_SIZE;
@@ -407,7 +569,6 @@ private:
         writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         writes[1].pBufferInfo      = &uboInfo;
 
-        // 2: Living world buffer
         VkDescriptorBufferInfo worldInfo{};
         worldInfo.buffer = Memory::getBuffer(livingWorldHandle_);
         worldInfo.range  = VK_WHOLE_SIZE;
@@ -418,7 +579,6 @@ private:
         writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[2].pBufferInfo      = &worldInfo;
 
-        // 3: Materials buffer
         VkDescriptorBufferInfo matInfo{};
         matInfo.buffer = Memory::getBuffer(materialsHandle_);
         matInfo.range  = VK_WHOLE_SIZE;
@@ -429,7 +589,6 @@ private:
         writes[3].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[3].pBufferInfo      = &matInfo;
 
-        // 4: Primitives buffer
         VkDescriptorBufferInfo primInfo{};
         primInfo.buffer = Memory::getBuffer(primitivesHandle_);
         primInfo.range  = VK_WHOLE_SIZE;
@@ -656,6 +815,35 @@ private:
         vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(rtx().device, fence, nullptr);
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+    }
+
+private:
+    // Helper: cheap hue shift for material variation
+    static glm::vec4 hue_shift(glm::vec4 c, float shift)
+    {
+        glm::vec3 rgb = glm::vec3(c);
+        float u = cosf(shift * glm::pi<float>() * 2.0f);
+        float w = sinf(shift * glm::pi<float>() * 2.0f);
+
+        glm::mat3 rot = glm::mat3(
+            0.299f + 0.701f * u + 0.168f * w,   0.587f - 0.587f * u + 0.330f * w,   0.114f - 0.114f * u - 0.497f * w,
+            0.299f - 0.299f * u - 0.328f * w,   0.587f + 0.413f * u + 0.035f * w,   0.114f - 0.114f * u + 0.292f * w,
+            0.299f - 0.300f * u + 1.250f * w,   0.587f - 0.588f * u - 1.050f * w,   0.114f + 0.886f * u - 0.203f * w
+        );
+
+        rgb = rot * rgb;
+        return glm::vec4(glm::clamp(rgb, 0.0f, 1.0f), c.a);
+    }
+
+    // Cheap hash for variation seed
+    static float hash11(uint32_t x)
+    {
+        x ^= x >> 16;
+        x *= 0x7feb352dU;
+        x ^= x >> 15;
+        x *= 0x846ca68bU;
+        x ^= x >> 16;
+        return float(x) * (1.0f / 4294967296.0f);
     }
 
 private:

@@ -827,6 +827,18 @@ inline void init() noexcept {
 
     rtx().physical = selected;
 
+    // Check and enable shaderFloat64
+    VkPhysicalDeviceFeatures features{};
+    vkGetPhysicalDeviceFeatures(selected, &features);
+
+    if (!features.shaderFloat64) {
+        LOG_FATAL("VULKAN", "Selected GPU does not support shaderFloat64 — required for doubles in shaders");
+        return VK_NULL_HANDLE;  // Or fallback logic
+    }
+
+    VkPhysicalDeviceFeatures enabledFeatures{};
+    enabledFeatures.shaderFloat64 = VK_TRUE;  // Enable the feature
+
     std::set<uint32_t> unique_families = {best_indices.graphics.value(), best_indices.present.value(), best_indices.compute.value()};
     if (best_indices.transfer.has_value()) unique_families.insert(best_indices.transfer.value());
 
@@ -868,6 +880,7 @@ inline void init() noexcept {
     VkDeviceCreateInfo dev_ci{};
     dev_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dev_ci.pNext = &desc_buf;
+    dev_ci.pEnabledFeatures = &enabledFeatures;  // Attach enabled features
     dev_ci.queueCreateInfoCount = static_cast<uint32_t>(queue_infos.size());
     dev_ci.pQueueCreateInfos = queue_infos.data();
     dev_ci.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());

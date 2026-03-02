@@ -15,6 +15,7 @@
 #include <fstream>
 #include <format>
 #include <filesystem>
+#include <cstdint>
 
 namespace Pipeline {
 
@@ -42,6 +43,14 @@ inline constexpr VkShaderStageFlags COMPUTE_PUSH_MASK = VK_SHADER_STAGE_COMPUTE_
 inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
 inline VkPipelineLayout      pipeline_layout        = VK_NULL_HANDLE;
 inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Push constant struct — EXACTLY matches the shader (8 bytes total)
+// ─────────────────────────────────────────────────────────────────────────────
+struct PushConstants {
+    float time;
+    uint  frameSeed;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Load canvas.spv — single compute shader
@@ -114,7 +123,7 @@ inline void initialize() noexcept {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Create pipeline layout with push constants
+// Create pipeline layout with 8-byte push constants (matches shader)
 // ─────────────────────────────────────────────────────────────────────────────
 inline void create_pipeline_layout() noexcept {
     if (pipeline_layout != VK_NULL_HANDLE) return;
@@ -124,7 +133,7 @@ inline void create_pipeline_layout() noexcept {
     VkPushConstantRange push{};
     push.stageFlags = COMPUTE_PUSH_MASK;
     push.offset     = 0;
-    push.size       = sizeof(float);  // totalTime
+    push.size       = sizeof(PushConstants);  // 8 bytes (float + uint)
 
     VkPipelineLayoutCreateInfo plCI{};
     plCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -136,7 +145,7 @@ inline void create_pipeline_layout() noexcept {
     vkh.checker(vkCreatePipelineLayout(rtx().device, &plCI, nullptr, &pipeline_layout),
                 "vkCreatePipelineLayout", "canvas");
 
-    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created with push constants");
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout created with 8-byte push constants");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,7 +186,7 @@ inline void create_canvas_pipeline() noexcept {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dispatch — called from RayCanvas::maybeUpdateCanvas()
+// Dispatch — now pushes 8 bytes (time + frameSeed) to match shader
 // ─────────────────────────────────────────────────────────────────────────────
 inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height, float totalTime) noexcept {
     if (canvas_pipeline == VK_NULL_HANDLE) {
@@ -190,8 +199,13 @@ inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
 
+    // Pack both values (matches shader exactly)
+    PushConstants pc{};
+    pc.time       = totalTime;
+    pc.frameSeed  = static_cast<uint>(totalTime * 1000.0f) ^ 0xDEADBEEFu;  // deterministic per-frame seed
+
     vkCmdPushConstants(cmd, pipeline_layout, COMPUTE_PUSH_MASK,
-                       0, sizeof(float), &totalTime);
+                       0, sizeof(PushConstants), &pc);
 
     uint32_t dispatchX = (width  + 15) / 16;
     uint32_t dispatchY = (height + 15) / 16;

@@ -5,330 +5,90 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
 
-layout(set = 0, binding = 1) uniform CameraUBO {
-    mat4 viewInverse;
-    mat4 projInverse;
-    mat4 view;
-    mat4 proj;
-    vec4 cameraPos;
-    vec4 prevCameraPos;
-    double exposure;
-    double genesisTime;
-    uint randomSeed;
-    uint maxDepth;
-    uint frameCount;
-    uint padding[1];
-} camera;
-
-layout(set = 0, binding = 2, std140) readonly buffer LivingWorldData {
-    vec4 sunDirAndIntensity;     // .xyz = sun direction, .w = sun intensity
-    vec4 skyDayTop;
-    vec4 skyDayHorizon;
-    vec4 skyNight;
-    vec4 groundColorDay;
-    vec4 groundColorNight;
-    float dayNightFactor;
-    float cloudDensity;
-    float fogDensity;
-    float temperature;
-    uint frameSeed;
-    uint padding[3];
-} world;
-
-struct Material {
-    vec4 albedo;
-    vec4 emissive;
-    float metallic;
-    float roughness;
-    float ior;
-    uint type;          // 0: diffuse, 1: emissive, 2: metallic, 3: dielectric
-};
-
-layout(set = 0, binding = 3, std140) readonly buffer Materials {
-    Material mats[];
-} materials;
-
-struct UniversalPrimitive {
-    vec4 aabbMin;
-    vec4 aabbMax;
-    mat4 transform;
-    uint type;          // 0: plane, 1: sphere, 2: cylinder, 3: cone, etc.
-    uint materialIndex;
-    float destruction;
-};
-
-layout(set = 0, binding = 4, std140) readonly buffer Primitives {
-    UniversalPrimitive prims[];
-} primitives;
-
 layout(push_constant) uniform Push {
     float totalTime;
-} push;
+} pc;
 
-#define PI         3.1415926535897932384626433832795
-#define TWO_PI     6.283185307179586
-#define EPS        0.001
-#define INF        1e20
-#define MAX_DEPTH  12
-#define MAX_PRIMS  1024
+#define PI          3.14159265358979323846
+#define TAU         (2.0 * PI)
+#define PHI         1.618033988749895
+#define EPS         0.0001
+#define NUM_ORBS    8192u               // 8k — change to 16384u or 32768u if you want more
 
-// ───────────────────────────────────────────────
-// RNG
-// ───────────────────────────────────────────────
-uvec2 pcg2d(uvec2 v) {
-    v = v * 1664525u + 1013904223u;
-    v.x += v.y * 1664525u;
-    v.y += v.x * 1664525u;
-    v = v ^ (v>>16u);
-    v.x += v.y * 1664525u;
-    v.y += v.x * 1664525u;
-    v = v ^ (v>>16u);
-    return v;
+// Fast hash
+float hash11(float p) {
+    p = fract(p * 0.1031);
+    p *= p + 33.33;
+    return fract(2.0 * p * (p + 33.33));
 }
 
-float rand(inout uvec2 state) {
-    state = pcg2d(state);
-    return float(state.x) / float(0xFFFFFFFFu);
-}
-
-// Random point inside unit sphere
-vec3 randomInUnitSphere(inout uvec2 state) {
-    vec3 p;
-    do {
-        p = vec3(rand(state), rand(state), rand(state)) * 2.0 - 1.0;
-    } while (dot(p, p) >= 1.0);
-    return p;
-}
-
-// Random direction in hemisphere
-vec3 randomHemisphere(vec3 normal, inout uvec2 state) {
-    vec3 randDir = randomInUnitSphere(state);
-    if (dot(randDir, normal) < 0.0) randDir = -randDir;
-    return normalize(randDir);
-}
-
-// ───────────────────────────────────────────────
-// Sky with moving sun + moon + clouds
-// ───────────────────────────────────────────────
-vec3 getSky(vec3 dir) {
-    float dayProgress = mod(push.totalTime / 86400.0, 1.0);
-    float sunAngle = dayProgress * TWO_PI - PI * 0.5;
-
-    vec3 sunDir = normalize(vec3(
-        cos(sunAngle),
-        sin(sunAngle) * 0.8 + 0.2,
-        sin(sunAngle * 1.5) * 0.3
-    ));
-
-    float sunCos = dot(dir, sunDir);
-    vec3 moonDir = -sunDir;
-    float moonCos = dot(dir, moonDir);
-
-    vec3 daySky = mix(world.skyDayHorizon.rgb, world.skyDayTop.rgb, pow(max(dir.y, 0.0), 0.6));
-    vec3 nightSky = world.skyNight.rgb * 0.4;
-    vec3 sky = mix(nightSky, daySky, world.dayNightFactor);
-
-    float sunDisc  = smoothstep(0.9995, 1.0, sunCos) * world.sunDirAndIntensity.w * 30.0;
-    float sunGlow  = pow(max(sunCos, 0.0), 6.0) * world.sunDirAndIntensity.w * 4.0;
-    vec3 sunColor  = vec3(1.0, 0.96, 0.82) * (sunDisc + sunGlow);
-
-    float moonDisc = smoothstep(0.998, 1.0, moonCos) * (1.0 - world.dayNightFactor) * 8.0;
-    float moonGlow = pow(max(moonCos, 0.0), 12.0) * (1.0 - world.dayNightFactor) * 1.5;
-    vec3 moonColor = vec3(0.9, 0.95, 1.0) * (moonDisc + moonGlow);
-
-    // Clouds
-    if (world.cloudDensity > 0.0 && dir.y > 0.0) {
-        vec3 p = dir * (100.0 / dir.y) + vec3(push.totalTime * 0.05, 0.0, 0.0);
-        float n = sin(p.x * 0.1) * sin(p.y * 0.1) * sin(p.z * 0.1) + 0.5;
-        float clouds = smoothstep(0.5, 0.6, n) * world.cloudDensity * 0.8;
-        sky = mix(sky, vec3(1.0), clouds);
-    }
-
-    return sky + sunColor + moonColor;
-}
-
-// ───────────────────────────────────────────────
-// Ground: uniform green grass + rain + fog
-// ───────────────────────────────────────────────
-vec3 getGround(vec3 pos, vec3 viewDir) {
-    vec3 grass = vec3(0.18, 0.55, 0.12);  // clean, rich green
-
-    vec3 dayG   = world.groundColorDay.rgb;
-    vec3 nightG = world.groundColorNight.rgb;
-    vec3 ground = mix(nightG, grass * 1.3, world.dayNightFactor);
-
-    float rainAmt = smoothstep(0.3, 0.8, world.cloudDensity);
-    ground = mix(ground, ground * 0.65 + vec3(0.1,0.15,0.25)*0.4, rainAmt * 0.7);
-
-    float dist = length(pos.xz);
-    float fog = exp(-dist * world.fogDensity * 0.008);
-    return mix(getSky(viewDir), ground, fog);
-}
-
-// ───────────────────────────────────────────────
-// Screen-space rain streaks
-// ───────────────────────────────────────────────
-vec3 addRain(vec3 color, vec2 uv, float time) {
-    float speed = 15.0;
-    float dens  = 40.0;
-    float thick = 0.003;
-
-    vec2 ruv = uv * vec2(1.0, 4.0);
-    ruv.y += time * speed;
-    ruv.x += sin(ruv.y * 12.0) * 0.1;
-
-    float rain = fract(ruv.y * dens);
-    rain = smoothstep(0.0, thick, rain) * (1.0 - smoothstep(thick, thick*2.0, rain));
-
-    float mask = smoothstep(0.3, 0.7, 1.0 - uv.y);
-    float amt  = smoothstep(0.4, 0.9, world.cloudDensity);
-
-    return mix(color, color * 0.75 + vec3(0.6,0.7,0.9)*0.8, rain * mask * amt * 0.7);
-}
-
-// ───────────────────────────────────────────────
-// AABB intersection
-// ───────────────────────────────────────────────
-bool intersectAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tnear, out float tfar) {
-    vec3 inv = 1.0 / rd;
-    vec3 t0 = (bmin - ro) * inv;
-    vec3 t1 = (bmax - ro) * inv;
-    vec3 tmin = min(t0, t1);
-    vec3 tmax = max(t0, t1);
-    tnear = max(max(tmin.x, tmin.y), tmin.z);
-    tfar  = min(min(tmax.x, tmax.y), tmax.z);
-    return tnear <= tfar && tfar > 0.0;
-}
-
-// ───────────────────────────────────────────────
-// Sphere intersection
-// ───────────────────────────────────────────────
-bool intersectSphere(vec3 ro, vec3 rd, vec3 center, float r, out float t, out vec3 nrm) {
-    vec3 oc = ro - center;
-    float b = dot(oc, rd);
-    float c = dot(oc, oc) - r*r;
-    float h = b*b - c;
-    if (h < 0.0) return false;
-    h = sqrt(h);
-    t = -b - h;
-    if (t < EPS) t = -b + h;
-    if (t < EPS) return false;
-    vec3 p = ro + t * rd;
-    nrm = normalize(p - center);
-    return true;
-}
-
-// ───────────────────────────────────────────────
-// Scene intersection — ground + AABB objects
-// ───────────────────────────────────────────────
-bool intersectScene(vec3 ro, vec3 rd, out float t, out vec3 normal, out uint matId) {
-    t = INF;
-    matId = 0u;  // default ground material
-
-    // Ground plane (y=0)
-    if (rd.y < -EPS) {
-        float gt = -ro.y / rd.y;
-        if (gt > EPS && gt < t) {
-            t = gt;
-            normal = vec3(0,1,0);
-        }
-    }
-
-    // Check procedural objects
-    for (uint i = 0u; i < primitives.prims.length(); ++i) {
-        UniversalPrimitive p = primitives.prims[i];
-        mat4 invT = inverse(p.transform);
-        vec3 lro = (invT * vec4(ro, 1.0)).xyz;
-        vec3 lrd = (invT * vec4(rd, 0.0)).xyz;
-
-        float tn, tf;
-        if (!intersectAABB(lro, lrd, p.aabbMin.xyz, p.aabbMax.xyz, tn, tf)) continue;
-        if (tn >= t) continue;
-
-        float hitT = INF;
-        vec3 hitN = vec3(0);
-
-        // Sphere
-        if (p.type == 1u) {
-            vec3 center = (p.aabbMin.xyz + p.aabbMax.xyz) * 0.5;
-            float radius = length(p.aabbMax.xyz - center) * 0.5;
-            vec3 lnrm;
-            if (intersectSphere(lro, lrd, center, radius, hitT, lnrm)) {
-                hitN = lnrm;
-            }
-        }
-        // Add cylinder (type 2), cone (type 3), etc. later
-
-        if (hitT < INF && hitT < t) {
-            t = hitT;
-            normal = normalize((transpose(invT) * vec4(hitN, 0.0)).xyz);
-            matId = p.materialIndex;
-        }
-    }
-
-    return t < INF;
-}
-
-// ───────────────────────────────────────────────
-// Path tracing
-// ───────────────────────────────────────────────
-vec3 pathTrace(vec3 ro, vec3 rd, inout uvec2 rng) {
-    vec3 L = vec3(0.0);
-    vec3 throughput = vec3(1.0);
-
-    for (uint bounce = 0u; bounce < camera.maxDepth; ++bounce) {
-        float t;
-        vec3 nrm;
-        uint matIdx;
-        if (!intersectScene(ro, rd, t, nrm, matIdx)) {
-            L += throughput * getSky(rd);
-            break;
-        }
-
-        vec3 hit = ro + t * rd;
-        Material m = materials.mats[matIdx];
-
-        L += throughput * m.emissive.rgb;
-
-        // Simple diffuse bounce for now (extend with metallic/dielectric later)
-        vec3 nextDir = normalize(nrm + randomInUnitSphere(rng));
-        throughput *= m.albedo.rgb;
-
-        ro = hit + nrm * EPS;
-        rd = nextDir;
-    }
-
-    return L;
+// Soft glow
+float glow(float d, float str) {
+    return exp(-d * d * str);
 }
 
 void main() {
     ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 res = imageSize(hdrImage);
-    if (any(greaterThanEqual(pix, res))) return;
+    ivec2 dim = imageSize(hdrImage);
+    if (any(greaterThanEqual(pix, dim))) return;
 
-    uvec2 rng = uvec2(pix) ^ camera.randomSeed ^ world.frameSeed ^ uvec2(push.totalTime * 1000.0);
-
-    vec2 jitter = vec2(rand(rng), rand(rng)) - 0.5;
-    vec2 uv = (vec2(pix) + jitter) / vec2(res);
+    vec2 uv = (vec2(pix) + 0.5) / vec2(dim);
     uv = uv * 2.0 - 1.0;
-    uv.y = -uv.y;
+    uv.x *= float(dim.x) / float(dim.y);
 
-    vec4 clip = vec4(uv, 1.0, 1.0);
-    vec4 eye  = camera.projInverse * clip;
-    eye /= eye.w;
-    eye.z = -1.0;
-    vec3 rd = normalize((camera.viewInverse * eye).xyz);
-    vec3 ro = camera.cameraPos.xyz;
+    float t = pc.totalTime * 0.4;
 
-    vec3 color = pathTrace(ro, rd, rng);
+    vec3 col = vec3(0.004, 0.006, 0.012);  // deep void
 
-    vec3 rained = addRain(color, uv * 0.5 + 0.5, push.totalTime);
+    // Background — very faint nebula
+    vec2 nuv = uv * 3.0 + vec2(t * 0.02, sin(t * 0.05) * 0.01);
+    float neb = sin(nuv.x * 4.0 + t * 0.6) * 0.5 + 0.5;
+    neb *= smoothstep(0.0, -0.8, uv.y) * 0.08;
+    col += vec3(0.03, 0.08, 0.15) * neb;
 
-    vec4 prev = (camera.frameCount == 0u) ? vec4(0.0) : imageLoad(hdrImage, pix);
-    vec4 accum = (prev * float(camera.frameCount) + vec4(rained, 1.0)) / float(camera.frameCount + 1u);
+    // Thousands of glowing orbs
+    for (uint i = 0u; i < NUM_ORBS; ++i) {
+        float fi = float(i);
+        float seed = hash11(fi * 0.00013 + 0.001);
 
-    accum.rgb *= float(camera.exposure);
-    accum.rgb = accum.rgb / (accum.rgb + vec3(1.0));
+        // Base orbit radius & speed (larger i → farther & slower)
+        float radius = 0.5 + 4.5 * seed;
+        float speed  = 0.3 + 0.7 * (1.0 - seed);
 
-    imageStore(hdrImage, pix, accum);
+        // Position — 3D spherical orbit with slow precession
+        float theta = TAU * seed + t * speed;
+        float phi   = 0.4 * TAU * seed + t * 0.08 * (seed - 0.5);
+        vec3 orbPos = vec3(
+            radius * sin(phi) * cos(theta),
+            radius * cos(phi) * 0.6,
+            radius * sin(phi) * sin(theta)
+        );
+
+        // Individual size & pulse phase
+        float orbSize = 0.02 + 0.05 * seed;
+        float phase = t * (3.0 + 6.0 * seed) + fi * PHI;
+
+        // Distance to orb
+        float d = length(uv - orbPos.xy * 1.2) - orbSize;
+
+        // Color — smooth gradient across the swarm
+        vec3 orbCol = mix(vec3(0.1, 0.6, 1.0), vec3(0.9, 0.2, 0.5), seed);
+
+        // Intensity — pulse + distance falloff
+        float intensity = glow(d, 25.0) * (0.6 + 0.4 * sin(phase));
+
+        col += orbCol * intensity * 2.5;
+
+        // Very faint trail (motion blur feel)
+        vec2 trailUV = uv - orbPos.xy * 1.2;
+        float trail = glow(length(trailUV), 60.0) * 0.15 * (0.5 + 0.5 * sin(phase + 2.0));
+        col += orbCol * trail;
+    }
+
+    // Gentle vignette
+    float vig = 1.0 - length(uv) * 0.6;
+    col *= vig * 0.92 + 0.08;
+
+    // Final HDR — keep it punchy but not blinding
+    imageStore(hdrImage, pix, vec4(col * 1.8, 1.0));
 }

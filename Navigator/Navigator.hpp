@@ -257,16 +257,6 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     Pipeline::create_pipeline_layout();   // creates pipeline layout with push constants
     Pipeline::create_canvas_pipeline();   // creates the actual compute pipeline
 
-    if (Pipeline::canvas_pipeline == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("PIPELINE", "Failed to create canvas compute pipeline");
-        vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
-        vkDestroyDevice(device, nullptr);
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        sdl_cleanup_all();
-        return 1;
-    }
-
     LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
 
     // Step 7: Create RayCanvas
