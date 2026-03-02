@@ -1226,26 +1226,6 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
     return rtx().las_procedural_primitives.size() - 1;
 }
 
-// Default hybrid scene
-inline void createDefaultHybridScene() noexcept {
-    // Ground plane (land)
-    addAABBFromMesh(createPlane(5000.0f, 5000.0f), 0);
-
-    // Amouranth billboard
-    addAABBFromMesh(createBillboard(), 1, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, -10.0f)));
-
-    // Central sphere
-    addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(0,5,0), 2.0f, 2);
-
-    // Surrounding spheres
-    addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(4,5,4), 1.5f, 3);
-    addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(-4,5,-4), 1.5f, 4);
-
-    // Cylinder and cone
-    addProceduralAABB(GeometryType::ProceduralCylinder, glm::vec3(-15,10,-15), 2.0f, 6);
-    addProceduralAABB(GeometryType::ProceduralCone, glm::vec3(0,15,0), 5.0f, 7);
-}
-
 // Resize handler
 inline void onResize() noexcept {
     rtx().las_tlas_dirty = true;
@@ -1272,7 +1252,6 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     }
 
     if (!rtx().las_initialized) {
-        createDefaultHybridScene();
         rtx().las_initialized = true;
     }
 
