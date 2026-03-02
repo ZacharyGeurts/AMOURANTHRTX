@@ -1044,7 +1044,7 @@ struct Swapchain {
     }
 
     static bool shouldPresentNow() noexcept {
-        double now = 0.0; // Replace with actual time function if available
+        double now = TotalTime::get().seconds();
 
         if (lastPresentTime_s <= 0.0) {
             lastPresentTime_s = now;
