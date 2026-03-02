@@ -35,7 +35,6 @@
 #define VK_KHR_deferred_host_operations 1
 #define VK_KHR_buffer_device_address 1
 #define VK_EXT_descriptor_buffer 1
-#define VK_EXT_present_mode_fifo_latest_ready 1
 
 // Required Vulkan device extensions
 inline constexpr std::array<const char*, 8> requiredDeviceExtensions = {{
@@ -86,10 +85,10 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
 [[nodiscard]] inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName   = "AMOURANTH RTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 0, 91, 0);
-    appInfo.pEngineName        = "VALHALLA";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 0, 91, 0);
+    appInfo.pApplicationName   = "AMOURANTHRTX";
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 0, 93.1, 0);
+    appInfo.pEngineName        = "BETA";
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 0, 97.1, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlCount = 0;
@@ -107,17 +106,18 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     ci.ppEnabledExtensionNames = extensions.data();
 
     VkInstance inst = VK_NULL_HANDLE;
-    [[maybe_unused]] VkResult res = vkCreateInstance(&ci, nullptr, &inst);
+    vkCreateInstance(&ci, nullptr, &inst);
 
     return inst;
 }
 
 // Geometry type enum (used for procedural BLAS)
 enum class GeometryType : uint32_t {
-    ProceduralPlane     = 0,
-    ProceduralSphere    = 1,
-    ProceduralCylinder  = 2,
-    ProceduralCone      = 3,
+    ProceduralPlane      = 0,
+    ProceduralSphere     = 1,
+    ProceduralCylinder   = 2,
+    ProceduralCone       = 3,
+    ProceduralWaterPlane = 4,
 };
 
 // Universal primitive (for BLAS procedural geometry)
@@ -794,7 +794,6 @@ inline void init() noexcept {
 
     rtx().physical = selected;
 
-    // Check and enable shaderFloat64
     VkPhysicalDeviceFeatures features{};
     vkGetPhysicalDeviceFeatures(selected, &features);
 
@@ -1045,7 +1044,7 @@ struct Swapchain {
     }
 
     static bool shouldPresentNow() noexcept {
-        double now = 0.0; // Assume TotalTime::get().seconds();
+        double now = 0.0; // Replace with actual time function if available
 
         if (lastPresentTime_s <= 0.0) {
             lastPresentTime_s = now;
@@ -1075,7 +1074,7 @@ struct Swapchain {
     static VkResult tryPresent(VkQueue queue) noexcept {
         if (minimized || !swapchain.valid()) return VK_SUCCESS;
 
-        double now = 0.0; // Assume TotalTime::get().seconds();
+        double now = 0.0; // Replace with actual time function if available
 
         if (!shouldPresentNow()) return VK_EVENT_SET;
 
