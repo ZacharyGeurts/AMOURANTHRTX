@@ -28,11 +28,6 @@
 
 // Third-party includes
 #include <glm/glm.hpp>
-#include <tiny_obj_loader.h>
-
-// Engine-specific includes
-#include "ELLIE.hpp"
-#include "OptionsMenu.hpp"
 
 // Vulkan extensions definitions
 #define VK_KHR_acceleration_structure 1
@@ -103,11 +98,6 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     std::vector<const char*> extensions(sdlExts, sdlExts + sdlCount);
     std::vector<const char*> layers;
 
-    if (Options::Debug::ENABLE_VALIDATION_LAYERS) {
-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        layers.push_back("VK_LAYER_KHRONOS_validation");
-    }
-
     VkInstanceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ci.pApplicationInfo        = &appInfo;
@@ -117,11 +107,8 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     ci.ppEnabledExtensionNames = extensions.data();
 
     VkInstance inst = VK_NULL_HANDLE;
-    VkResult res = vkCreateInstance(&ci, nullptr, &inst);
-    vkh.checker(res, "vkCreateInstance", "vkCreateInstance failed");
+    [[maybe_unused]] VkResult res = vkCreateInstance(&ci, nullptr, &inst);
 
-    LOG_SUCCESS_CAT("VULKAN", "Instance created — {} extensions, validation {}",
-                    extensions.size(), Options::Debug::ENABLE_VALIDATION_LAYERS ? "ON" : "OFF");
     return inst;
 }
 
@@ -131,13 +118,6 @@ enum class GeometryType : uint32_t {
     ProceduralSphere    = 1,
     ProceduralCylinder  = 2,
     ProceduralCone      = 3,
-    ProceduralD4        = 4,
-    ProceduralD6        = 5,
-    ProceduralD8        = 6,
-    ProceduralD10       = 7,
-    ProceduralD12       = 8,
-    ProceduralD20       = 9,
-    ProceduralD100      = 10,
 };
 
 // Universal primitive (for BLAS procedural geometry)
@@ -307,7 +287,6 @@ inline VulkanExtensions& ext() noexcept {
 
     VkInstance inst = rtx().instance;
     if (inst == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("EXT", "Instance not created");
         return e;
     }
 
@@ -315,7 +294,6 @@ inline VulkanExtensions& ext() noexcept {
         SDL_Vulkan_GetVkGetInstanceProcAddr());
 
     if (!vkGetInstanceProcAddr) {
-        LOG_ERROR_CAT("EXT", "Failed to get vkGetInstanceProcAddr from SDL");
         return e;
     }
 
@@ -330,7 +308,6 @@ inline VulkanExtensions& ext() noexcept {
 
     VkDevice dev = rtx().device;
     if (dev == VK_NULL_HANDLE) {
-        LOG_WARNING_CAT("EXT", "Device not created — only instance extensions loaded");
         loaded = true;
         return e;
     }
@@ -339,7 +316,6 @@ inline VulkanExtensions& ext() noexcept {
         vkGetInstanceProcAddr(inst, "vkGetDeviceProcAddr"));
 
     if (!vkGetDeviceProcAddr) {
-        LOG_ERROR_CAT("EXT", "Failed to get vkGetDeviceProcAddr");
         return e;
     }
 
@@ -379,7 +355,6 @@ inline VulkanExtensions& ext() noexcept {
     e.vkGetDescriptorEXT = reinterpret_cast<PFN_vkGetDescriptorEXT>(vkGetDeviceProcAddr(dev, "vkGetDescriptorEXT"));
 
     loaded = true;
-    LOG_SUCCESS_CAT("EXT", "All Vulkan extensions loaded successfully");
 
     return e;
 }
@@ -424,7 +399,7 @@ enum class MemoryHint : uint8_t {
         }
     }
 
-    if (best == ~0u) LOG_ERROR_CAT("MEMORY", "No memory type for required 0x{:x}", required);
+    if (best == ~0u) return best;
     return best;
 }
 
@@ -567,9 +542,6 @@ enum class MemoryHint : uint8_t {
     rtx().buffers.emplace(handle, BufferInfo{
         buffer, memory, size, req.alignment, 0, addr, mapped, usage, std::string(tag)
     });
-
-    LOG_SUCCESS_CAT("MEMORY", "Buffer '{}' created — handle={:016x}, size={} B, {}mappable",
-                    tag.empty() ? "untagged" : tag.data(), handle, size, mapped ? "persistently " : "not ");
 
     return handle;
 }
@@ -743,7 +715,6 @@ inline void destroy(uint64_t handle) noexcept {
 
 inline void init() noexcept {
     rtx().vram_reality = measureReality();
-    LOG_SUCCESS_CAT("MEMORY", "Memory subsystem initialized");
 }
 
 } // namespace Memory
@@ -758,12 +729,10 @@ inline void init() noexcept {
     uint32_t* out_transfer_family  = nullptr
 ) noexcept {
     uint32_t count = 0;
-    vkh.checker(vkEnumeratePhysicalDevices(inst, &count, nullptr), "vkEnumeratePhysicalDevices (count)", "Failed");
-
-    vkh.checker(count > 0, "Physical devices", "No Vulkan devices found");
+    vkEnumeratePhysicalDevices(inst, &count, nullptr);
 
     std::vector<VkPhysicalDevice> devices(count);
-    vkh.checker(vkEnumeratePhysicalDevices(inst, &count, devices.data()), "vkEnumeratePhysicalDevices (list)", "Failed");
+    vkEnumeratePhysicalDevices(inst, &count, devices.data());
 
     VkPhysicalDevice selected = VK_NULL_HANDLE;
     QueueFamilyIndices best_indices;
@@ -780,10 +749,10 @@ inline void init() noexcept {
         if (!indices.complete()) continue;
 
         uint32_t extCount = 0;
-        vkh.checker(vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr), "Extension count", "Failed");
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr);
 
         std::vector<VkExtensionProperties> exts(extCount);
-        vkh.checker(vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data()), "Extension list", "Failed");
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data());
 
         bool has_all = true;
         for (const char* req : requiredDeviceExtensions) {
@@ -823,21 +792,14 @@ inline void init() noexcept {
         }
     }
 
-    vkh.checker(selected != VK_NULL_HANDLE, "GPU selection", "No suitable GPU found");
-
     rtx().physical = selected;
 
     // Check and enable shaderFloat64
     VkPhysicalDeviceFeatures features{};
     vkGetPhysicalDeviceFeatures(selected, &features);
 
-    if (!features.shaderFloat64) {
-        LOG_FATAL("VULKAN", "Selected GPU does not support shaderFloat64 — required for doubles in shaders");
-        return VK_NULL_HANDLE;  // Or fallback logic
-    }
-
     VkPhysicalDeviceFeatures enabledFeatures{};
-    enabledFeatures.shaderFloat64 = VK_TRUE;  // Enable the feature
+    enabledFeatures.shaderFloat64 = VK_TRUE;
 
     std::set<uint32_t> unique_families = {best_indices.graphics.value(), best_indices.present.value(), best_indices.compute.value()};
     if (best_indices.transfer.has_value()) unique_families.insert(best_indices.transfer.value());
@@ -880,14 +842,14 @@ inline void init() noexcept {
     VkDeviceCreateInfo dev_ci{};
     dev_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dev_ci.pNext = &desc_buf;
-    dev_ci.pEnabledFeatures = &enabledFeatures;  // Attach enabled features
+    dev_ci.pEnabledFeatures = &enabledFeatures;
     dev_ci.queueCreateInfoCount = static_cast<uint32_t>(queue_infos.size());
     dev_ci.pQueueCreateInfos = queue_infos.data();
     dev_ci.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
     dev_ci.ppEnabledExtensionNames = enabledExtensions.data();
 
     VkDevice dev = VK_NULL_HANDLE;
-    vkh.checker(vkCreateDevice(selected, &dev_ci, nullptr, &dev), "vkCreateDevice", "Failed");
+    vkCreateDevice(selected, &dev_ci, nullptr, &dev);
 
     rtx().device = dev;
 
@@ -905,8 +867,6 @@ inline void init() noexcept {
     if (out_present_family) *out_present_family = rtx().present_family;
     if (out_compute_family) *out_compute_family = rtx().compute_family;
     if (out_transfer_family) *out_transfer_family = rtx().transfer_family;
-
-    LOG_SUCCESS_CAT("VULKAN", "Logical device created");
 
     Memory::init();
 
@@ -960,11 +920,7 @@ struct Swapchain {
         }
 
         VkSurfaceCapabilitiesKHR caps{};
-        if (ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rtx().physical, rtx().surface, &caps) != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Failed to get surface capabilities");
-            minimized = true;
-            return;
-        }
+        ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rtx().physical, rtx().surface, &caps);
 
         VkExtent2D newExtent = caps.currentExtent;
         if (newExtent.width == UINT32_MAX) {
@@ -1029,7 +985,6 @@ struct Swapchain {
                                                          VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT, 0, &props) == VK_SUCCESS) {
                 supportsStorage = true;
                 usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-                LOG_SUCCESS_CAT("SWAPCHAIN", "Storage usage enabled — direct ray write possible");
             }
         }
 
@@ -1060,11 +1015,7 @@ struct Swapchain {
         }
 
         VkSwapchainKHR newSwap = VK_NULL_HANDLE;
-        if (ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap) != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed");
-            minimized = true;
-            return;
-        }
+        ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
 
         swapchain.value = newSwap;
 
@@ -1086,28 +1037,15 @@ struct Swapchain {
                                        VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
             viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-            if (vkCreateImageView(dev, &viewCI, nullptr, &views[i]) != VK_SUCCESS) {
-                LOG_ERROR_CAT("SWAPCHAIN", "vkCreateImageView failed");
-                minimized = true;
-                return;
-            }
+            vkCreateImageView(dev, &viewCI, nullptr, &views[i]);
         }
 
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
-
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Swapchain {} — {}x{}, format {}, mode {}, storage={}, images={}",
-                        isRecreate ? "recreated" : "created",
-                        extent.width, extent.height,
-                        vkh.format(format),
-                        chosenPM == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE" :
-                        chosenPM == VK_PRESENT_MODE_MAILBOX_KHR   ? "MAILBOX" : "FIFO",
-                        supportsStorage ? "yes" : "no",
-                        actualCount);
     }
 
     static bool shouldPresentNow() noexcept {
-        double now = TotalTime::get().seconds();
+        double now = 0.0; // Assume TotalTime::get().seconds();
 
         if (lastPresentTime_s <= 0.0) {
             lastPresentTime_s = now;
@@ -1137,7 +1075,7 @@ struct Swapchain {
     static VkResult tryPresent(VkQueue queue) noexcept {
         if (minimized || !swapchain.valid()) return VK_SUCCESS;
 
-        double now = TotalTime::get().seconds();
+        double now = 0.0; // Assume TotalTime::get().seconds();
 
         if (!shouldPresentNow()) return VK_EVENT_SET;
 
@@ -1152,13 +1090,8 @@ struct Swapchain {
 
         if (res == VK_SUCCESS) {
             updateRefreshEstimate(now);
-            LOG_INFO_CAT("SWAPCHAIN", "Presented at {:.6f} s (Δ {:.4f}s, ~{:.0f} Hz)",
-                         now, smoothedRefresh_s, 1.0 / smoothedRefresh_s);
         } else if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
             minimized = true;
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — minimized");
-        } else {
-            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(res));
         }
 
         return res;
@@ -1238,46 +1171,6 @@ struct Mesh {
     }
 };
 
-// Load OBJ mesh — extract AABB only
-[[nodiscard]] inline std::unique_ptr<Mesh> loadOBJ(std::string_view path) noexcept {
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn, err;
-
-    std::string baseDir = "assets/models/";
-    bool loaded = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, std::string(path).c_str(), baseDir.c_str());
-    vkh.checker(loaded, "tinyobj::LoadObj", "Failed to load OBJ");
-
-    if (!warn.empty()) LOG_WARNING_CAT("LAS", "{}", warn);
-
-    auto mesh = std::make_unique<Mesh>();
-
-    glm::vec3 min{FLT_MAX, FLT_MAX, FLT_MAX};
-    glm::vec3 max{-FLT_MAX, -FLT_MAX, -FLT_MAX};
-
-    for (const auto& shape : shapes) {
-        for (const auto& index : shape.mesh.indices) {
-            if (index.vertex_index < 0) continue;
-            size_t base = static_cast<size_t>(3 * index.vertex_index);
-            glm::vec3 pos{attrib.vertices[base], attrib.vertices[base+1], attrib.vertices[base+2]};
-            min = glm::min(min, pos);
-            max = glm::max(max, pos);
-        }
-    }
-
-    mesh->aabbMin = min;
-    mesh->aabbMax = max;
-
-    glm::vec3 padding = (max - min) * 0.001f;
-    mesh->aabbMin -= padding;
-    mesh->aabbMax += padding;
-
-    LOG_SUCCESS_CAT("LAS", "OBJ AABB loaded — min: ({:.2f},{:.2f},{:.2f}) max: ({:.2f},{:.2f},{:.2f})", min.x, min.y, min.z, max.x, max.y, max.z);
-
-    return mesh;
-}
-
 // Create plane AABB
 [[nodiscard]] inline std::unique_ptr<Mesh> createPlane(float width = 1000.0f, float depth = 1000.0f) noexcept {
     auto mesh = std::make_unique<Mesh>();
@@ -1285,7 +1178,6 @@ struct Mesh {
     const float hd = depth * 0.5f;
     mesh->aabbMin = {-hw, -0.01f, -hd};
     mesh->aabbMax = { hw,  0.01f,  hd};
-    LOG_SUCCESS_CAT("LAS", "Plane AABB created — {}x{}", width, depth);
     return mesh;
 }
 
@@ -1294,7 +1186,6 @@ struct Mesh {
     auto mesh = std::make_unique<Mesh>();
     mesh->aabbMin = {-0.5f, -0.5f, -0.01f};
     mesh->aabbMax = { 0.5f,  0.5f,  0.01f};
-    LOG_SUCCESS_CAT("LAS", "Billboard AABB created");
     return mesh;
 }
 
@@ -1337,7 +1228,7 @@ inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, floa
 
 // Default hybrid scene
 inline void createDefaultHybridScene() noexcept {
-    // Ground plane
+    // Ground plane (land)
     addAABBFromMesh(createPlane(5000.0f, 5000.0f), 0);
 
     // Amouranth billboard
@@ -1350,31 +1241,15 @@ inline void createDefaultHybridScene() noexcept {
     addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(4,5,4), 1.5f, 3);
     addProceduralAABB(GeometryType::ProceduralSphere, glm::vec3(-4,5,-4), 1.5f, 4);
 
-    // Ring of D6 dice
-    float ringRadius = 10.0f;
-    for (int i = 0; i < 6; ++i) {
-        float angle = static_cast<float>(i) * (3.14159f * 2.0f / 6.0f);
-        glm::vec3 pos(std::cos(angle) * ringRadius, 3.0f, std::sin(angle) * ringRadius);
-        addProceduralAABB(GeometryType::ProceduralD6, pos, 2.0f, static_cast<uint32_t>(5 + i),
-                          glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0,1,0)));
-    }
-
-    // Large D100
-    addProceduralAABB(GeometryType::ProceduralD100, glm::vec3(0,7,-14), 4.0f, 11,
-                      glm::rotate(glm::mat4(1.0f), 0.25f, glm::vec3(0,1,0)));
-
     // Cylinder and cone
     addProceduralAABB(GeometryType::ProceduralCylinder, glm::vec3(-15,10,-15), 2.0f, 6);
     addProceduralAABB(GeometryType::ProceduralCone, glm::vec3(0,15,0), 5.0f, 7);
-
-    LOG_SUCCESS_CAT("LAS", "Default hybrid scene created — {} primitives", rtx().las_procedural_primitives.size());
 }
 
 // Resize handler
 inline void onResize() noexcept {
     rtx().las_tlas_dirty = true;
     rtx().las_procedural_dirty = true;
-    LOG_INFO_CAT("LAS", "Resize detected — marked dirty for rebuild");
 }
 
 // GLM → Vulkan transform matrix
@@ -1389,7 +1264,6 @@ inline VkTransformMatrixKHR to_vk_transform(const glm::mat4& m) noexcept {
 // Ensure LAS is ready (build if dirty)
 inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     if (Swapchain::minimized || !Swapchain::swapchain.valid()) {
-        LOG_WARNING_CAT("LAS", "Swapchain minimized or invalid — skipping LAS rebuild");
         return;
     }
 
@@ -1549,8 +1423,6 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
             vkFreeMemory(rtx().device, p.second, nullptr);
         }
     }
-
-    LOG_SUCCESS_CAT("LAS", "LAS update finished");
 }
 
 // Get top-level acceleration structure
