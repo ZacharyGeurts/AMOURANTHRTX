@@ -6,6 +6,13 @@
 // AMOURANTH FOREVER 💖
 // =============================================================================
 
+// Vulkan 1.4 (2026) — ray tracing is stable, no beta flag needed
+#define VK_KHR_acceleration_structure 1
+#define VK_KHR_ray_tracing_pipeline 1
+#define VK_KHR_deferred_host_operations 1
+#define VK_KHR_buffer_device_address 1
+#define VK_EXT_descriptor_buffer 1
+
 // Core includes
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
@@ -15,8 +22,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cfloat>
 #include <format>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -25,18 +34,13 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <cstring>
+#include <limits>
 
 // Third-party includes
 #include <glm/glm.hpp>
 
-// Vulkan extensions definitions
-#define VK_KHR_acceleration_structure 1
-#define VK_KHR_ray_tracing_pipeline 1
-#define VK_KHR_deferred_host_operations 1
-#define VK_KHR_buffer_device_address 1
-#define VK_EXT_descriptor_buffer 1
-
-// Required Vulkan device extensions
+// Required Vulkan device extensions (2026 stable)
 inline constexpr std::array<const char*, 8> requiredDeviceExtensions = {{
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -86,10 +90,10 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 0, 93.1, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 0, 93, 1);
     appInfo.pEngineName        = "BETA";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 0, 97.1, 0);
-    appInfo.apiVersion         = VK_API_VERSION_1_3;
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 0, 97, 1);
+    appInfo.apiVersion         = VK_API_VERSION_1_4;  // 2026 baseline
 
     uint32_t sdlCount = 0;
     const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
@@ -122,9 +126,9 @@ enum class GeometryType : uint32_t {
 
 // Universal primitive (for BLAS procedural geometry)
 struct UniversalPrimitive {
-    glm::vec4 aabbMin;
-    glm::vec4 aabbMax;
-    glm::mat4 transform;
+    glm::vec4 aabbMin;  // Local AABB min
+    glm::vec4 aabbMax;  // Local AABB max
+    glm::mat4 transform;  // Local to world transform
     uint32_t  type          = 0;   // GeometryType
     uint32_t  materialIndex = 0;
     float     destruction   = 0.0f;
@@ -213,16 +217,15 @@ struct RTX {
     uint32_t miss_group_count = 0;
     uint32_t hit_group_count = 0;
 
-    uint64_t las_instance_buffer = 0;
+    uint64_t las_aabb_buffer = 0;
     uint64_t las_universal_primitives_buffer = 0;
-    VkAccelerationStructureKHR las_tlas = VK_NULL_HANDLE;
-    uint64_t las_tlas_storage = 0;
+    VkAccelerationStructureKHR las_as = VK_NULL_HANDLE;
+    uint64_t las_as_storage = 0;
 
     std::vector<UniversalPrimitive> las_procedural_primitives;
 
     bool las_initialized = false;
-    bool las_tlas_dirty = true;
-    bool las_procedural_dirty = true;
+    bool las_dirty = true;
 
     std::unordered_map<uint64_t, BufferInfo> buffers;
     uint64_t next_buffer_handle = 0x00000001ULL;
@@ -286,25 +289,18 @@ inline VulkanExtensions& ext() noexcept {
     if (loaded) return e;
 
     VkInstance inst = rtx().instance;
-    if (inst == VK_NULL_HANDLE) {
-        return e;
-    }
+    if (inst == VK_NULL_HANDLE) return e;
 
     PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         SDL_Vulkan_GetVkGetInstanceProcAddr());
 
-    if (!vkGetInstanceProcAddr) {
-        return e;
-    }
+    if (!vkGetInstanceProcAddr) return e;
 
-    e.vkGetPhysicalDeviceSurfaceSupportKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(
-        vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceSupportKHR"));
-    e.vkGetPhysicalDeviceSurfaceFormatsKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>(
-        vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
-    e.vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>(
-        vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfacePresentModesKHR"));
-    e.vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(
-        vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
+    // Instance functions
+    e.vkGetPhysicalDeviceSurfaceSupportKHR      = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceSupportKHR"));
+    e.vkGetPhysicalDeviceSurfaceFormatsKHR      = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>(vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
+    e.vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>(vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfacePresentModesKHR"));
+    e.vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(vkGetInstanceProcAddr(inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
 
     VkDevice dev = rtx().device;
     if (dev == VK_NULL_HANDLE) {
@@ -315,10 +311,9 @@ inline VulkanExtensions& ext() noexcept {
     PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
         vkGetInstanceProcAddr(inst, "vkGetDeviceProcAddr"));
 
-    if (!vkGetDeviceProcAddr) {
-        return e;
-    }
+    if (!vkGetDeviceProcAddr) return e;
 
+    // Device functions (same as before)
     e.vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(vkGetDeviceProcAddr(dev, "vkCreateSwapchainKHR"));
     e.vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(vkGetDeviceProcAddr(dev, "vkDestroySwapchainKHR"));
     e.vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(vkGetDeviceProcAddr(dev, "vkGetSwapchainImagesKHR"));
@@ -355,53 +350,44 @@ inline VulkanExtensions& ext() noexcept {
     e.vkGetDescriptorEXT = reinterpret_cast<PFN_vkGetDescriptorEXT>(vkGetDeviceProcAddr(dev, "vkGetDescriptorEXT"));
 
     loaded = true;
-
     return e;
 }
 
-// Memory namespace — unified buffer creation with auto-detection
+// Memory namespace (unchanged, full version)
 namespace Memory {
+    inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;
+    inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 1ULL << 20;
 
-inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;
-inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 1ULL << 20; // 1 MiB
+    enum class MemoryHint : uint8_t { Auto = 0, DeviceLocalOnly = 1, HostVisible = 2, DescriptorBuffer = 3 };
 
-enum class MemoryHint : uint8_t {
-    Auto              = 0,
-    DeviceLocalOnly   = 1,
-    HostVisible       = 2,
-    DescriptorBuffer  = 3
-};
-
-[[nodiscard]] constexpr VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
-    return ((value + alignment - 1) / alignment) * alignment;
-}
-
-[[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags required, VkMemoryPropertyFlags preferred = 0) noexcept {
-    VkPhysicalDevice phys = rtx().physical;
-    VkPhysicalDeviceMemoryProperties memProps{};
-    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
-
-    uint32_t best = ~0u;
-    int bestScore = -1;
-
-    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-        if ((typeFilter & (1u << i)) == 0) continue;
-        VkMemoryPropertyFlags flags = memProps.memoryTypes[i].propertyFlags;
-        if ((flags & required) != required) continue;
-
-        int score = 0;
-        if (flags & preferred) score += 10;
-        if (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) score += 5;
-
-        if (score > bestScore) {
-            bestScore = score;
-            best = i;
-        }
+    [[nodiscard]] constexpr VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
+        return ((value + alignment - 1) / alignment) * alignment;
     }
 
-    if (best == ~0u) return best;
-    return best;
-}
+    [[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags required, VkMemoryPropertyFlags preferred = 0) noexcept {
+        VkPhysicalDevice phys = rtx().physical;
+        VkPhysicalDeviceMemoryProperties memProps{};
+        vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
+
+        uint32_t best = ~0u;
+        int bestScore = -1;
+
+        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+            if ((typeFilter & (1u << i)) == 0) continue;
+            VkMemoryPropertyFlags flags = memProps.memoryTypes[i].propertyFlags;
+            if ((flags & required) != required) continue;
+
+            int score = 0;
+            if (flags & preferred) score += 10;
+            if (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) score += 5;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = i;
+            }
+        }
+        return best;
+    }
 
 [[nodiscard]] inline VRAMReality measureReality() noexcept {
     static VRAMReality reality{};
@@ -758,7 +744,7 @@ inline void init() noexcept {
         for (const char* req : requiredDeviceExtensions) {
             bool found = false;
             for (const auto& avail : exts) {
-                if (strcmp(avail.extensionName, req) == 0) {
+                if (std::strcmp(avail.extensionName, req) == 0) {
                     found = true;
                     break;
                 }
@@ -1044,7 +1030,7 @@ struct Swapchain {
     }
 
     static bool shouldPresentNow() noexcept {
-        double now = TotalTime::get().seconds();
+        double now = static_cast<double>(SDL_GetTicks()) / 1000.0;
 
         if (lastPresentTime_s <= 0.0) {
             lastPresentTime_s = now;
@@ -1074,7 +1060,7 @@ struct Swapchain {
     static VkResult tryPresent(VkQueue queue) noexcept {
         if (minimized || !swapchain.valid()) return VK_SUCCESS;
 
-        double now = 0.0; // Replace with actual time function if available
+        double now = static_cast<double>(SDL_GetTicks()) / 1000.0;
 
         if (!shouldPresentNow()) return VK_EVENT_SET;
 
@@ -1138,97 +1124,9 @@ struct Swapchain {
     static double getLastPresentTime() noexcept { return lastPresentTime_s; }
 };
 
-// Vertex structure
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 normal;
-    glm::vec2 uv;
-};
-
-// Mesh structure
-struct Mesh {
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-
-    glm::vec3 aabbMin{FLT_MAX, FLT_MAX, FLT_MAX};
-    glm::vec3 aabbMax{-FLT_MAX, -FLT_MAX, -FLT_MAX};
-
-    void computeAABB() noexcept {
-        if (vertices.empty()) return;
-
-        aabbMin = vertices[0].pos;
-        aabbMax = vertices[0].pos;
-
-        for (const auto& v : vertices) {
-            aabbMin = glm::min(aabbMin, v.pos);
-            aabbMax = glm::max(aabbMax, v.pos);
-        }
-
-        glm::vec3 padding = (aabbMax - aabbMin) * 0.001f;
-        aabbMin -= padding;
-        aabbMax += padding;
-    }
-};
-
-// Create plane AABB
-[[nodiscard]] inline std::unique_ptr<Mesh> createPlane(float width = 1000.0f, float depth = 1000.0f) noexcept {
-    auto mesh = std::make_unique<Mesh>();
-    const float hw = width * 0.5f;
-    const float hd = depth * 0.5f;
-    mesh->aabbMin = {-hw, -0.01f, -hd};
-    mesh->aabbMax = { hw,  0.01f,  hd};
-    return mesh;
-}
-
-// Create billboard AABB
-[[nodiscard]] inline std::unique_ptr<Mesh> createBillboard() noexcept {
-    auto mesh = std::make_unique<Mesh>();
-    mesh->aabbMin = {-0.5f, -0.5f, -0.01f};
-    mesh->aabbMax = { 0.5f,  0.5f,  0.01f};
-    return mesh;
-}
-
-// Add AABB from mesh
-inline size_t addAABBFromMesh(std::unique_ptr<Mesh> mesh, uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f)) noexcept {
-    if (!mesh) return rtx().las_procedural_primitives.size();
-
-    mesh->computeAABB();
-
-    UniversalPrimitive p{};
-    p.aabbMin = glm::vec4(mesh->aabbMin, 0.0f);
-    p.aabbMax = glm::vec4(mesh->aabbMax, 0.0f);
-    p.transform = transform;
-    p.type = 0;
-    p.materialIndex = materialIndex;
-
-    rtx().las_procedural_primitives.push_back(p);
-    rtx().las_procedural_dirty = true;
-    rtx().las_tlas_dirty = true;
-
-    return rtx().las_procedural_primitives.size() - 1;
-}
-
-// Add procedural AABB
-inline size_t addProceduralAABB(GeometryType type, const glm::vec3& center, float scale,
-                                uint32_t materialIndex = 0, const glm::mat4& transform = glm::mat4(1.0f)) noexcept {
-    UniversalPrimitive p{};
-    p.aabbMin = glm::vec4(center - glm::vec3(scale), 0.0f);
-    p.aabbMax = glm::vec4(center + glm::vec3(scale), 0.0f);
-    p.transform = transform;
-    p.type = static_cast<uint32_t>(type);
-    p.materialIndex = materialIndex;
-
-    rtx().las_procedural_primitives.push_back(p);
-    rtx().las_procedural_dirty = true;
-    rtx().las_tlas_dirty = true;
-
-    return rtx().las_procedural_primitives.size() - 1;
-}
-
 // Resize handler
 inline void onResize() noexcept {
-    rtx().las_tlas_dirty = true;
-    rtx().las_procedural_dirty = true;
+    rtx().las_dirty = true;
 }
 
 // GLM → Vulkan transform matrix
@@ -1240,13 +1138,13 @@ inline VkTransformMatrixKHR to_vk_transform(const glm::mat4& m) noexcept {
     return vkMat;
 }
 
-// Ensure LAS is ready (build if dirty)
+// Ensure LAS is ready (build if dirty) — using correct Vulkan 1.4 struct: VkAabbPositionsKHR
 inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
     if (Swapchain::minimized || !Swapchain::swapchain.valid()) {
         return;
     }
 
-    if (rtx().las_initialized && !rtx().las_tlas_dirty && !rtx().las_procedural_dirty && rtx().las_tlas != VK_NULL_HANDLE) {
+    if (rtx().las_initialized && !rtx().las_dirty && rtx().las_as != VK_NULL_HANDLE) {
         return;
     }
 
@@ -1279,109 +1177,132 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         if (stagingBuf != VK_NULL_HANDLE) pendingStaging.emplace_back(stagingBuf, stagingMem);
     };
 
-    if (rtx().las_procedural_dirty) {
-        VkDeviceSize primSize = rtx().las_procedural_primitives.size() * sizeof(UniversalPrimitive);
-        if (primSize == 0) primSize = 16;
+    VkDeviceSize primCount = rtx().las_procedural_primitives.size();
+    VkDeviceSize primSize = primCount * sizeof(UniversalPrimitive);
+    if (primSize == 0) primSize = 16;
 
-        if (rtx().las_universal_primitives_buffer == 0) {
-            rtx().las_universal_primitives_buffer = Memory::createBuffer(primSize,
-                                                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                                          "LAS_Primitives");
-        }
-
-        safeUpload(rtx().las_universal_primitives_buffer,
-                   rtx().las_procedural_primitives.data(),
-                   primSize);
-        rtx().las_procedural_dirty = false;
+    if (rtx().las_universal_primitives_buffer == 0) {
+        rtx().las_universal_primitives_buffer = Memory::createBuffer(primSize,
+                                                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                      "LAS_Primitives");
     }
 
-    if (rtx().las_tlas_dirty) {
-        VkDeviceSize instanceCount = rtx().las_procedural_primitives.size();
-        VkDeviceSize instanceSize = instanceCount * sizeof(VkAccelerationStructureInstanceKHR);
-        if (instanceSize == 0) instanceSize = 64;
+    safeUpload(rtx().las_universal_primitives_buffer,
+               rtx().las_procedural_primitives.data(),
+               primSize);
 
-        if (rtx().las_instance_buffer == 0) {
-            rtx().las_instance_buffer = Memory::createBuffer(instanceSize,
-                                                             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                                                             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                                             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                             "LAS_Instances");
+    // Compute world AABBs — using correct struct VkAabbPositionsKHR
+    std::vector<VkAabbPositionsKHR> aabbs(primCount);
+    for (size_t i = 0; i < primCount; ++i) {
+        const auto& prim = rtx().las_procedural_primitives[i];
+        glm::vec3 local_min = glm::vec3(prim.aabbMin);
+        glm::vec3 local_max = glm::vec3(prim.aabbMax);
+
+        glm::vec3 corners[8] = {
+            {local_min.x, local_min.y, local_min.z},
+            {local_min.x, local_min.y, local_max.z},
+            {local_min.x, local_max.y, local_min.z},
+            {local_min.x, local_max.y, local_max.z},
+            {local_max.x, local_min.y, local_min.z},
+            {local_max.x, local_min.y, local_max.z},
+            {local_max.x, local_max.y, local_min.z},
+            {local_max.x, local_max.y, local_max.z}
+        };
+
+        glm::vec3 world_min(std::numeric_limits<float>::max());
+        glm::vec3 world_max(std::numeric_limits<float>::lowest());
+
+        for (const auto& corner : corners) {
+            glm::vec4 transformed = prim.transform * glm::vec4(corner, 1.0f);
+            glm::vec3 pos = glm::vec3(transformed) / transformed.w;
+            world_min = glm::min(world_min, pos);
+            world_max = glm::max(world_max, pos);
         }
 
-        std::vector<VkAccelerationStructureInstanceKHR> instances(instanceCount);
-        for (size_t i = 0; i < instanceCount; ++i) {
-            const auto& prim = rtx().las_procedural_primitives[i];
-            instances[i].transform = to_vk_transform(prim.transform);
-            instances[i].instanceCustomIndex = static_cast<uint32_t>(i) & 0xFFFFFFu; // 24-bit limit
-            instances[i].mask = 0xFF;
-            instances[i].instanceShaderBindingTableRecordOffset = 0;
-            instances[i].flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-            instances[i].accelerationStructureReference = 0;
-        }
-
-        safeUpload(rtx().las_instance_buffer, instances.data(), instanceSize);
-
-        VkAccelerationStructureGeometryKHR geom{};
-        geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-        geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-        geom.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-        geom.geometry.instances.arrayOfPointers = VK_FALSE;
-        geom.geometry.instances.data.deviceAddress = Memory::getDeviceAddress(rtx().las_instance_buffer);
-
-        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
-        buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-        buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
-        buildInfo.geometryCount = 1;
-        buildInfo.pGeometries = &geom;
-
-        VkAccelerationStructureBuildRangeInfoKHR range{};
-        range.primitiveCount = static_cast<uint32_t>(instanceCount);
-        const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
-
-        VkAccelerationStructureBuildSizesInfoKHR sizes{};
-        sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
-
-        ext().vkGetAccelerationStructureBuildSizesKHR(rtx().device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                                                      &buildInfo, &range.primitiveCount, &sizes);
-
-        VkDeviceAddress scratchAddr = Memory::allocateScratch(sizes.buildScratchSize);
-        buildInfo.scratchData.deviceAddress = scratchAddr;
-
-        if (rtx().las_tlas == VK_NULL_HANDLE) {
-            rtx().las_tlas_storage = Memory::createBuffer(sizes.accelerationStructureSize,
-                                                          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                                                          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                                          "LAS_TLAS");
-
-            auto* storage = Memory::get(rtx().las_tlas_storage);
-            VkAccelerationStructureCreateInfoKHR createInfo{};
-            createInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-            createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-            createInfo.buffer = storage->buffer;
-            createInfo.size = sizes.accelerationStructureSize;
-
-            ext().vkCreateAccelerationStructureKHR(rtx().device, &createInfo, nullptr, &rtx().las_tlas);
-        }
-
-        buildInfo.dstAccelerationStructure = rtx().las_tlas;
-
-        ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &buildInfo, &pRange);
-
-        VkMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-
-        vkCmdPipelineBarrier(localCmd,
-                             VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                             VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                             0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-        rtx().las_tlas_dirty = false;
+        aabbs[i].minX = world_min.x;
+        aabbs[i].minY = world_min.y;
+        aabbs[i].minZ = world_min.z;
+        aabbs[i].maxX = world_max.x;
+        aabbs[i].maxY = world_max.y;
+        aabbs[i].maxZ = world_max.z;
     }
+
+    VkDeviceSize aabbSize = primCount * sizeof(VkAabbPositionsKHR);
+    if (aabbSize == 0) aabbSize = 16;
+
+    if (rtx().las_aabb_buffer == 0) {
+        rtx().las_aabb_buffer = Memory::createBuffer(aabbSize,
+                                                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                      "LAS_AABBs");
+    }
+
+    safeUpload(rtx().las_aabb_buffer, aabbs.data(), aabbSize);
+
+    VkAccelerationStructureGeometryKHR geom{};
+    geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+    geom.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+    geom.geometry.aabbs.data.deviceAddress = Memory::getDeviceAddress(rtx().las_aabb_buffer);
+    geom.geometry.aabbs.stride = sizeof(VkAabbPositionsKHR);  // ← FIXED: correct struct name
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+    buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &geom;
+
+    VkAccelerationStructureBuildRangeInfoKHR range{};
+    range.primitiveCount = static_cast<uint32_t>(primCount);
+    range.primitiveOffset = 0;
+    range.firstVertex = 0;
+    range.transformOffset = 0;
+    const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
+
+    VkAccelerationStructureBuildSizesInfoKHR sizes{};
+    sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+    ext().vkGetAccelerationStructureBuildSizesKHR(dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                                                  &buildInfo, &range.primitiveCount, &sizes);
+
+    VkDeviceAddress scratchAddr = Memory::allocateScratch(sizes.buildScratchSize);
+    buildInfo.scratchData.deviceAddress = scratchAddr;
+
+    if (rtx().las_as == VK_NULL_HANDLE) {
+        rtx().las_as_storage = Memory::createBuffer(sizes.accelerationStructureSize,
+                                                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                                    "LAS_AS");
+
+        auto* storage = Memory::get(rtx().las_as_storage);
+        VkAccelerationStructureCreateInfoKHR createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        createInfo.buffer = storage->buffer;
+        createInfo.size = sizes.accelerationStructureSize;
+
+        ext().vkCreateAccelerationStructureKHR(dev, &createInfo, nullptr, &rtx().las_as);
+    }
+
+    buildInfo.dstAccelerationStructure = rtx().las_as;
+
+    ext().vkCmdBuildAccelerationStructuresKHR(localCmd, 1, &buildInfo, &pRange);
+
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+
+    vkCmdPipelineBarrier(localCmd,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    rtx().las_dirty = false;
 
     if (ownsCmd) {
         vkEndCommandBuffer(localCmd);
@@ -1394,17 +1315,49 @@ inline void ensureReady(VkCommandBuffer cmd = VK_NULL_HANDLE) noexcept {
         vkQueueSubmit(rtx().graphics_queue, 1, &submit, VK_NULL_HANDLE);
         vkQueueWaitIdle(rtx().graphics_queue);
 
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &localCmd);
+        vkFreeCommandBuffers(dev, rtx().transient_pool, 1, &localCmd);
 
         for (auto& p : pendingStaging) {
-            vkDestroyBuffer(rtx().device, p.first, nullptr);
-            vkFreeMemory(rtx().device, p.second, nullptr);
+            vkDestroyBuffer(dev, p.first, nullptr);
+            vkFreeMemory(dev, p.second, nullptr);
         }
     }
 }
 
-// Get top-level acceleration structure
-[[nodiscard]] inline VkAccelerationStructureKHR getTLAS() noexcept {
+// Get acceleration structure
+[[nodiscard]] inline VkAccelerationStructureKHR getAS() noexcept {
     ensureReady();
-    return rtx().las_tlas;
+    return rtx().las_as;
+}
+
+// Additional: Init function for the engine
+inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
+    rtx().instance = createVulkanInstance();
+    if (rtx().instance == VK_NULL_HANDLE) return false;
+
+    if (!SDL_Vulkan_CreateSurface(window, rtx().instance, nullptr, &rtx().surface)) return false;
+
+    rtx().device = createLogicalDeviceAndSelectGPU(rtx().instance, rtx().surface);
+    if (rtx().device == VK_NULL_HANDLE) return false;
+
+    ext();  // Load extensions
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = rtx().graphics_family;
+    vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
+
+    Swapchain::create(window, width, height);
+
+    return true;
+}
+
+// Cleanup function
+inline void cleanupRTX() noexcept {
+    if (rtx().transient_pool != VK_NULL_HANDLE) vkDestroyCommandPool(rtx().device, rtx().transient_pool, nullptr);
+    Swapchain::cleanup();
+    if (rtx().device != VK_NULL_HANDLE) vkDestroyDevice(rtx().device, nullptr);
+    if (rtx().surface != VK_NULL_HANDLE) vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);
+    if (rtx().instance != VK_NULL_HANDLE) vkDestroyInstance(rtx().instance, nullptr);
 }
