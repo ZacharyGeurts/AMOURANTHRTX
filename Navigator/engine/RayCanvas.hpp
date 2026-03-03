@@ -72,7 +72,7 @@ struct CameraSceneData {
     double    exposure     = 1.0;
     double    genesisTime  = 0.0;
     uint32_t  randomSeed   = 12345u;
-    uint32_t  maxDepth     = 12;
+    int  maxDepth = Options::Rendering::MAX_RAY_RECURSION;
 
     uint32_t  padding[2]   = {0, 0};
 };
