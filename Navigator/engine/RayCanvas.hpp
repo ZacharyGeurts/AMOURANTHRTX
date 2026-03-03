@@ -1,5 +1,11 @@
 #pragma once
 
+// =============================================================================
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
+// AMOURANTH FOREVER 💖
+// =============================================================================
+
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "camera.hpp"
@@ -298,6 +304,13 @@ public:
         }
 
         double now = TotalTime::get().seconds();
+
+        // Ensure time is always advancing (fallback in case TotalTime stalls)
+        static double lastKnownTime = 0.0;
+        if (now <= lastKnownTime) {
+            now = lastKnownTime + 0.016;  // ~60 fps step
+        }
+        lastKnownTime = now;
 
         updateCameraUBO(now);
         updateLivingWorldBuffer(now);
