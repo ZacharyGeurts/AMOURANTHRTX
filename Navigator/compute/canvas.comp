@@ -16,7 +16,7 @@ layout(push_constant) uniform Push {
 
 // ────────────────────────────────────────────────
 // Tune these three values depending on your target resolution & GPU
-#define NUM_ORBS          3072u       // 2048–4096 usually sweet spot; 8192 still possible on high-end
+#define NUM_ORBS          900u
 #define GLOW_STRENGTH     38.0        // higher = sharper / smaller glow radius
 #define TRAIL_STRENGTH    110.0       // higher = narrower trails
 // ────────────────────────────────────────────────
