@@ -13,60 +13,41 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Extended toy / playground material — Disney / extended principled + fun extras
-// Thousands of base materials + procedural variation → perceived trillions
 // ─────────────────────────────────────────────────────────────────────────────
 struct alignas(16) Material
 {
-    // ── Core appearance ─────────────────────────────────────────────────────
-    glm::vec4 baseColor         {1.0f, 1.0f, 1.0f, 1.0f};   // albedo (RGB) + opacity (A)
-    glm::vec4 emissive          {0.0f, 0.0f, 0.0f, 0.0f};   // RGB color, A = strength multiplier
+    glm::vec4 baseColor         {1.0f, 1.0f, 1.0f, 1.0f};
+    glm::vec4 emissive          {0.0f, 0.0f, 0.0f, 0.0f};
 
-    float     metallic          = 0.0f;     // 0 = dielectric   1 = metal
-    float     roughness         = 0.5f;     // 0=mirror, 1=matt
-    float     specular          = 0.5f;     // Disney-style specular (~0.5 ≈ IOR~1.5)
-    float     ior               = 1.50f;    // index of refraction
+    float     metallic          = 0.0f;
+    float     roughness         = 0.5f;
+    float     specular          = 0.5f;
+    float     ior               = 1.50f;
 
-    // ── Transmission / subsurface ───────────────────────────────────────────
-    float     transmission      = 0.0f;     // 0..1 (glass, jelly, water)
-    float     subsurface        = 0.0f;     // 0..1 approximate scattering
+    float     transmission      = 0.0f;
+    float     subsurface        = 0.0f;
     glm::vec3 subsurfaceColor   {0.8f,0.6f,0.5f};
-    float     transmissionRoughness = 0.0f; // blurs refraction
+    float     transmissionRoughness = 0.0f;
 
-    // ── Clearcoat ───────────────────────────────────────────────────────────
-    float     clearcoat         = 0.0f;     // 0..1 weight
-    float     clearcoatRoughness= 0.03f;    // usually 0.01–0.3
+    float     clearcoat         = 0.0f;
+    float     clearcoatRoughness= 0.03f;
 
-    // ── Sheen / velvet ──────────────────────────────────────────────────────
     float     sheen             = 0.0f;
     glm::vec3 sheenTint         {1.0f,1.0f,1.0f};
 
-    // ── Anisotropy ──────────────────────────────────────────────────────────
-    float     anisotropy        = 0.0f;     // -1..1 strength & direction
-    float     anisoRotation     = 0.0f;     // 0..1 tangent rotation
+    float     anisotropy        = 0.0f;
+    float     anisoRotation     = 0.0f;
 
-    // ── Thin-film interference ──────────────────────────────────────────────
-    float     thinFilm          = 0.0f;     // 0..1 strength
+    float     thinFilm          = 0.0f;
     float     thinFilmIOR       = 1.45f;
-    float     thinFilmThickness_nm = 350.0f; // 200–1200 nm rainbow range
+    float     thinFilmThickness_nm = 350.0f;
 
-    // ── Procedural variation layer ──────────────────────────────────────────
-    uint32_t  procType          = 0;        // 0=none, 1=perlin, 2=ridged, 3=voronoi, 4=grid, 5=stripes, 6=spots
+    uint32_t  procType          = 0;
     float     procScale         = 8.0f;
     float     procStrength      = 0.35f;
     float     procOffsetSeed    = 0.0f;
 
-    // ── Flags ───────────────────────────────────────────────────────────────
     uint32_t  flags             = 0;
-    // 0 : transmission
-    // 1 : subsurface
-    // 2 : clearcoat
-    // 3 : sheen
-    // 4 : thin-film
-    // 5 : anisotropy
-    // 6 : emission modulates with baseColor
-    // 7 : procedural affects emissive
-    // 8 : thin-film view-dependent thickness shift
-
     uint32_t  padding[2]        = {0,0};
 };
 
@@ -132,7 +113,6 @@ public:
     {
         LOG_INFO_CAT("RAYCANVAS", "Initializing single-shader compute canvas — {}x{}", width, height);
 
-        // Camera UBO
         cameraUBOHandle_ = Memory::createBuffer(
             sizeof(CameraSceneData),
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -144,7 +124,6 @@ public:
             std::abort();
         }
 
-        // Living world buffer
         livingWorldHandle_ = Memory::createBuffer(
             sizeof(LivingWorldData),
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -157,11 +136,8 @@ public:
             std::abort();
         }
 
-        // ───────────────────────────────────────────────────────────────
-        // BIG MATERIAL LIBRARY — toy edition with trillions of combos
-        // ───────────────────────────────────────────────────────────────
+        // Material library
         std::vector<Material> sceneMaterials;
-
         auto addMat = [&](Material m) {
             if (m.transmission      > 0.001f) m.flags |= (1u << 0);
             if (m.subsurface        > 0.001f) m.flags |= (1u << 1);
@@ -172,72 +148,31 @@ public:
             sceneMaterials.push_back(m);
         };
 
-        // Base templates - explicit member setting to avoid init errors
+        // Base materials
         {
-            Material m{};
-            m.baseColor = {0.95f, 0.64f, 0.07f, 1.0f};
-            m.metallic = 1.0f;
-            m.roughness = 0.08f;
-            m.specular = 0.5f;
-            m.ior = 1.5f;
-            addMat(m); // polished gold
+            Material m{}; m.baseColor = {0.95f,0.64f,0.07f,1.0f}; m.metallic=1.0f; m.roughness=0.08f; m.ior=1.5f; addMat(m);
         }
         {
-            Material m{};
-            m.baseColor = {0.04f, 0.04f, 0.04f, 1.0f};
-            m.roughness = 0.92f;
-            m.ior = 1.5f;
-            m.clearcoatRoughness = 0.0f;
-            m.sheen = 0.95f;
-            m.sheenTint = {0.9f, 0.9f, 0.9f};
-            addMat(m); // velvet
+            Material m{}; m.baseColor = {0.04f,0.04f,0.04f,1.0f}; m.roughness=0.92f; m.ior=1.5f; m.sheen=0.95f; m.sheenTint={0.9f,0.9f,0.9f}; addMat(m);
         }
         {
-            Material m{};
-            m.baseColor = {0.9f, 0.9f, 1.0f, 0.4f};
-            m.roughness = 0.02f;
-            m.specular = 0.5f;
-            m.ior = 1.45f;
-            m.transmission = 0.98f;
-            addMat(m); // clear bubble
+            Material m{}; m.baseColor = {0.9f,0.9f,1.0f,0.4f}; m.roughness=0.02f; m.ior=1.45f; m.transmission=0.98f; addMat(m);
         }
         {
-            Material m{};
-            m.baseColor = {1.0f, 0.1f, 0.4f, 1.0f};
-            m.emissive = {8.0f, 1.0f, 2.0f, 15.0f};
-            m.roughness = 0.4f;
-            addMat(m); // candy glow
+            Material m{}; m.baseColor = {1.0f,0.1f,0.4f,1.0f}; m.emissive={8.0f,1.0f,2.0f,15.0f}; m.roughness=0.4f; addMat(m);
         }
         {
-            Material m{};
-            m.baseColor = {0.2f, 0.7f, 0.2f, 1.0f};
-            m.roughness = 0.85f;
-            m.ior = 1.5f;
-            m.subsurface = 0.4f;
-            m.subsurfaceColor = {0.3f, 0.9f, 0.4f};
-            addMat(m); // waxy leaf
+            Material m{}; m.baseColor = {0.2f,0.7f,0.2f,1.0f}; m.roughness=0.85f; m.ior=1.5f; m.subsurface=0.4f; m.subsurfaceColor={0.3f,0.9f,0.4f}; addMat(m);
         }
         {
-            Material m{};
-            m.baseColor = {0.9f, 0.92f, 1.0f, 1.0f};
-            m.roughness = 0.04f;
-            m.specular = 0.5f;
-            m.ior = 1.45f;
-            m.thinFilm = 1.0f;
-            m.thinFilmIOR = 1.45f;
-            m.thinFilmThickness_nm = 620.0f;
-            addMat(m); // soap bubble
+            Material m{}; m.baseColor = {0.9f,0.92f,1.0f,1.0f}; m.roughness=0.04f; m.ior=1.45f; m.thinFilm=1.0f; m.thinFilmThickness_nm=620.0f; addMat(m);
         }
 
-        // Generate thousands of variations
         size_t baseCount = sceneMaterials.size();
         constexpr int TOTAL_MATERIALS = 8000;
-
-        for (size_t i = baseCount; sceneMaterials.size() < TOTAL_MATERIALS; ++i)
-        {
+        for (size_t i = baseCount; sceneMaterials.size() < TOTAL_MATERIALS; ++i) {
             size_t baseIdx = (i - baseCount) % baseCount;
             Material m = sceneMaterials[baseIdx];
-
             float rnd = hash11(static_cast<uint32_t>(i) * 214013u + 2531011u);
 
             if (rnd < 0.7f) {
@@ -272,48 +207,33 @@ public:
         LOG_INFO_CAT("RAYCANVAS", "Created {} materials ({} base + variations)", sceneMaterials.size(), baseCount);
 
         VkDeviceSize matSize = sceneMaterials.size() * sizeof(Material);
-        materialsHandle_ = Memory::createBuffer(
-            matSize,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            "MaterialsBuffer",
-            Memory::MemoryHint::HostVisible
-        );
-
-        if (materialsHandle_ != 0 && matSize > 0) {
-            auto [sb, sm] = Memory::uploadToBuffer(materialsHandle_, sceneMaterials.data(), matSize);
-            if (sb != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, sb, nullptr);
-                vkFreeMemory(rtx().device, sm, nullptr);
+        materialsHandle_ = Memory::createBuffer(matSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                "MaterialsBuffer", Memory::MemoryHint::HostVisible);
+        if (matSize > 0) {
+            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(materialsHandle_, sceneMaterials.data(), matSize);
+            if (stagingBuf != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
+                vkFreeMemory(rtx().device, stagingMem, nullptr);
             }
         }
 
-        // Primitives buffer
         VkDeviceSize primSize = rtx().las_procedural_primitives.size() * sizeof(UniversalPrimitive);
-        if (primSize == 0) {
-            primSize = sizeof(UniversalPrimitive);
-            primitivesHandle_ = Memory::createBuffer(
-                primSize,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                "PrimitivesBuffer (dummy)"
-            );
+        if (primSize == 0) primSize = sizeof(UniversalPrimitive);
+        primitivesHandle_ = Memory::createBuffer(primSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                 primSize == sizeof(UniversalPrimitive) ? "PrimitivesBuffer (dummy)" : "PrimitivesBuffer",
+                                                 Memory::MemoryHint::HostVisible);
+        if (primSize == sizeof(UniversalPrimitive)) {
             UniversalPrimitive dummy{};
-            auto [sb, sm] = Memory::uploadToBuffer(primitivesHandle_, &dummy, primSize);
-            if (sb != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, sb, nullptr);
-                vkFreeMemory(rtx().device, sm, nullptr);
+            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(primitivesHandle_, &dummy, primSize);
+            if (stagingBuf != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
+                vkFreeMemory(rtx().device, stagingMem, nullptr);
             }
         } else {
-            primitivesHandle_ = Memory::createBuffer(
-                primSize,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                "PrimitivesBuffer",
-                Memory::MemoryHint::HostVisible
-            );
-
-            auto [sb, sm] = Memory::uploadToBuffer(primitivesHandle_, rtx().las_procedural_primitives.data(), primSize);
-            if (sb != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, sb, nullptr);
-                vkFreeMemory(rtx().device, sm, nullptr);
+            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(primitivesHandle_, rtx().las_procedural_primitives.data(), primSize);
+            if (stagingBuf != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
+                vkFreeMemory(rtx().device, stagingMem, nullptr);
             }
         }
 
@@ -340,16 +260,12 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        if (descriptorSet_ != VK_NULL_HANDLE) {
-            vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
-        }
-        if (descriptorPool_ != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
-        }
+        vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
+        vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
 
-        if (hdrOutputView_) vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        if (hdrOutputImage_) vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        if (hdrOutputMemory_) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+        vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
+        vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+        vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(livingWorldHandle_);
@@ -362,86 +278,83 @@ public:
     }
 
     void maybeUpdateCanvas() noexcept {
-        if (destroyed_ || minimized_) return;
+        if (destroyed_) return;
 
-        TotalTime& tt = TotalTime::get();
+        if (minimized_) {
+            int w = 0, h = 0;
+            SDL_GetWindowSize(window_, &w, &h);
+            if (w > 0 && h > 0 && (w != width_ || h != height_)) {
+                LOG_INFO_CAT("SWAPCHAIN", "Recovering from out-of-date state — resizing to {}x{}", w, h);
+                onResize(w, h);
+            } else {
+                return;
+            }
+        }
 
         if (firstFrame_) {
-            tt.seal();
+            TotalTime::get().seal();
             firstFrame_ = false;
             LOG_AMOURANTH("Genesis sealed — eternal single-shader canvas begins 💖");
         }
 
-        double now = tt.seconds();
+        double now = TotalTime::get().seconds();
 
         updateCameraUBO(now);
         updateLivingWorldBuffer(now);
         updateDescriptorSet();
 
         uint32_t imageIndex = 0;
-
         VkFence acquireFence = VK_NULL_HANDLE;
         VkFenceCreateInfo fenceCI{};
         fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceCI.pNext = nullptr;
+        fenceCI.flags = 0;
 
-        VkResult fenceRes = vkCreateFence(rtx().device, &fenceCI, nullptr, &acquireFence);
-        if (fenceRes != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Failed to create acquire fence: {}", vkh.result(fenceRes));
+        if (vkCreateFence(rtx().device, &fenceCI, nullptr, &acquireFence) != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Failed to create acquire fence");
             return;
         }
 
         VkResult acquireRes = ext().vkAcquireNextImageKHR(
-            rtx().device,
-            Swapchain::get(),
-            UINT64_MAX,
-            VK_NULL_HANDLE,
-            acquireFence,
-            &imageIndex
-        );
-
-        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR) {
-            minimized_ = true;
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — needs recreate");
-            vkDestroyFence(rtx().device, acquireFence, nullptr);
-            return;
-        }
-
-        if (acquireRes != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "vkAcquireNextImageKHR failed: {}", vkh.result(acquireRes));
-            vkDestroyFence(rtx().device, acquireFence, nullptr);
-            return;
-        }
+            rtx().device, Swapchain::get(), UINT64_MAX, VK_NULL_HANDLE, acquireFence, &imageIndex);
 
         vkWaitForFences(rtx().device, 1, &acquireFence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(rtx().device, acquireFence, nullptr);
 
+        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR) {
+            minimized_ = true;
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — recovery needed next frame");
+            return;
+        }
+
+        if (acquireRes != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acquireRes));
+            return;
+        }
+
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
-        transitionImageLayout(cmd, hdrOutputImage_,
-                              VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_GENERAL);
+        transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
         VkDescriptorSet set = descriptorSet_;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
 
-        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_),
-                                  static_cast<uint32_t>(height_), static_cast<float>(now));
+        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), static_cast<float>(now));
 
         VkImageMemoryBarrier postBarrier{};
-        postBarrier.sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postBarrier.pNext = nullptr;
         postBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         postBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        postBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
-        postBarrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        postBarrier.image         = hdrOutputImage_;
+        postBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        postBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        postBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        postBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        postBarrier.image = hdrOutputImage_;
         postBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &postBarrier);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postBarrier);
 
         endSubmitAndWait(cmd);
 
@@ -449,35 +362,32 @@ public:
         if (!blitCmd) return;
 
         VkImage swapImage = Swapchain::images[imageIndex];
-
-        transitionImageLayout(blitCmd, swapImage,
-                              VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
         VkImageBlit blit{};
         blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[0]  = {0, 0, 0};
-        blit.srcOffsets[1]  = {width_, height_, 1};
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {width_, height_, 1};
         blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[0]  = {0, 0, 0};
-        blit.dstOffsets[1]  = {width_, height_, 1};
+        blit.dstOffsets[0] = {0, 0, 0};
+        blit.dstOffsets[1] = {width_, height_, 1};
 
-        vkCmdBlitImage(blitCmd,
-                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImage,       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &blit, VK_FILTER_LINEAR);
+        vkCmdBlitImage(blitCmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 
-        transitionImageLayout(blitCmd, swapImage,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         endSubmitAndWait(blitCmd);
 
         VkPresentInfoKHR presentInfo{};
-        presentInfo.sType          = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.pNext = nullptr;
         presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains    = &Swapchain::swapchain.value;
-        presentInfo.pImageIndices  = &imageIndex;
+        presentInfo.pSwapchains = &Swapchain::swapchain.value;
+        presentInfo.pImageIndices = &imageIndex;
+        presentInfo.waitSemaphoreCount = 0;
+        presentInfo.pWaitSemaphores = nullptr;
+        presentInfo.pResults = nullptr;
 
         VkResult presentRes = ext().vkQueuePresentKHR(rtx().present_queue, &presentInfo);
 
@@ -485,8 +395,8 @@ public:
             Swapchain::updateRefreshEstimate(now);
         } else if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR) {
             minimized_ = true;
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal");
-        } else {
+            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — recovery needed next frame");
+        } else if (presentRes != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(presentRes));
         }
     }
@@ -505,25 +415,26 @@ public:
         height_ = newHeight;
         minimized_ = false;
 
+        LOG_INFO_CAT("WINDOW", "Resized canvas to {}x{}", width_, height_);
+
         Swapchain::recreate(width_, height_);
         createPersistentHDR();
-
         updateDescriptorSet();
     }
 
-    int    getWidth()  const noexcept { return width_; }
-    int    getHeight() const noexcept { return height_; }
-    bool   isMinimized() const noexcept { return minimized_; }
-    bool   isDestroyed() const noexcept { return destroyed_; }
+    int  getWidth()  const noexcept { return width_; }
+    int  getHeight() const noexcept { return height_; }
+    bool isMinimized() const noexcept { return minimized_; }
+    bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
     void createDescriptorPoolAndSet() noexcept {
         VkDescriptorPoolSize poolSizes[5] = {
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  1},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},  // living world
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},  // materials
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}   // primitives
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}
         };
 
         VkDescriptorPoolCreateInfo poolCI{};
@@ -534,7 +445,7 @@ private:
         poolCI.pPoolSizes    = poolSizes;
 
         vkh.checker(vkCreateDescriptorPool(rtx().device, &poolCI, nullptr, &descriptorPool_),
-                    "vkCreateDescriptorPool", "RayCanvas (5 bindings)");
+                    "vkCreateDescriptorPool", "RayCanvas");
 
         VkDescriptorSetAllocateInfo allocCI{};
         allocCI.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -547,57 +458,67 @@ private:
     }
 
     void updateDescriptorSet() noexcept {
-        VkWriteDescriptorSet writes[5]{};
-
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView   = hdrOutputView_;
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        writes[0].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet           = descriptorSet_;
-        writes[0].dstBinding       = 0;
-        writes[0].descriptorCount  = 1;
-        writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[0].pImageInfo       = &imgInfo;
 
         VkDescriptorBufferInfo uboInfo{};
         uboInfo.buffer = Memory::getBuffer(cameraUBOHandle_);
         uboInfo.range  = VK_WHOLE_SIZE;
-        writes[1].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet           = descriptorSet_;
-        writes[1].dstBinding       = 1;
-        writes[1].descriptorCount  = 1;
-        writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[1].pBufferInfo      = &uboInfo;
 
         VkDescriptorBufferInfo worldInfo{};
         worldInfo.buffer = Memory::getBuffer(livingWorldHandle_);
         worldInfo.range  = VK_WHOLE_SIZE;
-        writes[2].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet           = descriptorSet_;
-        writes[2].dstBinding       = 2;
-        writes[2].descriptorCount  = 1;
-        writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].pBufferInfo      = &worldInfo;
 
         VkDescriptorBufferInfo matInfo{};
         matInfo.buffer = Memory::getBuffer(materialsHandle_);
         matInfo.range  = VK_WHOLE_SIZE;
-        writes[3].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[3].dstSet           = descriptorSet_;
-        writes[3].dstBinding       = 3;
-        writes[3].descriptorCount  = 1;
-        writes[3].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[3].pBufferInfo      = &matInfo;
 
         VkDescriptorBufferInfo primInfo{};
         primInfo.buffer = Memory::getBuffer(primitivesHandle_);
         primInfo.range  = VK_WHOLE_SIZE;
-        writes[4].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[4].dstSet           = descriptorSet_;
-        writes[4].dstBinding       = 4;
-        writes[4].descriptorCount  = 1;
-        writes[4].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[4].pBufferInfo      = &primInfo;
+
+        VkWriteDescriptorSet writes[5] = {};
+
+        writes[0].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].pNext              = nullptr;
+        writes[0].dstSet             = descriptorSet_;
+        writes[0].dstBinding         = 0;
+        writes[0].descriptorCount    = 1;
+        writes[0].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].pImageInfo         = &imgInfo;
+
+        writes[1].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].pNext              = nullptr;
+        writes[1].dstSet             = descriptorSet_;
+        writes[1].dstBinding         = 1;
+        writes[1].descriptorCount    = 1;
+        writes[1].descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[1].pBufferInfo        = &uboInfo;
+
+        writes[2].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].pNext              = nullptr;
+        writes[2].dstSet             = descriptorSet_;
+        writes[2].dstBinding         = 2;
+        writes[2].descriptorCount    = 1;
+        writes[2].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[2].pBufferInfo        = &worldInfo;
+
+        writes[3].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[3].pNext              = nullptr;
+        writes[3].dstSet             = descriptorSet_;
+        writes[3].dstBinding         = 3;
+        writes[3].descriptorCount    = 1;
+        writes[3].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[3].pBufferInfo        = &matInfo;
+
+        writes[4].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[4].pNext              = nullptr;
+        writes[4].dstSet             = descriptorSet_;
+        writes[4].dstBinding         = 4;
+        writes[4].descriptorCount    = 1;
+        writes[4].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[4].pBufferInfo        = &primInfo;
 
         vkUpdateDescriptorSets(rtx().device, 5, writes, 0, nullptr);
     }
@@ -635,10 +556,10 @@ private:
         if (info && info->mapped) {
             std::memcpy(info->mapped, &data, sizeof(data));
         } else {
-            auto [sb, sm] = Memory::uploadToBuffer(livingWorldHandle_, &data, sizeof(data));
-            if (sb != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, sb, nullptr);
-                vkFreeMemory(rtx().device, sm, nullptr);
+            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(livingWorldHandle_, &data, sizeof(data));
+            if (stagingBuf != VK_NULL_HANDLE) {
+                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
+                vkFreeMemory(rtx().device, stagingMem, nullptr);
             }
         }
     }
@@ -649,10 +570,6 @@ private:
         if (hdrOutputView_)   vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
         if (hdrOutputImage_)  vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
         if (hdrOutputMemory_) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-
-        hdrOutputView_ = VK_NULL_HANDLE;
-        hdrOutputImage_ = VK_NULL_HANDLE;
-        hdrOutputMemory_ = VK_NULL_HANDLE;
 
         VkImageCreateInfo ci{};
         ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -730,6 +647,7 @@ private:
 
         VkImageMemoryBarrier b{};
         b.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        b.pNext               = nullptr;
         b.oldLayout           = oldLayout;
         b.newLayout           = newLayout;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -796,8 +714,13 @@ private:
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fenceCI{};
         fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceCI.pNext = nullptr;
+        fenceCI.flags = 0;
 
-        vkCreateFence(rtx().device, &fenceCI, nullptr, &fence);
+        if (vkCreateFence(rtx().device, &fenceCI, nullptr, &fence) != VK_SUCCESS) {
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+            return;
+        }
 
         VkSubmitInfo submit{};
         submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -818,9 +741,7 @@ private:
     }
 
 private:
-    // Helper: cheap hue shift for material variation
-    static glm::vec4 hue_shift(glm::vec4 c, float shift)
-    {
+    static glm::vec4 hue_shift(glm::vec4 c, float shift) {
         glm::vec3 rgb = glm::vec3(c);
         float u = cosf(shift * glm::pi<float>() * 2.0f);
         float w = sinf(shift * glm::pi<float>() * 2.0f);
@@ -835,9 +756,7 @@ private:
         return glm::vec4(glm::clamp(rgb, 0.0f, 1.0f), c.a);
     }
 
-    // Cheap hash for variation seed
-    static float hash11(uint32_t x)
-    {
+    static float hash11(uint32_t x) {
         x ^= x >> 16;
         x *= 0x7feb352dU;
         x ^= x >> 15;
@@ -853,10 +772,12 @@ private:
     bool           minimized_        = false;
     bool           destroyed_        = false;
     bool           firstFrame_       = true;
+
     uint64_t       materialsHandle_  = 0;
     uint64_t       primitivesHandle_ = 0;
     uint64_t       cameraUBOHandle_  = 0;
-    uint64_t       livingWorldHandle_ = 0;
+    uint64_t       livingWorldHandle_= 0;
+
     VkImage        hdrOutputImage_   = VK_NULL_HANDLE;
     VkImageView    hdrOutputView_    = VK_NULL_HANDLE;
     VkDeviceMemory hdrOutputMemory_  = VK_NULL_HANDLE;

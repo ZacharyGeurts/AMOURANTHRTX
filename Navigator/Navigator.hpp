@@ -266,13 +266,20 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         g_window
     );
 
+    // IMPORTANT: Force correct initial size handling (fixes potential initial mismatch)
+    int realWidth = 0, realHeight = 0;
+    SDL_GetWindowSize(g_window, &realWidth, &realHeight);
+    LOG_INFO_CAT("MAIN", "Forcing initial resize to actual window size: {}x{}", realWidth, realHeight);
+    raycanvas->onResize(realWidth, realHeight);
+
     // Reset camera
     CAM.reset();
 
     LOG_AMOURANTH("Genesis sealed — eternal compute begins");
 
-    // Status print timer (~1 Hz)
+    // Status print timer (~1 Hz) + frame counter for visibility
     double lastStatusPrint_s = TotalTime::get().seconds();
+    uint64_t frameCounter = 0;
 
     // ────────────────────────────────────────────────
     // Eternal loop
@@ -286,23 +293,37 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         if (fullscreen_toggle) {
             sdl_toggle_fullscreen();
         }
+
         if (quit) {
             break;
         }
 
+        // Update canvas size only if changed (sdl_poll_events sets w/h)
         raycanvas->onResize(w, h);
+
+        // Increment frame counter before rendering
+        ++frameCounter;
+
+        // Render the frame
         raycanvas->maybeUpdateCanvas();
 
-        // Periodic status line (~1 Hz)
+        // Periodic status line — exactly ~once per second
         double now_s = TotalTime::get().seconds();
-        if (now_s - lastStatusPrint_s >= 1.0) {
+        double frac_sec = fmod(now_s, 1.0);
+
+        // Trigger only when we cross into a new second
+        static double last_frac = 0.0;
+        bool new_second = (frac_sec < last_frac) || (frac_sec < 0.1 && last_frac > 0.9);
+
+        if (new_second) {
             double genesisTime = now_s;
             double elapsed = now_s - lastStatusPrint_s;
 
             fprintf(stderr, "\033[38;2;100;255;100m[%.3fs | +%.3fs] \033[0m"
-                            "Canvas: %dx%d %s | Δ: %.4fs (%.0f Hz) | Last: %.3fs | "
+                            "Frame %lu | Canvas: %dx%d %s | Δ: %.4fs (%.0f Hz) | Last: %.3fs | "
                             "VRAM: %llu/%llu MB\n",
-                    genesisTime, elapsed,
+                    frac_sec, elapsed,
+                    frameCounter,
                     raycanvas->getWidth(), raycanvas->getHeight(),
                     raycanvas->isMinimized() ? "[MIN]" : "",
                     Swapchain::smoothedRefresh_s,
@@ -312,6 +333,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                     rtx().vram_reality.remaining / (1024ULL * 1024));
 
             lastStatusPrint_s = now_s;
+            last_frac = frac_sec;
         }
     }
 

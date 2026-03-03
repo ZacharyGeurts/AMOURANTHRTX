@@ -5,22 +5,67 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
 
+// ────────────────────────────────────────────────
+// Push constants (passed from host)
 layout(push_constant) uniform Push {
     float totalTime;
 } pc;
 
+// ────────────────────────────────────────────────
+// Material struct (must match your C++ Material exactly)
+struct Material {
+    vec4 baseColor;
+    vec4 emissive;
+    float metallic;
+    float roughness;
+    float specular;
+    float ior;
+    float transmission;
+    float subsurface;
+    vec3 subsurfaceColor;
+    float transmissionRoughness;
+    float clearcoat;
+    float clearcoatRoughness;
+    float sheen;
+    vec3 sheenTint;
+    float anisotropy;
+    float anisoRotation;
+    float thinFilm;
+    float thinFilmIOR;
+    float thinFilmThickness_nm;
+    uint procType;
+    float procScale;
+    float procStrength;
+    float procOffsetSeed;
+    uint flags;
+    uint padding[2];
+};
+
+// ────────────────────────────────────────────────
+// Bindings (match your descriptor set)
+layout(set = 0, binding = 3) readonly buffer MaterialsBuffer {
+    Material materials[];
+};
+
+// ────────────────────────────────────────────────
+// Constants
 #define PI          3.14159265358979323846
 #define TAU         (2.0 * PI)
 #define PHI         1.618033988749895
 #define EPS         0.0001
 
-// ────────────────────────────────────────────────
-// Tune these three values depending on your target resolution & GPU
-#define NUM_ORBS          900u
-#define GLOW_STRENGTH     38.0        // higher = sharper / smaller glow radius
-#define TRAIL_STRENGTH    110.0       // higher = narrower trails
-// ────────────────────────────────────────────────
+// ─── Display tuning ──────────────────────────────────────────────────────────
+#define MATERIALS_PER_FRAME  64u       // Show ~64 at a time (8×8 grid)
+#define GRID_COLS            8u
+#define GRID_ROWS            8u
+#define ORB_SIZE_BASE        0.08
+#define GLOW_STRENGTH        28.0
+#define TRAIL_STRENGTH       90.0
+#define CYCLE_SPEED          0.15      // how fast the material selection rotates
+#define HUE_CYCLE_SPEED      0.4       // rainbow hue animation speed
+#define EMISSIVE_PULSE_SPEED 2.8       // pulsing glow speed
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 float hash11(float p) {
     p = fract(p * 0.1031);
     p *= p + 33.33;
@@ -29,7 +74,14 @@ float hash11(float p) {
 
 float softGlow(float d, float strength) {
     d = max(0.0, d);
-    return exp2(-d * d * strength);     // slightly sharper & faster than exp(-x)
+    return exp2(-d * d * strength);
+}
+
+vec3 hueShift(vec3 color, float hue) {
+    const vec3 k = vec3(0.57735, 0.57735, 0.57735);
+    float cosA = cos(hue * TAU);
+    float sinA = sin(hue * TAU);
+    return vec3(cosA * color + sinA * cross(k, color) + (1.0 - cosA) * dot(k, color) * k);
 }
 
 void main() {
@@ -41,76 +93,75 @@ void main() {
     uv = uv * 2.0 - 1.0;
     uv.x *= float(dim.x) / float(dim.y);
 
-    float t = pc.totalTime * 0.4;
+    float t = pc.totalTime;
 
-    vec3 col = vec3(0.004, 0.006, 0.012);   // deep space black-blue
+    // Deep space background
+    vec3 col = vec3(0.004, 0.006, 0.012);
 
-    // ─── Very faint animated nebula background ───────────────────────────────
+    // Faint animated nebula
     vec2 nuv = uv * 3.0 + vec2(t * 0.02, sin(t * 0.05) * 0.01);
     float neb = sin(nuv.x * 4.0 + t * 0.6) * 0.5 + 0.5;
     neb *= smoothstep(0.0, -0.8, uv.y) * 0.08;
     col += vec3(0.03, 0.08, 0.15) * neb;
 
-    // ─── Early out: skip orb loop if pixel is way outside possible influence ──
-    const float maxInfluence = 5.2;   // covers largest orb radius + glow + trail
-    if (length(uv) > maxInfluence) {
+    // Early out if far from grid area
+    const float maxDist = 1.6;
+    if (length(uv) > maxDist) {
         imageStore(hdrImage, pix, vec4(col * 1.8, 1.0));
         return;
     }
 
-    // ─── Main glowing orbs loop ──────────────────────────────────────────────
-    for (uint i = 0u; i < NUM_ORBS; ++i) {
-        float fi = float(i);
-        float seed = hash11(fi * 0.00013 + 0.001);
+    // ─── Material grid animation ─────────────────────────────────────────────
+    uint totalMaterials = uint(materials.length());
+    uint cycleOffset = uint(t * CYCLE_SPEED * float(totalMaterials)) % totalMaterials;
 
-        // Orbit parameters — larger/farther orbits for bigger seed values
-        float radius = 0.5 + 4.5 * seed;
-        float angularSpeed = 0.3 + 0.7 * (1.0 - seed);
+    for (uint i = 0u; i < MATERIALS_PER_FRAME; ++i) {
+        uint matIdx = (cycleOffset + i) % totalMaterials;
+        Material m = materials[matIdx];
 
-        float theta = TAU * seed + t * angularSpeed;
-        float phi   = 0.4 * TAU * seed + t * 0.08 * (seed - 0.5);
+        // Grid position (8×8)
+        uint gx = i % GRID_COLS;
+        uint gy = i / GRID_COLS;
+        vec2 gridUV = vec2(float(gx) - float(GRID_COLS-1u)*0.5,
+                           float(gy) - float(GRID_ROWS-1u)*0.5) * 0.28;
 
-        vec3 orbPos = vec3(
-            radius * sin(phi) * cos(theta),
-            radius * cos(phi) * 0.6,              // squash vertically a bit
-            radius * sin(phi) * sin(theta)
-        );
+        // Center orb on grid cell
+        vec2 orbCenter = gridUV;
 
-        float orbSize  = 0.02 + 0.05 * seed;
-        float pulsePhase = t * (3.0 + 6.0 * seed) + fi * PHI;
+        // Distance to orb
+        float d = length(uv - orbCenter) - ORB_SIZE_BASE;
 
-        // Project to screen space (simple orthographic for now)
-        vec2 orbScreen = orbPos.xy * 1.2;
+        // Base color from material + animated hue cycle
+        vec3 baseCol = m.baseColor.rgb;
+        float hueAnim = t * HUE_CYCLE_SPEED + float(matIdx) * 0.07;
+        baseCol = hueShift(baseCol, hueAnim);
 
-        // Core orb distance
-        float d = length(uv - orbScreen) - orbSize;
+        // Emissive glow pulse
+        float pulse = 0.6 + 0.4 * sin(t * EMISSIVE_PULSE_SPEED + float(matIdx) * PHI);
+        vec3 emissiveGlow = m.emissive.rgb * m.emissive.a * pulse * 2.5;
 
-        // Color gradient across the swarm
-        vec3 orbCol = mix(
-            vec3(0.10, 0.60, 1.00),
-            vec3(0.90, 0.20, 0.50),
-            seed
-        );
+        // Combine base + emissive
+        vec3 orbColor = mix(baseCol, emissiveGlow, 0.7 + 0.3 * sin(t * 1.2 + float(matIdx)));
 
-        // Soft core glow + pulsing
+        // Core glow
         float intensity = softGlow(d * 1.4, GLOW_STRENGTH)
-                        * (0.55 + 0.45 * sin(pulsePhase));
+                        * (0.7 + 0.3 * sin(t * 3.0 + float(matIdx) * PHI));
 
-        col += orbCol * intensity * 2.8;
+        col += orbColor * intensity * 3.5;
 
-        // Very subtle motion-trail hint
-        vec2 trailUV = uv - orbScreen;
-        float trail = softGlow(length(trailUV) * 1.8, TRAIL_STRENGTH)
-                    * 0.12
-                    * (0.5 + 0.5 * sin(pulsePhase + 2.0));
+        // Subtle trail
+        vec2 trailDir = normalize(uv - orbCenter);
+        float trail = softGlow(length(uv - orbCenter) * 1.8, TRAIL_STRENGTH)
+                    * 0.15
+                    * (0.5 + 0.5 * sin(t * 2.5 + float(matIdx)));
 
-        col += orbCol * trail;
+        col += orbColor * trail;
     }
 
-    // ─── Gentle vignette ─────────────────────────────────────────────────────
+    // Gentle vignette
     float vig = 1.0 - length(uv) * 0.62;
     col *= vig * 0.92 + 0.08;
 
-    // Final output — mild HDR scaling
+    // Final HDR output
     imageStore(hdrImage, pix, vec4(col * 1.8, 1.0));
 }

@@ -186,7 +186,7 @@ inline void create_canvas_pipeline() noexcept {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dispatch — now pushes 8 bytes (time + frameSeed) to match shader
+// Dispatch — pushes 8 bytes (time + frameSeed) to match shader
 // ─────────────────────────────────────────────────────────────────────────────
 inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height, float totalTime) noexcept {
     if (canvas_pipeline == VK_NULL_HANDLE) {
