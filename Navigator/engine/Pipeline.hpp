@@ -19,13 +19,11 @@
 
 namespace Pipeline {
 
+// Use fixed-width types for cross-platform consistency
+using u32 = std::uint32_t;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Bindings — matches the current shader (5 bindings)
-// 0: storage image (HDR write)
-// 1: uniform buffer (camera)
-// 2: storage buffer (living world)
-// 3: storage buffer (materials)
-// 4: storage buffer (primitives / scene objects)
 // ─────────────────────────────────────────────────────────────────────────────
 inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[5] = {
     {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // 0: HDR output
@@ -49,25 +47,50 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 // ─────────────────────────────────────────────────────────────────────────────
 struct PushConstants {
     float time;
-    uint  frameSeed;
+    u32   frameSeed;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Load canvas.spv — single compute shader
+//   CMake copies it to ${BIN_DIR}/compute/canvas.spv
+//   → look relative to executable or cwd
 // ─────────────────────────────────────────────────────────────────────────────
 [[nodiscard]] inline VkShaderModule load_canvas_shader() noexcept {
     constexpr std::string_view shader_name = "canvas.spv";
 
-    std::array<std::string, 7> search_paths = {
-        "compute/canvas.spv",
-        "build/bin/Linux/compute/canvas.spv",
-        "build/bin/Windows/compute/canvas.spv"
-    };
+    namespace fs = std::filesystem;
+
+    std::array<fs::path, 6> search_paths;
+
+    // 0. Most reliable: next to the running executable (bin/.../compute/)
+    fs::path exe_dir;
+    try {
+        exe_dir = fs::canonical("/proc/self/exe").parent_path();
+        search_paths[0] = exe_dir / "compute" / shader_name;
+    } catch (...) {
+        search_paths[0].clear();
+    }
+
+    // 1. Current working directory / compute (run from build root)
+    search_paths[1] = fs::current_path() / "compute" / shader_name;
+
+    // 2. cwd parent / bin / compute (run from project root)
+    search_paths[2] = fs::current_path() / "bin" / "compute" / shader_name;
+
+    // 3–5. Explicit common output subdirs from your CMake
+    search_paths[3] = fs::path("bin/Linux/compute") / shader_name;
+    search_paths[4] = fs::path("bin/Windows/compute") / shader_name;
+    search_paths[5] = fs::path("compute") / shader_name;
 
     std::vector<uint32_t> code;
 
-    for (const auto& path : search_paths) {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
+    for (const auto& p : search_paths) {
+        if (p.empty()) continue;
+
+        std::error_code ec;
+        if (!fs::exists(p, ec) || ec) continue;
+
+        std::ifstream file(p, std::ios::binary | std::ios::ate);
         if (!file.is_open()) continue;
 
         auto size_bytes = file.tellg();
@@ -81,7 +104,7 @@ struct PushConstants {
         if (file.good() && !file.fail()) {
             int64_t printable_size = static_cast<int64_t>(size_bytes);
             LOG_SUCCESS_CAT("PIPELINE", "Loaded canvas.spv ({} bytes) from {}", 
-                            printable_size, path);
+                            printable_size, p.string());
             break;
         }
 
@@ -89,7 +112,9 @@ struct PushConstants {
     }
 
     if (code.empty()) {
-        LOG_FATAL_CAT("PIPELINE", "canvas.spv not found or corrupted in any search path");
+        LOG_FATAL_CAT("PIPELINE", "canvas.spv not found or corrupted in any search path.\n"
+                      "Expected location: <build-dir>/bin/<platform>/compute/canvas.spv\n"
+                      "Run from the bin/... directory or check copy_assets / shaders target.");
         return VK_NULL_HANDLE;
     }
 
@@ -133,7 +158,7 @@ inline void create_pipeline_layout() noexcept {
     VkPushConstantRange push{};
     push.stageFlags = COMPUTE_PUSH_MASK;
     push.offset     = 0;
-    push.size       = sizeof(PushConstants);  // 8 bytes (float + uint)
+    push.size       = sizeof(PushConstants);  // 8 bytes (float + u32)
 
     VkPipelineLayoutCreateInfo plCI{};
     plCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -188,7 +213,7 @@ inline void create_canvas_pipeline() noexcept {
 // ─────────────────────────────────────────────────────────────────────────────
 // Dispatch — pushes 8 bytes (time + frameSeed) to match shader
 // ─────────────────────────────────────────────────────────────────────────────
-inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height, float totalTime) noexcept {
+inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float totalTime) noexcept {
     if (canvas_pipeline == VK_NULL_HANDLE) {
         create_canvas_pipeline();
         if (canvas_pipeline == VK_NULL_HANDLE) {
@@ -199,16 +224,15 @@ inline void dispatch_canvas(VkCommandBuffer cmd, uint32_t width, uint32_t height
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
 
-    // Pack both values (matches shader exactly)
     PushConstants pc{};
-    pc.time       = totalTime;
-    pc.frameSeed  = static_cast<uint>(totalTime * 1000.0f) ^ 0xDEADBEEFu;  // deterministic per-frame seed
+    pc.time      = totalTime;
+    pc.frameSeed = static_cast<u32>(totalTime * 1000.0f) ^ 0xDEADBEEFu;
 
     vkCmdPushConstants(cmd, pipeline_layout, COMPUTE_PUSH_MASK,
                        0, sizeof(PushConstants), &pc);
 
-    uint32_t dispatchX = (width  + 15) / 16;
-    uint32_t dispatchY = (height + 15) / 16;
+    u32 dispatchX = (width  + 15) / 16;
+    u32 dispatchY = (height + 15) / 16;
 
     vkCmdDispatch(cmd, dispatchX, dispatchY, 1);
 }

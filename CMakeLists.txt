@@ -74,7 +74,7 @@ message(STATUS "Executable suffix:   ${EXE_SUFFIX}")
 add_compile_options(
     -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion
     -Wno-unused-but-set-variable -Wno-deprecated-declarations
-    -O3 -flto=auto -ffast-math -march=native -mtune=native
+    -O3 -ffast-math -march=native -mtune=native
     -g -ggdb
 )
 
@@ -85,7 +85,7 @@ if(MOLD_EXECUTABLE)
     message(STATUS "Linker: mold")
 endif()
 
-# Windows-specific hardening (but keep console subsystem)
+# Windows-specific hardening + FULLY STATIC linking (no libwinpthread-1.dll, no libstdc++-6.dll)
 if(TARGET_PLATFORM STREQUAL "Windows")
     add_compile_options(
         -fstack-protector-strong
@@ -95,7 +95,10 @@ if(TARGET_PLATFORM STREQUAL "Windows")
         -fno-ident
     )
     add_link_options(
-        -static-libgcc -static-libstdc++
+        -static
+        -static-libgcc
+        -static-libstdc++
+        -Wl,--whole-archive -lwinpthread -lgcc -lgcc_eh -Wl,--no-whole-archive
         -Wl,--dynamicbase,--nxcompat,--high-entropy-va
         -Wl,--build-id
     )
@@ -126,14 +129,13 @@ file(MAKE_DIRECTORY "${BIN_DIR}/compute")
 set(ASSETS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set(ASSETS_DEST_DIR "${BIN_DIR}/assets")
 
-# Use a marker file to track whether assets have been copied
 add_custom_command(
     OUTPUT "${ASSETS_DEST_DIR}/.assets_copied"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ASSETS_DEST_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ASSETS_SRC_DIR}" "${ASSETS_DEST_DIR}"
     COMMAND ${CMAKE_COMMAND} -E touch "${ASSETS_DEST_DIR}/.assets_copied"
-    DEPENDS "${ASSETS_SRC_DIR}"  # Re-copy if source assets change
+    DEPENDS "${ASSETS_SRC_DIR}"
     COMMENT "Copying assets/ → ${ASSETS_DEST_DIR}"
     VERBATIM
 )
@@ -169,7 +171,7 @@ if(TARGET_PLATFORM STREQUAL "Windows")
     find_library(SDL3_IMAGE_LIB NAMES SDL3_image PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
 endif()
 
-# tinyobjloader (optional — keep if you still use OBJ AABB extraction)
+# tinyobjloader
 FetchContent_Declare(
     tinyobjloader
     GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
@@ -186,11 +188,10 @@ set(ALL_SOURCES
     ${TINYOBJLOADER_SRC}
 )
 
-# Prevent compiling CMake's own compiler ID files
 list(FILTER ALL_SOURCES EXCLUDE REGEX "CMakeFiles/.*CompilerId.*\\.cpp$")
 
 # =============================================================================
-# EXECUTABLE — Console app (no WIN32!)
+# EXECUTABLE — Console app
 # =============================================================================
 add_executable(amouranth_engine ${ALL_SOURCES})
 set_target_properties(amouranth_engine PROPERTIES
@@ -199,12 +200,10 @@ set_target_properties(amouranth_engine PROPERTIES
     SUFFIX "${EXE_SUFFIX}"
 )
 
-# Force console subsystem on Windows/MinGW
 if(TARGET_PLATFORM STREQUAL "Windows" OR MINGW)
     target_link_options(amouranth_engine PRIVATE -mconsole)
 endif()
 
-# Disable LTO warnings/noise on MinGW (optional)
 if(MINGW)
     set_target_properties(amouranth_engine PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
 endif()
@@ -253,7 +252,7 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
         ${SDL3_LIB}
         ${SDL3_IMAGE_LIB}
         kernel32 user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
-        setupapi cfgmgr32
+        setupapi cfgmgr32 dbghelp
     )
 endif()
 
