@@ -705,6 +705,37 @@ inline void init() noexcept {
 
 } // namespace Memory
 
+inline void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
+                                  VkImageLayout oldLayout, VkImageLayout newLayout) noexcept
+{
+    if (oldLayout == newLayout || image == VK_NULL_HANDLE) return;
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    } // add more cases if needed
+
+    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
 // Logical device creation and GPU selection
 [[nodiscard]] inline VkDevice createLogicalDeviceAndSelectGPU(
     VkInstance inst,
@@ -858,11 +889,10 @@ inline void init() noexcept {
     return dev;
 }
 
-// Swapchain — multi-image support
 struct Swapchain {
     struct Handle {
         VkSwapchainKHR value;
-        Handle() : value(VK_NULL_HANDLE) {}
+        Handle() = default;
         explicit Handle(VkSwapchainKHR v) : value(v) {}
         VkSwapchainKHR get() const noexcept { return value; }
         void reset() noexcept { value = VK_NULL_HANDLE; }
@@ -870,47 +900,55 @@ struct Swapchain {
         operator VkSwapchainKHR() const noexcept { return value; }
     };
 
-    inline static Handle swapchain;
-    inline static std::vector<VkImage> images;
+    inline static Handle                swapchain{};
+    inline static std::vector<VkImage>  images;
     inline static std::vector<VkImageView> views;
-    inline static VkExtent2D extent{};
-    inline static VkFormat format{};
-    inline static bool minimized = false;
-    inline static bool supportsStorage = false;
+    inline static VkExtent2D            extent          = {};
+    inline static VkFormat              format          = VK_FORMAT_UNDEFINED;
+    inline static VkColorSpaceKHR       colorSpace      = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    inline static VkPresentModeKHR      presentMode     = VK_PRESENT_MODE_FIFO_KHR;
+    inline static bool                  minimized       = false;
+    inline static bool                  supportsStorage = false;
 
-    inline static double lastPresentTime_s = 0.0;
-    inline static double smoothedRefresh_s = 1.0 / 60.0;
+    // Timing / refresh estimation
+    inline static double lastPresentTime_s   = 0.0;
+    inline static double smoothedRefresh_s   = 1.0 / 60.0;
 
-    static void createOrRecreate(int width, int height, bool isRecreate = false) noexcept {
-        if (width <= 0 || height <= 0) {
-            minimized = true;
-            return;
-        }
+    // ────────────────────────────────────────────────────────────────
+    // Create or recreate swapchain (called from RayCanvas::onResize too)
+    // ────────────────────────────────────────────────────────────────
+    static void createOrRecreate(int requestedWidth, int requestedHeight, bool isRecreate = false) noexcept {
+        VkDevice device = rtx().device;
+        if (!device) return;
 
-        VkDevice dev = rtx().device;
-        if (dev == VK_NULL_HANDLE) return;
-
-        vkDeviceWaitIdle(dev);
+        vkDeviceWaitIdle(device);
         vkQueueWaitIdle(rtx().present_queue);
 
         if (isRecreate) {
-            for (auto& v : views) vkDestroyImageView(dev, v, nullptr);
-            views.clear();
-            images.clear();
-            if (swapchain.valid()) {
-                ext().vkDestroySwapchainKHR(dev, swapchain.get(), nullptr);
-                swapchain.reset();
-            }
+            cleanupViewsAndSwapchain();
             minimized = false;
         }
 
         VkSurfaceCapabilitiesKHR caps{};
         ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rtx().physical, rtx().surface, &caps);
 
+        // Handle minimized / invalid surface state
+        if (caps.currentExtent.width == 0 || caps.currentExtent.height == 0) {
+            minimized = true;
+            LOG_WARNING_CAT("SWAPCHAIN", "Surface reports 0×0 extent — window likely minimized");
+            return;
+        }
+
+        // Choose extent
         VkExtent2D newExtent = caps.currentExtent;
-        if (newExtent.width == UINT32_MAX) {
-            newExtent.width  = std::clamp(static_cast<uint32_t>(width), caps.minImageExtent.width, caps.maxImageExtent.width);
-            newExtent.height = std::clamp(static_cast<uint32_t>(height), caps.minImageExtent.height, caps.maxImageExtent.height);
+        if (newExtent.width == std::numeric_limits<uint32_t>::max()) {
+            // Windowed mode: clamp to requested size within capabilities
+            newExtent.width  = std::clamp(static_cast<uint32_t>(requestedWidth),
+                                          caps.minImageExtent.width,
+                                          caps.maxImageExtent.width);
+            newExtent.height = std::clamp(static_cast<uint32_t>(requestedHeight),
+                                          caps.minImageExtent.height,
+                                          caps.maxImageExtent.height);
         }
 
         if (newExtent.width == 0 || newExtent.height == 0) {
@@ -920,6 +958,7 @@ struct Swapchain {
 
         extent = newExtent;
 
+        // ── Surface formats ─────────────────────────────────────────────
         uint32_t fmtCount = 0;
         ext().vkGetPhysicalDeviceSurfaceFormatsKHR(rtx().physical, rtx().surface, &fmtCount, nullptr);
         std::vector<VkSurfaceFormatKHR> formats(fmtCount);
@@ -927,23 +966,26 @@ struct Swapchain {
 
         VkSurfaceFormatKHR chosenFmt = formats.empty() ? VkSurfaceFormatKHR{} : formats[0];
 
-        constexpr std::array preferred = {
-            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
+        constexpr std::array preferredFormats = {
+            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+            VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+            VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
         };
 
-        for (const auto& pref : preferred) {
+        for (const auto& pref : preferredFormats) {
             auto it = std::find_if(formats.begin(), formats.end(),
-                                   [&](const auto& f) { return f.format == pref.format && f.colorSpace == pref.colorSpace; });
+                [&](const auto& f) { return f.format == pref.format && f.colorSpace == pref.colorSpace; });
             if (it != formats.end()) {
                 chosenFmt = *it;
                 break;
             }
         }
 
-        format = chosenFmt.format;
+        format    = chosenFmt.format;
+        colorSpace = chosenFmt.colorSpace;
 
+        // ── Present modes ───────────────────────────────────────────────
         uint32_t pmCount = 0;
         ext().vkGetPhysicalDeviceSurfacePresentModesKHR(rtx().physical, rtx().surface, &pmCount, nullptr);
         std::vector<VkPresentModeKHR> modes(pmCount);
@@ -951,156 +993,151 @@ struct Swapchain {
 
         VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
 
-        if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-            chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-        } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
+        // Preference order: Mailbox > Immediate > FIFO
+        if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
             chosenPM = VK_PRESENT_MODE_MAILBOX_KHR;
+        } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
+            chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
         }
 
-        uint32_t imgCount = 2;
-        imgCount = std::max(caps.minImageCount, imgCount);
-        imgCount = std::min(caps.maxImageCount ? caps.maxImageCount : imgCount, imgCount);
+        presentMode = chosenPM;
 
-        VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        supportsStorage = false;
-
-        if (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
-            VkImageFormatProperties props{};
-            if (vkGetPhysicalDeviceImageFormatProperties(rtx().physical, format, VK_IMAGE_TYPE_2D,
-                                                         VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT, 0, &props) == VK_SUCCESS) {
-                supportsStorage = true;
-                usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-            }
+        // ── Image count ─────────────────────────────────────────────────
+        uint32_t imgCount = caps.minImageCount;
+        imgCount = std::max(imgCount, 2u);  // try triple buffering if allowed
+        if (caps.maxImageCount > 0) {
+            imgCount = std::min(imgCount, caps.maxImageCount);
         }
+
+        // ── Image usage ─────────────────────────────────────────────────
+        VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) {
+            usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
+
+        // Check if we can use storage directly (rare on desktop)
+        supportsStorage = (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
+
+        // ── Sharing mode ────────────────────────────────────────────────
+        uint32_t queueFamilyIndices[2] = {
+            rtx().graphics_family,
+            rtx().present_family
+        };
 
         VkSwapchainCreateInfoKHR ci{};
-        ci.sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        ci.surface         = rtx().surface;
-        ci.minImageCount   = imgCount;
-        ci.imageFormat     = format;
-        ci.imageColorSpace = chosenFmt.colorSpace;
-        ci.imageExtent     = extent;
+        ci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        ci.surface          = rtx().surface;
+        ci.minImageCount    = imgCount;
+        ci.imageFormat      = format;
+        ci.imageColorSpace  = colorSpace;
+        ci.imageExtent      = extent;
         ci.imageArrayLayers = 1;
-        ci.imageUsage      = usage;
-        ci.preTransform    = caps.currentTransform;
-        ci.compositeAlpha  = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        ci.presentMode     = chosenPM;
-        ci.clipped         = VK_TRUE;
-        ci.oldSwapchain    = swapchain;
+        ci.imageUsage       = usage;
+        ci.preTransform     = caps.currentTransform;
+        ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        ci.presentMode      = presentMode;
+        ci.clipped          = VK_TRUE;
+        ci.oldSwapchain     = isRecreate ? swapchain.get() : VK_NULL_HANDLE;
 
         if (rtx().graphics_family != rtx().present_family) {
-            static uint32_t families[2] = {rtx().graphics_family, rtx().present_family};
-            ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            ci.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
             ci.queueFamilyIndexCount = 2;
-            ci.pQueueFamilyIndices = families;
+            ci.pQueueFamilyIndices   = queueFamilyIndices;
         } else {
-            ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            ci.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
             ci.queueFamilyIndexCount = 0;
-            ci.pQueueFamilyIndices = nullptr;
+            ci.pQueueFamilyIndices   = nullptr;
         }
 
         VkSwapchainKHR newSwap = VK_NULL_HANDLE;
-        ext().vkCreateSwapchainKHR(dev, &ci, nullptr, &newSwap);
+        VkResult res = ext().vkCreateSwapchainKHR(device, &ci, nullptr, &newSwap);
+        if (res != VK_SUCCESS) {
+            minimized = true;
+            return;
+        }
 
-        swapchain.value = newSwap;
+        swapchain = Handle(newSwap);
 
+        // ── Get images ──────────────────────────────────────────────────
         uint32_t actualCount = 0;
-        ext().vkGetSwapchainImagesKHR(dev, newSwap, &actualCount, nullptr);
+        ext().vkGetSwapchainImagesKHR(device, newSwap, &actualCount, nullptr);
         images.resize(actualCount);
-        ext().vkGetSwapchainImagesKHR(dev, newSwap, &actualCount, images.data());
+        ext().vkGetSwapchainImagesKHR(device, newSwap, &actualCount, images.data());
 
         rtx().image_count = actualCount;
 
+        // ── Create views ────────────────────────────────────────────────
         views.resize(actualCount);
         for (uint32_t i = 0; i < actualCount; ++i) {
-            VkImageViewCreateInfo viewCI{};
-            viewCI.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            viewCI.image            = images[i];
-            viewCI.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-            viewCI.format           = format;
-            viewCI.components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                       VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-            viewCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            VkImageViewCreateInfo vi{};
+            vi.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            vi.image            = images[i];
+            vi.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+            vi.format           = format;
+            vi.components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                   VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+            vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-            vkCreateImageView(dev, &viewCI, nullptr, &views[i]);
+            if (vkCreateImageView(device, &vi, nullptr, &views[i]) != VK_SUCCESS) {
+                LOG_ERROR_CAT("SWAPCHAIN", "Failed to create swapchain image view #{}", i);
+            }
         }
 
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
+
+        LOG_SUCCESS_CAT("SWAPCHAIN", "Created swapchain {}x{} ({} images, present mode {})",
+                extent.width, extent.height, actualCount, static_cast<int>(presentMode));
     }
 
-    static bool shouldPresentNow() noexcept {
-        double now = static_cast<double>(SDL_GetTicks()) / 1000.0;
+    // ────────────────────────────────────────────────────────────────
+    // Blit from internal HDR render target → swapchain image (with scale)
+    // ────────────────────────────────────────────────────────────────
+    static void scaleBlit(VkCommandBuffer cmd,
+                          VkImage srcImage,
+                          VkExtent2D srcExtent,
+                          VkImage dstImage,
+                          VkExtent2D dstExtent) noexcept {
+        if (!cmd || srcImage == VK_NULL_HANDLE || dstImage == VK_NULL_HANDLE) return;
 
-        if (lastPresentTime_s <= 0.0) {
-            lastPresentTime_s = now;
-            return true;
-        }
+        // Assume srcImage is already in TRANSFER_SRC_OPTIMAL (done in RayCanvas)
+        transitionImageLayout(cmd, dstImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-        double next = lastPresentTime_s + smoothedRefresh_s;
-        if (now >= next - 0.0005) {
-            lastPresentTime_s = now;
-            return true;
-        }
+        VkImageBlit region{};
+        region.srcSubresource.aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.srcSubresource.mipLevel        = 0;
+        region.srcSubresource.baseArrayLayer  = 0;
+        region.srcSubresource.layerCount      = 1;
+        region.srcOffsets[0] = {0, 0, 0};
+        region.srcOffsets[1] = {static_cast<int32_t>(srcExtent.width),
+                                static_cast<int32_t>(srcExtent.height), 1};
 
-        return false;
+        region.dstSubresource.aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.dstSubresource.mipLevel        = 0;
+        region.dstSubresource.baseArrayLayer  = 0;
+        region.dstSubresource.layerCount      = 1;
+        region.dstOffsets[0] = {0, 0, 0};
+        region.dstOffsets[1] = {static_cast<int32_t>(dstExtent.width),
+                                static_cast<int32_t>(dstExtent.height), 1};
+
+        vkCmdBlitImage(cmd,
+                       srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &region,
+                       VK_FILTER_LINEAR);   // or VK_FILTER_NEAREST for sharper pixel art look
+
+        transitionImageLayout(cmd, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     }
 
-    static void updateRefreshEstimate(double presentTime) noexcept {
-        if (lastPresentTime_s > 0.0) {
-            double delta = presentTime - lastPresentTime_s;
-            if (delta > 0.001 && delta < 0.1) {
-                constexpr double alpha = 0.25;
-                smoothedRefresh_s = alpha * delta + (1.0 - alpha) * smoothedRefresh_s;
-            }
-        }
-        lastPresentTime_s = presentTime;
-    }
-
-    static VkResult tryPresent(VkQueue queue) noexcept {
-        if (minimized || !swapchain.valid()) return VK_SUCCESS;
-
-        double now = static_cast<double>(SDL_GetTicks()) / 1000.0;
-
-        if (!shouldPresentNow()) return VK_EVENT_SET;
-
-        VkPresentInfoKHR pi{};
-        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        pi.swapchainCount = 1;
-        pi.pSwapchains = &swapchain.value;
-        uint32_t idx = 0;
-        pi.pImageIndices = &idx;
-
-        VkResult res = ext().vkQueuePresentKHR(queue, &pi);
-
-        if (res == VK_SUCCESS) {
-            updateRefreshEstimate(now);
-        } else if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
-            minimized = true;
-        }
-
-        return res;
-    }
-
-    static void recreate(int w, int h) noexcept {
-        vkDeviceWaitIdle(rtx().device);
-        createOrRecreate(w, h, true);
-    }
-
-    static void create(SDL_Window* win, int w, int h) noexcept {
-        rtx().window = win;
-        createOrRecreate(w, h, false);
-    }
-
-    static void cleanup() noexcept {
+    // ────────────────────────────────────────────────────────────────
+    // Helpers
+    // ────────────────────────────────────────────────────────────────
+    static void cleanupViewsAndSwapchain() noexcept {
         VkDevice dev = rtx().device;
-        if (dev == VK_NULL_HANDLE) return;
+        if (!dev) return;
 
-        vkDeviceWaitIdle(dev);
-        vkQueueWaitIdle(rtx().present_queue);
-
-        for (auto& v : views) {
-            vkDestroyImageView(dev, v, nullptr);
+        for (auto view : views) {
+            if (view) vkDestroyImageView(dev, view, nullptr);
         }
         views.clear();
         images.clear();
@@ -1109,19 +1146,42 @@ struct Swapchain {
             ext().vkDestroySwapchainKHR(dev, swapchain.get(), nullptr);
             swapchain.reset();
         }
+    }
 
+    static void cleanup() noexcept {
+        cleanupViewsAndSwapchain();
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
+        minimized = false;
+    }
+
+    static void create(SDL_Window* window, int w, int h) noexcept {
+        rtx().window = window;
+        createOrRecreate(w, h, false);
+    }
+
+    static void recreate(int w, int h) noexcept {
+        createOrRecreate(w, h, true);
     }
 
     static bool isMinimized() noexcept { return minimized; }
-    static bool canDirectWrite() noexcept { return supportsStorage; }
+    static VkSwapchainKHR get() noexcept { return swapchain.get(); }
     static VkExtent2D getExtent() noexcept { return extent; }
     static VkFormat getFormat() noexcept { return format; }
-    static VkSwapchainKHR get() noexcept { return swapchain.value; }
-
+    static bool canDirectWrite() noexcept { return supportsStorage; }
     static double getSmoothedRefresh() noexcept { return smoothedRefresh_s; }
-    static double getLastPresentTime() noexcept { return lastPresentTime_s; }
+
+    // Optional: call after successful present
+    static void updateRefreshEstimate(double presentTime_s) noexcept {
+        if (lastPresentTime_s > 0.0) {
+            double delta = presentTime_s - lastPresentTime_s;
+            if (delta > 0.0005 && delta < 0.2) {
+                constexpr double alpha = 0.25;
+                smoothedRefresh_s = alpha * delta + (1.0 - alpha) * smoothedRefresh_s;
+            }
+        }
+        lastPresentTime_s = presentTime_s;
+    }
 };
 
 // Resize handler

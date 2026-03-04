@@ -100,10 +100,14 @@ struct LivingWorldData {
 // =============================================================================
 class RayCanvas {
 public:
-    RayCanvas(int width, int height, SDL_Window* window)
+    RayCanvas(int windowWidth, int windowHeight, SDL_Window* window)
         : window_(window),
-          width_(width),
-          height_(height),
+          window_width_(windowWidth),
+          window_height_(windowHeight),
+          // TODO: Replace these hardcoded values with your actual internal resolution
+          //       (add to Options::Rendering if missing)
+          internal_width_(1920),
+          internal_height_(1080),
           minimized_(false),
           destroyed_(false),
           firstFrame_(true),
@@ -117,13 +121,10 @@ public:
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE)
     {
-        LOG_INFO_CAT("RAYCANVAS", "Initializing single-shader compute canvas — {}x{}", width, height);
+        LOG_INFO_CAT("RAYCANVAS", "Initializing single-shader compute canvas — window {}x{}, internal render {}x{}",
+                     window_width_, window_height_, internal_width_, internal_height_);
 
-        // ───────────────────────────────────────────────────────────────
-        // CRITICAL: Create the swapchain FIRST — before any rendering or UBOs
-        // This was the root cause of the null swapchain → driver crash
-        // ───────────────────────────────────────────────────────────────
-        Swapchain::create(window, width, height);
+        Swapchain::create(window, window_width_, window_height_);
 
         if (!Swapchain::get()) {
             LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain during initialization — aborting");
@@ -157,7 +158,7 @@ public:
             std::abort();
         }
 
-        // Material library
+        // ── Material library ────────────────────────────────────────────────
         std::vector<Material> sceneMaterials;
         auto addMat = [&](Material m) {
             if (m.transmission      > 0.001f) m.flags |= (1u << 0);
@@ -169,7 +170,7 @@ public:
             sceneMaterials.push_back(m);
         };
 
-        // Base materials
+        // Base materials (your originals)
         {
             Material m{}; m.baseColor = {0.95f,0.64f,0.07f,1.0f}; m.metallic=1.0f; m.roughness=0.08f; m.ior=1.5f; addMat(m);
         }
@@ -228,8 +229,10 @@ public:
         LOG_INFO_CAT("RAYCANVAS", "Created {} materials ({} base + variations)", sceneMaterials.size(), baseCount);
 
         VkDeviceSize matSize = sceneMaterials.size() * sizeof(Material);
-        materialsHandle_ = Memory::createBuffer(matSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        materialsHandle_ = Memory::createBuffer(matSize,
+                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                 "MaterialsBuffer", Memory::MemoryHint::HostVisible);
+
         if (matSize > 0) {
             auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(materialsHandle_, sceneMaterials.data(), matSize);
             if (stagingBuf != VK_NULL_HANDLE) {
@@ -240,9 +243,12 @@ public:
 
         VkDeviceSize primSize = rtx().las_procedural_primitives.size() * sizeof(UniversalPrimitive);
         if (primSize == 0) primSize = sizeof(UniversalPrimitive);
-        primitivesHandle_ = Memory::createBuffer(primSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+
+        primitivesHandle_ = Memory::createBuffer(primSize,
+                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                  primSize == sizeof(UniversalPrimitive) ? "PrimitivesBuffer (dummy)" : "PrimitivesBuffer",
                                                  Memory::MemoryHint::HostVisible);
+
         if (primSize == sizeof(UniversalPrimitive)) {
             UniversalPrimitive dummy{};
             auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(primitivesHandle_, &dummy, primSize);
@@ -301,21 +307,28 @@ public:
     void maybeUpdateCanvas() noexcept {
         if (destroyed_) return;
 
-        // Safety guard: skip if swapchain is invalid or window minimized
-        if (!Swapchain::get() || Swapchain::isMinimized()) {
-            LOG_WARNING_CAT("RAYCANVAS", "Swapchain invalid or window minimized — skipping frame");
+        int currentW = 0, currentH = 0;
+        SDL_GetWindowSize(window_, &currentW, &currentH);
+
+        bool sizeChanged   = (currentW != window_width_ || currentH != window_height_);
+        bool wasMinimized  = minimized_;
+        bool nowMinimized  = (currentW <= 0 || currentH <= 0);
+
+        if (nowMinimized) {
+            minimized_ = true;
             return;
         }
 
-        if (minimized_) {
-            int w = 0, h = 0;
-            SDL_GetWindowSize(window_, &w, &h);
-            if (w > 0 && h > 0 && (w != width_ || h != height_)) {
-                LOG_INFO_CAT("SWAPCHAIN", "Recovering from out-of-date state — resizing to {}x{}", w, h);
-                onResize(w, h);
-            } else {
-                return;
-            }
+        // Force resize if size changed OR previously minimized
+        if (sizeChanged || wasMinimized) {
+            vkDeviceWaitIdle(rtx().device);
+            onResize(currentW, currentH);
+            minimized_ = false;
+        }
+
+        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
+            LOG_WARNING_CAT("RAYCANVAS", "Invalid state after resize — skipping frame");
+            return;
         }
 
         if (firstFrame_) {
@@ -325,119 +338,96 @@ public:
         }
 
         double now = TotalTime::get().seconds();
-
-        // Ensure time is always advancing (fallback in case TotalTime stalls)
         static double lastKnownTime = 0.0;
-        if (now <= lastKnownTime) {
-            now = lastKnownTime + Swapchain::smoothedRefresh_s;  // Use measured refresh interval
-        }
+        if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
 
         updateCameraUBO(now);
         updateLivingWorldBuffer(now);
         updateDescriptorSet();
 
+        // Acquire
         uint32_t imageIndex = 0;
-        VkFence acquireFence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fenceCI{};
-        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceCI.pNext = nullptr;
-        fenceCI.flags = 0;
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        vkCreateFence(rtx().device, &fci, nullptr, &fence);
 
-        if (vkCreateFence(rtx().device, &fenceCI, nullptr, &acquireFence) != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Failed to create acquire fence");
-            return;
-        }
+        VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
+                                                    VK_NULL_HANDLE, fence, &imageIndex);
 
-        VkResult acquireRes = ext().vkAcquireNextImageKHR(
-            rtx().device, Swapchain::get(), UINT64_MAX, VK_NULL_HANDLE, acquireFence, &imageIndex);
+        vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(rtx().device, fence, nullptr);
 
-        vkWaitForFences(rtx().device, 1, &acquireFence, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(rtx().device, acquireFence, nullptr);
-
-        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR) {
+        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date after resize — retrying next frame");
             minimized_ = true;
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — recovery needed next frame");
             return;
         }
 
-        if (acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
-            LOG_FATAL_CAT("SWAPCHAIN", "Surface lost — fatal error");
-            destroyed_ = true;
+        if (acq != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
+            if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
             return;
         }
 
-        if (acquireRes != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acquireRes));
-            return;
-        }
-
+        // Render
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
         transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
         VkDescriptorSet set = descriptorSet_;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
+                                0, 1, &set, 0, nullptr);
 
-        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), static_cast<float>(now));
+        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), static_cast<float>(now));
 
-        VkImageMemoryBarrier postBarrier{};
-        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        postBarrier.pNext = nullptr;
-        postBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        postBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        postBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        postBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        postBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        postBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        postBarrier.image = hdrOutputImage_;
-        postBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.image = hdrOutputImage_;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postBarrier);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
 
         endSubmitAndWait(cmd);
 
+        // Blit to swapchain using Swapchain helper
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
 
-        VkImage swapImage = Swapchain::images[imageIndex];
-        transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkImage swapImg = Swapchain::images[imageIndex];
 
-        VkImageBlit blit{};
-        blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.srcOffsets[0] = {0, 0, 0};
-        blit.srcOffsets[1] = {width_, height_, 1};
-        blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        blit.dstOffsets[0] = {0, 0, 0};
-        blit.dstOffsets[1] = {width_, height_, 1};
-
-        vkCmdBlitImage(blitCmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-
-        transitionImageLayout(blitCmd, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        Swapchain::scaleBlit(blitCmd,
+                             hdrOutputImage_,
+                             {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_)},
+                             swapImg,
+                             Swapchain::getExtent());
 
         endSubmitAndWait(blitCmd);
 
-        VkPresentInfoKHR presentInfo{};
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        presentInfo.pNext = nullptr;
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains    = &Swapchain::swapchain.value;  // <-- Correct: address of the VkSwapchainKHR handle
-        presentInfo.pImageIndices  = &imageIndex;
-        presentInfo.waitSemaphoreCount = 0;
-        presentInfo.pWaitSemaphores = nullptr;
-        presentInfo.pResults = nullptr;
+        // Present
+        VkPresentInfoKHR pi{};
+        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        pi.swapchainCount = 1;
+        pi.pSwapchains    = &Swapchain::swapchain.value;
+        pi.pImageIndices  = &imageIndex;
 
-        VkResult presentRes = ext().vkQueuePresentKHR(rtx().present_queue, &presentInfo);
+        VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
 
-        if (presentRes == VK_SUCCESS) {
+        if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(now);
-        } else if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR) {
+        } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
+            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date — will recreate next frame");
             minimized_ = true;
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — recovery needed next frame");
-        } else if (presentRes != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(presentRes));
+        } else if (pres != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
+            if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
     }
 
@@ -447,23 +437,24 @@ public:
             return;
         }
 
-        if (newWidth == width_ && newHeight == height_) return;
+        if (newWidth == window_width_ && newHeight == window_height_) return;
 
         vkDeviceWaitIdle(rtx().device);
 
-        width_  = newWidth;
-        height_ = newHeight;
+        window_width_  = newWidth;
+        window_height_ = newHeight;
         minimized_ = false;
 
-        LOG_INFO_CAT("WINDOW", "Resized canvas to {}x{}", width_, height_);
+        LOG_INFO_CAT("WINDOW", "Resizing canvas to {}x{}", window_width_, window_height_);
 
-        Swapchain::recreate(width_, height_);
-        createPersistentHDR();
+        Swapchain::recreate(window_width_, window_height_);
+
+        // HDR remains at internal resolution — no need to recreate unless resolution option changed
         updateDescriptorSet();
     }
 
-    int  getWidth()  const noexcept { return width_; }
-    int  getHeight() const noexcept { return height_; }
+    int  getWidth()  const noexcept { return window_width_; }
+    int  getHeight() const noexcept { return window_height_; }
     bool isMinimized() const noexcept { return minimized_; }
     bool isDestroyed() const noexcept { return destroyed_; }
 
@@ -477,90 +468,110 @@ private:
             {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}
         };
 
-        VkDescriptorPoolCreateInfo poolCI{};
-        poolCI.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolCI.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        poolCI.maxSets       = 1;
-        poolCI.poolSizeCount = 5;
-        poolCI.pPoolSizes    = poolSizes;
+        VkDescriptorPoolCreateInfo pci{};
+        pci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        pci.maxSets       = 1;
+        pci.poolSizeCount = 5;
+        pci.pPoolSizes    = poolSizes;
 
-        vkh.checker(vkCreateDescriptorPool(rtx().device, &poolCI, nullptr, &descriptorPool_),
+        vkh.checker(vkCreateDescriptorPool(rtx().device, &pci, nullptr, &descriptorPool_),
                     "vkCreateDescriptorPool", "RayCanvas");
 
-        VkDescriptorSetAllocateInfo allocCI{};
-        allocCI.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocCI.descriptorPool     = descriptorPool_;
-        allocCI.descriptorSetCount = 1;
-        allocCI.pSetLayouts        = &Pipeline::main_descriptor_layout;
+        VkDescriptorSetAllocateInfo ai{};
+        ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        ai.descriptorPool     = descriptorPool_;
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts        = &Pipeline::main_descriptor_layout;
 
-        vkh.checker(vkAllocateDescriptorSets(rtx().device, &allocCI, &descriptorSet_),
+        vkh.checker(vkAllocateDescriptorSets(rtx().device, &ai, &descriptorSet_),
                     "vkAllocateDescriptorSets", "RayCanvas");
     }
 
     void updateDescriptorSet() noexcept {
+        if (!hdrOutputView_) return;
+
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView   = hdrOutputView_;
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        VkDescriptorBufferInfo uboInfo{};
-        uboInfo.buffer = Memory::getBuffer(cameraUBOHandle_);
-        uboInfo.range  = VK_WHOLE_SIZE;
+        VkDescriptorBufferInfo uboInfo{ Memory::getBuffer(cameraUBOHandle_), 0, VK_WHOLE_SIZE };
+        VkDescriptorBufferInfo worldInfo{ Memory::getBuffer(livingWorldHandle_), 0, VK_WHOLE_SIZE };
+        VkDescriptorBufferInfo matInfo{ Memory::getBuffer(materialsHandle_), 0, VK_WHOLE_SIZE };
+        VkDescriptorBufferInfo primInfo{ Memory::getBuffer(primitivesHandle_), 0, VK_WHOLE_SIZE };
 
-        VkDescriptorBufferInfo worldInfo{};
-        worldInfo.buffer = Memory::getBuffer(livingWorldHandle_);
-        worldInfo.range  = VK_WHOLE_SIZE;
+        VkWriteDescriptorSet writes[5]{};
 
-        VkDescriptorBufferInfo matInfo{};
-        matInfo.buffer = Memory::getBuffer(materialsHandle_);
-        matInfo.range  = VK_WHOLE_SIZE;
-
-        VkDescriptorBufferInfo primInfo{};
-        primInfo.buffer = Memory::getBuffer(primitivesHandle_);
-        primInfo.range  = VK_WHOLE_SIZE;
-
-        VkWriteDescriptorSet writes[5] = {};
-
-        writes[0].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].pNext              = nullptr;
-        writes[0].dstSet             = descriptorSet_;
-        writes[0].dstBinding         = 0;
-        writes[0].descriptorCount    = 1;
-        writes[0].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[0].pImageInfo         = &imgInfo;
-
-        writes[1].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].pNext              = nullptr;
-        writes[1].dstSet             = descriptorSet_;
-        writes[1].dstBinding         = 1;
-        writes[1].descriptorCount    = 1;
-        writes[1].descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[1].pBufferInfo        = &uboInfo;
-
-        writes[2].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].pNext              = nullptr;
-        writes[2].dstSet             = descriptorSet_;
-        writes[2].dstBinding         = 2;
-        writes[2].descriptorCount    = 1;
-        writes[2].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].pBufferInfo        = &worldInfo;
-
-        writes[3].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[3].pNext              = nullptr;
-        writes[3].dstSet             = descriptorSet_;
-        writes[3].dstBinding         = 3;
-        writes[3].descriptorCount    = 1;
-        writes[3].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[3].pBufferInfo        = &matInfo;
-
-        writes[4].sType              = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[4].pNext              = nullptr;
-        writes[4].dstSet             = descriptorSet_;
-        writes[4].dstBinding         = 4;
-        writes[4].descriptorCount    = 1;
-        writes[4].descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[4].pBufferInfo        = &primInfo;
+        writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &imgInfo,   nullptr, nullptr };
+        writes[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 1, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &uboInfo,  nullptr };
+        writes[2] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 2, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &worldInfo,nullptr };
+        writes[3] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 3, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &matInfo,  nullptr };
+        writes[4] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 4, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &primInfo, nullptr };
 
         vkUpdateDescriptorSets(rtx().device, 5, writes, 0, nullptr);
+    }
+
+    void createPersistentHDR() noexcept {
+        vkDeviceWaitIdle(rtx().device);
+
+        if (hdrOutputView_)   vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+        if (hdrOutputImage_)  vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+        if (hdrOutputMemory_) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+
+        hdrOutputView_   = VK_NULL_HANDLE;
+        hdrOutputImage_  = VK_NULL_HANDLE;
+        hdrOutputMemory_ = VK_NULL_HANDLE;
+
+        VkImageCreateInfo ci{};
+        ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType   = VK_IMAGE_TYPE_2D;
+        ci.format      = VK_FORMAT_R32G32B32A32_SFLOAT;
+        ci.extent      = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
+        ci.mipLevels   = 1;
+        ci.arrayLayers = 1;
+        ci.samples     = VK_SAMPLE_COUNT_1_BIT;
+        ci.tiling      = VK_IMAGE_TILING_OPTIMAL;
+        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        if (vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_) != VK_SUCCESS) {
+            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImage HDR failed");
+            return;
+        }
+
+        VkMemoryRequirements req{};
+        vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &req);
+
+        uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        VkMemoryAllocateInfo mai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, req.size, memType };
+
+        if (vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_) != VK_SUCCESS) {
+            LOG_ERROR_CAT("RAYCANVAS", "vkAllocateMemory HDR failed");
+            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+            hdrOutputImage_ = VK_NULL_HANDLE;
+            return;
+        }
+
+        vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
+
+        VkImageViewCreateInfo vi{};
+        vi.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vi.image            = hdrOutputImage_;
+        vi.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
+        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        if (vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_) != VK_SUCCESS) {
+            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImageView HDR failed");
+            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+            hdrOutputImage_ = VK_NULL_HANDLE;
+            hdrOutputMemory_ = VK_NULL_HANDLE;
+            return;
+        }
+
+        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR canvas created — {}x{}", internal_width_, internal_height_);
     }
 
     void updateLivingWorldBuffer(double now) noexcept {
@@ -604,68 +615,11 @@ private:
         }
     }
 
-    void createPersistentHDR() noexcept {
-        vkDeviceWaitIdle(rtx().device);
-
-        if (hdrOutputView_)   vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        if (hdrOutputImage_)  vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        if (hdrOutputMemory_) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-
-        VkImageCreateInfo ci{};
-        ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        ci.imageType   = VK_IMAGE_TYPE_2D;
-        ci.format      = VK_FORMAT_R32G32B32A32_SFLOAT;
-        ci.extent      = {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1};
-        ci.mipLevels   = 1;
-        ci.arrayLayers = 1;
-        ci.samples     = VK_SAMPLE_COUNT_1_BIT;
-        ci.tiling      = VK_IMAGE_TILING_OPTIMAL;
-        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-        if (vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImage (HDR) failed");
-            return;
-        }
-
-        VkMemoryRequirements req{};
-        vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &req);
-
-        uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        VkMemoryAllocateInfo mai{};
-        mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        mai.allocationSize  = req.size;
-        mai.memoryTypeIndex = memType;
-
-        if (vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkAllocateMemory (HDR) failed");
-            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-            return;
-        }
-
-        vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
-
-        VkImageViewCreateInfo vi{};
-        vi.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        vi.image            = hdrOutputImage_;
-        vi.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
-        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        if (vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImageView (HDR) failed");
-            return;
-        }
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR canvas created — {}x{}", width_, height_);
-    }
-
     void updateCameraUBO(double now) noexcept {
         CameraSceneData data{};
 
         data.view        = CAM.view();
-        data.proj        = CAM.projection(static_cast<float>(width_) / static_cast<float>(height_));
+        data.proj        = CAM.projection(static_cast<float>(internal_width_) / static_cast<float>(internal_height_));
         data.viewInverse = glm::inverse(data.view);
         data.projInverse = glm::inverse(data.proj);
 
@@ -681,46 +635,6 @@ private:
         }
     }
 
-    void transitionImageLayout(VkCommandBuffer cmd, VkImage img,
-                               VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
-        if (oldLayout == newLayout || img == VK_NULL_HANDLE) return;
-
-        VkImageMemoryBarrier b{};
-        b.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        b.pNext               = nullptr;
-        b.oldLayout           = oldLayout;
-        b.newLayout           = newLayout;
-        b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        b.image               = img;
-        b.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-        VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-
-        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
-            b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            dstStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-        } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-            b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            srcStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-            b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-            srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-            dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-            b.srcAccessMask = 0;
-            b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        }
-
-        vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b);
-    }
-
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkCommandBufferAllocateInfo alloc{};
@@ -729,9 +643,7 @@ private:
         alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc.commandBufferCount = 1;
 
-        if (vkAllocateCommandBuffers(rtx().device, &alloc, &cmd) != VK_SUCCESS) {
-            return VK_NULL_HANDLE;
-        }
+        if (vkAllocateCommandBuffers(rtx().device, &alloc, &cmd) != VK_SUCCESS) return VK_NULL_HANDLE;
 
         VkCommandBufferBeginInfo begin{};
         begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -754,8 +666,6 @@ private:
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fenceCI{};
         fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceCI.pNext = nullptr;
-        fenceCI.flags = 0;
 
         if (vkCreateFence(rtx().device, &fenceCI, nullptr, &fence) != VK_SUCCESS) {
             vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
@@ -769,7 +679,6 @@ private:
 
         VkResult res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
         if (res != VK_SUCCESS) {
-            if (res == VK_ERROR_DEVICE_LOST) destroyed_ = true;
             vkDestroyFence(rtx().device, fence, nullptr);
             vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
             return;
@@ -807,8 +716,10 @@ private:
 
 private:
     SDL_Window*    window_           = nullptr;
-    int            width_            = 0;
-    int            height_           = 0;
+    int            window_width_     = 0;
+    int            window_height_    = 0;
+    int            internal_width_   = 0;
+    int            internal_height_  = 0;
     bool           minimized_        = false;
     bool           destroyed_        = false;
     bool           firstFrame_       = true;
