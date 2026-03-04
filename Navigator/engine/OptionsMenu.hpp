@@ -8,6 +8,74 @@
 
 #include <glm/glm.hpp>
 
+namespace Options::GameStyle
+{
+    enum class DimensionMode : uint32_t
+    {
+        TextOnly       = 0,     // ASCII / terminal style (very cheap, fun easter egg)
+        Pure2D         = 1,     // side-scroller / classic pixel art
+        TwoPointFiveD  = 2,     // 3D models but locked movement plane (e.g. Trine, LittleBigPlanet layers)
+        Full3D         = 3      // free 6DoF movement & camera
+    };
+
+    enum class CameraPerspective : uint32_t
+    {
+        FirstPerson       = 0, // player's perspective
+        ThirdPerson       = 1, // camera follows behind the character
+        TopDown           = 2, // classic RTS / twin-stick
+        Isometric         = 3, // angled view creating depth
+        SideScroller      = 4, // fixed side view (2D or 2.5D)
+        Orthographic2D    = 5, // pure 2D ortho projection
+        TextAdventure     = 6  // no real camera, narrative mode
+    };
+
+    enum class GenrePreset : uint32_t
+    {
+        None              = 0, // no specific genre
+        FPS               = 1, // fast movement, first-person, shooting focus
+        ThirdPersonAction = 2, // over-shoulder / behind character perspective
+        Platformer        = 3, // jump-heavy, precise movement
+        Metroidvania      = 4, // exploration + backtracking
+        TopDownRPG        = 5, // top-down role-playing game
+        TwinStickShooter  = 6, // shooter controlled with dual sticks
+        SurvivalHorror    = 7, // horror themes with survival elements
+        Roguelike         = 8, // randomized levels and permadeath
+        TextAdventure     = 9, // narrative-based games without graphic elements
+        Shmup             = 10, // shoot 'em up (vertical/horizontal scrolling)
+        Racing            = 11, // racing focused gameplay
+        Puzzle            = 12, // gameplay centered around solving puzzles
+        Fighting          = 13, // combat between characters
+        Sports            = 14, // gameplay focused on sports
+        Simulation        = 15, // life simulation or business simulation genres
+        Strategy          = 16, // logical reasoning and planning focused games
+        MMORPG            = 17, // massive multiplayer online role-playing games
+        PartyGame         = 18  // games meant for multiple players at once
+        // Additional genres can be added as needed
+    };
+
+    // runtime values (these will be modified by menu / config)
+    inline DimensionMode       CurrentDimension     = DimensionMode::Full3D;
+    inline CameraPerspective   CurrentPerspective   = CameraPerspective::FirstPerson;
+    inline GenrePreset         CurrentGenre         = GenrePreset::FPS;
+
+    // helper flags derived from above (used in shader & C++ logic)
+    inline bool Is3D()          { return CurrentDimension == DimensionMode::Full3D; }
+    inline bool Is25D()         { return CurrentDimension == DimensionMode::TwoPointFiveD; }
+    inline bool Is2D()          { return CurrentDimension <= DimensionMode::TwoPointFiveD && CurrentDimension != DimensionMode::TextOnly; }
+    inline bool IsTextMode()    { return CurrentDimension == DimensionMode::TextOnly; }
+    inline bool IsFirstPerson() { return CurrentPerspective == CameraPerspective::FirstPerson; }
+    inline bool IsThirdPerson() { return CurrentPerspective == CameraPerspective::ThirdPerson; }
+    inline bool IsTopDown()     { return CurrentPerspective == CameraPerspective::TopDown; }
+    inline bool IsIsometric()    { return CurrentPerspective == CameraPerspective::Isometric; }
+    inline bool IsSideScroller() { return CurrentPerspective == CameraPerspective::SideScroller; }
+    inline bool IsOrthographic2D() { return CurrentPerspective == CameraPerspective::Orthographic2D; }
+    inline bool IsTextAdventureMode() { return CurrentPerspective == CameraPerspective::TextAdventure; }
+    inline bool IsGenreFPS()        { return CurrentGenre == GenrePreset::FPS; }
+    inline bool IsGenrePlatformer() { return CurrentGenre == GenrePreset::Platformer; }
+    // Add more genre checks as needed
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Window & Display
 // ─────────────────────────────────────────────────────────────────────────────

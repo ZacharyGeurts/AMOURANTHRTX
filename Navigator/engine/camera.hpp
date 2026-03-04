@@ -54,16 +54,16 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         currentState_ = CameraState(
             Options::Camera::START_POSITION,
-            glm::quat(glm::vec3(0.0f, glm::radians(-90.0f), 0.0f)), // looking forward along -Z
+            glm::quat(glm::vec3(0.0f, glm::radians(-90.0f), 0.0f)),
             Options::Camera::DEFAULT_FOV,
             Options::Camera::DEFAULT_APERTURE,
             Options::Camera::DEFAULT_FOCUS_DISTANCE
         );
         targetState_ = currentState_;
+        prevPosition_ = currentState_.position;
         transitionProgress_ = 1.0f;
         transitionStartGenesis_ = TotalTime::get().seconds();
         invalidateCache();
-        LOG_AMOURANTH("Camera reset — genesis photons aligned 💖");
     }
 
     // Smooth transition to target state (duration in real seconds)
@@ -75,17 +75,20 @@ public:
         transitionProgress_     = 0.0f;
     }
 
-    // Update transition using genesis clock (no dt parameter needed)
+    // Update transition using genesis clock
     void update() noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
 
-        if (transitionProgress_ >= 1.0f) return;
+        if (transitionProgress_ >= 1.0f) {
+            prevPosition_ = currentState_.position;
+            return;
+        }
 
         double nowGenesis = TotalTime::get().seconds();
         double elapsed = nowGenesis - transitionStartGenesis_;
         transitionProgress_ = std::min(1.0f, static_cast<float>(elapsed / transitionDurationSec_));
 
-        // Cubic ease-out for cinematic feel
+        // Cubic ease-out
         float t = transitionProgress_;
         t = 1.0f - std::pow(1.0f - t, 3.0f);
 
@@ -99,10 +102,11 @@ public:
     }
 
     // ────────────────────────────────────────────────
-    // Secure setters (thread-safe, genesis philosophy)
+    // Secure setters
     // ────────────────────────────────────────────────
     void setPosition(const glm::vec3& p, bool instant = false) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
+        prevPosition_ = currentState_.position;
         if (instant) {
             currentState_.position = targetState_.position = p;
         } else {
@@ -139,17 +143,18 @@ public:
     }
 
     // ────────────────────────────────────────────────
-    // Cinematic movement helpers (genesis-relative)
+    // Cinematic movement helpers
     // ────────────────────────────────────────────────
     void zoom(float delta) noexcept {
         float newFov = currentState_.fov - delta * Options::Camera::ZOOM_SENSITIVITY;
-        setFov(newFov, false);  // smooth transition
+        setFov(newFov, false);
     }
 
     void dolly(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
         double now = TotalTime::get().seconds();
         float scaled = amount * Options::Camera::DOLLY_SPEED * static_cast<float>(now - lastUpdateGenesis_);
+        prevPosition_ = currentState_.position;
         currentState_.position += currentState_.orientation * glm::vec3(0.0f, 0.0f, -scaled);
         targetState_.position = currentState_.position;
         lastUpdateGenesis_ = now;
@@ -160,6 +165,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         double now = TotalTime::get().seconds();
         float scaled = amount * Options::Camera::CRANE_SPEED * static_cast<float>(now - lastUpdateGenesis_);
+        prevPosition_ = currentState_.position;
         currentState_.position += glm::vec3(0.0f, scaled, 0.0f);
         targetState_.position = currentState_.position;
         lastUpdateGenesis_ = now;
@@ -173,9 +179,9 @@ public:
         transitionProgress_ = 0.0f;
     }
 
-    // Internal movement helpers
     void moveForward(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
+        prevPosition_ = currentState_.position;
         currentState_.position += currentState_.orientation * glm::vec3(0.0f, 0.0f, -amount);
         targetState_.position = currentState_.position;
         invalidateCache();
@@ -183,6 +189,7 @@ public:
 
     void moveRight(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
+        prevPosition_ = currentState_.position;
         currentState_.position += currentState_.orientation * glm::vec3(amount, 0.0f, 0.0f);
         targetState_.position = currentState_.position;
         invalidateCache();
@@ -190,6 +197,7 @@ public:
 
     void moveUp(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
+        prevPosition_ = currentState_.position;
         currentState_.position += glm::vec3(0.0f, amount, 0.0f);
         targetState_.position = currentState_.position;
         invalidateCache();
@@ -210,7 +218,7 @@ public:
     }
 
     // ────────────────────────────────────────────────
-    // Output matrices — cached & genesis-secure
+    // Output matrices — cached
     // ────────────────────────────────────────────────
     [[nodiscard]] glm::mat4 view() const noexcept {
         ensureCached();
@@ -222,9 +230,10 @@ public:
     }
 
     // ────────────────────────────────────────────────
-    // Getters — const, thread-safe, genesis-safe
+    // Getters
     // ────────────────────────────────────────────────
     [[nodiscard]] glm::vec3 position()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.position; }
+    [[nodiscard]] glm::vec3 prevPosition() const noexcept { std::lock_guard<std::mutex> l(mtx_); return prevPosition_; }
     [[nodiscard]] glm::vec3 forward()     const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0.0f, 0.0f, -1.0f); }
     [[nodiscard]] glm::vec3 right()       const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(1.0f, 0.0f, 0.0f); }
     [[nodiscard]] glm::vec3 up()          const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0.0f, 1.0f, 0.0f); }
@@ -242,10 +251,12 @@ private:
 
     CameraState currentState_;
     CameraState targetState_;
+    glm::vec3   prevPosition_{};
+
     double      transitionStartGenesis_{0.0};
     float       transitionDurationSec_{1.5f};
     float       transitionProgress_{1.0f};
-    double      lastUpdateGenesis_{0.0};  // for dt-free motion scaling
+    double      lastUpdateGenesis_{0.0};
 
     void invalidateCache() noexcept {
         generation_.fetch_add(1, std::memory_order_release);
@@ -266,13 +277,14 @@ private:
 };
 
 // ────────────────────────────────────────────────
-// Global access — secure, no macro hell
+// Global access
 // ────────────────────────────────────────────────
 inline Camera& CAM = Camera::get();
 
-// Inline wrappers — now correctly call existing members
+// Inline wrappers
 inline void CAM_RESET()                         { CAM.reset(); }
 inline glm::vec3 CAM_POS()                      { return CAM.position(); }
+inline glm::vec3 CAM_PREV_POS()                 { return CAM.prevPosition(); }
 inline glm::vec3 CAM_FWD()                      { return CAM.forward(); }
 inline void CAM_LOOK_AT(const glm::vec3& t)     { CAM.lookAt(t); }
 inline void CAM_DOLLY(float d)                  { CAM.dolly(d); }

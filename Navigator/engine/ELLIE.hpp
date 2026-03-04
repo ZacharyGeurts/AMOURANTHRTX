@@ -1,14 +1,12 @@
-#pragma once
-
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 // =============================================================================
-
 // Inspired by Ellie Fier
 // =============================================================================
 
+#pragma once
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
@@ -57,8 +55,14 @@
 // TOTALTIME v∞ MONOLITH — The One True Clock
 // =============================================================================
 
+#pragma once
+
+#include <chrono>
+#include <atomic>
+#include <mutex>
+
 namespace detail {
-    using Clock    = std::chrono::steady_clock;
+    using Clock     = std::chrono::steady_clock;
     using TimePoint = Clock::time_point;
     using Duration  = Clock::duration;
 
@@ -85,46 +89,47 @@ struct TotalTime final {
         return instance;
     }
 
-    [[nodiscard]] bool is_sealed() const noexcept {
-        return sealed_;
+    [[nodiscard]] bool isSealed() const noexcept {
+        return sealed_.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] double us() const noexcept {
-        verify();
-        if (sealed_) return raw_us_.count();
-        detail::Duration dur = detail::Clock::now() - genesis_;
+        if (isSealed()) {
+            return raw_us_.load(std::memory_order_relaxed);
+        }
+        auto dur = detail::Clock::now() - genesis_;
         return std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(dur).count();
     }
 
     [[nodiscard]] double seconds() const noexcept {
-        verify();
-        if (sealed_) return std::chrono::duration_cast<std::chrono::duration<double>>(raw_us_).count();
-        detail::Duration dur = detail::Clock::now() - genesis_;
+        if (isSealed()) {
+            return raw_seconds_.load(std::memory_order_relaxed);
+        }
+        auto dur = detail::Clock::now() - genesis_;
         return std::chrono::duration_cast<std::chrono::duration<double>>(dur).count();
     }
 
     void seal() noexcept {
-        detail::Duration dur = detail::Clock::now() - genesis_;
-        raw_us_ = std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(dur);
-        sealed_ = true;
+        std::call_once(seal_flag_, [this] {
+            auto dur = detail::Clock::now() - genesis_;
+            raw_us_.store(std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(dur).count(),
+                          std::memory_order_release);
+            raw_seconds_.store(std::chrono::duration_cast<std::chrono::duration<double>>(dur).count(),
+                               std::memory_order_release);
+            sealed_.store(true, std::memory_order_release);
+        });
     }
 
     [[nodiscard]] uint64_t entropy() const noexcept {
-        verify();
         return entropy_;
     }
 
 private:
-    uint64_t entropy_;
-    uint64_t entropy_check_;
-    detail::TimePoint genesis_;
-    std::chrono::duration<double, std::micro> raw_us_{0};
-    bool sealed_{false};
-
     TotalTime() noexcept
         : entropy_(detail::make_session_entropy())
         , genesis_(detail::Clock::now())
-        , raw_us_(0)
+        , raw_us_(0.0)
+        , raw_seconds_(0.0)
         , sealed_(false)
     {
         entropy_check_ = entropy_ ^ 0x9E37AF18C64D8A17UL;
@@ -132,15 +137,23 @@ private:
 
     void verify() const noexcept {
         if ((entropy_ ^ 0x9E37AF18C64D8A17UL) != entropy_check_) [[unlikely]] {
-            std::abort();
+            std::abort();  // memory corruption — fatal
         }
     }
+
+    uint64_t entropy_;
+    uint64_t entropy_check_;
+    detail::TimePoint genesis_;
+    std::atomic<double> raw_us_;
+    std::atomic<double> raw_seconds_;
+    std::atomic<bool> sealed_;
+    std::once_flag seal_flag_;
 };
 
 inline void print_total_time(const char* prefix = nullptr) noexcept {
     const TotalTime& tt = TotalTime::get();
 
-    if (!tt.is_sealed()) {
+    if (!tt.isSealed()) {
         std::cout << (prefix ? prefix : "") << "[totalTime] not sealed yet — skipping print\n";
         std::cout.flush();
         return;
@@ -245,14 +258,14 @@ namespace std {
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
 constexpr bool ENABLE_INFO    = true;
-constexpr bool ENABLE_SUCCESS = true;
-constexpr bool ENABLE_ATTEMPT = true;
-constexpr bool ENABLE_PERF    = true;
 constexpr bool ENABLE_WARNING = true;
 constexpr bool ENABLE_ERROR   = true;
 constexpr bool ENABLE_FAILURE = true;
 constexpr bool ENABLE_FATAL   = true;
-constexpr bool ENABLE_SIMULATION_LOGGING = true;
+constexpr bool ENABLE_SUCCESS = true;
+constexpr bool ENABLE_ATTEMPT = true;
+constexpr bool ENABLE_PERF    = true;
+constexpr bool SIMULATION_LOGGING = true;
 
 constexpr size_t LEVEL_WIDTH   = 10;
 constexpr size_t DELTA_WIDTH   = 10;
@@ -271,7 +284,7 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_ERROR(...)          [&]() { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Error,   "General", __VA_ARGS__); }();
 #define LOG_FAILURE(...)        [&]() { if constexpr (ENABLE_FAILURE) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Failure, "General", __VA_ARGS__); }();
 #define LOG_FATAL(...)          [&]() { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   "General", __VA_ARGS__); }();
-#define LOG_SIMULATION(...)     [&]() { if constexpr (ENABLE_SIMULATION_LOGGING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }();
+#define LOG_SIMULATION(...)     [&]() { if constexpr (SIMULATION_LOGGING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }();
 
 #define LOG_TRACE_CAT(cat, ...)   [&]() { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   cat, __VA_ARGS__); }();
 #define LOG_DEBUG_CAT(cat, ...)   [&]() { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   cat, __VA_ARGS__); }();
@@ -301,7 +314,7 @@ namespace Logging {
 enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error, Failure, Fatal };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLORS — FULL GLORY RESTORED
+// 1. HYPER-VIVID ANSI COLORS
 // ========================================================================
 namespace Color {
     inline constexpr const char* AMOURANTH                      = "\033[1;38;2;153;0;0;48;2;255;255;255m";
@@ -472,6 +485,7 @@ public:
     // Explicit startup — call once after all static init is safe
     void startup() noexcept {
         // Force TotalTime construction here (safe now — logger is ready)
+        // This makes genesis_ ≈ logger startup time, which is usually very close to main()
         TotalTime& tt = TotalTime::get();
 
         double currentUs = tt.us();
@@ -746,7 +760,7 @@ struct GPUCrash {
     bool happened{false};
     uint64_t          addr{0};
     uint32_t          type{0};
-    char              desc[1024]{"Unknown GPU fault -- likely null SBT buffer or destroyed resource"}; // ← Increased to 1024
+    char              desc[512]{"Unknown GPU fault -- likely null SBT buffer or destroyed resource"};
 };
 
 inline GPUCrash g_gpu_crash;
@@ -772,7 +786,7 @@ static void safe_writeln(const char* data) noexcept {
     safe_write("\n", 1);
 }
 
-// Color defines (used in crash handler)
+// Color defines
 #define COLOR_RESET   "\033[0m"
 #define COLOR_BOLD    "\033[1m"
 #define COLOR_RED     "\033[31m"
@@ -876,7 +890,7 @@ static LONG WINAPI apocalypse_handler(EXCEPTION_POINTERS* pExceptionInfo) noexce
         }
     }
 
-    char buf[1024]; // ← Increased size to 1024
+    char buf[512];
     snprintf(buf, sizeof(buf), COLOR_YELLOW "EXCEPTION CODE : 0x%08lX" COLOR_RESET,
              pExceptionInfo->ExceptionRecord->ExceptionCode);
     safe_writeln(buf);
@@ -931,7 +945,7 @@ static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept {
         safe_writeln(*line);
     }
     
-    char buf[2048];
+    char buf[256];
     snprintf(buf, sizeof(buf), COLOR_YELLOW "SIGNAL        : %d" COLOR_RESET, sig);
     safe_writeln(buf);
     snprintf(buf, sizeof(buf), COLOR_YELLOW "FAULT ADDRESS : %p" COLOR_RESET, info ? info->si_addr : nullptr);
@@ -942,8 +956,21 @@ static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept {
 
     if (g_gpu_crash.happened) {
         safe_writeln(COLOR_RED "GPU CRASH CONFIRMED -- That can't be good." COLOR_RESET);
-        snprintf(buf, sizeof(buf), "Diagnosis     : %s", g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown");
-        safe_writeln(buf);
+
+        char diag_buf[1024] = {0};  // Much larger buffer to safely hold desc (512 max) + prefix
+
+        const char* diagnosis = g_gpu_crash.desc[0] ? g_gpu_crash.desc : "Unknown";
+        int len = snprintf(diag_buf, sizeof(diag_buf), "Diagnosis     : %s", diagnosis);
+
+        // If truncated (very unlikely now), add ellipsis for safety
+        if (len >= static_cast<int>(sizeof(diag_buf))) {
+            diag_buf[sizeof(diag_buf) - 4] = '.';
+            diag_buf[sizeof(diag_buf) - 3] = '.';
+            diag_buf[sizeof(diag_buf) - 2] = '.';
+            diag_buf[sizeof(diag_buf) - 1] = '\0';
+        }
+
+        safe_writeln(diag_buf);
         safe_writeln("");
     }
 
@@ -993,7 +1020,7 @@ inline void install_apocalypse_handler() noexcept {
 // Empire / vkh
 // ──────────────────────────────────────────────────────────────────────────────
 struct Empire {
-    // ────────────────────── RESULT → STRING — FULL COVERAGE — CROSS-PLATFORM ──────────────────────
+    // ────────────────────── RESULT → STRING — FULL COVERAGE ──────────────────────
     [[nodiscard]] static constexpr const char* result(VkResult r) noexcept {
         switch (r) {
             case VK_SUCCESS:                                           return "VK_SUCCESS";
@@ -1134,7 +1161,7 @@ struct Empire {
         }
     }
 
-    // ────────────────────── IMAGE LAYOUT → STRING — FULL COVERAGE ──────────────────────
+    // ────────────────────── IMAGE LAYOUT → STRING ──────────────────────
     [[nodiscard]] static inline const char* imageLayout(VkImageLayout layout) noexcept {
         switch (layout) {
             case VK_IMAGE_LAYOUT_UNDEFINED:                                return "UNDEFINED (0)";
@@ -1180,71 +1207,71 @@ struct Empire {
         }
     }
 
-    // ────────────────────── FATAL CHECK — FULL EXECUTION REPORT WITH AUTO-DETECT ──────────────────────
-    template <typename T, typename... Args>
-    static void checker(T value,
-                        const char* call,
-                        const char* msg,
-                        Args&&... args,
-                        std::source_location loc = std::source_location::current()) noexcept
-    {
-        bool condition = false;
-        std::string resultStr = "FAILED";
+// ────────────────────── FATAL CHECK — FULL EXECUTION REPORT WITH AUTO-DETECT ──────────────────────
+template <typename T, typename... Args>
+static void checker(T value,
+                    const char* call,
+                    const char* msg,
+                    Args&&... args,
+                    std::source_location loc = std::source_location::current()) noexcept
+{
+    bool condition = false;
+    std::string resultStr = "FAILED";
 
-        if constexpr (std::is_same<T, VkResult>::value) {
-            condition = (value == VK_SUCCESS || value == VK_SUBOPTIMAL_KHR);
-            resultStr = std::format("{} ({})", result(value), static_cast<int>(value));
-        }
-        else if constexpr (std::is_pointer<T>::value) {
-            condition = (value != nullptr);
-            resultStr = (value == nullptr) ? "NULL" : "valid pointer";
-        }
-        else if constexpr (std::is_same<T, bool>::value) {
-            condition = static_cast<bool>(value);
-            resultStr = condition ? "true" : "false";
-        }
-        else if constexpr (std::is_integral<T>::value) {
-            using UT = std::make_unsigned_t<T>;
-            condition = (value != 0) && (static_cast<UT>(value) != ~UT(0));
-            resultStr = std::to_string(value);
+    if constexpr (std::is_same<T, VkResult>::value) {
+        condition = (value == VK_SUCCESS || value == VK_SUBOPTIMAL_KHR);
+        resultStr = std::format("{} ({})", result(value), static_cast<int>(value));
+    }
+    else if constexpr (std::is_pointer<T>::value) {
+        condition = (value != nullptr);
+        resultStr = (value == nullptr) ? "NULL" : "valid pointer";
+    }
+    else if constexpr (std::is_same<T, bool>::value) {
+        condition = static_cast<bool>(value);
+        resultStr = condition ? "true" : "false";
+    }
+    else if constexpr (std::is_integral<T>::value) {
+        using UT = std::make_unsigned_t<T>;
+        condition = (value != 0) && (static_cast<UT>(value) != ~UT(0));
+        resultStr = std::to_string(value);
 
-            if constexpr (std::is_signed<T>::value) {
-                if (value < 0 && SDL_GetError) {
-                    resultStr += std::format(" (SDL error: {})", SDL_GetError());
-                }
+        if constexpr (std::is_signed<T>::value) {
+            if (value < 0 && SDL_GetError) {
+                resultStr += std::format(" (SDL error: {})", SDL_GetError());
             }
         }
-        else {
-            condition = (value != 0);
-            resultStr = "invalid (fallback check)";
-        }
+    }
+    else {
+        condition = (value != 0);
+        resultStr = "invalid (fallback check)";
+    }
 
-        if (condition) [[likely]] return;
+    if (condition) [[likely]] return;
 
-        std::string formattedMsg = std::vformat(msg, std::make_format_args(args...));
+    std::string formattedMsg = std::vformat(msg, std::make_format_args(args...));
 
-        std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
+    std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
 
-        LOG_FATAL("\n"
-                  "════════════════════════════════════════════════════════════════\n"
-                  "CHECK FAILED — EXECUTION HALTED\n"
-                  "  Call site : {}\n"
-                  "  Condition : {} → {}\n"
-                  "  Message   : {}\n"
-                  "  Location  : {}:{}\n"
-                  "  Function  : {}\n"
-                  "════════════════════════════════════════════════════════════════",
-                  call,
-                  resultStr,
-                  condition ? "PASS" : "FAIL",
-                  formattedMsg,
-                  guiltyFile, loc.line(),
-                  loc.function_name());
+    LOG_FATAL("\n"
+              "════════════════════════════════════════════════════════════════\n"
+              "CHECK FAILED — EXECUTION HALTED\n"
+              "  Call site : {}\n"
+              "  Condition : {} → {}\n"
+              "  Message   : {}\n"
+              "  Location  : {}:{}\n"
+              "  Function  : {}\n"
+              "════════════════════════════════════════════════════════════════",
+              call,
+              resultStr,
+              condition ? "PASS" : "FAIL",
+              formattedMsg,
+              guiltyFile, loc.line(),
+              loc.function_name());
 
 #ifdef DEBUG
-        std::abort();
+    std::abort();
 #endif
-    }
+}
 
     // debugCallback, alignUp, installCrashHandler unchanged
     [[maybe_unused]] static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(

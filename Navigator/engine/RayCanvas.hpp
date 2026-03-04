@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 // =============================================================================
@@ -17,9 +17,7 @@
 #include <vector>
 #include <cstdint>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Extended toy / playground material — Disney / extended principled + fun extras
-// ─────────────────────────────────────────────────────────────────────────────
+// Extended Disney-style material (stable layout)
 struct alignas(16) Material
 {
     glm::vec4 baseColor         {1.0f, 1.0f, 1.0f, 1.0f};
@@ -57,14 +55,15 @@ struct alignas(16) Material
     uint32_t  padding[2]        = {0,0};
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Camera uniform data block
-// ─────────────────────────────────────────────────────────────────────────────
+// Camera uniform block — includes previous position and matrices
 struct CameraSceneData {
     glm::mat4 viewInverse;
     glm::mat4 projInverse;
     glm::mat4 view;
     glm::mat4 proj;
+
+    glm::mat4 prevView;
+    glm::mat4 prevProj;
 
     glm::vec4 cameraPos;
     glm::vec4 prevCameraPos;
@@ -77,9 +76,7 @@ struct CameraSceneData {
     uint32_t  padding[2]   = {0, 0};
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Living world state
-// ─────────────────────────────────────────────────────────────────────────────
+// Living world — enhanced for volumetrics, fire, water caustics, etc.
 struct LivingWorldData {
     glm::vec4 sunDirAndIntensity;
     glm::vec4 skyDayTop;
@@ -91,12 +88,18 @@ struct LivingWorldData {
     float     cloudDensity;
     float     fogDensity;
     float     temperature;
+
+    float     volumetricDensity      = 0.015f;
+    float     volumetricAnisotropy   = 0.35f;
+    float     volumetricEmissionScale = 1.0f;
+    float     causticsStrength       = 0.0f;
+
     uint32_t  frameSeed;
-    uint32_t  padding[3];
+    uint32_t  padding[2];
 };
 
 // =============================================================================
-// RayCanvas — Persistent progressive compute canvas with living world
+// RayCanvas — Persistent compute-based renderer with temporal support
 // =============================================================================
 class RayCanvas {
 public:
@@ -104,10 +107,8 @@ public:
         : window_(window),
           window_width_(windowWidth),
           window_height_(windowHeight),
-          // TODO: Replace these hardcoded values with your actual internal resolution
-          //       (add to Options::Rendering if missing)
-          internal_width_(1920),
-          internal_height_(1080),
+          internal_width_(Options::Rendering::INTERNAL_WIDTH),
+          internal_height_(Options::Rendering::INTERNAL_HEIGHT),
           minimized_(false),
           destroyed_(false),
           firstFrame_(true),
@@ -118,21 +119,17 @@ public:
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
+          prevHdrOutputImage_(VK_NULL_HANDLE),
+          prevHdrOutputView_(VK_NULL_HANDLE),
+          prevHdrOutputMemory_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE)
     {
-        LOG_INFO_CAT("RAYCANVAS", "Initializing single-shader compute canvas — window {}x{}, internal render {}x{}",
-                     window_width_, window_height_, internal_width_, internal_height_);
-
         Swapchain::create(window, window_width_, window_height_);
 
         if (!Swapchain::get()) {
-            LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain during initialization — aborting");
+            LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain");
             std::abort();
-        }
-
-        if (Swapchain::isMinimized()) {
-            LOG_WARNING_CAT("RAYCANVAS", "Window is minimized at startup — skipping initial render");
         }
 
         cameraUBOHandle_ = Memory::createBuffer(
@@ -141,11 +138,6 @@ public:
             "CameraUBO"
         );
 
-        if (cameraUBOHandle_ == 0) {
-            LOG_FATAL_CAT("RAYCANVAS", "Failed to allocate Camera UBO");
-            std::abort();
-        }
-
         livingWorldHandle_ = Memory::createBuffer(
             sizeof(LivingWorldData),
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -153,12 +145,7 @@ public:
             Memory::MemoryHint::HostVisible
         );
 
-        if (livingWorldHandle_ == 0) {
-            LOG_FATAL_CAT("RAYCANVAS", "Failed to allocate LivingWorld buffer");
-            std::abort();
-        }
-
-        // ── Material library ────────────────────────────────────────────────
+        // Material library with procedural variation
         std::vector<Material> sceneMaterials;
         auto addMat = [&](Material m) {
             if (m.transmission      > 0.001f) m.flags |= (1u << 0);
@@ -170,7 +157,7 @@ public:
             sceneMaterials.push_back(m);
         };
 
-        // Base materials (your originals)
+        // Base materials (your original 6)
         {
             Material m{}; m.baseColor = {0.95f,0.64f,0.07f,1.0f}; m.metallic=1.0f; m.roughness=0.08f; m.ior=1.5f; addMat(m);
         }
@@ -226,8 +213,6 @@ public:
             addMat(m);
         }
 
-        LOG_INFO_CAT("RAYCANVAS", "Created {} materials ({} base + variations)", sceneMaterials.size(), baseCount);
-
         VkDeviceSize matSize = sceneMaterials.size() * sizeof(Material);
         materialsHandle_ = Memory::createBuffer(matSize,
                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -264,12 +249,8 @@ public:
             }
         }
 
-        if (primitivesHandle_ == 0) {
-            LOG_FATAL_CAT("RAYCANVAS", "Failed to allocate Primitives buffer");
-            std::abort();
-        }
-
         createPersistentHDR();
+        createPreviousHDR();
         createDescriptorPoolAndSet();
 
         Pipeline::initialize();
@@ -277,8 +258,6 @@ public:
         Pipeline::create_canvas_pipeline();
 
         updateDescriptorSet();
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Single-shader compute canvas initialized — toy mode active");
     }
 
     ~RayCanvas() {
@@ -294,142 +273,187 @@ public:
         vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
         vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
+        vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
+        vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+        vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(livingWorldHandle_);
         Memory::destroy(materialsHandle_);
         Memory::destroy(primitivesHandle_);
 
         Pipeline::shutdown();
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Shutdown complete");
     }
 
-    void maybeUpdateCanvas() noexcept {
-        if (destroyed_) return;
+void maybeUpdateCanvas() noexcept {
+    if (destroyed_) return;
 
-        int currentW = 0, currentH = 0;
-        SDL_GetWindowSize(window_, &currentW, &currentH);
+    int currentW = 0, currentH = 0;
+    SDL_GetWindowSize(window_, &currentW, &currentH);
 
-        bool sizeChanged   = (currentW != window_width_ || currentH != window_height_);
-        bool wasMinimized  = minimized_;
-        bool nowMinimized  = (currentW <= 0 || currentH <= 0);
+    bool sizeChanged   = (currentW != window_width_ || currentH != window_height_);
+    bool wasMinimized  = minimized_;
+    bool nowMinimized  = (currentW <= 0 || currentH <= 0);
 
-        if (nowMinimized) {
-            minimized_ = true;
-            return;
-        }
-
-        // Force resize if size changed OR previously minimized
-        if (sizeChanged || wasMinimized) {
-            vkDeviceWaitIdle(rtx().device);
-            onResize(currentW, currentH);
-            minimized_ = false;
-        }
-
-        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
-            LOG_WARNING_CAT("RAYCANVAS", "Invalid state after resize — skipping frame");
-            return;
-        }
-
-        if (firstFrame_) {
-            TotalTime::get().seal();
-            firstFrame_ = false;
-            LOG_AMOURANTH("Genesis sealed — eternal single-shader canvas begins 💖");
-        }
-
-        double now = TotalTime::get().seconds();
-        static double lastKnownTime = 0.0;
-        if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
-        lastKnownTime = now;
-
-        updateCameraUBO(now);
-        updateLivingWorldBuffer(now);
-        updateDescriptorSet();
-
-        // Acquire
-        uint32_t imageIndex = 0;
-        VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fci{};
-        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        vkCreateFence(rtx().device, &fci, nullptr, &fence);
-
-        VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
-                                                    VK_NULL_HANDLE, fence, &imageIndex);
-
-        vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(rtx().device, fence, nullptr);
-
-        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date after resize — retrying next frame");
-            minimized_ = true;
-            return;
-        }
-
-        if (acq != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
-            if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
-            return;
-        }
-
-        // Render
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (!cmd) return;
-
-        transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-
-        VkDescriptorSet set = descriptorSet_;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
-                                0, 1, &set, 0, nullptr);
-
-        Pipeline::dispatch_canvas(cmd, static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), static_cast<float>(now));
-
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barrier.image = hdrOutputImage_;
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-        endSubmitAndWait(cmd);
-
-        // Blit to swapchain using Swapchain helper
-        VkCommandBuffer blitCmd = beginTransientCommandBuffer();
-        if (!blitCmd) return;
-
-        VkImage swapImg = Swapchain::images[imageIndex];
-
-        Swapchain::scaleBlit(blitCmd,
-                             hdrOutputImage_,
-                             {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_)},
-                             swapImg,
-                             Swapchain::getExtent());
-
-        endSubmitAndWait(blitCmd);
-
-        // Present
-        VkPresentInfoKHR pi{};
-        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        pi.swapchainCount = 1;
-        pi.pSwapchains    = &Swapchain::swapchain.value;
-        pi.pImageIndices  = &imageIndex;
-
-        VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
-
-        if (pres == VK_SUCCESS) {
-            Swapchain::updateRefreshEstimate(now);
-        } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date — will recreate next frame");
-            minimized_ = true;
-        } else if (pres != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
-            if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
-        }
+    if (nowMinimized) {
+        minimized_ = true;
+        return;
     }
+
+    if (sizeChanged || wasMinimized) {
+        vkDeviceWaitIdle(rtx().device);
+        onResize(currentW, currentH);
+        minimized_ = false;
+    }
+
+    if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
+        LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
+        return;
+    }
+
+    if (firstFrame_) {
+        TotalTime::get().seal();
+        firstFrame_ = false;
+        LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
+    }
+
+    double now = TotalTime::get().seconds();
+    static double lastKnownTime = 0.0;
+    if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
+    lastKnownTime = now;
+
+    updateCameraUBO(now);
+    updateLivingWorldBuffer(now);
+    updateDescriptorSet();
+
+    uint32_t imageIndex = 0;
+    VkFence fence = VK_NULL_HANDLE;
+    VkFenceCreateInfo fci{};
+    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    vkCreateFence(rtx().device, &fci, nullptr, &fence);
+
+    VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
+                                                VK_NULL_HANDLE, fence, &imageIndex);
+
+    vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(rtx().device, fence, nullptr);
+
+    if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date — retrying next frame");
+        minimized_ = true;
+        return;
+    }
+
+    if (acq != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
+        if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
+        return;
+    }
+
+    VkCommandBuffer cmd = beginTransientCommandBuffer();
+    if (!cmd) return;
+
+    // Ensure HDR is in GENERAL layout before compute writes
+    transitionImageLayout(cmd, hdrOutputImage_,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    if (!firstFrame_) {
+        copyHDRtoPrevious(cmd);
+    }
+
+    VkDescriptorSet set = descriptorSet_;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
+                            0, 1, &set, 0, nullptr);
+
+    Pipeline::dispatch_canvas(cmd,
+                              static_cast<uint32_t>(internal_width_),
+                              static_cast<uint32_t>(internal_height_),
+                              static_cast<float>(now));
+
+    // Critical barrier: make compute writes visible to transfer/blit
+    VkImageMemoryBarrier postComputeBarrier{};
+    postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    postComputeBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postComputeBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    postComputeBarrier.image = hdrOutputImage_;
+    postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
+
+    endSubmitAndWait(cmd);
+
+    // Blit phase
+    VkCommandBuffer blitCmd = beginTransientCommandBuffer();
+    if (!blitCmd) return;
+
+    VkImage swapImg = Swapchain::images[imageIndex];
+
+    // Transition swapchain image to TRANSFER_DST
+    VkImageMemoryBarrier swapBarrier{};
+    swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    swapBarrier.srcAccessMask = 0;
+    swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    swapBarrier.image = swapImg;
+    swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(blitCmd,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
+
+    // Optional: clear swapchain to black for debug (remove later)
+    VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
+
+    Swapchain::scaleBlit(blitCmd,
+                         hdrOutputImage_,
+                         VkExtent2D{static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_)},
+                         swapImg,
+                         Swapchain::getExtent());
+
+    // Transition swapchain back to PRESENT_SRC_KHR
+    VkImageMemoryBarrier presentBarrier{};
+    presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    presentBarrier.image = swapImg;
+    presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(blitCmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+
+    endSubmitAndWait(blitCmd);
+
+    VkPresentInfoKHR pi{};
+    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.swapchainCount = 1;
+    pi.pSwapchains    = &Swapchain::swapchain.value;
+    pi.pImageIndices  = &imageIndex;
+
+    VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
+
+    if (pres == VK_SUCCESS) {
+        Swapchain::updateRefreshEstimate(now);
+    } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date — recreate next frame");
+        minimized_ = true;
+    } else if (pres != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
+        if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
+    }
+}
 
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
@@ -445,11 +469,21 @@ public:
         window_height_ = newHeight;
         minimized_ = false;
 
-        LOG_INFO_CAT("WINDOW", "Resizing canvas to {}x{}", window_width_, window_height_);
+        LOG_INFO_CAT("WINDOW", "Resizing to {}x{}", newWidth, newHeight);
 
         Swapchain::recreate(window_width_, window_height_);
 
-        // HDR remains at internal resolution — no need to recreate unless resolution option changed
+        using namespace Options::GameStyle;
+        if (CurrentDimension == DimensionMode::Pure2D || CurrentDimension == DimensionMode::TwoPointFiveD) {
+            internal_width_  = std::min(1280, window_width_);
+            internal_height_ = std::min(720, window_height_);
+        } else {
+            internal_width_  = Options::Rendering::INTERNAL_WIDTH;
+            internal_height_ = Options::Rendering::INTERNAL_HEIGHT;
+        }
+
+        createPersistentHDR();
+        createPreviousHDR();
         updateDescriptorSet();
     }
 
@@ -534,10 +568,8 @@ private:
         ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        if (vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImage HDR failed");
-            return;
-        }
+        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_),
+                    "vkCreateImage", "HDR");
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &req);
@@ -546,12 +578,8 @@ private:
 
         VkMemoryAllocateInfo mai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, req.size, memType };
 
-        if (vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkAllocateMemory HDR failed");
-            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-            hdrOutputImage_ = VK_NULL_HANDLE;
-            return;
-        }
+        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_),
+                    "vkAllocateMemory", "HDR");
 
         vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
 
@@ -562,16 +590,110 @@ private:
         vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        if (vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_) != VK_SUCCESS) {
-            LOG_ERROR_CAT("RAYCANVAS", "vkCreateImageView HDR failed");
-            vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-            vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
-            hdrOutputImage_ = VK_NULL_HANDLE;
-            hdrOutputMemory_ = VK_NULL_HANDLE;
-            return;
-        }
+        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_),
+                    "vkCreateImageView", "HDR");
+    }
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Persistent HDR canvas created — {}x{}", internal_width_, internal_height_);
+    void createPreviousHDR() noexcept {
+        vkDeviceWaitIdle(rtx().device);
+
+        if (prevHdrOutputView_)   vkDestroyImageView(rtx().device, prevHdrOutputView_, nullptr);
+        if (prevHdrOutputImage_)  vkDestroyImage(rtx().device, prevHdrOutputImage_, nullptr);
+        if (prevHdrOutputMemory_) vkFreeMemory(rtx().device, prevHdrOutputMemory_, nullptr);
+
+        prevHdrOutputView_   = VK_NULL_HANDLE;
+        prevHdrOutputImage_  = VK_NULL_HANDLE;
+        prevHdrOutputMemory_ = VK_NULL_HANDLE;
+
+        VkImageCreateInfo ci{};
+        ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType   = VK_IMAGE_TYPE_2D;
+        ci.format      = VK_FORMAT_R32G32B32A32_SFLOAT;
+        ci.extent      = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
+        ci.mipLevels   = 1;
+        ci.arrayLayers = 1;
+        ci.samples     = VK_SAMPLE_COUNT_1_BIT;
+        ci.tiling      = VK_IMAGE_TILING_OPTIMAL;
+        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &prevHdrOutputImage_),
+                    "vkCreateImage", "Prev HDR");
+
+        VkMemoryRequirements req{};
+        vkGetImageMemoryRequirements(rtx().device, prevHdrOutputImage_, &req);
+
+        uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        VkMemoryAllocateInfo mai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, req.size, memType };
+
+        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &prevHdrOutputMemory_),
+                    "vkAllocateMemory", "Prev HDR");
+
+        vkBindImageMemory(rtx().device, prevHdrOutputImage_, prevHdrOutputMemory_, 0);
+
+        VkImageViewCreateInfo vi{};
+        vi.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vi.image            = prevHdrOutputImage_;
+        vi.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
+        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &prevHdrOutputView_),
+                    "vkCreateImageView", "Prev HDR");
+    }
+
+    void copyHDRtoPrevious(VkCommandBuffer cmd) noexcept {
+        if (!prevHdrOutputImage_ || !hdrOutputImage_) return;
+
+        VkImageMemoryBarrier barriers[2]{};
+
+        barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barriers[0].image = hdrOutputImage_;
+        barriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barriers[1].srcAccessMask = 0;
+        barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barriers[1].image = prevHdrOutputImage_;
+        barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 2, barriers);
+
+        VkImageCopy copyRegion{};
+        copyRegion.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copyRegion.srcOffset = {0,0,0};
+        copyRegion.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copyRegion.dstOffset = {0,0,0};
+        copyRegion.extent = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
+
+        vkCmdCopyImage(cmd,
+            hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            prevHdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &copyRegion);
+
+        VkImageMemoryBarrier postBarrier{};
+        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        postBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        postBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        postBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        postBarrier.image = prevHdrOutputImage_;
+        postBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &postBarrier);
     }
 
     void updateLivingWorldBuffer(double now) noexcept {
@@ -591,17 +713,23 @@ private:
         float dayFactor = glm::smoothstep(-0.1f, 0.3f, sunHeight);
         float intensity = glm::max(0.0f, sunHeight) * 4.0f + 0.1f;
 
-        data.sunDirAndIntensity = glm::vec4(sunDir, intensity);
-        data.skyDayTop          = Options::Sky::SKY_ZENITH_DAY;
-        data.skyDayHorizon      = Options::Sky::SKY_HORIZON_DAY;
-        data.skyNight           = Options::Sky::SKY_ZENITH_NIGHT;
-        data.groundColorDay     = Options::Sky::GROUND_COLOR_DAY;
-        data.groundColorNight   = Options::Sky::GROUND_COLOR_NIGHT;
-        data.dayNightFactor     = dayFactor;
-        data.cloudDensity       = Options::Sky::CLOUD_DENSITY;
-        data.fogDensity         = Options::Sky::FOG_DENSITY;
-        data.temperature        = 20.0f + 10.0f * sinf(dayFrac * 2.0f * glm::pi<float>());
-        data.frameSeed          = static_cast<uint32_t>(now * 1000.0f);
+        data.sunDirAndIntensity     = glm::vec4(sunDir, intensity);
+        data.skyDayTop              = Options::Sky::SKY_ZENITH_DAY;
+        data.skyDayHorizon          = Options::Sky::SKY_HORIZON_DAY;
+        data.skyNight               = Options::Sky::SKY_ZENITH_NIGHT;
+        data.groundColorDay         = Options::Sky::GROUND_COLOR_DAY;
+        data.groundColorNight       = Options::Sky::GROUND_COLOR_NIGHT;
+        data.dayNightFactor         = dayFactor;
+        data.cloudDensity           = Options::Sky::CLOUD_DENSITY;
+        data.fogDensity             = Options::Sky::FOG_DENSITY;
+        data.temperature            = 20.0f + 10.0f * sinf(dayFrac * 2.0f * glm::pi<float>());
+
+        data.volumetricDensity      = 0.015f;
+        data.volumetricAnisotropy   = 0.35f;
+        data.volumetricEmissionScale= 1.0f;
+        data.causticsStrength       = 0.0f;
+
+        data.frameSeed              = static_cast<uint32_t>(now * 1000.0f);
 
         auto* info = Memory::get(livingWorldHandle_);
         if (info && info->mapped) {
@@ -618,15 +746,34 @@ private:
     void updateCameraUBO(double now) noexcept {
         CameraSceneData data{};
 
+        using namespace Options::GameStyle;
+        if (CurrentPerspective == CameraPerspective::Orthographic2D ||
+            CurrentPerspective == CameraPerspective::SideScroller) {
+            float aspect = static_cast<float>(internal_width_) / static_cast<float>(internal_height_);
+            data.proj = glm::ortho(-aspect * 5.0f, aspect * 5.0f, -5.0f, 5.0f, 0.1f, 1000.0f);
+        } else {
+            data.proj = CAM.projection(static_cast<float>(internal_width_) / static_cast<float>(internal_height_));
+        }
+
+        static glm::mat4 lastView = data.view;
+        static glm::mat4 lastProj = data.proj;
+
+        data.prevView = lastView;
+        data.prevProj = lastProj;
+
         data.view        = CAM.view();
-        data.proj        = CAM.projection(static_cast<float>(internal_width_) / static_cast<float>(internal_height_));
         data.viewInverse = glm::inverse(data.view);
         data.projInverse = glm::inverse(data.proj);
 
         data.cameraPos   = glm::vec4(CAM.position(), 1.0f);
+        data.prevCameraPos = glm::vec4(CAM.prevPosition(), 1.0f);
+
         data.exposure    = Options::Rendering::EXPOSURE;
         data.genesisTime = now;
         data.randomSeed  = static_cast<uint32_t>(now * 1'000'000.0) ^ 0xCAFEBABEu;
+
+        lastView = data.view;
+        lastProj = data.proj;
 
         auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
         if (stagingBuf != VK_NULL_HANDLE) {
@@ -696,9 +843,15 @@ private:
         float w = sinf(shift * glm::pi<float>() * 2.0f);
 
         glm::mat3 rot = glm::mat3(
-            0.299f + 0.701f * u + 0.168f * w,   0.587f - 0.587f * u + 0.330f * w,   0.114f - 0.114f * u - 0.497f * w,
-            0.299f - 0.299f * u - 0.328f * w,   0.587f + 0.413f * u + 0.035f * w,   0.114f - 0.114f * u + 0.292f * w,
-            0.299f - 0.300f * u + 1.250f * w,   0.587f - 0.588f * u - 1.050f * w,   0.114f + 0.886f * u - 0.203f * w
+            0.299f + 0.701f * u + 0.168f * w,
+            0.587f - 0.587f * u + 0.330f * w,
+            0.114f - 0.114f * u - 0.497f * w,
+            0.299f - 0.299f * u - 0.328f * w,
+            0.587f + 0.413f * u + 0.035f * w,
+            0.114f - 0.114f * u + 0.292f * w,
+            0.299f - 0.300f * u + 1.250f * w,
+            0.587f - 0.588f * u - 1.050f * w,
+            0.114f + 0.886f * u - 0.203f * w
         );
 
         rgb = rot * rgb;
@@ -732,6 +885,10 @@ private:
     VkImage        hdrOutputImage_   = VK_NULL_HANDLE;
     VkImageView    hdrOutputView_    = VK_NULL_HANDLE;
     VkDeviceMemory hdrOutputMemory_  = VK_NULL_HANDLE;
+
+    VkImage        prevHdrOutputImage_   = VK_NULL_HANDLE;
+    VkImageView    prevHdrOutputView_    = VK_NULL_HANDLE;
+    VkDeviceMemory prevHdrOutputMemory_  = VK_NULL_HANDLE;
 
     VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_  = VK_NULL_HANDLE;

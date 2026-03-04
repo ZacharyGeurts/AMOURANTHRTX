@@ -278,8 +278,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     LOG_AMOURANTH("Genesis sealed — eternal compute begins");
 
     // ────────────────────────────────────────────────
-    // Eternal loop
+    // Eternal loop — now with proper frame timing (up to ~240 FPS)
     // ────────────────────────────────────────────────
+    double lastFrameTime = TotalTime::get().seconds();
+    constexpr double targetFrameTime = 1.0 / 240.0;  // ~240 FPS max
+
     while (true) {
         int w = 0, h = 0;
         bool quit = false, fullscreen_toggle = false;
@@ -294,11 +297,30 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
             break;
         }
 
-        // Update canvas size only if changed (sdl_poll_events sets w/h)
+        // Update canvas size only if changed
         raycanvas->onResize(w, h);
+
+        // Frame timing — avoid blasting too many frames
+        double currentTime = TotalTime::get().seconds();
+        double dt = currentTime - lastFrameTime;
+
+        if (dt < targetFrameTime) {
+            // Sleep briefly to avoid 100% CPU usage and respect ~240 FPS cap
+            SDL_Delay(static_cast<Uint32>((targetFrameTime - dt) * 1000.0));
+            currentTime = TotalTime::get().seconds();  // re-sample after sleep
+        }
 
         // Render the frame
         raycanvas->maybeUpdateCanvas();
+
+        lastFrameTime = currentTime;
+
+        // Optional: log FPS every 5 seconds for debugging
+        static double lastFpsLog = 0.0;
+        if (currentTime - lastFpsLog > 5.0) {
+            LOG_INFO_CAT("MAIN", "Current FPS: ~%.1f (dt=%.4f s)", 1.0 / dt, dt);
+            lastFpsLog = currentTime;
+        }
     }
 
     // Cleanup
