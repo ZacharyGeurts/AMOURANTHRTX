@@ -900,22 +900,22 @@ struct Swapchain {
         operator VkSwapchainKHR() const noexcept { return value; }
     };
 
-    inline static Handle                swapchain{};
+    inline static Handle                swapchain;
     inline static std::vector<VkImage>  images;
     inline static std::vector<VkImageView> views;
-    inline static VkExtent2D            extent          = {};
+    inline static VkExtent2D            extent          {};
     inline static VkFormat              format          = VK_FORMAT_UNDEFINED;
     inline static VkColorSpaceKHR       colorSpace      = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     inline static VkPresentModeKHR      presentMode     = VK_PRESENT_MODE_FIFO_KHR;
     inline static bool                  minimized       = false;
     inline static bool                  supportsStorage = false;
 
-    // Timing / refresh estimation
+    // Timing / refresh estimation (used by RayCanvas for pacing)
     inline static double lastPresentTime_s   = 0.0;
     inline static double smoothedRefresh_s   = 1.0 / 60.0;
 
     // ────────────────────────────────────────────────────────────────
-    // Create or recreate swapchain (called from RayCanvas::onResize too)
+    // Create or recreate swapchain
     // ────────────────────────────────────────────────────────────────
     static void createOrRecreate(int requestedWidth, int requestedHeight, bool isRecreate = false) noexcept {
         VkDevice device = rtx().device;
@@ -932,7 +932,7 @@ struct Swapchain {
         VkSurfaceCapabilitiesKHR caps{};
         ext().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rtx().physical, rtx().surface, &caps);
 
-        // Handle minimized / invalid surface state
+        // Handle minimized / invalid surface
         if (caps.currentExtent.width == 0 || caps.currentExtent.height == 0) {
             minimized = true;
             LOG_WARNING_CAT("SWAPCHAIN", "Surface reports 0×0 extent — window likely minimized");
@@ -942,7 +942,6 @@ struct Swapchain {
         // Choose extent
         VkExtent2D newExtent = caps.currentExtent;
         if (newExtent.width == std::numeric_limits<uint32_t>::max()) {
-            // Windowed mode: clamp to requested size within capabilities
             newExtent.width  = std::clamp(static_cast<uint32_t>(requestedWidth),
                                           caps.minImageExtent.width,
                                           caps.maxImageExtent.width);
@@ -966,14 +965,13 @@ struct Swapchain {
 
         VkSurfaceFormatKHR chosenFmt = formats.empty() ? VkSurfaceFormatKHR{} : formats[0];
 
-        constexpr std::array preferredFormats = {
+        constexpr std::array preferred = {
             VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
             VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
+            VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
         };
 
-        for (const auto& pref : preferredFormats) {
+        for (const auto& pref : preferred) {
             auto it = std::find_if(formats.begin(), formats.end(),
                 [&](const auto& f) { return f.format == pref.format && f.colorSpace == pref.colorSpace; });
             if (it != formats.end()) {
@@ -982,7 +980,7 @@ struct Swapchain {
             }
         }
 
-        format    = chosenFmt.format;
+        format     = chosenFmt.format;
         colorSpace = chosenFmt.colorSpace;
 
         // ── Present modes ───────────────────────────────────────────────
@@ -991,20 +989,22 @@ struct Swapchain {
         std::vector<VkPresentModeKHR> modes(pmCount);
         ext().vkGetPhysicalDeviceSurfacePresentModesKHR(rtx().physical, rtx().surface, &pmCount, modes.data());
 
-        VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;
+        VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;  // safe fallback
 
-        // Preference order: Mailbox > Immediate > FIFO
-        if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) != modes.end()) {
-            chosenPM = VK_PRESENT_MODE_MAILBOX_KHR;
-        } else if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-            chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-        }
+        if (!Options::Window::VSYNC) {
+            // Our own relaxed pacing is in control → prefer IMMEDIATE for lowest latency
+            // Timing cache prevents over-submit / excessive tearing
+            if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
+                chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            }
+            // No MAILBOX attempt — we know it's unavailable and not needed
+        } 
+        // else: user explicitly wants driver V-Sync → FIFO (zero tearing, higher latency)
 
         presentMode = chosenPM;
 
         // ── Image count ─────────────────────────────────────────────────
-        uint32_t imgCount = caps.minImageCount;
-        imgCount = std::max(imgCount, 2u);  // try triple buffering if allowed
+        uint32_t imgCount = std::max(caps.minImageCount, 2u);
         if (caps.maxImageCount > 0) {
             imgCount = std::min(imgCount, caps.maxImageCount);
         }
@@ -1015,14 +1015,10 @@ struct Swapchain {
             usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         }
 
-        // Check if we can use storage directly (rare on desktop)
         supportsStorage = (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
 
         // ── Sharing mode ────────────────────────────────────────────────
-        uint32_t queueFamilyIndices[2] = {
-            rtx().graphics_family,
-            rtx().present_family
-        };
+        uint32_t queueFamilyIndices[2] = {rtx().graphics_family, rtx().present_family};
 
         VkSwapchainCreateInfoKHR ci{};
         ci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -1052,6 +1048,7 @@ struct Swapchain {
         VkSwapchainKHR newSwap = VK_NULL_HANDLE;
         VkResult res = ext().vkCreateSwapchainKHR(device, &ci, nullptr, &newSwap);
         if (res != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {}", vkh.result(res));
             minimized = true;
             return;
         }
@@ -1078,16 +1075,14 @@ struct Swapchain {
                                    VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
             vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-            if (vkCreateImageView(device, &vi, nullptr, &views[i]) != VK_SUCCESS) {
-                LOG_ERROR_CAT("SWAPCHAIN", "Failed to create swapchain image view #{}", i);
-            }
+            vkCreateImageView(device, &vi, nullptr, &views[i]);
         }
 
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
 
         LOG_SUCCESS_CAT("SWAPCHAIN", "Created swapchain {}x{} ({} images, present mode {})",
-                extent.width, extent.height, actualCount, static_cast<int>(presentMode));
+                        extent.width, extent.height, actualCount, static_cast<int>(presentMode));
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -1100,22 +1095,30 @@ struct Swapchain {
                           VkExtent2D dstExtent) noexcept {
         if (!cmd || srcImage == VK_NULL_HANDLE || dstImage == VK_NULL_HANDLE) return;
 
-        // Assume srcImage is already in TRANSFER_SRC_OPTIMAL (done in RayCanvas)
-        transitionImageLayout(cmd, dstImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        // Assume srcImage is already in TRANSFER_SRC_OPTIMAL (set by caller)
+        // Transition dst to TRANSFER_DST
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = dstImage;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
 
         VkImageBlit region{};
-        region.srcSubresource.aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.srcSubresource.mipLevel        = 0;
-        region.srcSubresource.baseArrayLayer  = 0;
-        region.srcSubresource.layerCount      = 1;
+        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.srcOffsets[0] = {0, 0, 0};
         region.srcOffsets[1] = {static_cast<int32_t>(srcExtent.width),
                                 static_cast<int32_t>(srcExtent.height), 1};
 
-        region.dstSubresource.aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.dstSubresource.mipLevel        = 0;
-        region.dstSubresource.baseArrayLayer  = 0;
-        region.dstSubresource.layerCount      = 1;
+        region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.dstOffsets[0] = {0, 0, 0};
         region.dstOffsets[1] = {static_cast<int32_t>(dstExtent.width),
                                 static_cast<int32_t>(dstExtent.height), 1};
@@ -1124,9 +1127,18 @@ struct Swapchain {
                        srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        1, &region,
-                       VK_FILTER_LINEAR);   // or VK_FILTER_NEAREST for sharper pixel art look
+                       VK_FILTER_LINEAR);
 
-        transitionImageLayout(cmd, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        // Transition dst to PRESENT_SRC_KHR
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -1171,7 +1183,6 @@ struct Swapchain {
     static bool canDirectWrite() noexcept { return supportsStorage; }
     static double getSmoothedRefresh() noexcept { return smoothedRefresh_s; }
 
-    // Optional: call after successful present
     static void updateRefreshEstimate(double presentTime_s) noexcept {
         if (lastPresentTime_s > 0.0) {
             double delta = presentTime_s - lastPresentTime_s;
