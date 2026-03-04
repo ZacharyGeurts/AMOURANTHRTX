@@ -1,12 +1,14 @@
+#pragma once
+
 // =============================================================================
 // AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 // =============================================================================
+
 // Inspired by Ellie Fier
 // =============================================================================
 
-#pragma once
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
@@ -243,14 +245,14 @@ namespace std {
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
 constexpr bool ENABLE_INFO    = true;
+constexpr bool ENABLE_SUCCESS = true;
+constexpr bool ENABLE_ATTEMPT = true;
+constexpr bool ENABLE_PERF    = true;
 constexpr bool ENABLE_WARNING = true;
 constexpr bool ENABLE_ERROR   = true;
 constexpr bool ENABLE_FAILURE = true;
 constexpr bool ENABLE_FATAL   = true;
-constexpr bool ENABLE_SUCCESS = true;
-constexpr bool ENABLE_ATTEMPT = true;
-constexpr bool ENABLE_PERF    = true;
-constexpr bool SIMULATION_LOGGING = true;
+constexpr bool ENABLE_SIMULATION_LOGGING = true;
 
 constexpr size_t LEVEL_WIDTH   = 10;
 constexpr size_t DELTA_WIDTH   = 10;
@@ -269,7 +271,7 @@ constexpr size_t THREAD_WIDTH  = 18;
 #define LOG_ERROR(...)          [&]() { if constexpr (ENABLE_ERROR)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Error,   "General", __VA_ARGS__); }();
 #define LOG_FAILURE(...)        [&]() { if constexpr (ENABLE_FAILURE) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Failure, "General", __VA_ARGS__); }();
 #define LOG_FATAL(...)          [&]() { if constexpr (ENABLE_FATAL)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Fatal,   "General", __VA_ARGS__); }();
-#define LOG_SIMULATION(...)     [&]() { if constexpr (SIMULATION_LOGGING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }();
+#define LOG_SIMULATION(...)     [&]() { if constexpr (ENABLE_SIMULATION_LOGGING) Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Info, "SIMULATION", __VA_ARGS__); }();
 
 #define LOG_TRACE_CAT(cat, ...)   [&]() { if constexpr (ENABLE_TRACE)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Trace,   cat, __VA_ARGS__); }();
 #define LOG_DEBUG_CAT(cat, ...)   [&]() { if constexpr (ENABLE_DEBUG)   Logging::Logger::get().log(std::source_location::current(), Logging::LogLevel::Debug,   cat, __VA_ARGS__); }();
@@ -299,7 +301,7 @@ namespace Logging {
 enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error, Failure, Fatal };
 
 // ========================================================================
-// 1. HYPER-VIVID ANSI COLORS
+// 1. HYPER-VIVID ANSI COLORS — FULL GLORY RESTORED
 // ========================================================================
 namespace Color {
     inline constexpr const char* AMOURANTH                      = "\033[1;38;2;153;0;0;48;2;255;255;255m";
@@ -470,7 +472,6 @@ public:
     // Explicit startup — call once after all static init is safe
     void startup() noexcept {
         // Force TotalTime construction here (safe now — logger is ready)
-        // This makes genesis_ ≈ logger startup time, which is usually very close to main()
         TotalTime& tt = TotalTime::get();
 
         double currentUs = tt.us();
@@ -745,7 +746,7 @@ struct GPUCrash {
     bool happened{false};
     uint64_t          addr{0};
     uint32_t          type{0};
-    char              desc[512]{"Unknown GPU fault -- likely null SBT buffer or destroyed resource"};
+    char              desc[1024]{"Unknown GPU fault -- likely null SBT buffer or destroyed resource"}; // ← Increased to 1024
 };
 
 inline GPUCrash g_gpu_crash;
@@ -771,7 +772,7 @@ static void safe_writeln(const char* data) noexcept {
     safe_write("\n", 1);
 }
 
-// Color defines
+// Color defines (used in crash handler)
 #define COLOR_RESET   "\033[0m"
 #define COLOR_BOLD    "\033[1m"
 #define COLOR_RED     "\033[31m"
@@ -875,7 +876,7 @@ static LONG WINAPI apocalypse_handler(EXCEPTION_POINTERS* pExceptionInfo) noexce
         }
     }
 
-    char buf[512];
+    char buf[1024]; // ← Increased size to 1024
     snprintf(buf, sizeof(buf), COLOR_YELLOW "EXCEPTION CODE : 0x%08lX" COLOR_RESET,
              pExceptionInfo->ExceptionRecord->ExceptionCode);
     safe_writeln(buf);
@@ -930,7 +931,7 @@ static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept {
         safe_writeln(*line);
     }
     
-    char buf[256];
+    char buf[2048];
     snprintf(buf, sizeof(buf), COLOR_YELLOW "SIGNAL        : %d" COLOR_RESET, sig);
     safe_writeln(buf);
     snprintf(buf, sizeof(buf), COLOR_YELLOW "FAULT ADDRESS : %p" COLOR_RESET, info ? info->si_addr : nullptr);
@@ -992,7 +993,7 @@ inline void install_apocalypse_handler() noexcept {
 // Empire / vkh
 // ──────────────────────────────────────────────────────────────────────────────
 struct Empire {
-    // ────────────────────── RESULT → STRING — FULL COVERAGE ──────────────────────
+    // ────────────────────── RESULT → STRING — FULL COVERAGE — CROSS-PLATFORM ──────────────────────
     [[nodiscard]] static constexpr const char* result(VkResult r) noexcept {
         switch (r) {
             case VK_SUCCESS:                                           return "VK_SUCCESS";
@@ -1133,7 +1134,7 @@ struct Empire {
         }
     }
 
-    // ────────────────────── IMAGE LAYOUT → STRING ──────────────────────
+    // ────────────────────── IMAGE LAYOUT → STRING — FULL COVERAGE ──────────────────────
     [[nodiscard]] static inline const char* imageLayout(VkImageLayout layout) noexcept {
         switch (layout) {
             case VK_IMAGE_LAYOUT_UNDEFINED:                                return "UNDEFINED (0)";
@@ -1179,71 +1180,71 @@ struct Empire {
         }
     }
 
-// ────────────────────── FATAL CHECK — FULL EXECUTION REPORT WITH AUTO-DETECT ──────────────────────
-template <typename T, typename... Args>
-static void checker(T value,
-                    const char* call,
-                    const char* msg,
-                    Args&&... args,
-                    std::source_location loc = std::source_location::current()) noexcept
-{
-    bool condition = false;
-    std::string resultStr = "FAILED";
+    // ────────────────────── FATAL CHECK — FULL EXECUTION REPORT WITH AUTO-DETECT ──────────────────────
+    template <typename T, typename... Args>
+    static void checker(T value,
+                        const char* call,
+                        const char* msg,
+                        Args&&... args,
+                        std::source_location loc = std::source_location::current()) noexcept
+    {
+        bool condition = false;
+        std::string resultStr = "FAILED";
 
-    if constexpr (std::is_same<T, VkResult>::value) {
-        condition = (value == VK_SUCCESS || value == VK_SUBOPTIMAL_KHR);
-        resultStr = std::format("{} ({})", result(value), static_cast<int>(value));
-    }
-    else if constexpr (std::is_pointer<T>::value) {
-        condition = (value != nullptr);
-        resultStr = (value == nullptr) ? "NULL" : "valid pointer";
-    }
-    else if constexpr (std::is_same<T, bool>::value) {
-        condition = static_cast<bool>(value);
-        resultStr = condition ? "true" : "false";
-    }
-    else if constexpr (std::is_integral<T>::value) {
-        using UT = std::make_unsigned_t<T>;
-        condition = (value != 0) && (static_cast<UT>(value) != ~UT(0));
-        resultStr = std::to_string(value);
+        if constexpr (std::is_same<T, VkResult>::value) {
+            condition = (value == VK_SUCCESS || value == VK_SUBOPTIMAL_KHR);
+            resultStr = std::format("{} ({})", result(value), static_cast<int>(value));
+        }
+        else if constexpr (std::is_pointer<T>::value) {
+            condition = (value != nullptr);
+            resultStr = (value == nullptr) ? "NULL" : "valid pointer";
+        }
+        else if constexpr (std::is_same<T, bool>::value) {
+            condition = static_cast<bool>(value);
+            resultStr = condition ? "true" : "false";
+        }
+        else if constexpr (std::is_integral<T>::value) {
+            using UT = std::make_unsigned_t<T>;
+            condition = (value != 0) && (static_cast<UT>(value) != ~UT(0));
+            resultStr = std::to_string(value);
 
-        if constexpr (std::is_signed<T>::value) {
-            if (value < 0 && SDL_GetError) {
-                resultStr += std::format(" (SDL error: {})", SDL_GetError());
+            if constexpr (std::is_signed<T>::value) {
+                if (value < 0 && SDL_GetError) {
+                    resultStr += std::format(" (SDL error: {})", SDL_GetError());
+                }
             }
         }
-    }
-    else {
-        condition = (value != 0);
-        resultStr = "invalid (fallback check)";
-    }
+        else {
+            condition = (value != 0);
+            resultStr = "invalid (fallback check)";
+        }
 
-    if (condition) [[likely]] return;
+        if (condition) [[likely]] return;
 
-    std::string formattedMsg = std::vformat(msg, std::make_format_args(args...));
+        std::string formattedMsg = std::vformat(msg, std::make_format_args(args...));
 
-    std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
+        std::string guiltyFile = std::filesystem::path(loc.file_name()).filename().string();
 
-    LOG_FATAL("\n"
-              "════════════════════════════════════════════════════════════════\n"
-              "CHECK FAILED — EXECUTION HALTED\n"
-              "  Call site : {}\n"
-              "  Condition : {} → {}\n"
-              "  Message   : {}\n"
-              "  Location  : {}:{}\n"
-              "  Function  : {}\n"
-              "════════════════════════════════════════════════════════════════",
-              call,
-              resultStr,
-              condition ? "PASS" : "FAIL",
-              formattedMsg,
-              guiltyFile, loc.line(),
-              loc.function_name());
+        LOG_FATAL("\n"
+                  "════════════════════════════════════════════════════════════════\n"
+                  "CHECK FAILED — EXECUTION HALTED\n"
+                  "  Call site : {}\n"
+                  "  Condition : {} → {}\n"
+                  "  Message   : {}\n"
+                  "  Location  : {}:{}\n"
+                  "  Function  : {}\n"
+                  "════════════════════════════════════════════════════════════════",
+                  call,
+                  resultStr,
+                  condition ? "PASS" : "FAIL",
+                  formattedMsg,
+                  guiltyFile, loc.line(),
+                  loc.function_name());
 
 #ifdef DEBUG
-    std::abort();
+        std::abort();
 #endif
-}
+    }
 
     // debugCallback, alignUp, installCrashHandler unchanged
     [[maybe_unused]] static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(

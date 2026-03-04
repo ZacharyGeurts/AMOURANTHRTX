@@ -1048,7 +1048,6 @@ struct Swapchain {
         VkSwapchainKHR newSwap = VK_NULL_HANDLE;
         VkResult res = ext().vkCreateSwapchainKHR(device, &ci, nullptr, &newSwap);
         if (res != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "vkCreateSwapchainKHR failed: {}", vkh.result(res));
             minimized = true;
             return;
         }

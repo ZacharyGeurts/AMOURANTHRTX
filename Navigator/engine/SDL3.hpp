@@ -96,8 +96,8 @@ inline bool sdl_poll_events(int& out_w, int& out_h, bool& quit, bool& toggle_fs)
                     continue;
                 }
 
-                int w = ev.window.data1;
-                int h = ev.window.data2;
+                int w, h;
+                SDL_GetWindowSizeInPixels(g_window, &w, &h);
 
                 bool currently_minimized = (w <= 0 || h <= 0);
 
@@ -233,7 +233,7 @@ inline bool sdl_audio_load_sound(const std::string& path, const std::string& nam
     Uint8* buffer = nullptr;
     Uint32 length = 0;
 
-    if (SDL_LoadWAV(path.c_str(), &spec, &buffer, &length) == false) {
+    if (SDL_LoadWAV(path.c_str(), &spec, &buffer, &length) == 0) {
         LOG_ERROR_CAT("SDL3_audio", "Failed to load WAV {}: {}", path, SDL_GetError());
         return false;
     }
