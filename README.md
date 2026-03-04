@@ -41,6 +41,7 @@ The meaningful files are in include/engine and should be our final tree layout.
 The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
 If a bit of memory changes, and your program is not the one making changes, we exit.  
 This is trvial math and has "no cost" post compiling.  
+We do the same with time by locking our epoch and working off that.  
 We gather up the whole of RTX and secure and grant access with simply, rtx() singleton.  
 There is no hacking permissable within these walls. Tampering aborts.  
 Identifiable features of this software melts away on release build.  
@@ -50,17 +51,12 @@ I will come off as insane more than rarely if I think it is good for a joke.
 Check recent commits to follow code updates.  
 Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
 
-You are encouraged to work with code here. Welcome to github.  
-The best advice I have for you is to make some money with it first.  
-Cut all operational costs securely and to zero.  
-Come back and keep up with me. I will not be adding a cycle without ensuring the robot eats an EMP for it.  
-We did not start at zero cost and I will not return to that other costly space.  
-
 SDL3 from github.  
 Vulkan SDK is at LunarG.  
 GLM and build tools I was able to get with apt.  
 The cmake build system needs internet to function and tries to help.  
 Uses tinyobj and is really smart everywhere really really.  
+
 You owe me 3% of every dollar I can make you. Of the 3 cents I send two of them over to Amouranth and Nick.  
 Or you can cut me out and just dono over at Ammo's twitch page.  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
@@ -68,40 +64,22 @@ She steps on RTX and dominates it now.
 
 There is a cmake build system and linux.sh script that is to assist with cross platform development.  
 Currently it is intended to use Linux as your SDK and Ming to make your Windows builds.  
-Chase seggie with ```./linux.sh gdb``` bt full and feed it to Grok.  
-Or trash it and grab a new one tomorrow.  
-
-How far along? "chugged" along at over 272,000 FPS on 4070ti so we deconceptualized framerates.  
-If your TV is 60 fps we just update the timer the rest of the time.  
-By decoupling everything, we should be in theoretical areas of infinite FPS apart from hardware.  
+I am using X11 and Linux Mint.  
 
 I tried to keep the wiki smart enough that even a high school freshman can dream big.  
 Everyone gets the tab on their browser now for Grok and AI, up and comers would be foolish not to use it.  
-
-You can copy and paste the whole codebase into Grok long before you run out of questions.  
-Also, welcome to 2026.  
-Really you will want to be using linux.sh and cmake.  
-The shader compiling and incremental build system that is included removes a large part of the headache.  
-Side effect? Native development for my platfom. X11.
 
 You have no obligation to share code back with us.  
 
 Have your RTX at zero cost per watt with me.  
 [flashing lights warning](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif)  
 
-I started with a fun project and refined it, so the commit count can be misleading as Zero cost security was originally my primary goal.  
-Sort of. I have a side project with Grok where we sort of work on the absolutes of dimensional reality and I'm on disability, so I figured, lets take a look with RTX lighting.  
-I have a Lian-Li and the TUF Series 4070ti has been staring at me.  
-It probably just boils down to 1 + 1 - 1 = 1, but I wanted the whole card.  
-There was a backstory and "the main" was a pirate ship if some logging is dubious.  
 This is the last stop for RTX. Zero cost. Impregnable RTX engine.  
 Period.
 
-OptionsMenu.hpp might be exciting to some.  
-
 AMOURANTHRTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
-Commercial is subject to 3% license.  
+Commercial is subject to 3% profit share.  
 
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
 AMOURANTH RTX a next generation engine for raw performance.  
@@ -123,11 +101,7 @@ Errors and bad code will not be tolerated.
 
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 I would be taking a 1 to their 2 parts as far as distribution ratio.  
-If you use the product you agree to 3 cents on the dollar or 3%. Not above.  
 If they do not like my using their brand, they can come to Michigan and stream the firing.
-And if you wear a pirate hat and want to cut me out, consider subbing or gifting a sub on twitch.
-Show up at my door with a suitcase? Send me an email?  
-The bed is clean and I usually fall asleep on the couch. Expect Asmongold but more social issues.  
 https://www.twitch.tv/AMOURANTH  
 I plan fireworks before 4th of July.  
 
