@@ -226,6 +226,9 @@ public:
     }
 
     [[nodiscard]] glm::mat4 projection(float aspect) const noexcept {
+        if (Options::GameStyle::CurrentPerspective == Options::GameStyle::CameraPerspective::Orthographic2D) {
+            return glm::ortho(-aspect, aspect, -1.0f, 1.0f, 0.1f, 100.0f);
+        }
         return glm::perspective(glm::radians(currentState_.fov), aspect, 0.05f, 20000.0f);
     }
 
