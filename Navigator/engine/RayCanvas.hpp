@@ -72,7 +72,7 @@ struct CameraSceneData {
     double    exposure     = 1.0;
     double    genesisTime  = 0.0;
     uint32_t  randomSeed   = 12345u;
-    int  maxDepth = Options::Rendering::MAX_RAY_RECURSION;
+    int       maxDepth     = Options::Rendering::MAX_RAY_RECURSION;
 
     uint32_t  padding[2]   = {0, 0};
 };
@@ -118,6 +118,21 @@ public:
           descriptorSet_(VK_NULL_HANDLE)
     {
         LOG_INFO_CAT("RAYCANVAS", "Initializing single-shader compute canvas — {}x{}", width, height);
+
+        // ───────────────────────────────────────────────────────────────
+        // CRITICAL: Create the swapchain FIRST — before any rendering or UBOs
+        // This was the root cause of the null swapchain → driver crash
+        // ───────────────────────────────────────────────────────────────
+        Swapchain::create(window, width, height);
+
+        if (!Swapchain::get()) {
+            LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain during initialization — aborting");
+            std::abort();
+        }
+
+        if (Swapchain::isMinimized()) {
+            LOG_WARNING_CAT("RAYCANVAS", "Window is minimized at startup — skipping initial render");
+        }
 
         cameraUBOHandle_ = Memory::createBuffer(
             sizeof(CameraSceneData),
@@ -286,6 +301,12 @@ public:
     void maybeUpdateCanvas() noexcept {
         if (destroyed_) return;
 
+        // Safety guard: skip if swapchain is invalid or window minimized
+        if (!Swapchain::get() || Swapchain::isMinimized()) {
+            LOG_WARNING_CAT("RAYCANVAS", "Swapchain invalid or window minimized — skipping frame");
+            return;
+        }
+
         if (minimized_) {
             int w = 0, h = 0;
             SDL_GetWindowSize(window_, &w, &h);
@@ -308,7 +329,7 @@ public:
         // Ensure time is always advancing (fallback in case TotalTime stalls)
         static double lastKnownTime = 0.0;
         if (now <= lastKnownTime) {
-            now = lastKnownTime + 0.016;  // ~60 fps step
+            now = lastKnownTime + Swapchain::smoothedRefresh_s;  // Use measured refresh interval
         }
         lastKnownTime = now;
 
@@ -337,6 +358,12 @@ public:
         if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR || acquireRes == VK_SUBOPTIMAL_KHR) {
             minimized_ = true;
             LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — recovery needed next frame");
+            return;
+        }
+
+        if (acquireRes == VK_ERROR_SURFACE_LOST_KHR) {
+            LOG_FATAL_CAT("SWAPCHAIN", "Surface lost — fatal error");
+            destroyed_ = true;
             return;
         }
 
@@ -396,8 +423,8 @@ public:
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.pNext = nullptr;
         presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = &Swapchain::swapchain.value;
-        presentInfo.pImageIndices = &imageIndex;
+        presentInfo.pSwapchains    = &Swapchain::swapchain.value;  // <-- Correct: address of the VkSwapchainKHR handle
+        presentInfo.pImageIndices  = &imageIndex;
         presentInfo.waitSemaphoreCount = 0;
         presentInfo.pWaitSemaphores = nullptr;
         presentInfo.pResults = nullptr;

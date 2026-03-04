@@ -3,125 +3,244 @@
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
 
 layout(push_constant) uniform Push {
-    float totalTime;
+    float time;
+    uint  frameSeed;
 } pc;
 
-#define PI          3.14159265358979323846
-#define TAU         (2.0 * PI)
-#define PHI         1.618033988749895
-#define EPS         0.0001
-#define TRAIL_LENGTH      0.52
+#define T     pc.time
+#define FS    pc.frameSeed
+#define PI    3.141592653589793
+#define TAU   6.283185307179586
+#define PHI   1.618033988749895
 
-// ────────────────────────────────────────────────
-// Tune these three values depending on your target resolution & GPU
-#define NUM_ORBS          1024u
-#define GLOW_STRENGTH     38.0        // higher = sharper / smaller glow radius
-#define TRAIL_STRENGTH    110.0       // higher = narrower trails
-// ────────────────────────────────────────────────
+// ─── Very cheap hashes ───────────────────────────────────────────────────────
+uint hash(uint x) {
+    x ^= x >> 16;
+    x *= 0x7feb352dU;
+    x ^= x >> 15;
+    x *= 0x846ca68bU;
+    x ^= x >> 16;
+    return x;
+}
 
 float hash11(float p) {
-    p = fract(p * 0.1031);
-    p *= p + 33.33;
-    return fract(2.0 * p * (p + 33.33));
+    uint n = floatBitsToUint(p);
+    return float(hash(n)) * (1.0 / 4294967296.0);
 }
 
-float softGlow(float d, float strength) {
-    d = max(0.0, d);
-    return exp2(-d * d * strength);     // slightly sharper & faster than exp(-x)
+vec2 hash22(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031,0.1030,0.0973));
+    p3 += dot(p3, p3.yzx+33.33);
+    return fract((p3.xx+p3.yz)*p3.zy);
 }
 
+vec3 hash33(vec3 p3) {
+    p3 = fract(p3 * vec3(0.1031,0.1030,0.0973));
+    p3 += dot(p3, p3.yxz+33.33);
+    return fract((p3.xxy + p3.yxx)*p3.zyx);
+}
+
+// ─── Noise helpers ───────────────────────────────────────────────────────────
+float valueNoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
+    return mix(mix(hash11(i.x   + i.y*57.),
+                   hash11(i.x+1. + i.y*57.), u.x),
+               mix(hash11(i.x   +(i.y+1.)*57.),
+                   hash11(i.x+1. +(i.y+1.)*57.), u.x), u.y);
+}
+
+// Full control
+float fbm(vec2 p, int oct, float lac, float gain) {
+    float n = 0.0, a = 0.5;
+    for(int i = 0; i < oct; i++) {
+        n += a * valueNoise(p);
+        p *= lac; a *= gain;
+    }
+    return n;
+}
+
+// Convenience overloads
+float fbm(vec2 p, int oct) {
+    return fbm(p, oct, 2.02, 0.5);
+}
+
+float fbm(vec2 p) {
+    return fbm(p, 5, 2.02, 0.5);
+}
+
+float ridged(vec2 p) {
+    return 1.0 - abs(2.0 * (valueNoise(p) - 0.5));
+}
+
+float cellular(vec2 p) {
+    vec2 i = floor(p), f = fract(p), md = vec2(8.0);
+    for(int y=-1;y<=1;y++)
+    for(int x=-1;x<=1;x++) {
+        vec2 o = hash22(i + vec2(x,y));
+        float d = length(f - o - vec2(x,y));
+        md = min(md, vec2(d, o.x + o.y * 17.3));
+    }
+    return md.x;
+}
+
+// ─── Cheap shapes ────────────────────────────────────────────────────────────
+float sdBox(vec2 p, vec2 b) {
+    vec2 d = abs(p)-b;
+    return length(max(d,0.0)) + min(max(d.x,d.y),0.0);
+}
+
+float sdHex(vec2 p, float r) {
+    p = abs(p); p.y -= 0.5*r;
+    return length(p - min(p.x, r)*vec2(0.8660254,0.5));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main ────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 void main() {
-    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 dim = imageSize(hdrImage);
-    if (any(greaterThanEqual(pix, dim))) return;
+    ivec2 pix   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 res   = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, res))) return;
 
-    vec2 uv = (vec2(pix) + 0.5) / vec2(dim);
-    uv = uv * 2.0 - 1.0;
-    uv.x *= float(dim.x) / float(dim.y);
+    vec2 uv = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
+    uv.x *= float(res.x)/float(res.y);
 
-    float t = pc.totalTime * 0.4;
+    float seed  = float(FS & 0xFFFFu) * 0.0001;
+    float sceneIdx = floor(mod(T, 90.0) / 10.0);   // 0 .. 8, exactly 10 seconds each
+    float localT   = mod(T, 10.0);                 // 0..10s inside current scene
+    float fade     = smoothstep(0.0, 1.5, localT) * smoothstep(10.0, 8.5, localT);
 
-    vec3 col = vec3(0.004, 0.006, 0.012);   // deep space black-blue
+    vec3 col = vec3(0.0);
 
-    // ─── Very faint animated nebula background ───────────────────────────────
-    vec2 nuv = uv * 3.0 + vec2(t * 0.02, sin(t * 0.05) * 0.01);
-    float neb = sin(nuv.x * 4.0 + t * 0.6) * 0.5 + 0.5;
-    neb *= smoothstep(0.0, -0.8, uv.y) * 0.08;
-    col += vec3(0.03, 0.08, 0.15) * neb;
-
-    // ─── Early out: skip orb loop if pixel is way outside possible influence ──
-    const float maxInfluence = 5.2;   // covers largest orb radius + glow + trail
-    if (length(uv) > maxInfluence) {
-        imageStore(hdrImage, pix, vec4(col * 1.8, 1.0));
-        return;
+    // ─── 9 scenes — each 10 seconds ──────────────────────────────────────────
+    if (sceneIdx == 0.0) {
+        // 0–10 s: Slow plasma + palette breathing
+        vec2 p = uv * 2.8 + vec2(T*0.12, sin(T*0.18)*0.4);
+        float n = fbm(p*1.8 + T*0.22, 5);
+        n += ridged(p*4.2 - T*0.35)*0.25;
+        float hue = fract(n*0.28 + T*0.04);
+        col = 0.5 + 0.5*cos(TAU*(vec3(0.0,0.33,0.67) + hue));
+        col *= 1.0 + 0.4*sin(length(uv)*6.0 + T*0.7);
+    }
+    else if (sceneIdx == 1.0) {
+        // 10–20 s: Deep tunnel with slow swirl
+        vec2 p = uv;
+        float r = length(p), a = atan(p.y,p.x) + T*0.18;
+        float dist = r*5.0 + sin(T*0.45 + a*2.8)*0.7;
+        float n = fbm(vec2(a*5.0, dist*1.8) + T*0.25, 6);
+        col = vec3(0.04,0.15,0.6) * (n*1.8 + 0.6);
+        col += vec3(0.9,0.5,0.15) * pow(n,3.5)*2.2;
+        col *= 1.4 / (1.0 + r*2.1);
+    }
+    else if (sceneIdx == 2.0) {
+        // 20–30 s: Soap bubble kaleidoscope – slow rotation
+        vec2 p = uv;
+        float a = atan(p.y,p.x) + T*0.09, r = length(p);
+        float k = 7.0 + 1.5*sin(T*0.11);
+        a = mod(a + T*0.07, TAU/k) - TAU/(k*2.0);
+        p = r * vec2(cos(a), sin(a));
+        float n = fbm(p*10.0 + T*0.16, 4);
+        vec3 irid = 0.5 + 0.5*cos(TAU*(vec3(0.0,0.33,0.67) + n*1.3 + r*4.5 + T*0.08));
+        col = irid * (1.2 + n*1.5);
+        col *= smoothstep(0.95, 0.25, r);
+    }
+    else if (sceneIdx == 3.0) {
+        // 30–40 s: Metaballs cluster – gentle pulsing
+        float balls = 0.0;
+        for(int i = 0; i < 8; i++) {
+            float fi = float(i);
+            vec2 pos = 0.75 * vec2(sin(T*0.55 + fi*2.1), cos(T*0.72 + fi*2.8));
+            float rad = 0.16 + 0.05*sin(T*2.3 + fi*11.0);
+            float d = length(uv - pos) - rad;
+            balls += 0.48 / max(0.01, abs(d));
+        }
+        col = tanh(balls*0.75) * (0.6 + 0.4*sin(T*0.45 + length(uv)*9.0 + vec3(0,1.8,3.6)));
+    }
+    else if (sceneIdx == 4.0) {
+        // 40–50 s: Voronoi cells + slow boiling edges
+        vec2 p = uv * 7.0 + T*0.08;
+        vec2 i = floor(p), f = fract(p);
+        float md = 8.0, glow = 0.0;
+        for(int y=-1;y<=1;y++)
+        for(int x=-1;x<=1;x++) {
+            vec2 o = hash22(i + vec2(x,y));
+            float d = length(f - o - vec2(x,y));
+            if (d < md) { md = d; glow = hash11(dot(i+vec2(x,y), vec2(13.7, 29.3))); }
+        }
+        col = vec3(0.12,0.08,0.25) * (1.0 - smoothstep(0.0,0.18,md));
+        col += vec3(0.9,0.6,0.3) * (1.0 - smoothstep(0.0,0.07,md)) * (0.6 + 0.4*sin(glow*TAU + T*1.1));
+    }
+    else if (sceneIdx == 5.0) {
+        // 50–60 s: Truchet tiles with very slow flow
+        vec2 p = uv * 11.0;
+        vec2 cell = floor(p);
+        vec2 f = fract(p);
+        float rot = floor(hash11(dot(cell,vec2(17.19,31.7)))) * TAU/4.0 + T*0.22;
+        vec2 q = mat2(cos(rot),-sin(rot),sin(rot),cos(rot)) * (f-0.5);
+        float shape = smoothstep(0.52,0.48,sdHex(q,0.85));
+        col = mix(vec3(0.03,0.02,0.09), vec3(0.8,0.45,0.15), shape);
+        col += 0.35 * sin(dot(cell + T*0.6, vec2(11.3,19.7))) * shape;
+    }
+    else if (sceneIdx == 6.0) {
+        // 60–70 s: Fake volumetric fog layers + slow drift
+        vec2 p = uv * 2.4 + vec2(T*0.09, T*0.06);
+        float n = fbm(p*2.8 + T*0.14, 7);
+        col = vec3(0.01,0.03,0.14) * (0.8 + n*2.8);
+        col += vec3(0.7,0.9,1.2)*0.15 * pow(n, 2.5);
+    }
+    else if (sceneIdx == 7.0) {
+        // 70–80 s: Emissive particle field – gentle orbit
+        col = vec3(0.0);
+        for(int i = 0; i < 14; i++) {
+            float fi = float(i);
+            vec2 pos = 1.1 * vec2(sin(T*0.38 + fi*1.9), cos(T*0.51 + fi*2.4));
+            float d = length(uv - pos) - 0.028;
+            float pulse = 0.5 + 0.5*sin(T*4.2 + fi*17.0);
+            col += vec3(1.0, 0.8 + 0.2*sin(fi*3.0), 0.5 + 0.5*cos(fi*4.1)) * exp(-d*60.0) * pulse;
+        }
+    }
+    else {
+        // 80–90 s: Retro CRT + subtle glitch overlay
+        vec2 cu = uv * (1.0 + 0.04*sin(T*0.7 + uv.y*12.0));
+        float vig = 1.0 - 0.7*dot(cu,cu);
+        vig = pow(vig, 1.6);
+        col = vec3(0.05,0.12,0.08) * (1.0 + vig*1.4);
+        float sl = 0.5 + 0.5*sin(cu.y*1400.0 + T*22.0);
+        col *= 0.88 + 0.12*sl;
+        float ph = 0.82 + 0.18*sin(cu.x*TAU*4.0)*sin(cu.y*TAU*3.0);
+        col *= ph;
+        col += vec3(0.9,0.4,0.1) * (0.04 + 0.03*fract(sin(T*13.7)*43758.5453));
     }
 
-    // ─── Main glowing orbs loop ──────────────────────────────────────────────
-    for (uint i = 0u; i < NUM_ORBS; ++i) {
-        float fi = float(i);
-        float seed = hash11(fi * 0.00013 + 0.001);
+    // ─── Post-process ────────────────────────────────────────────────────────
+    // gentle chromatic aberration (fake)
+    vec2 caOff = 0.005 * (length(uv)-0.3) * vec2(1.0, -0.9);
+    vec3 ca = vec3(col.r*1.03, col.g, col.b*1.03);
 
-        // ─── IMPROVED ANIMATION ──────────────────────────────────────────────
-        // Faster base speed + stronger variation + gentle spiral twist
-        float radiusBase   = 0.5 + 4.5 * seed;
-        float angularSpeed = 0.6 + 1.2 * (1.0 - seed);           // noticeably faster orbits
-        float spiral       = 0.18 * sin(t * 0.25 + seed * TAU);  // gentle inward/outward breathing spiral
+    col = mix(col, ca, 0.25 * fade);
 
-        float theta = TAU * seed + t * angularSpeed + spiral * 1.2;
-        float phi   = 0.4 * TAU * seed + t * 0.12 * (seed - 0.5) + spiral * 0.8;
+    // vignette + soft glow
+    float vig = 1.0 - 0.62 * dot(uv,uv);
+    vig = pow(vig, 1.5);
+    col *= 0.25 + 0.75*vig;
+    vec3 bloom = max(col - 0.92, 0.0);
+    col += bloom * 1.1;
 
-        vec3 orbPos = vec3(
-            radiusBase * sin(phi) * cos(theta),
-            radiusBase * cos(phi) * 0.6,
-            radiusBase * sin(phi) * sin(theta)
-        );
+    // light phosphor + scanlines
+    vec2 scr = uv * vec2(420.0, 320.0);
+    float ph = 0.88 + 0.12 * sin(scr.x * TAU * 3.5) * sin(scr.y * TAU * 2.5);
+    col *= ph;
 
-        float orbSizeBase = 0.02 + 0.05 * seed;
-        float pulsePhase  = t * (4.5 + 9.0 * seed) + fi * PHI;   // faster, more lively pulsing
-        float sizeOsc     = 0.12 * sin(pulsePhase * 1.6);        // size breathing → less static/melty
+    float sl = 0.5 + 0.5 * sin(uv.y * 1100.0 + T*18.0);
+    col *= 0.94 + 0.06*sl;
 
-        float orbRadius = orbSizeBase * (1.0 + sizeOsc);
+    // final tone
+    col = pow(col, vec3(0.4545));
+    col = col / (1.0 + col * 0.18);
+    col *= 1.28;
 
-        // Project to screen space
-        vec2 orbScreen = orbPos.xy * 1.2;
-
-        // Core orb distance
-        float d = length(uv - orbScreen) - orbRadius;
-
-        // Color gradient across the swarm
-        vec3 orbCol = mix(
-            vec3(0.10, 0.60, 1.00),
-            vec3(0.90, 0.20, 0.50),
-            seed
-        );
-
-        // Soft core glow + pulsing (same strength as original)
-        float intensity = softGlow(d * 1.4, GLOW_STRENGTH)
-                        * (0.55 + 0.45 * sin(pulsePhase));
-
-        col += orbCol * intensity * 2.8;
-
-        // ─── Improved trail: follows actual motion direction ─────────────────
-        vec2 motionDir  = vec2(cos(theta), sin(theta));   // approximate velocity direction
-        vec2 trailUV    = uv - orbScreen;
-        float trailProj = dot(trailUV, motionDir);
-        float trailDist = length(trailUV - trailProj * motionDir);
-
-        float trail = softGlow(trailDist * 1.8 + trailProj * 0.3, TRAIL_STRENGTH)
-                    * 0.12
-                    * (0.5 + 0.5 * sin(pulsePhase + 2.0))
-                    * smoothstep(0.0, TRAIL_LENGTH, trailProj + 0.1);
-
-        col += orbCol * trail;
-    }
-
-    // ─── Gentle vignette ─────────────────────────────────────────────────────
-    float vig = 1.0 - length(uv) * 0.62;
-    col *= vig * 0.92 + 0.08;
-
-    // Final output — mild HDR scaling
-    imageStore(hdrImage, pix, vec4(col * 1.8, 1.0));
+    imageStore(outputImage, pix, vec4(col, 1.0));
 }
