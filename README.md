@@ -122,3 +122,5 @@ Ensure code follows C++20 standards and includes proper error handling.
 I am now a stickler for OMP parallelization and memory safety with C++20 due to advent of AI coding.  
 
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
+
+https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Svv2K1y7woZ0g7Bu.mp4
