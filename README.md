@@ -87,9 +87,6 @@ See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine in
 
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
-Errors and bad code will not be tolerated.
-<img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Untitled.png" />  
-
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
 I would be taking a 1 to their 2 parts as far as distribution ratio.  
 If they do not like my using their brand, they can come to Michigan and stream the firing.
