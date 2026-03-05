@@ -82,19 +82,10 @@ Free work is licensed under GPL v3.0 or higher.
 Commercial is subject to 3% profit share.  
 
 See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
-AMOURANTH RTX a next generation engine for raw performance.  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
 
-
-[AMOURANTH RTX Video](https://x.com/ZacharyGeurts/status/2007912263446151181)  
-
-**C++23** using **SDL3**, **Vulkan**, and **GLM**.  
-
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
-
-270,000+ FPS on 4070ti full path tracer.  
-<img width="1300" alt="FPS" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202026-01-12%2023-11-03.png" />  
 
 Errors and bad code will not be tolerated.
 <img width="1300" alt="StoneKey" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Untitled.png" />  
