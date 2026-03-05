@@ -140,8 +140,8 @@ static inline void EngineMemoryInit() noexcept {
 // Main entry point — called from developer's empty main.cpp
 // Developers link against this header and call navigator_main(argc, argv)
 // =============================================================================
-inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
-
+inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
+{
     install_apocalypse_handler();
     Logging::Logger::get().startup();
     LOG_SUCCESS_CAT("MAIN", "Apocalypse handler installed — logger started");
@@ -151,7 +151,8 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                  Options::Window::DEFAULT_HEIGHT,
                  "AMOURANTHRTX");
 
-    if (!g_window) {
+    if (!g_window)
+    {
         LOG_FATAL_CAT("MAIN", "SDL window creation failed");
         sdl_cleanup_all();
         return 1;
@@ -162,14 +163,16 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     // Step 3: Vulkan instance
     VkInstance instance = createVulkanInstance();
-    if (instance == VK_NULL_HANDLE) {
+    if (instance == VK_NULL_HANDLE)
+    {
         LOG_FATAL_CAT("VULKAN", "Instance creation failed");
         sdl_cleanup_all();
         return 1;
     }
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(g_window, instance, nullptr, &surface) == 0) {
+    if (SDL_Vulkan_CreateSurface(g_window, instance, nullptr, &surface) == 0)
+    {
         LOG_FATAL_CAT("VULKAN", "Failed to create Vulkan surface");
         vkDestroyInstance(instance, nullptr);
         sdl_cleanup_all();
@@ -182,7 +185,8 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     VkDevice device = createLogicalDeviceAndSelectGPU(instance, surface,
                                                       &graphics_family, &present_family,
                                                       &compute_family, &transfer_family);
-    if (device == VK_NULL_HANDLE) {
+    if (device == VK_NULL_HANDLE)
+    {
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
         sdl_cleanup_all();
@@ -219,7 +223,8 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         poolInfo.queueFamilyIndex = rtx().graphics_family;
 
         VkResult res = vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
-        if (res != VK_SUCCESS) {
+        if (res != VK_SUCCESS)
+        {
             LOG_FATAL_CAT("VULKAN", "Failed to create transient command pool: {}", vkh.result(res));
             vkDestroyDevice(device, nullptr);
             vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -236,7 +241,8 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
                       Options::Window::DEFAULT_WIDTH,
                       Options::Window::DEFAULT_HEIGHT);
 
-    if (!Swapchain::swapchain.valid()) {
+    if (!Swapchain::swapchain.valid())
+    {
         LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed");
         vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
         vkDestroyDevice(device, nullptr);
@@ -266,58 +272,60 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         g_window
     );
 
-    // IMPORTANT: Force correct initial size handling (fixes potential initial mismatch)
+    // IMPORTANT: Force correct initial size handling + camera reset
     int realWidth = 0, realHeight = 0;
     SDL_GetWindowSize(g_window, &realWidth, &realHeight);
     LOG_INFO_CAT("MAIN", "Forcing initial resize to actual window size: {}x{}", realWidth, realHeight);
     raycanvas->onResize(realWidth, realHeight);
 
-    // Reset camera
+    // Explicit camera reset — ensures valid position, orientation, and FOV before first frame
     CAM.reset();
+    LOG_INFO_CAT("CAMERA", "Reset complete — pos: {:.2f} {:.2f} {:.2f} | fov: {:.1f}",
+                 CAM.position().x, CAM.position().y, CAM.position().z, CAM.fov());
+
+    // Optional: log initial camera state for debugging
+    LOG_INFO_CAT("CAMERA", "Initial quat: {:.3f} {:.3f} {:.3f} {:.3f}",
+                 CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
 
     LOG_AMOURANTH("Genesis sealed — eternal compute begins");
 
     // ────────────────────────────────────────────────
-    // Eternal loop — now with proper frame timing (up to ~240 FPS)
+    // Eternal loop — smooth frame timing, respects vsync
     // ────────────────────────────────────────────────
     double lastFrameTime = TotalTime::get().seconds();
-    constexpr double targetFrameTime = 1.0 / 240.0;  // ~240 FPS max
 
-    while (true) {
+    while (true)
+    {
         int w = 0, h = 0;
         bool quit = false, fullscreen_toggle = false;
 
         sdl_poll_events(w, h, quit, fullscreen_toggle);
 
-        if (fullscreen_toggle) {
+        if (fullscreen_toggle)
+        {
             sdl_toggle_fullscreen();
         }
 
-        if (quit) {
+        if (quit)
+        {
             break;
         }
 
         // Update canvas size only if changed
         raycanvas->onResize(w, h);
 
-        // Frame timing — avoid blasting too many frames
-        double currentTime = TotalTime::get().seconds();
-        double dt = currentTime - lastFrameTime;
-
-        if (dt < targetFrameTime) {
-            // Sleep briefly to avoid 100% CPU usage and respect ~240 FPS cap
-            SDL_Delay(static_cast<Uint32>((targetFrameTime - dt) * 1000.0));
-            currentTime = TotalTime::get().seconds();  // re-sample after sleep
-        }
-
         // Render the frame
         raycanvas->maybeUpdateCanvas();
 
+        // Simple frame pacing (optional — remove if vsync is enough)
+        double currentTime = TotalTime::get().seconds();
+        double dt = currentTime - lastFrameTime;
         lastFrameTime = currentTime;
 
-        // Optional: log FPS every 5 seconds for debugging
+        // Optional FPS logging every 5 seconds
         static double lastFpsLog = 0.0;
-        if (currentTime - lastFpsLog > 5.0) {
+        if (currentTime - lastFpsLog > 5.0)
+        {
             LOG_INFO_CAT("MAIN", "Current FPS: ~%.1f (dt=%.4f s)", 1.0 / dt, dt);
             lastFpsLog = currentTime;
         }

@@ -7,58 +7,60 @@
 // =============================================================================
 
 #include <glm/glm.hpp>
+#include <cstdint>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Game Style & Perspective (unchanged from your version)
+// ─────────────────────────────────────────────────────────────────────────────
 namespace Options::GameStyle
 {
     enum class DimensionMode : uint32_t
     {
-        TextOnly       = 0,     // ASCII / terminal style (very cheap, fun easter egg)
-        Pure2D         = 1,     // side-scroller / classic pixel art
-        TwoPointFiveD  = 2,     // 3D models but locked movement plane (e.g. Trine, LittleBigPlanet layers)
-        Full3D         = 3      // free 6DoF movement & camera
+        TextOnly       = 0,
+        Pure2D         = 1,
+        TwoPointFiveD  = 2,
+        Full3D         = 3
     };
 
     enum class CameraPerspective : uint32_t
     {
-        FirstPerson       = 0, // player's perspective
-        ThirdPerson       = 1, // camera follows behind the character
-        TopDown           = 2, // classic RTS / twin-stick
-        Isometric         = 3, // angled view creating depth
-        SideScroller      = 4, // fixed side view (2D or 2.5D)
-        Orthographic2D    = 5, // pure 2D ortho projection
-        TextAdventure     = 6  // no real camera, narrative mode
+        FirstPerson       = 0,
+        ThirdPerson       = 1,
+        TopDown           = 2,
+        Isometric         = 3,
+        SideScroller      = 4,
+        Orthographic2D    = 5,
+        TextAdventure     = 6
     };
 
     enum class GenrePreset : uint32_t
     {
-        None              = 0, // no specific genre
-        FPS               = 1, // fast movement, first-person, shooting focus
-        ThirdPersonAction = 2, // over-shoulder / behind character perspective
-        Platformer        = 3, // jump-heavy, precise movement
-        Metroidvania      = 4, // exploration + backtracking
-        TopDownRPG        = 5, // top-down role-playing game
-        TwinStickShooter  = 6, // shooter controlled with dual sticks
-        SurvivalHorror    = 7, // horror themes with survival elements
-        Roguelike         = 8, // randomized levels and permadeath
-        TextAdventure     = 9, // narrative-based games without graphic elements
-        Shmup             = 10, // shoot 'em up (vertical/horizontal scrolling)
-        Racing            = 11, // racing focused gameplay
-        Puzzle            = 12, // gameplay centered around solving puzzles
-        Fighting          = 13, // combat between characters
-        Sports            = 14, // gameplay focused on sports
-        Simulation        = 15, // life simulation or business simulation genres
-        Strategy          = 16, // logical reasoning and planning focused games
-        MMORPG            = 17, // massive multiplayer online role-playing games
-        PartyGame         = 18  // games meant for multiple players at once
-        // Additional genres can be added as needed
+        None              = 0,
+        FPS               = 1,
+        ThirdPersonAction = 2,
+        Platformer        = 3,
+        Metroidvania      = 4,
+        TopDownRPG        = 5,
+        TwinStickShooter  = 6,
+        SurvivalHorror    = 7,
+        Roguelike         = 8,
+        TextAdventure     = 9,
+        Shmup             = 10,
+        Racing            = 11,
+        Puzzle            = 12,
+        Fighting          = 13,
+        Sports            = 14,
+        Simulation        = 15,
+        Strategy          = 16,
+        MMORPG            = 17,
+        PartyGame         = 18
     };
 
-    // runtime values (these will be modified by menu / config)
+    // Runtime values — modified by menu / config
     inline DimensionMode       CurrentDimension     = DimensionMode::Full3D;
     inline CameraPerspective   CurrentPerspective   = CameraPerspective::FirstPerson;
     inline GenrePreset         CurrentGenre         = GenrePreset::FPS;
 
-    // helper flags derived from above (used in shader & C++ logic)
     inline bool Is3D()          { return CurrentDimension == DimensionMode::Full3D; }
     inline bool Is25D()         { return CurrentDimension == DimensionMode::TwoPointFiveD; }
     inline bool Is2D()          { return CurrentDimension <= DimensionMode::TwoPointFiveD && CurrentDimension != DimensionMode::TextOnly; }
@@ -66,15 +68,11 @@ namespace Options::GameStyle
     inline bool IsFirstPerson() { return CurrentPerspective == CameraPerspective::FirstPerson; }
     inline bool IsThirdPerson() { return CurrentPerspective == CameraPerspective::ThirdPerson; }
     inline bool IsTopDown()     { return CurrentPerspective == CameraPerspective::TopDown; }
-    inline bool IsIsometric()    { return CurrentPerspective == CameraPerspective::Isometric; }
-    inline bool IsSideScroller() { return CurrentPerspective == CameraPerspective::SideScroller; }
+    inline bool IsIsometric()   { return CurrentPerspective == CameraPerspective::Isometric; }
+    inline bool IsSideScroller(){ return CurrentPerspective == CameraPerspective::SideScroller; }
     inline bool IsOrthographic2D() { return CurrentPerspective == CameraPerspective::Orthographic2D; }
     inline bool IsTextAdventureMode() { return CurrentPerspective == CameraPerspective::TextAdventure; }
-    inline bool IsGenreFPS()        { return CurrentGenre == GenrePreset::FPS; }
-    inline bool IsGenrePlatformer() { return CurrentGenre == GenrePreset::Platformer; }
-    // Add more genre checks as needed
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Window & Display
@@ -84,25 +82,39 @@ namespace Options::Window {
     inline constexpr int     DEFAULT_HEIGHT           = 1080;
     inline constexpr bool    START_FULLSCREEN         = false;
     inline constexpr bool    ALLOW_RESIZE             = true;
-    inline constexpr bool    VSYNC                    = false;      // FIFO vs IMMEDIATE
+    inline constexpr bool    VSYNC                    = false;
     inline constexpr bool    BORDERLESS               = false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Camera — all defaults & feel
+// Camera — restored old positions/view as configurable defaults
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Camera {
-    inline constexpr glm::vec3 START_POSITION         = glm::vec3(0.0f, 1.8f, 10.0f);
-    inline constexpr float     DEFAULT_FOV            = 75.0f;
+    // Old hardcoded values — now configurable
+    inline constexpr glm::vec3 START_POSITION         = glm::vec3(0.0f, 6.5f, 23.0f);
+    inline constexpr float     DEFAULT_FOV            = 60.0f;   // approximate old feel
     inline constexpr float     DEFAULT_NEAR           = 0.1f;
     inline constexpr float     DEFAULT_FAR            = 1000.0f;
 
-    inline constexpr float     DEFAULT_APERTURE       = 2.8f;       // f-stop
-    inline constexpr float     DEFAULT_FOCUS_DISTANCE = 8.0f;       // meters
+    inline constexpr float     DEFAULT_APERTURE       = 2.8f;
+    inline constexpr float     DEFAULT_FOCUS_DISTANCE = 8.0f;
 
+    // Old orbiting/swing settings — now exposed for menu tweaking
+    inline constexpr float     BASE_HEIGHT            = 6.5f;
+    inline constexpr float     HEIGHT_SWING           = 2.8f;
+    inline constexpr float     HEIGHT_FREQ            = 0.11f;
+
+    inline constexpr float     BASE_DISTANCE          = 23.0f;
+    inline constexpr float     DISTANCE_SWING         = 4.5f;
+    inline constexpr float     DISTANCE_FREQ          = 0.08f;
+
+    inline constexpr float     FOV_SCALE              = 1.72f;
+    inline constexpr float     LOOK_AT_Y_OFFSET       = -2.35f;
+
+    // Mouse / movement
     inline constexpr float     MOUSE_SENSITIVITY      = 0.12f;
     inline constexpr bool      INVERT_MOUSE_Y         = false;
-    inline constexpr float     MOVEMENT_SPEED         = 12.0f;      // m/s
+    inline constexpr float     MOVEMENT_SPEED         = 12.0f;
     inline constexpr float     SPRINT_MULTIPLIER      = 2.5f;
     inline constexpr float     ZOOM_SENSITIVITY       = 1.5f;
 
@@ -124,27 +136,25 @@ namespace Options::Camera {
 // Rendering & Performance
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Rendering {
-    // Internal render resolution (ray tracing / compute target size)
-    // This is fixed — swapchain/window size can be different (upscaled via blit)
-    inline constexpr int     INTERNAL_WIDTH           = 1920;   // ← Change to your preferred quality/perf balance
-    inline constexpr int     INTERNAL_HEIGHT          = 1080;   //   2560×1440, 3840×2160, etc. are great choices
+    inline constexpr int     INTERNAL_WIDTH           = 1920;
+    inline constexpr int     INTERNAL_HEIGHT          = 1080;
 
-    inline constexpr bool    ACCUMULATION             = true;      // temporal reprojection / accumulation
+    inline constexpr bool    ACCUMULATION             = true;
     inline constexpr bool    ADAPTIVE_SAMPLING        = true;
     inline constexpr int     MAX_RAY_RECURSION        = 8;
-    inline constexpr float   EXPOSURE                 = 0.2f;     // HDR → screen brightness
-    inline constexpr bool    ENABLE_TONEMAP           = true;      // Reinhard / ACES
-    inline constexpr int     DISPATCH_GROUP_SIZE      = 16;        // compute local workgroup size
+    inline constexpr float   EXPOSURE                 = 0.2f;
+    inline constexpr bool    ENABLE_TONEMAP           = true;
+    inline constexpr int     DISPATCH_GROUP_SIZE      = 16;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sky & Day/Night Cycle (Earth-realistic)
+// Sky & Day/Night Cycle
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Sky {
     inline constexpr bool    ENABLE_DAY_NIGHT_CYCLE   = true;
-    inline constexpr float   DAY_LENGTH_SECONDS       = 1200.0f;   // 20 min full cycle
-    inline constexpr float   CYCLE_SPEED              = 1.0f;      // multiplier
-    inline constexpr float   START_TIME_OF_DAY        = 12.0f;     // noon
+    inline constexpr float   DAY_LENGTH_SECONDS       = 1200.0f;
+    inline constexpr float   CYCLE_SPEED              = 1.0f;
+    inline constexpr float   START_TIME_OF_DAY        = 12.0f;
 
     inline constexpr bool    SUN_ENABLED              = true;
     inline constexpr glm::vec3 SUN_COLOR              = glm::vec3(1.0f, 0.96f, 0.88f);
@@ -171,20 +181,19 @@ namespace Options::Sky {
 // LAS (Acceleration Structures)
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::LAS {
-    inline constexpr bool    SYNC_REBUILD             = true;      // true = block main thread
-                                                                   // false = async thread (future)
+    inline constexpr bool    SYNC_REBUILD             = true;
     inline constexpr bool    ENABLE_TLAS              = true;
     inline constexpr bool    ENABLE_BLAS              = true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Audio — matches SDL3.hpp usage exactly
+// Audio
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Audio {
-    inline constexpr bool    ENABLE_HAPTICS_FEEDBACK  = true;      // controller rumble
+    inline constexpr bool    ENABLE_HAPTICS_FEEDBACK  = true;
     inline constexpr int     SAMPLE_RATE              = 48000;
     inline constexpr int     CHANNELS                 = 2;
-    inline constexpr int     BUFFER_SIZE              = 2048;      // latency vs stability
+    inline constexpr int     BUFFER_SIZE              = 2048;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

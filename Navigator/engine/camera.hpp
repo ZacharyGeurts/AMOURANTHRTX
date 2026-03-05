@@ -233,10 +233,11 @@ public:
     }
 
     // ────────────────────────────────────────────────
-    // Getters
+    // Getters — added missing orientation() getter
     // ────────────────────────────────────────────────
     [[nodiscard]] glm::vec3 position()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.position; }
     [[nodiscard]] glm::vec3 prevPosition() const noexcept { std::lock_guard<std::mutex> l(mtx_); return prevPosition_; }
+    [[nodiscard]] glm::quat orientation() const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation; }
     [[nodiscard]] glm::vec3 forward()     const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0.0f, 0.0f, -1.0f); }
     [[nodiscard]] glm::vec3 right()       const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(1.0f, 0.0f, 0.0f); }
     [[nodiscard]] glm::vec3 up()          const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.orientation * glm::vec3(0.0f, 1.0f, 0.0f); }
@@ -288,6 +289,7 @@ inline Camera& CAM = Camera::get();
 inline void CAM_RESET()                         { CAM.reset(); }
 inline glm::vec3 CAM_POS()                      { return CAM.position(); }
 inline glm::vec3 CAM_PREV_POS()                 { return CAM.prevPosition(); }
+inline glm::quat CAM_ORI()                      { return CAM.orientation(); }   // new wrapper
 inline glm::vec3 CAM_FWD()                      { return CAM.forward(); }
 inline void CAM_LOOK_AT(const glm::vec3& t)     { CAM.lookAt(t); }
 inline void CAM_DOLLY(float d)                  { CAM.dolly(d); }

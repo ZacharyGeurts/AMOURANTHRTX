@@ -10,6 +10,7 @@
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
+#include "camera.hpp"           // ← added: for CAM singleton access
 
 #include <algorithm>
 #include <vector>
@@ -25,33 +26,39 @@ namespace Pipeline {
 
 using u32 = std::uint32_t;
 
+// ────────────────────────────────────────────────
+// Descriptor bindings (matches your current shader)
+// ────────────────────────────────────────────────
 inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[5] = {
-    {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-    {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-    {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+    {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // outputImage
+    {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
+    {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
+    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
+    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
 };
 
 inline constexpr VkShaderStageFlags COMPUTE_PUSH_MASK = VK_SHADER_STAGE_COMPUTE_BIT;
+
+// ────────────────────────────────────────────────
+// Push constants — matches current shader layout
+// ────────────────────────────────────────────────
+struct PushConstants {
+    float    time;          // pc.time
+    u32      frameSeed;     // pc.frameSeed
+    glm::vec3 cameraPos;    // pc.cameraPos
+    float    _pad0;         // align vec3 to 16 bytes
+    glm::vec4 cameraQuat;   // pc.cameraQuat (xyzw)
+    float    cameraFov;     // pc.cameraFov
+    float    _pad1[3];      // pad to 16-byte multiple
+};
 
 inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
 inline VkPipelineLayout      pipeline_layout        = VK_NULL_HANDLE;
 inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 
-struct PushConstants {
-    float time;
-    u32   frameSeed;
-    u32   dimensionMode;
-    u32   perspective;
-    u32   genrePreset;
-    u32   styleFlags;
-    u32   materialCount;
-    u32   primitiveCount;
-};
-
+// ────────────────────────────────────────────────
 // Load SPV shader — returns expected<module, error string>
-// Set verbose=true only for debugging (avoids risky logs)
+// ────────────────────────────────────────────────
 [[nodiscard]] inline std::expected<VkShaderModule, std::string> load_canvas_shader(
     const std::string& override_path = "",
     bool verbose = false) noexcept 
@@ -136,6 +143,9 @@ struct PushConstants {
     return mod;
 }
 
+// ────────────────────────────────────────────────
+// Initialize descriptor layout
+// ────────────────────────────────────────────────
 inline void initialize() noexcept {
     if (main_descriptor_layout != VK_NULL_HANDLE) return;
 
@@ -148,6 +158,9 @@ inline void initialize() noexcept {
                 "DESCRIPTOR", "vkCreateDescriptorSetLayout");
 }
 
+// ────────────────────────────────────────────────
+// Create pipeline layout with push constants
+// ────────────────────────────────────────────────
 inline void create_pipeline_layout() noexcept {
     if (pipeline_layout != VK_NULL_HANDLE) return;
 
@@ -169,6 +182,9 @@ inline void create_pipeline_layout() noexcept {
                 "PIPELINE", "vkCreatePipelineLayout");
 }
 
+// ────────────────────────────────────────────────
+// Create / recreate compute pipeline
+// ────────────────────────────────────────────────
 inline void create_canvas_pipeline(const std::string& shader_override = "", bool verbose = false) noexcept {
     if (canvas_pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
@@ -203,6 +219,9 @@ inline void create_canvas_pipeline(const std::string& shader_override = "", bool
     LOG_SUCCESS_CAT("PIPELINE", "Canvas compute pipeline created");
 }
 
+// ────────────────────────────────────────────────
+// Dispatch — now pushes real camera data
+// ────────────────────────────────────────────────
 inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float totalTime) noexcept {
     if (canvas_pipeline == VK_NULL_HANDLE) {
         create_canvas_pipeline();
@@ -213,23 +232,18 @@ inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float to
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
 
+    // Real push constants — synced with shader
     PushConstants pc{};
-    pc.time          = totalTime;
-    pc.frameSeed     = static_cast<u32>(totalTime * 1000.0f) ^ 0xDEADBEEFu;
+    pc.time       = totalTime;
+    pc.frameSeed  = static_cast<u32>(totalTime * 1000.0f) ^ 0xDEADBEEFu;
 
-    using namespace Options::GameStyle;
-    pc.dimensionMode = static_cast<u32>(CurrentDimension);
-    pc.perspective   = static_cast<u32>(CurrentPerspective);
-    pc.genrePreset   = static_cast<u32>(CurrentGenre);
-
-    pc.styleFlags    = 0;
-    if (Options::Rendering::ENABLE_TONEMAP)      pc.styleFlags |= 1u << 0;
-    if (Options::Rendering::ACCUMULATION)        pc.styleFlags |= 1u << 1;
-    if (Options::Rendering::ADAPTIVE_SAMPLING)   pc.styleFlags |= 1u << 2;
-
-    pc.materialCount  = 8000u;
-    size_t pcnt       = rtx().las_procedural_primitives.size();
-    pc.primitiveCount = (pcnt > UINT32_MAX) ? UINT32_MAX : static_cast<u32>(pcnt);
+    // Pull real camera data
+    pc.cameraPos  = CAM.position();
+    pc.cameraQuat = glm::vec4(CAM.orientation().x,
+                              CAM.orientation().y,
+                              CAM.orientation().z,
+                              CAM.orientation().w);
+    pc.cameraFov  = CAM.fov();
 
     vkCmdPushConstants(cmd, pipeline_layout, COMPUTE_PUSH_MASK,
                        0, sizeof(PushConstants), &pc);
@@ -240,6 +254,9 @@ inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float to
     vkCmdDispatch(cmd, dx, dy, 1);
 }
 
+// ────────────────────────────────────────────────
+// Shutdown — clean up all resources
+// ────────────────────────────────────────────────
 inline void shutdown() noexcept {
     if (canvas_pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
@@ -257,7 +274,9 @@ inline void shutdown() noexcept {
     }
 }
 
-// Developer hot-reload entry point (verbose optional)
+// ────────────────────────────────────────────────
+// Developer hot-reload entry point
+// ────────────────────────────────────────────────
 inline void hot_reload_shader(const std::string& path = "compute/canvas.spv", bool verbose = false) noexcept {
     LOG_INFO_CAT("PIPELINE", "Hot-reloading canvas shader from: {}", path);
     create_canvas_pipeline(path, verbose);

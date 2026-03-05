@@ -16,46 +16,97 @@
 #include <glm/gtx/rotate_vector.hpp>
 #include <vector>
 #include <cstdint>
+#include <array>
 
-// Extended Disney-style material (stable layout)
+// ────────────────────────────────────────────────
+// Flags (bitfield – used in shader for fast-path decisions)
+// ────────────────────────────────────────────────
+namespace MaterialFlags {
+    constexpr uint32_t TRANSMISSION      = 1u << 0;
+    constexpr uint32_t SUBSURFACE        = 1u << 1;
+    constexpr uint32_t CLEARCOAT         = 1u << 2;
+    constexpr uint32_t SHEEN             = 1u << 3;
+    constexpr uint32_t THIN_FILM         = 1u << 4;
+    constexpr uint32_t ANISOTROPY        = 1u << 5;
+    constexpr uint32_t EMISSIVE          = 1u << 6;
+    constexpr uint32_t PROCEDURAL        = 1u << 7;
+    constexpr uint32_t VOLUMETRIC_HINT   = 1u << 8;
+    constexpr uint32_t DOUBLE_SIDED      = 1u << 9;
+}
+
+// ────────────────────────────────────────────────
+// Extended Disney + thin-film + procedural layers
+// Must remain aligned to 16 bytes (std430 / scalar block layout)
+// ────────────────────────────────────────────────
 struct alignas(16) Material
 {
-    glm::vec4 baseColor         {1.0f, 1.0f, 1.0f, 1.0f};
-    glm::vec4 emissive          {0.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec4 baseColor             {1.0f, 1.0f, 1.0f, 1.0f};   // .a = opacity (1=opaque, 0=invisible)
 
-    float     metallic          = 0.0f;
-    float     roughness         = 0.5f;
-    float     specular          = 0.5f;
-    float     ior               = 1.50f;
+    glm::vec4 emissive              {0.0f, 0.0f, 0.0f, 0.0f};   // .a = emission strength multiplier
 
-    float     transmission      = 0.0f;
-    float     subsurface        = 0.0f;
-    glm::vec3 subsurfaceColor   {0.8f,0.6f,0.5f};
+    // Core PBR
+    float     metallic              = 0.0f;
+    float     roughness             = 0.5f;
+    float     specular              = 0.5f;
+    float     ior                   = 1.50f;
+
+    // Transmission & thin surfaces
+    float     transmission          = 0.0f;
     float     transmissionRoughness = 0.0f;
+    float     thinFilm              = 0.0f;
+    float     thinFilmThickness_nm  = 350.0f;
 
-    float     clearcoat         = 0.0f;
-    float     clearcoatRoughness= 0.03f;
+    // Subsurface / wax / skin / leaves
+    float     subsurface            = 0.0f;
+    glm::vec3 subsurfaceColor       {0.8f, 0.6f, 0.5f};
+    float     subsurfaceRadiusScale = 1.0f;
 
-    float     sheen             = 0.0f;
-    glm::vec3 sheenTint         {1.0f,1.0f,1.0f};
+    // Clearcoat (car paint, polished wood, etc.)
+    float     clearcoat             = 0.0f;
+    float     clearcoatRoughness    = 0.03f;
 
-    float     anisotropy        = 0.0f;
-    float     anisoRotation     = 0.0f;
+    // Sheen (fabric, velvet, dust)
+    float     sheen                 = 0.0f;
+    glm::vec3 sheenTint             {1.0f, 1.0f, 1.0f};
 
-    float     thinFilm          = 0.0f;
-    float     thinFilmIOR       = 1.45f;
-    float     thinFilmThickness_nm = 350.0f;
+    // Anisotropy (brushed metal, hair, vinyl)
+    float     anisotropy            = 0.0f;
+    float     anisoRotation         = 0.0f;
 
-    uint32_t  procType          = 0;
-    float     procScale         = 8.0f;
-    float     procStrength      = 0.35f;
-    float     procOffsetSeed    = 0.0f;
+    // Procedural texturing / variation
+    uint32_t  procType              = 0;                        // 0 = none, 1–N = noise types
+    float     procScale             = 8.0f;
+    float     procStrength          = 0.35f;
+    float     procOffsetSeed        = 0.0f;
 
-    uint32_t  flags             = 0;
-    uint32_t  padding[2]        = {0,0};
+    // Layer blending (for infinite variety)
+    std::array<uint32_t, 4> layerMaterialIndices {0,0,0,0};     // indices into material array
+    std::array<float,    4> layerBlendFactors    {0.0f,0.0f,0.0f,0.0f};
+    uint32_t  layerCount            = 0;                        // 0–4
+
+    uint32_t  flags                 = 0;
+    uint32_t  padding[3]            = {0,0,0};
 };
 
+// ────────────────────────────────────────────────
+// Procedural AABB (for ray-AABB intersection acceleration)
+// Can have arbitrary number of child facets (stored separately)
+// ────────────────────────────────────────────────
+struct alignas(16) ProceduralAABB
+{
+    glm::vec3 minBounds;
+    uint32_t  materialIndex;        // base material
+
+    glm::vec3 maxBounds;
+    uint32_t  facetCount;           // how many child facets follow
+
+    glm::vec4 userData0;            // free parameters (scale, rotation seed, etc.)
+    glm::vec4 userData1;
+};
+
+// ────────────────────────────────────────────────
 // Camera uniform block — includes previous position and matrices
+// ────────────────────────────────────────────────
 struct CameraSceneData {
     glm::mat4 viewInverse;
     glm::mat4 projInverse;
@@ -76,7 +127,9 @@ struct CameraSceneData {
     uint32_t  padding[2]   = {0, 0};
 };
 
+// ────────────────────────────────────────────────
 // Living world — enhanced for volumetrics, fire, water caustics, etc.
+// ────────────────────────────────────────────────
 struct LivingWorldData {
     glm::vec4 sunDirAndIntensity;
     glm::vec4 skyDayTop;
@@ -113,7 +166,7 @@ public:
           destroyed_(false),
           firstFrame_(true),
           materialsHandle_(0),
-          primitivesHandle_(0),
+          proceduralAABBsHandle_(0),
           cameraUBOHandle_(0),
           livingWorldHandle_(0),
           hdrOutputImage_(VK_NULL_HANDLE),
@@ -145,109 +198,7 @@ public:
             Memory::MemoryHint::HostVisible
         );
 
-        // Material library with procedural variation
-        std::vector<Material> sceneMaterials;
-        auto addMat = [&](Material m) {
-            if (m.transmission      > 0.001f) m.flags |= (1u << 0);
-            if (m.subsurface        > 0.001f) m.flags |= (1u << 1);
-            if (m.clearcoat         > 0.001f) m.flags |= (1u << 2);
-            if (m.sheen             > 0.001f) m.flags |= (1u << 3);
-            if (m.thinFilm          > 0.001f) m.flags |= (1u << 4);
-            if (std::abs(m.anisotropy) > 0.001f) m.flags |= (1u << 5);
-            sceneMaterials.push_back(m);
-        };
-
-        // Base materials (your original 6)
-        {
-            Material m{}; m.baseColor = {0.95f,0.64f,0.07f,1.0f}; m.metallic=1.0f; m.roughness=0.08f; m.ior=1.5f; addMat(m);
-        }
-        {
-            Material m{}; m.baseColor = {0.04f,0.04f,0.04f,1.0f}; m.roughness=0.92f; m.ior=1.5f; m.sheen=0.95f; m.sheenTint={0.9f,0.9f,0.9f}; addMat(m);
-        }
-        {
-            Material m{}; m.baseColor = {0.9f,0.9f,1.0f,0.4f}; m.roughness=0.02f; m.ior=1.45f; m.transmission=0.98f; addMat(m);
-        }
-        {
-            Material m{}; m.baseColor = {1.0f,0.1f,0.4f,1.0f}; m.emissive={8.0f,1.0f,2.0f,15.0f}; m.roughness=0.4f; addMat(m);
-        }
-        {
-            Material m{}; m.baseColor = {0.2f,0.7f,0.2f,1.0f}; m.roughness=0.85f; m.ior=1.5f; m.subsurface=0.4f; m.subsurfaceColor={0.3f,0.9f,0.4f}; addMat(m);
-        }
-        {
-            Material m{}; m.baseColor = {0.9f,0.92f,1.0f,1.0f}; m.roughness=0.04f; m.ior=1.45f; m.thinFilm=1.0f; m.thinFilmThickness_nm=620.0f; addMat(m);
-        }
-
-        size_t baseCount = sceneMaterials.size();
-        constexpr int TOTAL_MATERIALS = 8000;
-        for (size_t i = baseCount; sceneMaterials.size() < TOTAL_MATERIALS; ++i) {
-            size_t baseIdx = (i - baseCount) % baseCount;
-            Material m = sceneMaterials[baseIdx];
-            float rnd = hash11(static_cast<uint32_t>(i) * 214013u + 2531011u);
-
-            if (rnd < 0.7f) {
-                float hueShift = (rnd * 2.0f - 1.0f) * 0.45f;
-                m.baseColor = hue_shift(m.baseColor, hueShift);
-            }
-
-            m.roughness = glm::clamp(m.roughness + (rnd - 0.5f) * 0.75f, 0.02f, 0.98f);
-
-            if (rnd > 0.35f && rnd < 0.65f)
-                m.metallic = glm::clamp(m.metallic + (rnd - 0.5f) * 0.9f, 0.0f, 1.0f);
-
-            if (rnd > 0.38f && rnd < 0.82f) {
-                m.procType     = 1 + (static_cast<uint32_t>(i * 7u) % 6);
-                m.procScale    = 4.0f + rnd * 24.0f;
-                m.procStrength = 0.15f + rnd * 0.65f;
-                m.procOffsetSeed = rnd * 100.0f;
-            }
-
-            if (rnd < 0.12f) {
-                m.emissive = glm::vec4(2.0f + rnd*10.0f, 0.1f+rnd*4.0f, 0.3f+rnd*6.0f, 8.0f + rnd*30.0f);
-            }
-
-            if (rnd > 0.88f) {
-                m.thinFilm = 0.7f + rnd * 0.3f;
-                m.thinFilmThickness_nm = 220.0f + (rnd * 980.0f);
-            }
-
-            addMat(m);
-        }
-
-        VkDeviceSize matSize = sceneMaterials.size() * sizeof(Material);
-        materialsHandle_ = Memory::createBuffer(matSize,
-                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                "MaterialsBuffer", Memory::MemoryHint::HostVisible);
-
-        if (matSize > 0) {
-            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(materialsHandle_, sceneMaterials.data(), matSize);
-            if (stagingBuf != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
-                vkFreeMemory(rtx().device, stagingMem, nullptr);
-            }
-        }
-
-        VkDeviceSize primSize = rtx().las_procedural_primitives.size() * sizeof(UniversalPrimitive);
-        if (primSize == 0) primSize = sizeof(UniversalPrimitive);
-
-        primitivesHandle_ = Memory::createBuffer(primSize,
-                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                 primSize == sizeof(UniversalPrimitive) ? "PrimitivesBuffer (dummy)" : "PrimitivesBuffer",
-                                                 Memory::MemoryHint::HostVisible);
-
-        if (primSize == sizeof(UniversalPrimitive)) {
-            UniversalPrimitive dummy{};
-            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(primitivesHandle_, &dummy, primSize);
-            if (stagingBuf != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
-                vkFreeMemory(rtx().device, stagingMem, nullptr);
-            }
-        } else {
-            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(primitivesHandle_, rtx().las_procedural_primitives.data(), primSize);
-            if (stagingBuf != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
-                vkFreeMemory(rtx().device, stagingMem, nullptr);
-            }
-        }
+        buildMaterialLibrary();
 
         createPersistentHDR();
         createPreviousHDR();
@@ -280,180 +231,363 @@ public:
         Memory::destroy(cameraUBOHandle_);
         Memory::destroy(livingWorldHandle_);
         Memory::destroy(materialsHandle_);
-        Memory::destroy(primitivesHandle_);
+        Memory::destroy(proceduralAABBsHandle_);
 
         Pipeline::shutdown();
     }
 
-void maybeUpdateCanvas() noexcept {
-    if (destroyed_) return;
+    void buildMaterialLibrary() {
+        std::vector<Material> materials;
 
-    int currentW = 0, currentH = 0;
-    SDL_GetWindowSize(window_, &currentW, &currentH);
+        auto addBase = [&](const Material& base) {
+            Material m = base;
+            if (m.transmission      > 0.001f) m.flags |= MaterialFlags::TRANSMISSION;
+            if (m.subsurface        > 0.001f) m.flags |= MaterialFlags::SUBSURFACE;
+            if (m.clearcoat         > 0.001f) m.flags |= MaterialFlags::CLEARCOAT;
+            if (m.sheen             > 0.001f) m.flags |= MaterialFlags::SHEEN;
+            if (m.thinFilm          > 0.001f) m.flags |= MaterialFlags::THIN_FILM;
+            if (std::abs(m.anisotropy) > 0.001f) m.flags |= MaterialFlags::ANISOTROPY;
+            if (glm::length(m.emissive) > 0.001f) m.flags |= MaterialFlags::EMISSIVE;
+            materials.push_back(m);
+        };
 
-    bool sizeChanged   = (currentW != window_width_ || currentH != window_height_);
-    bool wasMinimized  = minimized_;
-    bool nowMinimized  = (currentW <= 0 || currentH <= 0);
+        // 0 – Gold (metallic)
+        {
+            Material m{};
+            m.baseColor = {1.00f, 0.78f, 0.34f, 1.0f};
+            m.metallic = 1.0f;
+            m.roughness = 0.08f;
+            m.specular = 0.6f;
+            addBase(m);
+        }
 
-    if (nowMinimized) {
-        minimized_ = true;
-        return;
+        // 1 – Matte black plastic
+        {
+            Material m{};
+            m.baseColor = {0.04f, 0.04f, 0.04f, 1.0f};
+            m.roughness = 0.92f;
+            m.specular = 0.35f;
+            addBase(m);
+        }
+
+        // 2 – Clear glass (transmissive)
+        {
+            Material m{};
+            m.baseColor = {0.95f, 0.97f, 1.00f, 0.98f};
+            m.roughness = 0.00f;
+            m.ior = 1.50f;
+            m.transmission = 1.0f;
+            m.transmissionRoughness = 0.0f;
+            addBase(m);
+        }
+
+        // 3 – Neon emissive pink
+        {
+            Material m{};
+            m.baseColor = {1.0f, 0.1f, 0.6f, 1.0f};
+            m.emissive = {12.0f, 1.2f, 6.0f, 20.0f};
+            m.roughness = 0.4f;
+            addBase(m);
+        }
+
+        // 4 – Jade-like translucent subsurface
+        {
+            Material m{};
+            m.baseColor = {0.2f, 0.9f, 0.5f, 1.0f};
+            m.roughness = 0.12f;
+            m.ior = 1.52f;
+            m.subsurface = 0.65f;
+            m.subsurfaceColor = {0.1f, 0.8f, 0.4f};
+            addBase(m);
+        }
+
+        // 5 – Iridescent thin-film soap bubble
+        {
+            Material m{};
+            m.baseColor = {1.0f, 1.0f, 1.0f, 0.4f};
+            m.roughness = 0.00f;
+            m.ior = 1.33f;
+            m.transmission = 0.95f;
+            m.thinFilm = 1.0f;
+            m.thinFilmThickness_nm = 480.0f;
+            addBase(m);
+        }
+
+        size_t baseCount = materials.size();
+
+        constexpr size_t TOTAL_MATERIALS = 8192;
+        for (size_t i = baseCount; materials.size() < TOTAL_MATERIALS; ++i) {
+            size_t baseIdx = (i - baseCount) % baseCount;
+            Material m = materials[baseIdx];
+
+            uint32_t seed = static_cast<uint32_t>(i) * 1664525u + 1013904223u;
+            float rnd1 = hash11(seed);
+            float rnd2 = hash11(seed + 1);
+            float rnd3 = hash11(seed + 2);
+
+            // Color variation
+            if (rnd1 < 0.75f) {
+                float hue = rnd1 * 6.283185f;
+                m.baseColor = glm::vec4(
+                    0.5f + 0.5f * cosf(hue),
+                    0.5f + 0.5f * cosf(hue + 2.094f),
+                    0.5f + 0.5f * cosf(hue + 4.188f),
+                    m.baseColor.a
+                );
+            }
+
+            m.roughness = glm::clamp(m.roughness + (rnd2 - 0.5f) * 0.9f, 0.0f, 1.0f);
+
+            if (rnd3 < 0.4f) {
+                m.metallic = glm::clamp(rnd3 * 2.0f, 0.0f, 1.0f);
+            }
+
+            if (rnd1 > 0.65f && rnd2 > 0.5f) {
+                m.transmission = glm::clamp(m.transmission + (rnd3 * 0.8f), 0.0f, 1.0f);
+                if (m.transmission > 0.01f) m.flags |= MaterialFlags::TRANSMISSION;
+            }
+
+            // Layering (up to 4 layers for extreme variety)
+            if (rnd1 > 0.88f) {
+                m.layerCount = 2 + (static_cast<uint32_t>(seed) % 3);
+                for (uint32_t l = 0; l < m.layerCount; ++l) {
+                    size_t otherMat = (i + l + 1) % baseCount;
+                    m.layerMaterialIndices[l] = static_cast<uint32_t>(otherMat);
+                    m.layerBlendFactors[l] = 0.15f + hash11(seed + l + 100) * 0.7f;
+                }
+            }
+
+            // Procedural texture
+            if (rnd2 > 0.6f) {
+                m.procType = 1 + (static_cast<uint32_t>(seed * 7u) % 12);
+                m.procScale = 2.0f + rnd3 * 30.0f;
+                m.procStrength = 0.1f + rnd1 * 0.8f;
+                m.procOffsetSeed = static_cast<float>(seed);
+                m.flags |= MaterialFlags::PROCEDURAL;
+            }
+
+            // Thin-film iridescence
+            if (rnd3 > 0.92f) {
+                m.thinFilm = 0.6f + rnd1 * 0.4f;
+                m.thinFilmThickness_nm = 200.0f + rnd2 * 1200.0f;
+                m.flags |= MaterialFlags::THIN_FILM;
+            }
+
+            materials.push_back(m);
+        }
+
+        VkDeviceSize size = materials.size() * sizeof(Material);
+        materialsHandle_ = Memory::createBuffer(size,
+                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                "MaterialsLibrary",
+                                                Memory::MemoryHint::HostVisible);
+
+        if (size > 0) {
+            auto [staging, mem] = Memory::uploadToBuffer(materialsHandle_, materials.data(), size);
+            if (staging) {
+                vkDestroyBuffer(rtx().device, staging, nullptr);
+                vkFreeMemory(rtx().device, mem, nullptr);
+            }
+        }
     }
 
-    if (sizeChanged || wasMinimized) {
-        vkDeviceWaitIdle(rtx().device);
-        onResize(currentW, currentH);
-        minimized_ = false;
+    void maybeUpdateCanvas() noexcept
+    {
+        if (destroyed_) return;
+
+        int currentW = 0, currentH = 0;
+        SDL_GetWindowSize(window_, &currentW, &currentH);
+
+        bool sizeChanged   = (currentW != window_width_ || currentH != window_height_);
+        bool wasMinimized  = minimized_;
+        bool nowMinimized  = (currentW <= 0 || currentH <= 0);
+
+        if (nowMinimized)
+        {
+            minimized_ = true;
+            return;
+        }
+
+        if (sizeChanged || wasMinimized)
+        {
+            vkDeviceWaitIdle(rtx().device);
+            onResize(currentW, currentH);
+            minimized_ = false;
+        }
+
+        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_)
+        {
+            LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
+            return;
+        }
+
+        if (firstFrame_)
+        {
+            TotalTime::get().seal();
+            firstFrame_ = false;
+            LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
+        }
+
+        double now = TotalTime::get().seconds();
+        static double lastKnownTime = 0.0;
+        if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
+        lastKnownTime = now;
+
+        // ────────────────────────────────────────────────
+        // Drive real camera to match old orbiting view using Options::Camera values
+        // ────────────────────────────────────────────────
+        float orbitTime = static_cast<float>(now);
+
+        float swingX = sinf(orbitTime * Options::Camera::DISTANCE_FREQ) * Options::Camera::DISTANCE_SWING;
+        float swingY = sinf(orbitTime * Options::Camera::HEIGHT_FREQ) * Options::Camera::HEIGHT_SWING;
+
+        glm::vec3 targetPos = glm::vec3(swingX,
+                                        Options::Camera::BASE_HEIGHT + swingY,
+                                        Options::Camera::BASE_DISTANCE);
+
+        // Look at origin, slightly downward
+        glm::vec3 lookTarget = glm::vec3(0.0f, Options::Camera::LOOK_AT_Y_OFFSET, 0.0f);
+
+        CAM.setPosition(targetPos, true);   // instant = true → no transition smoothing
+        CAM.lookAt(lookTarget, true);
+
+        // Match old FOV feel
+        CAM.setFov(60.0f, true);            // or use Options::Camera::DEFAULT_FOV if preferred
+
+        updateCameraUBO(now);
+        updateLivingWorldBuffer(now);
+        updateDescriptorSet();
+
+        uint32_t imageIndex = 0;
+        VkFence fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        vkCreateFence(rtx().device, &fci, nullptr, &fence);
+
+        VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
+                                                    VK_NULL_HANDLE, fence, &imageIndex);
+
+        vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
+        vkDestroyFence(rtx().device, fence, nullptr);
+
+        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR)
+        {
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date — retrying next frame");
+            minimized_ = true;
+            return;
+        }
+
+        if (acq != VK_SUCCESS)
+        {
+            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
+            if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
+            return;
+        }
+
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        if (!cmd) return;
+
+        transitionImageLayout(cmd, hdrOutputImage_,
+                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+        if (!firstFrame_)
+        {
+            copyHDRtoPrevious(cmd);
+        }
+
+        VkDescriptorSet set = descriptorSet_;
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
+                                0, 1, &set, 0, nullptr);
+
+        Pipeline::dispatch_canvas(cmd,
+                                  static_cast<uint32_t>(internal_width_),
+                                  static_cast<uint32_t>(internal_height_),
+                                  static_cast<float>(now));
+
+        VkImageMemoryBarrier postComputeBarrier{};
+        postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        postComputeBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        postComputeBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        postComputeBarrier.image = hdrOutputImage_;
+        postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
+
+        endSubmitAndWait(cmd);
+
+        VkCommandBuffer blitCmd = beginTransientCommandBuffer();
+        if (!blitCmd) return;
+
+        VkImage swapImg = Swapchain::images[imageIndex];
+
+        VkImageMemoryBarrier swapBarrier{};
+        swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        swapBarrier.srcAccessMask = 0;
+        swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        swapBarrier.image = swapImg;
+        swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(blitCmd,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
+
+        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
+
+        Swapchain::scaleBlit(blitCmd,
+                             hdrOutputImage_,
+                             VkExtent2D{static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_)},
+                             swapImg,
+                             Swapchain::getExtent());
+
+        VkImageMemoryBarrier presentBarrier{};
+        presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+        presentBarrier.image = swapImg;
+        presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(blitCmd,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+
+        endSubmitAndWait(blitCmd);
+
+        VkPresentInfoKHR pi{};
+        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        pi.swapchainCount = 1;
+        pi.pSwapchains    = &Swapchain::swapchain.value;
+        pi.pImageIndices  = &imageIndex;
+
+        VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
+
+        if (pres == VK_SUCCESS)
+        {
+            Swapchain::updateRefreshEstimate(now);
+        }
+        else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR)
+        {
+            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date — recreate next frame");
+            minimized_ = true;
+        }
+        else if (pres != VK_SUCCESS)
+        {
+            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
+            if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
+        }
     }
-
-    if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
-        LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
-        return;
-    }
-
-    if (firstFrame_) {
-        TotalTime::get().seal();
-        firstFrame_ = false;
-        LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
-    }
-
-    double now = TotalTime::get().seconds();
-    static double lastKnownTime = 0.0;
-    if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
-    lastKnownTime = now;
-
-    updateCameraUBO(now);
-    updateLivingWorldBuffer(now);
-    updateDescriptorSet();
-
-    uint32_t imageIndex = 0;
-    VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fci{};
-    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    vkCreateFence(rtx().device, &fci, nullptr, &fence);
-
-    VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
-                                                VK_NULL_HANDLE, fence, &imageIndex);
-
-    vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
-    vkDestroyFence(rtx().device, fence, nullptr);
-
-    if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-        LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date — retrying next frame");
-        minimized_ = true;
-        return;
-    }
-
-    if (acq != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
-        if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
-        return;
-    }
-
-    VkCommandBuffer cmd = beginTransientCommandBuffer();
-    if (!cmd) return;
-
-    // Ensure HDR is in GENERAL layout before compute writes
-    transitionImageLayout(cmd, hdrOutputImage_,
-                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-
-    if (!firstFrame_) {
-        copyHDRtoPrevious(cmd);
-    }
-
-    VkDescriptorSet set = descriptorSet_;
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
-                            0, 1, &set, 0, nullptr);
-
-    Pipeline::dispatch_canvas(cmd,
-                              static_cast<uint32_t>(internal_width_),
-                              static_cast<uint32_t>(internal_height_),
-                              static_cast<float>(now));
-
-    // Critical barrier: make compute writes visible to transfer/blit
-    VkImageMemoryBarrier postComputeBarrier{};
-    postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    postComputeBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    postComputeBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    postComputeBarrier.image = hdrOutputImage_;
-    postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
-
-    endSubmitAndWait(cmd);
-
-    // Blit phase
-    VkCommandBuffer blitCmd = beginTransientCommandBuffer();
-    if (!blitCmd) return;
-
-    VkImage swapImg = Swapchain::images[imageIndex];
-
-    // Transition swapchain image to TRANSFER_DST
-    VkImageMemoryBarrier swapBarrier{};
-    swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    swapBarrier.srcAccessMask = 0;
-    swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    swapBarrier.image = swapImg;
-    swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    vkCmdPipelineBarrier(blitCmd,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
-
-    // Optional: clear swapchain to black for debug (remove later)
-    VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
-    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
-
-    Swapchain::scaleBlit(blitCmd,
-                         hdrOutputImage_,
-                         VkExtent2D{static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_)},
-                         swapImg,
-                         Swapchain::getExtent());
-
-    // Transition swapchain back to PRESENT_SRC_KHR
-    VkImageMemoryBarrier presentBarrier{};
-    presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    presentBarrier.image = swapImg;
-    presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    vkCmdPipelineBarrier(blitCmd,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
-
-    endSubmitAndWait(blitCmd);
-
-    VkPresentInfoKHR pi{};
-    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.swapchainCount = 1;
-    pi.pSwapchains    = &Swapchain::swapchain.value;
-    pi.pImageIndices  = &imageIndex;
-
-    VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
-
-    if (pres == VK_SUCCESS) {
-        Swapchain::updateRefreshEstimate(now);
-    } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-        LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date — recreate next frame");
-        minimized_ = true;
-    } else if (pres != VK_SUCCESS) {
-        LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
-        if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
-    }
-}
 
     void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
@@ -532,17 +666,15 @@ private:
         VkDescriptorBufferInfo uboInfo{ Memory::getBuffer(cameraUBOHandle_), 0, VK_WHOLE_SIZE };
         VkDescriptorBufferInfo worldInfo{ Memory::getBuffer(livingWorldHandle_), 0, VK_WHOLE_SIZE };
         VkDescriptorBufferInfo matInfo{ Memory::getBuffer(materialsHandle_), 0, VK_WHOLE_SIZE };
-        VkDescriptorBufferInfo primInfo{ Memory::getBuffer(primitivesHandle_), 0, VK_WHOLE_SIZE };
 
-        VkWriteDescriptorSet writes[5]{};
+        VkWriteDescriptorSet writes[4]{};
 
         writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &imgInfo,   nullptr, nullptr };
         writes[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 1, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &uboInfo,  nullptr };
         writes[2] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 2, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &worldInfo,nullptr };
         writes[3] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 3, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &matInfo,  nullptr };
-        writes[4] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 4, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &primInfo, nullptr };
 
-        vkUpdateDescriptorSets(rtx().device, 5, writes, 0, nullptr);
+        vkUpdateDescriptorSets(rtx().device, 4, writes, 0, nullptr);
     }
 
     void createPersistentHDR() noexcept {
@@ -836,28 +968,32 @@ private:
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
     }
 
-private:
-    static glm::vec4 hue_shift(glm::vec4 c, float shift) {
-        glm::vec3 rgb = glm::vec3(c);
-        float u = cosf(shift * glm::pi<float>() * 2.0f);
-        float w = sinf(shift * glm::pi<float>() * 2.0f);
+    void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
+                               VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = oldLayout;
+        barrier.newLayout = newLayout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        glm::mat3 rot = glm::mat3(
-            0.299f + 0.701f * u + 0.168f * w,
-            0.587f - 0.587f * u + 0.330f * w,
-            0.114f - 0.114f * u - 0.497f * w,
-            0.299f - 0.299f * u - 0.328f * w,
-            0.587f + 0.413f * u + 0.035f * w,
-            0.114f - 0.114f * u + 0.292f * w,
-            0.299f - 0.300f * u + 1.250f * w,
-            0.587f - 0.588f * u - 1.050f * w,
-            0.114f + 0.886f * u - 0.203f * w
-        );
+        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        }
 
-        rgb = rot * rgb;
-        return glm::vec4(glm::clamp(rgb, 0.0f, 1.0f), c.a);
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
+private:
     static float hash11(uint32_t x) {
         x ^= x >> 16;
         x *= 0x7feb352dU;
@@ -877,19 +1013,19 @@ private:
     bool           destroyed_        = false;
     bool           firstFrame_       = true;
 
-    uint64_t       materialsHandle_  = 0;
-    uint64_t       primitivesHandle_ = 0;
-    uint64_t       cameraUBOHandle_  = 0;
-    uint64_t       livingWorldHandle_= 0;
+    uint64_t       materialsHandle_          = 0;
+    uint64_t       proceduralAABBsHandle_    = 0;
+    uint64_t       cameraUBOHandle_          = 0;
+    uint64_t       livingWorldHandle_        = 0;
 
-    VkImage        hdrOutputImage_   = VK_NULL_HANDLE;
-    VkImageView    hdrOutputView_    = VK_NULL_HANDLE;
-    VkDeviceMemory hdrOutputMemory_  = VK_NULL_HANDLE;
+    VkImage        hdrOutputImage_           = VK_NULL_HANDLE;
+    VkImageView    hdrOutputView_            = VK_NULL_HANDLE;
+    VkDeviceMemory hdrOutputMemory_          = VK_NULL_HANDLE;
 
-    VkImage        prevHdrOutputImage_   = VK_NULL_HANDLE;
-    VkImageView    prevHdrOutputView_    = VK_NULL_HANDLE;
-    VkDeviceMemory prevHdrOutputMemory_  = VK_NULL_HANDLE;
+    VkImage        prevHdrOutputImage_       = VK_NULL_HANDLE;
+    VkImageView    prevHdrOutputView_        = VK_NULL_HANDLE;
+    VkDeviceMemory prevHdrOutputMemory_      = VK_NULL_HANDLE;
 
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
-    VkDescriptorSet  descriptorSet_  = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool_         = VK_NULL_HANDLE;
+    VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
 };
