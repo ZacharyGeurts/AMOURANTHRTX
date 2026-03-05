@@ -10,7 +10,7 @@
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "camera.hpp"           // ← added: for CAM singleton access
+#include "Camera.hpp"           // ← added: for CAM singleton access
 
 #include <algorithm>
 #include <vector>

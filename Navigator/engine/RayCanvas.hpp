@@ -8,9 +8,10 @@
 
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
-#include "camera.hpp"
+#include "Camera.hpp"
 #include "OptionsMenu.hpp"
 #include "Pipeline.hpp"
+#include "Materials.hpp"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/rotate_vector.hpp>
@@ -19,83 +20,12 @@
 #include <array>
 
 // ────────────────────────────────────────────────
-// Flags (bitfield – used in shader for fast-path decisions)
-// ────────────────────────────────────────────────
-namespace MaterialFlags {
-    constexpr uint32_t TRANSMISSION      = 1u << 0;
-    constexpr uint32_t SUBSURFACE        = 1u << 1;
-    constexpr uint32_t CLEARCOAT         = 1u << 2;
-    constexpr uint32_t SHEEN             = 1u << 3;
-    constexpr uint32_t THIN_FILM         = 1u << 4;
-    constexpr uint32_t ANISOTROPY        = 1u << 5;
-    constexpr uint32_t EMISSIVE          = 1u << 6;
-    constexpr uint32_t PROCEDURAL        = 1u << 7;
-    constexpr uint32_t VOLUMETRIC_HINT   = 1u << 8;
-    constexpr uint32_t DOUBLE_SIDED      = 1u << 9;
-}
-
-// ────────────────────────────────────────────────
-// Extended Disney + thin-film + procedural layers
-// Must remain aligned to 16 bytes (std430 / scalar block layout)
-// ────────────────────────────────────────────────
-struct alignas(16) Material
-{
-    glm::vec4 baseColor             {1.0f, 1.0f, 1.0f, 1.0f};   // .a = opacity (1=opaque, 0=invisible)
-
-    glm::vec4 emissive              {0.0f, 0.0f, 0.0f, 0.0f};   // .a = emission strength multiplier
-
-    // Core PBR
-    float     metallic              = 0.0f;
-    float     roughness             = 0.5f;
-    float     specular              = 0.5f;
-    float     ior                   = 1.50f;
-
-    // Transmission & thin surfaces
-    float     transmission          = 0.0f;
-    float     transmissionRoughness = 0.0f;
-    float     thinFilm              = 0.0f;
-    float     thinFilmThickness_nm  = 350.0f;
-
-    // Subsurface / wax / skin / leaves
-    float     subsurface            = 0.0f;
-    glm::vec3 subsurfaceColor       {0.8f, 0.6f, 0.5f};
-    float     subsurfaceRadiusScale = 1.0f;
-
-    // Clearcoat (car paint, polished wood, etc.)
-    float     clearcoat             = 0.0f;
-    float     clearcoatRoughness    = 0.03f;
-
-    // Sheen (fabric, velvet, dust)
-    float     sheen                 = 0.0f;
-    glm::vec3 sheenTint             {1.0f, 1.0f, 1.0f};
-
-    // Anisotropy (brushed metal, hair, vinyl)
-    float     anisotropy            = 0.0f;
-    float     anisoRotation         = 0.0f;
-
-    // Procedural texturing / variation
-    uint32_t  procType              = 0;                        // 0 = none, 1–N = noise types
-    float     procScale             = 8.0f;
-    float     procStrength          = 0.35f;
-    float     procOffsetSeed        = 0.0f;
-
-    // Layer blending (for infinite variety)
-    std::array<uint32_t, 4> layerMaterialIndices {0,0,0,0};     // indices into material array
-    std::array<float,    4> layerBlendFactors    {0.0f,0.0f,0.0f,0.0f};
-    uint32_t  layerCount            = 0;                        // 0–4
-
-    uint32_t  flags                 = 0;
-    uint32_t  padding[3]            = {0,0,0};
-};
-
-// ────────────────────────────────────────────────
 // Procedural AABB (for ray-AABB intersection acceleration)
-// Can have arbitrary number of child facets (stored separately)
 // ────────────────────────────────────────────────
 struct alignas(16) ProceduralAABB
 {
     glm::vec3 minBounds;
-    uint32_t  materialIndex;        // base material
+    uint32_t  materialIndex;        // index into material buffer
 
     glm::vec3 maxBounds;
     uint32_t  facetCount;           // how many child facets follow
@@ -178,6 +108,9 @@ public:
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE)
     {
+        // Respect OptionsMenu resolution settings on creation
+        updateInternalResolution();
+
         Swapchain::create(window, window_width_, window_height_);
 
         if (!Swapchain::get()) {
@@ -209,6 +142,9 @@ public:
         Pipeline::create_canvas_pipeline();
 
         updateDescriptorSet();
+
+        // Force clear HDR on startup to prevent garbage accumulation
+        clearHDRImages();
     }
 
     ~RayCanvas() {
@@ -239,82 +175,39 @@ public:
     void buildMaterialLibrary() {
         std::vector<Material> materials;
 
-        auto addBase = [&](const Material& base) {
-            Material m = base;
-            if (m.transmission      > 0.001f) m.flags |= MaterialFlags::TRANSMISSION;
-            if (m.subsurface        > 0.001f) m.flags |= MaterialFlags::SUBSURFACE;
-            if (m.clearcoat         > 0.001f) m.flags |= MaterialFlags::CLEARCOAT;
-            if (m.sheen             > 0.001f) m.flags |= MaterialFlags::SHEEN;
-            if (m.thinFilm          > 0.001f) m.flags |= MaterialFlags::THIN_FILM;
-            if (std::abs(m.anisotropy) > 0.001f) m.flags |= MaterialFlags::ANISOTROPY;
-            if (glm::length(m.emissive) > 0.001f) m.flags |= MaterialFlags::EMISSIVE;
+        // Wrap each base MaterialLayer into a single-layer Material
+        auto addBase = [&](const MaterialLayer& layer) {
+            Material m{};
+            m.layers[0] = layer;
+            m.layerCount = 1;
+            m.layerBlendFactors[0] = 1.0f;
             materials.push_back(m);
         };
 
-        // 0 – Gold (metallic)
-        {
-            Material m{};
-            m.baseColor = {1.00f, 0.78f, 0.34f, 1.0f};
-            m.metallic = 1.0f;
-            m.roughness = 0.08f;
-            m.specular = 0.6f;
-            addBase(m);
-        }
+        addBase(Materials::Mirror);
+        addBase(Materials::PolishedGold);
+        addBase(Materials::BrushedGold);
+        addBase(Materials::MatteBlackPlastic);
+        addBase(Materials::ClearGlass);
+        addBase(Materials::FrostedGlass);
+        addBase(Materials::Water);
+        addBase(Materials::Jade);
+        addBase(Materials::Skin);
+        addBase(Materials::Velvet);
+        addBase(Materials::NeonPink);
+        addBase(Materials::LightBulb);
+        addBase(Materials::SoapBubble);
+        addBase(Materials::CarPaintRed);
+        addBase(Materials::RoughConcrete);
+        addBase(Materials::WornLeather);
 
-        // 1 – Matte black plastic
-        {
-            Material m{};
-            m.baseColor = {0.04f, 0.04f, 0.04f, 1.0f};
-            m.roughness = 0.92f;
-            m.specular = 0.35f;
-            addBase(m);
-        }
+        // Add pre-defined layered combinations
+        materials.push_back(IridescentGold);
+        materials.push_back(FrostedJade);
+        materials.push_back(CyberSkin);
 
-        // 2 – Clear glass (transmissive)
-        {
-            Material m{};
-            m.baseColor = {0.95f, 0.97f, 1.00f, 0.98f};
-            m.roughness = 0.00f;
-            m.ior = 1.50f;
-            m.transmission = 1.0f;
-            m.transmissionRoughness = 0.0f;
-            addBase(m);
-        }
-
-        // 3 – Neon emissive pink
-        {
-            Material m{};
-            m.baseColor = {1.0f, 0.1f, 0.6f, 1.0f};
-            m.emissive = {12.0f, 1.2f, 6.0f, 20.0f};
-            m.roughness = 0.4f;
-            addBase(m);
-        }
-
-        // 4 – Jade-like translucent subsurface
-        {
-            Material m{};
-            m.baseColor = {0.2f, 0.9f, 0.5f, 1.0f};
-            m.roughness = 0.12f;
-            m.ior = 1.52f;
-            m.subsurface = 0.65f;
-            m.subsurfaceColor = {0.1f, 0.8f, 0.4f};
-            addBase(m);
-        }
-
-        // 5 – Iridescent thin-film soap bubble
-        {
-            Material m{};
-            m.baseColor = {1.0f, 1.0f, 1.0f, 0.4f};
-            m.roughness = 0.00f;
-            m.ior = 1.33f;
-            m.transmission = 0.95f;
-            m.thinFilm = 1.0f;
-            m.thinFilmThickness_nm = 480.0f;
-            addBase(m);
-        }
-
+        // Generate procedural variations for near-infinite variety
         size_t baseCount = materials.size();
-
         constexpr size_t TOTAL_MATERIALS = 8192;
         for (size_t i = baseCount; materials.size() < TOTAL_MATERIALS; ++i) {
             size_t baseIdx = (i - baseCount) % baseCount;
@@ -325,52 +218,28 @@ public:
             float rnd2 = hash11(seed + 1);
             float rnd3 = hash11(seed + 2);
 
-            // Color variation
-            if (rnd1 < 0.75f) {
-                float hue = rnd1 * 6.283185f;
-                m.baseColor = glm::vec4(
-                    0.5f + 0.5f * cosf(hue),
-                    0.5f + 0.5f * cosf(hue + 2.094f),
-                    0.5f + 0.5f * cosf(hue + 4.188f),
-                    m.baseColor.a
-                );
+            // Slight color variation
+            m.layers[0].baseColor.r += (rnd1 - 0.5f) * 0.15f;
+            m.layers[0].baseColor.g += (rnd2 - 0.5f) * 0.15f;
+            m.layers[0].baseColor.b += (rnd3 - 0.5f) * 0.15f;
+            m.layers[0].baseColor = glm::clamp(m.layers[0].baseColor, 0.0f, 1.0f);
+
+            // Roughness variation
+            m.layers[0].roughness = glm::clamp(m.layers[0].roughness + (rnd1 - 0.5f) * 0.4f, 0.0f, 1.0f);
+
+            // Randomly add thin-film or anisotropy to some
+            if (rnd2 > 0.7f) {
+                m.layers[0].thinFilm = 0.8f;
+                m.layers[0].thinFilmThickness_nm = 200.0f + rnd3 * 800.0f;
+                m.layers[0].flags |= MaterialFlags::THIN_FILM;
             }
 
-            m.roughness = glm::clamp(m.roughness + (rnd2 - 0.5f) * 0.9f, 0.0f, 1.0f);
-
-            if (rnd3 < 0.4f) {
-                m.metallic = glm::clamp(rnd3 * 2.0f, 0.0f, 1.0f);
-            }
-
-            if (rnd1 > 0.65f && rnd2 > 0.5f) {
-                m.transmission = glm::clamp(m.transmission + (rnd3 * 0.8f), 0.0f, 1.0f);
-                if (m.transmission > 0.01f) m.flags |= MaterialFlags::TRANSMISSION;
-            }
-
-            // Layering (up to 4 layers for extreme variety)
-            if (rnd1 > 0.88f) {
-                m.layerCount = 2 + (static_cast<uint32_t>(seed) % 3);
-                for (uint32_t l = 0; l < m.layerCount; ++l) {
-                    size_t otherMat = (i + l + 1) % baseCount;
-                    m.layerMaterialIndices[l] = static_cast<uint32_t>(otherMat);
-                    m.layerBlendFactors[l] = 0.15f + hash11(seed + l + 100) * 0.7f;
-                }
-            }
-
-            // Procedural texture
-            if (rnd2 > 0.6f) {
-                m.procType = 1 + (static_cast<uint32_t>(seed * 7u) % 12);
-                m.procScale = 2.0f + rnd3 * 30.0f;
-                m.procStrength = 0.1f + rnd1 * 0.8f;
-                m.procOffsetSeed = static_cast<float>(seed);
-                m.flags |= MaterialFlags::PROCEDURAL;
-            }
-
-            // Thin-film iridescence
-            if (rnd3 > 0.92f) {
-                m.thinFilm = 0.6f + rnd1 * 0.4f;
-                m.thinFilmThickness_nm = 200.0f + rnd2 * 1200.0f;
-                m.flags |= MaterialFlags::THIN_FILM;
+            // Occasionally add a second layer for more complexity
+            if (rnd3 > 0.85f && m.layerCount < 5) {
+                size_t otherBase = (i + 17) % baseCount;
+                m.layers[m.layerCount] = materials[otherBase].layers[0];
+                m.layerBlendFactors[m.layerCount] = 0.2f + rnd1 * 0.6f;
+                m.layerCount++;
             }
 
             materials.push_back(m);
@@ -389,6 +258,8 @@ public:
                 vkFreeMemory(rtx().device, mem, nullptr);
             }
         }
+
+        LOG_SUCCESS_CAT("RAYCANVAS", "Material library built with {} materials", materials.size());
     }
 
     void maybeUpdateCanvas() noexcept
@@ -432,27 +303,6 @@ public:
         static double lastKnownTime = 0.0;
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
-
-        // ────────────────────────────────────────────────
-        // Drive real camera to match old orbiting view using Options::Camera values
-        // ────────────────────────────────────────────────
-        float orbitTime = static_cast<float>(now);
-
-        float swingX = sinf(orbitTime * Options::Camera::DISTANCE_FREQ) * Options::Camera::DISTANCE_SWING;
-        float swingY = sinf(orbitTime * Options::Camera::HEIGHT_FREQ) * Options::Camera::HEIGHT_SWING;
-
-        glm::vec3 targetPos = glm::vec3(swingX,
-                                        Options::Camera::BASE_HEIGHT + swingY,
-                                        Options::Camera::BASE_DISTANCE);
-
-        // Look at origin, slightly downward
-        glm::vec3 lookTarget = glm::vec3(0.0f, Options::Camera::LOOK_AT_Y_OFFSET, 0.0f);
-
-        CAM.setPosition(targetPos, true);   // instant = true → no transition smoothing
-        CAM.lookAt(lookTarget, true);
-
-        // Match old FOV feel
-        CAM.setFov(60.0f, true);            // or use Options::Camera::DEFAULT_FOV if preferred
 
         updateCameraUBO(now);
         updateLivingWorldBuffer(now);
@@ -607,13 +457,18 @@ public:
 
         Swapchain::recreate(window_width_, window_height_);
 
-        using namespace Options::GameStyle;
-        if (CurrentDimension == DimensionMode::Pure2D || CurrentDimension == DimensionMode::TwoPointFiveD) {
-            internal_width_  = std::min(1280, window_width_);
-            internal_height_ = std::min(720, window_height_);
-        } else {
-            internal_width_  = Options::Rendering::INTERNAL_WIDTH;
-            internal_height_ = Options::Rendering::INTERNAL_HEIGHT;
+        // Respect OptionsMenu resolution settings
+        updateInternalResolution();
+
+        // Clear HDR images to prevent accumulation garbage/flicker on resize
+        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        if (cmd) {
+            vkCmdClearColorImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+            vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+            endSubmitAndWait(cmd);
         }
 
         createPersistentHDR();
@@ -627,6 +482,23 @@ public:
     bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
+    void updateInternalResolution() noexcept {
+        using namespace Options::GameStyle;
+        if (CurrentDimension == DimensionMode::Pure2D || CurrentDimension == DimensionMode::TwoPointFiveD) {
+            internal_width_  = std::min(Options::Rendering::INTERNAL_WIDTH, window_width_);
+            internal_height_ = std::min(Options::Rendering::INTERNAL_HEIGHT, window_height_);
+        } else {
+            internal_width_  = Options::Rendering::INTERNAL_WIDTH;
+            internal_height_ = Options::Rendering::INTERNAL_HEIGHT;
+        }
+
+        // Clamp to valid range if needed
+        internal_width_  = std::max(320, internal_width_);
+        internal_height_ = std::max(180, internal_height_);
+
+        LOG_INFO_CAT("RAYCANVAS", "Internal resolution set to {}x{} (based on OptionsMenu settings)", internal_width_, internal_height_);
+    }
+
     void createDescriptorPoolAndSet() noexcept {
         VkDescriptorPoolSize poolSizes[5] = {
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  1},
@@ -993,7 +865,18 @@ private:
                              0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
-private:
+    void clearHDRImages() noexcept {
+        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        if (cmd) {
+            vkCmdClearColorImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+            vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+            endSubmitAndWait(cmd);
+        }
+    }
+
     static float hash11(uint32_t x) {
         x ^= x >> 16;
         x *= 0x7feb352dU;

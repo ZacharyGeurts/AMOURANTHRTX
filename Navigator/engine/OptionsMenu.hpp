@@ -10,7 +10,7 @@
 #include <cstdint>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Game Style & Perspective (unchanged from your version)
+// Game Style & Perspective
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::GameStyle
 {
@@ -56,7 +56,7 @@ namespace Options::GameStyle
         PartyGame         = 18
     };
 
-    // Runtime values — modified by menu / config
+    // Runtime values — modified by menu / config / launch args
     inline DimensionMode       CurrentDimension     = DimensionMode::Full3D;
     inline CameraPerspective   CurrentPerspective   = CameraPerspective::FirstPerson;
     inline GenrePreset         CurrentGenre         = GenrePreset::FPS;
@@ -87,50 +87,76 @@ namespace Options::Window {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Camera — restored old positions/view as configurable defaults
+// Camera
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Camera {
-    // Old hardcoded values — now configurable
-    inline constexpr glm::vec3 START_POSITION         = glm::vec3(0.0f, 6.5f, 23.0f);
-    inline constexpr float     DEFAULT_FOV            = 60.0f;   // approximate old feel
-    inline constexpr float     DEFAULT_NEAR           = 0.1f;
-    inline constexpr float     DEFAULT_FAR            = 1000.0f;
+
+    // ────────────────────────────────────────────────
+    // Temporary compatibility fallbacks for old third-person orbiting code
+    // (remove these once RayCanvas is refactored to check IsFirstPerson()/IsThirdPerson())
+    // ────────────────────────────────────────────────
+    inline constexpr float LEGACY_BASE_HEIGHT       = 1.68f;
+    inline constexpr float LEGACY_HEIGHT_SWING      = 0.0f;     // disable swing in FP mode
+    inline constexpr float LEGACY_HEIGHT_FREQ       = 0.0f;
+    inline constexpr float LEGACY_BASE_DISTANCE     = 0.0f;     // irrelevant in FP
+    inline constexpr float LEGACY_DISTANCE_SWING    = 0.0f;
+    inline constexpr float LEGACY_DISTANCE_FREQ     = 0.0f;
+    inline constexpr float LEGACY_LOOK_AT_Y_OFFSET  = 0.0f;
+    inline constexpr float LEGACY_FOV_SCALE         = 1.0f;
+
+    // ────────────────────────────────────────────────
+    // Startup / Default camera state (true first-person)
+    // ────────────────────────────────────────────────
+    inline constexpr glm::vec3 START_POSITION    { 0.0f, 1.68f, 0.0f };   // Realistic adult eye height (~168 cm)
+    inline constexpr float     DEFAULT_FOV       = 90.0f;                // Vertical FOV — standard FPS (~106° horiz on 16:9)
+    inline constexpr float     DEFAULT_NEAR      = 0.05f;
+    inline constexpr float     DEFAULT_FAR       = 5000.0f;
 
     inline constexpr float     DEFAULT_APERTURE       = 2.8f;
-    inline constexpr float     DEFAULT_FOCUS_DISTANCE = 8.0f;
+    inline constexpr float     DEFAULT_FOCUS_DISTANCE = 3.0f;
 
-    // Old orbiting/swing settings — now exposed for menu tweaking
-    inline constexpr float     BASE_HEIGHT            = 6.5f;
-    inline constexpr float     HEIGHT_SWING           = 2.8f;
-    inline constexpr float     HEIGHT_FREQ            = 0.11f;
+    // ────────────────────────────────────────────────
+    // First-person immersion effects
+    // ────────────────────────────────────────────────
+    inline constexpr bool  ENABLE_HEAD_BOB        = true;
+    inline constexpr float HEAD_BOB_INTENSITY     = 0.035f;
+    inline constexpr float HEAD_BOB_FREQUENCY     = 2.1f;
 
-    inline constexpr float     BASE_DISTANCE          = 23.0f;
-    inline constexpr float     DISTANCE_SWING         = 4.5f;
-    inline constexpr float     DISTANCE_FREQ          = 0.08f;
+    inline constexpr bool  ENABLE_BREATHING       = true;
+    inline constexpr float BREATHING_INTENSITY    = 0.012f;
+    inline constexpr float BREATHING_FREQUENCY    = 0.18f;
 
-    inline constexpr float     FOV_SCALE              = 1.72f;
-    inline constexpr float     LOOK_AT_Y_OFFSET       = -2.35f;
+    inline constexpr bool  ENABLE_CAMERA_SHAKE    = true;
 
-    // Mouse / movement
-    inline constexpr float     MOUSE_SENSITIVITY      = 0.12f;
-    inline constexpr bool      INVERT_MOUSE_Y         = false;
-    inline constexpr float     MOVEMENT_SPEED         = 12.0f;
-    inline constexpr float     SPRINT_MULTIPLIER      = 2.5f;
-    inline constexpr float     ZOOM_SENSITIVITY       = 1.5f;
+    inline constexpr float SPRINT_FOV_BOOST       = 5.0f;
+    inline constexpr float CROUCH_EYE_DROP        = 0.45f;
 
-    inline constexpr bool      ENABLE_HEAD_BOB        = true;
-    inline constexpr float     HEAD_BOB_INTENSITY     = 0.06f;
-    inline constexpr float     HEAD_BOB_FREQUENCY     = 2.0f;
+    // ────────────────────────────────────────────────
+    // Input & control sensitivity
+    // ────────────────────────────────────────────────
+    inline constexpr float MOUSE_SENSITIVITY   = 0.11f;
+    inline constexpr bool  INVERT_MOUSE_Y      = false;
 
-    inline constexpr bool      ENABLE_BREATHING       = true;
-    inline constexpr float     BREATHING_INTENSITY    = 0.025f;
+    inline constexpr float MOVEMENT_SPEED      = 5.2f;
+    inline constexpr float SPRINT_MULTIPLIER   = 1.8f;
 
-    inline constexpr bool      ENABLE_CAMERA_SHAKE    = true;
+    inline constexpr float ZOOM_SENSITIVITY    = 1.0f;
 
-    inline constexpr float     DOLLY_SPEED            = 8.0f;
-    inline constexpr float     CRANE_SPEED            = 6.0f;
-    inline constexpr float     RACK_FOCUS_SPEED       = 4.5f;
-}
+    // ────────────────────────────────────────────────
+    // Viewmodel / weapon (first-person arms/hands)
+    // ────────────────────────────────────────────────
+    inline constexpr float VIEWMODEL_FOV          = 70.0f;
+    inline constexpr float VIEWMODEL_SCALE        = 0.85f;
+    inline constexpr float WEAPON_SWAY_INTENSITY  = 0.8f;
+
+    // ────────────────────────────────────────────────
+    // Cinematic / editor movement speeds
+    // ────────────────────────────────────────────────
+    inline constexpr float DOLLY_SPEED       = 4.0f;
+    inline constexpr float CRANE_SPEED       = 3.0f;
+    inline constexpr float RACK_FOCUS_SPEED  = 2.5f;
+
+} // namespace Options::Camera
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Rendering & Performance

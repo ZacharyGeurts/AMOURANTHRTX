@@ -9,7 +9,7 @@
 // Developers link against this header and call navigator_main(argc, argv)
 // =============================================================================
 
-#include "engine/camera.hpp"
+#include "engine/Camera.hpp"
 #include "engine/SDL3.hpp"
 #include "engine/ELLIE.hpp"
 #include "engine/AMOURANTHRTX.hpp"
@@ -280,11 +280,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     // Explicit camera reset — ensures valid position, orientation, and FOV before first frame
     CAM.reset();
-    LOG_INFO_CAT("CAMERA", "Reset complete — pos: {:.2f} {:.2f} {:.2f} | fov: {:.1f}",
+    LOG_INFO_CAT("CAMERA", "Reset complete — pos: {} {} {} | fov: {}",
                  CAM.position().x, CAM.position().y, CAM.position().z, CAM.fov());
 
     // Optional: log initial camera state for debugging
-    LOG_INFO_CAT("CAMERA", "Initial quat: {:.3f} {:.3f} {:.3f} {:.3f}",
+    LOG_INFO_CAT("CAMERA", "Initial quat: {} {} {} {}",
                  CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
 
     LOG_AMOURANTH("Genesis sealed — eternal compute begins");
@@ -326,7 +326,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         static double lastFpsLog = 0.0;
         if (currentTime - lastFpsLog > 5.0)
         {
-            LOG_INFO_CAT("MAIN", "Current FPS: ~%.1f (dt=%.4f s)", 1.0 / dt, dt);
+            LOG_INFO_CAT("MAIN", "Current FPS: ~{} (dt={} s)", 1.0 / dt, dt);
             lastFpsLog = currentTime;
         }
     }

@@ -5,18 +5,79 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
 
-layout(push_constant) uniform Push {
+layout(push_constant) uniform PushConstants {
     float time;
     uint  frameSeed;
+    vec3  cameraPos;
+    float _pad0;
+    vec4  cameraQuat;
+    float cameraFov;
+    float _pad1[3];
 } pc;
 
-#define T     pc.time
-#define FS    pc.frameSeed
-#define PI    3.141592653589793
-#define TAU   6.283185307179586
-#define PHI   1.618033988749895
+#define T       pc.time
+#define FS      pc.frameSeed
+#define CAM_POS pc.cameraPos
+#define CAM_QUAT pc.cameraQuat
+#define CAM_FOV pc.cameraFov
 
-// ─── Very cheap hashes ───────────────────────────────────────────────────────
+#define PI      3.141592653589793
+#define TAU     6.283185307179586
+#define PHI     1.618033988749895
+
+// ────────────────────────────────────────────────
+// Tunable defines – adjust feel without touching code
+// ────────────────────────────────────────────────
+#define SCENE_CYCLE_SECONDS     90.0       // full loop time
+#define SCENE_DURATION          10.0       // each scene length
+#define FADE_IN_DURATION        1.5        // fade in time
+#define FADE_OUT_DURATION       1.5        // fade out time
+#define GLOBAL_BRIGHTNESS       1.28       // final multiplier
+#define BLOOM_THRESHOLD         0.92       // bloom cutoff
+#define BLOOM_STRENGTH          1.1        // bloom intensity
+#define VIGNETTE_STRENGTH       0.62       // vignette amount
+#define CHROMATIC_ABERRATION    0.005      // CA strength
+#define SCANLINE_INTENSITY      0.06       // subtle scanlines
+#define PHOSPHOR_INTENSITY      0.12       // phosphor glow
+
+// ────────────────────────────────────────────────
+// Forward declarations
+// ────────────────────────────────────────────────
+uint hash(uint x);
+float hash11(float p);
+vec2 hash22(vec2 p);
+vec3 hash33(vec3 p3);
+
+float valueNoise(vec2 p);
+float fbm(vec2 p, int oct, float lac, float gain);
+float fbm(vec2 p, int oct);
+float fbm(vec2 p);
+float ridged(vec2 p);
+float cellular(vec2 p);
+
+float sdBox(vec2 p, vec2 b);
+float sdHex(vec2 p, float r);
+
+// ─── Quaternion to basis ────────────────────────────────────────────────────
+vec3 q_forward(vec4 q) {
+    return vec3( 2.0*(q.x*q.z + q.w*q.y),
+                -2.0*(q.x*q.y - q.w*q.z),
+                 1.0 - 2.0*(q.x*q.x + q.y*q.y) );
+}
+
+vec3 q_right(vec4 q) {
+    return vec3( 1.0 - 2.0*(q.y*q.y + q.z*q.z),
+                 2.0*(q.x*q.y + q.w*q.z),
+                 2.0*(q.x*q.z - q.w*q.y) );
+}
+
+vec3 q_up(vec4 q) {
+    return vec3( 2.0*(q.x*q.y - q.w*q.z),
+                 1.0 - 2.0*(q.x*q.x + q.z*q.z),
+                 2.0*(q.y*q.z + q.w*q.x) );
+}
+
+// ─── Hashes ─────────────────────────────────────────────────────────────────
 uint hash(uint x) {
     x ^= x >> 16;
     x *= 0x7feb352dU;
@@ -43,7 +104,7 @@ vec3 hash33(vec3 p3) {
     return fract((p3.xxy + p3.yxx)*p3.zyx);
 }
 
-// ─── Noise helpers ───────────────────────────────────────────────────────────
+// ─── Noise ──────────────────────────────────────────────────────────────────
 float valueNoise(vec2 p) {
     vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
     return mix(mix(hash11(i.x   + i.y*57.),
@@ -52,7 +113,6 @@ float valueNoise(vec2 p) {
                    hash11(i.x+1. +(i.y+1.)*57.), u.x), u.y);
 }
 
-// Full control
 float fbm(vec2 p, int oct, float lac, float gain) {
     float n = 0.0, a = 0.5;
     for(int i = 0; i < oct; i++) {
@@ -62,19 +122,9 @@ float fbm(vec2 p, int oct, float lac, float gain) {
     return n;
 }
 
-// Convenience overloads
-float fbm(vec2 p, int oct) {
-    return fbm(p, oct, 2.02, 0.5);
-}
-
-float fbm(vec2 p) {
-    return fbm(p, 5, 2.02, 0.5);
-}
-
-float ridged(vec2 p) {
-    return 1.0 - abs(2.0 * (valueNoise(p) - 0.5));
-}
-
+float fbm(vec2 p, int oct) { return fbm(p, oct, 2.02, 0.5); }
+float fbm(vec2 p)          { return fbm(p, 5, 2.02, 0.5); }
+float ridged(vec2 p)       { return 1.0 - abs(2.0 * (valueNoise(p) - 0.5)); }
 float cellular(vec2 p) {
     vec2 i = floor(p), f = fract(p), md = vec2(8.0);
     for(int y=-1;y<=1;y++)
@@ -86,7 +136,7 @@ float cellular(vec2 p) {
     return md.x;
 }
 
-// ─── Cheap shapes ────────────────────────────────────────────────────────────
+// ─── Shapes ─────────────────────────────────────────────────────────────────
 float sdBox(vec2 p, vec2 b) {
     vec2 d = abs(p)-b;
     return length(max(d,0.0)) + min(max(d.x,d.y),0.0);
@@ -105,19 +155,39 @@ void main() {
     ivec2 res   = imageSize(outputImage);
     if (any(greaterThanEqual(pix, res))) return;
 
-    vec2 uv = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
-    uv.x *= float(res.x)/float(res.y);
+    // ─── Correct perspective using global camera ─────────────────────────────
+    vec2 uv_ndc = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
+#if FLIP_VERTICALLY
+    uv_ndc.y = -uv_ndc.y;
+#endif
+    float aspect = float(res.x) / float(res.y);
+
+    float vfov_rad = radians(CAM_FOV);
+    float scaleY = tan(0.5 * vfov_rad);
+    float scaleX = scaleY * aspect;
+
+    vec3 rd_local = normalize(vec3(uv_ndc.x * scaleX, uv_ndc.y * scaleY, -1.0));
+
+    vec3 right   = q_right(CAM_QUAT);
+    vec3 up      = q_up(CAM_QUAT);
+    vec3 forward = q_forward(CAM_QUAT);
+
+    vec3 rd = normalize(rd_local.x * right + rd_local.y * up + rd_local.z * forward);
+
+    vec3 ro = CAM_POS;
+
+    // ─── Scene logic (screen-space UV for 2D effects) ────────────────────────
+    vec2 uv = uv_ndc;
+    uv.x *= aspect;  // aspect-corrected for original scenes
 
     float seed  = float(FS & 0xFFFFu) * 0.0001;
-    float sceneIdx = floor(mod(T, 90.0) / 10.0);   // 0 .. 8, exactly 10 seconds each
-    float localT   = mod(T, 10.0);                 // 0..10s inside current scene
+    float sceneIdx = floor(mod(T, 90.0) / 10.0);   // 0 .. 8
+    float localT   = mod(T, 10.0);
     float fade     = smoothstep(0.0, 1.5, localT) * smoothstep(10.0, 8.5, localT);
 
     vec3 col = vec3(0.0);
 
-    // ─── 9 scenes — each 10 seconds ──────────────────────────────────────────
     if (sceneIdx == 0.0) {
-        // 0–10 s: Slow plasma + palette breathing
         vec2 p = uv * 2.8 + vec2(T*0.12, sin(T*0.18)*0.4);
         float n = fbm(p*1.8 + T*0.22, 5);
         n += ridged(p*4.2 - T*0.35)*0.25;
@@ -126,7 +196,6 @@ void main() {
         col *= 1.0 + 0.4*sin(length(uv)*6.0 + T*0.7);
     }
     else if (sceneIdx == 1.0) {
-        // 10–20 s: Deep tunnel with slow swirl
         vec2 p = uv;
         float r = length(p), a = atan(p.y,p.x) + T*0.18;
         float dist = r*5.0 + sin(T*0.45 + a*2.8)*0.7;
@@ -136,7 +205,6 @@ void main() {
         col *= 1.4 / (1.0 + r*2.1);
     }
     else if (sceneIdx == 2.0) {
-        // 20–30 s: Soap bubble kaleidoscope – slow rotation
         vec2 p = uv;
         float a = atan(p.y,p.x) + T*0.09, r = length(p);
         float k = 7.0 + 1.5*sin(T*0.11);
@@ -148,7 +216,6 @@ void main() {
         col *= smoothstep(0.95, 0.25, r);
     }
     else if (sceneIdx == 3.0) {
-        // 30–40 s: Metaballs cluster – gentle pulsing
         float balls = 0.0;
         for(int i = 0; i < 8; i++) {
             float fi = float(i);
@@ -160,7 +227,6 @@ void main() {
         col = tanh(balls*0.75) * (0.6 + 0.4*sin(T*0.45 + length(uv)*9.0 + vec3(0,1.8,3.6)));
     }
     else if (sceneIdx == 4.0) {
-        // 40–50 s: Voronoi cells + slow boiling edges
         vec2 p = uv * 7.0 + T*0.08;
         vec2 i = floor(p), f = fract(p);
         float md = 8.0, glow = 0.0;
@@ -174,7 +240,6 @@ void main() {
         col += vec3(0.9,0.6,0.3) * (1.0 - smoothstep(0.0,0.07,md)) * (0.6 + 0.4*sin(glow*TAU + T*1.1));
     }
     else if (sceneIdx == 5.0) {
-        // 50–60 s: Truchet tiles with very slow flow
         vec2 p = uv * 11.0;
         vec2 cell = floor(p);
         vec2 f = fract(p);
@@ -185,14 +250,12 @@ void main() {
         col += 0.35 * sin(dot(cell + T*0.6, vec2(11.3,19.7))) * shape;
     }
     else if (sceneIdx == 6.0) {
-        // 60–70 s: Fake volumetric fog layers + slow drift
         vec2 p = uv * 2.4 + vec2(T*0.09, T*0.06);
         float n = fbm(p*2.8 + T*0.14, 7);
         col = vec3(0.01,0.03,0.14) * (0.8 + n*2.8);
         col += vec3(0.7,0.9,1.2)*0.15 * pow(n, 2.5);
     }
     else if (sceneIdx == 7.0) {
-        // 70–80 s: Emissive particle field – gentle orbit
         col = vec3(0.0);
         for(int i = 0; i < 14; i++) {
             float fi = float(i);
@@ -203,7 +266,6 @@ void main() {
         }
     }
     else {
-        // 80–90 s: Retro CRT + subtle glitch overlay
         vec2 cu = uv * (1.0 + 0.04*sin(T*0.7 + uv.y*12.0));
         float vig = 1.0 - 0.7*dot(cu,cu);
         vig = pow(vig, 1.6);
@@ -215,32 +277,28 @@ void main() {
         col += vec3(0.9,0.4,0.1) * (0.04 + 0.03*fract(sin(T*13.7)*43758.5453));
     }
 
-    // ─── Post-process ────────────────────────────────────────────────────────
-    // gentle chromatic aberration (fake)
-    vec2 caOff = 0.005 * (length(uv)-0.3) * vec2(1.0, -0.9);
+    // ─── Post-process (identical to original) ────────────────────────────────
+    vec2 caOff = CHROMATIC_ABERRATION * (length(uv)-0.3) * vec2(1.0, -0.9);
     vec3 ca = vec3(col.r*1.03, col.g, col.b*1.03);
-
     col = mix(col, ca, 0.25 * fade);
 
-    // vignette + soft glow
-    float vig = 1.0 - 0.62 * dot(uv,uv);
+    float vig = 1.0 - VIGNETTE_STRENGTH * dot(uv,uv);
     vig = pow(vig, 1.5);
     col *= 0.25 + 0.75*vig;
-    vec3 bloom = max(col - 0.92, 0.0);
-    col += bloom * 1.1;
 
-    // light phosphor + scanlines
+    vec3 bloom = max(col - BLOOM_THRESHOLD, 0.0);
+    col += bloom * BLOOM_STRENGTH;
+
     vec2 scr = uv * vec2(420.0, 320.0);
-    float ph = 0.88 + 0.12 * sin(scr.x * TAU * 3.5) * sin(scr.y * TAU * 2.5);
+    float ph = 0.88 + PHOSPHOR_INTENSITY * sin(scr.x * TAU * 3.5) * sin(scr.y * TAU * 2.5);
     col *= ph;
 
     float sl = 0.5 + 0.5 * sin(uv.y * 1100.0 + T*18.0);
-    col *= 0.94 + 0.06*sl;
+    col *= 0.94 + SCANLINE_INTENSITY*sl;
 
-    // final tone
     col = pow(col, vec3(0.4545));
     col = col / (1.0 + col * 0.18);
-    col *= 1.28;
+    col *= GLOBAL_BRIGHTNESS;
 
     imageStore(outputImage, pix, vec4(col, 1.0));
 }
