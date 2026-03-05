@@ -92,19 +92,6 @@ namespace Options::Window {
 namespace Options::Camera {
 
     // ────────────────────────────────────────────────
-    // Temporary compatibility fallbacks for old third-person orbiting code
-    // (remove these once RayCanvas is refactored to check IsFirstPerson()/IsThirdPerson())
-    // ────────────────────────────────────────────────
-    inline constexpr float LEGACY_BASE_HEIGHT       = 1.68f;
-    inline constexpr float LEGACY_HEIGHT_SWING      = 0.0f;     // disable swing in FP mode
-    inline constexpr float LEGACY_HEIGHT_FREQ       = 0.0f;
-    inline constexpr float LEGACY_BASE_DISTANCE     = 0.0f;     // irrelevant in FP
-    inline constexpr float LEGACY_DISTANCE_SWING    = 0.0f;
-    inline constexpr float LEGACY_DISTANCE_FREQ     = 0.0f;
-    inline constexpr float LEGACY_LOOK_AT_Y_OFFSET  = 0.0f;
-    inline constexpr float LEGACY_FOV_SCALE         = 1.0f;
-
-    // ────────────────────────────────────────────────
     // Startup / Default camera state (true first-person)
     // ────────────────────────────────────────────────
     inline constexpr glm::vec3 START_POSITION    { 0.0f, 1.68f, 0.0f };   // Realistic adult eye height (~168 cm)
