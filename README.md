@@ -123,4 +123,4 @@ I am now a stickler for OMP parallelization and memory safety with C++20 due to 
 
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
 
-https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Svv2K1y7woZ0g7Bu.mp4
+[![Video Title](https://img.youtube.com/vi/Svv2K1y7woZ0g7Bu/0.jpg)](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Svv2K1y7woZ0g7Bu.mp4)
