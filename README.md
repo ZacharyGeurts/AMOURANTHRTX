@@ -3,6 +3,8 @@ No demons permitted.
   
 3D Amouranth Cube Demo  
 https://x.com/ZacharyGeurts/status/2029738976299368778  
+
+Help yourself to the demos folder.  
   
 [Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 We are not minimalist. We added every feature from every forum, efficently.  
