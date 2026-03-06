@@ -1,6 +1,6 @@
 No demons permitted.  
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
-<video src="https://github.com/ZacharyGeurts/AMOURANTHRTX/raw/refs/heads/main/media/2026-03-05%2020-48-06.mp4" controls autoplay loop muted playsinline width="100%"></video>
+![Demo](https://github.com/ZacharyGeurts/AMOURANTHRTX/raw/refs/heads/main/media/2026-03-05%2020-48-06.mp4)
 [Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 We are not minimalist. We added every feature from every forum, efficently.  
 How efficent? Zero cost computing.  
