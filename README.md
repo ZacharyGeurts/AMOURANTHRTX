@@ -1,6 +1,6 @@
 No demons permitted.  
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
-<video src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/github-ready-video.mp4" 
+<video src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/github-ready-video.mp4?raw=true" 
        controls 
        autoplay 
        loop 
