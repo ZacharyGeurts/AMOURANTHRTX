@@ -1,10 +1,9 @@
 No demons permitted.  
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
-
-<video width="320" height="240" controls loop="" muted="" autoplay="">
-    <source src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/github-ready-video.mp4" />
-</video>  
-
+  
+3D Amouranth Cube Demo  
+https://x.com/ZacharyGeurts/status/2029738976299368778  
+  
 [Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 We are not minimalist. We added every feature from every forum, efficently.  
 How efficent? Zero cost computing.  
