@@ -358,11 +358,18 @@ inline void sdl_init_all(int w, int h, const char* title) noexcept {
     LOG_SUCCESS_CAT("SDL3_init", "SDL subsystems initialized (Video, Audio, Gamepad)");
 
     sdl_window_create(w, h, title);
+
+    // Very important: check that window actually exists before giving it to input manager
+    if (g_window == nullptr) {
+        LOG_FATAL_CAT("SDL3_init", "Cannot initialize input — window creation failed");
+        return;
+    }
+
     sdl_gamepads_init();
     sdl_audio_init();
 
-    // InputManager startup — call once after SDL init
-    INPUT.init();
+    // Now safe to init input
+    GlobalInputManager::get().init(g_window);
 }
 
 inline void sdl_cleanup_all() noexcept {

@@ -1,304 +1,156 @@
 #version 460
 #extension GL_EXT_scalar_block_layout : enable
 
-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
-
+layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
 
 layout(push_constant) uniform PushConstants {
-    float time;
-    uint  frameSeed;
-    vec3  cameraPos;
-    float _pad0;
-    vec4  cameraQuat;
-    float cameraFov;
-    float _pad1[3];
+    float       time;
+    uint        frameSeed;
+
+    vec3        cameraPos;
+    float       pad0;
+
+    vec4        cameraQuat;
+    float       cameraFovDeg;
+    float       aspectRatio;
+    float       exposure;
+
+    vec3        sunDir;
+    float       sunIntensity;
+
+    vec3        moonDir;
+    float       moonIntensity;
+
+    vec3        windDir;
+    float       windStrength;
+
+    float       temperatureC;
+    float       humidity;
+    float       airPressureKPa;
+    float       precipitationFactor;
+
+    float       fogDensity;
+    float       dayNightFactor;
+    float       cloudCoverage;
+    uint        debugFlags;
+
+    float       pad1[3];
 } pc;
 
-#define T       pc.time
-#define FS      pc.frameSeed
-#define CAM_POS pc.cameraPos
-#define CAM_QUAT pc.cameraQuat
-#define CAM_FOV pc.cameraFov
-
-#define PI      3.141592653589793
-#define TAU     6.283185307179586
-#define PHI     1.618033988749895
-
 // ────────────────────────────────────────────────
-// Tunable defines – adjust feel without touching code
+// Helpers
 // ────────────────────────────────────────────────
-#define SCENE_CYCLE_SECONDS     90.0       // full loop time
-#define SCENE_DURATION          10.0       // each scene length
-#define FADE_IN_DURATION        1.5        // fade in time
-#define FADE_OUT_DURATION       1.5        // fade out time
-#define GLOBAL_BRIGHTNESS       1.28       // final multiplier
-#define BLOOM_THRESHOLD         0.92       // bloom cutoff
-#define BLOOM_STRENGTH          1.1        // bloom intensity
-#define VIGNETTE_STRENGTH       0.62       // vignette amount
-#define CHROMATIC_ABERRATION    0.005      // CA strength
-#define SCANLINE_INTENSITY      0.06       // subtle scanlines
-#define PHOSPHOR_INTENSITY      0.12       // phosphor glow
-
-// ────────────────────────────────────────────────
-// Forward declarations
-// ────────────────────────────────────────────────
-uint hash(uint x);
-float hash11(float p);
-vec2 hash22(vec2 p);
-vec3 hash33(vec3 p3);
-
-float valueNoise(vec2 p);
-float fbm(vec2 p, int oct, float lac, float gain);
-float fbm(vec2 p, int oct);
-float fbm(vec2 p);
-float ridged(vec2 p);
-float cellular(vec2 p);
-
-float sdBox(vec2 p, vec2 b);
-float sdHex(vec2 p, float r);
-
-// ─── Quaternion to basis ────────────────────────────────────────────────────
-vec3 q_forward(vec4 q) {
-    return vec3( 2.0*(q.x*q.z + q.w*q.y),
-                -2.0*(q.x*q.y - q.w*q.z),
-                 1.0 - 2.0*(q.x*q.x + q.y*q.y) );
-}
-
-vec3 q_right(vec4 q) {
-    return vec3( 1.0 - 2.0*(q.y*q.y + q.z*q.z),
-                 2.0*(q.x*q.y + q.w*q.z),
-                 2.0*(q.x*q.z - q.w*q.y) );
-}
-
-vec3 q_up(vec4 q) {
-    return vec3( 2.0*(q.x*q.y - q.w*q.z),
-                 1.0 - 2.0*(q.x*q.x + q.z*q.z),
-                 2.0*(q.y*q.z + q.w*q.x) );
-}
-
-// ─── Hashes ─────────────────────────────────────────────────────────────────
-uint hash(uint x) {
-    x ^= x >> 16;
-    x *= 0x7feb352dU;
-    x ^= x >> 15;
-    x *= 0x846ca68bU;
-    x ^= x >> 16;
-    return x;
-}
-
-float hash11(float p) {
-    uint n = floatBitsToUint(p);
-    return float(hash(n)) * (1.0 / 4294967296.0);
-}
-
-vec2 hash22(vec2 p) {
+float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031,0.1030,0.0973));
-    p3 += dot(p3, p3.yzx+33.33);
-    return fract((p3.xx+p3.yz)*p3.zy);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
 
-vec3 hash33(vec3 p3) {
-    p3 = fract(p3 * vec3(0.1031,0.1030,0.0973));
-    p3 += dot(p3, p3.yxz+33.33);
-    return fract((p3.xxy + p3.yxx)*p3.zyx);
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0-2.0*f);
+    float a = hash12(i + vec2(0.0,0.0));
+    float b = hash12(i + vec2(1.0,0.0));
+    float c = hash12(i + vec2(0.0,1.0));
+    float d = hash12(i + vec2(1.0,1.0));
+    return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
 }
 
-// ─── Noise ──────────────────────────────────────────────────────────────────
-float valueNoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
-    return mix(mix(hash11(i.x   + i.y*57.),
-                   hash11(i.x+1. + i.y*57.), u.x),
-               mix(hash11(i.x   +(i.y+1.)*57.),
-                   hash11(i.x+1. +(i.y+1.)*57.), u.x), u.y);
+// ────────────────────────────────────────────────
+// Sky
+// ────────────────────────────────────────────────
+vec3 sampleSky(vec3 dir) {
+    float y = max(0.0, dir.y);
+    float day = pc.dayNightFactor;
+
+    vec3 sky = mix(
+        mix(vec3(0.15, 0.25, 0.50), vec3(0.02, 0.05, 0.15), 1.0 - y),
+        mix(vec3(0.50, 0.75, 1.00), vec3(0.70, 0.85, 1.00), 1.0 - y),
+        day
+    );
+
+    float sun = smoothstep(0.998, 0.9998, dot(dir, normalize(pc.sunDir)));
+    sky += vec3(1.4, 1.1, 0.8) * sun * pc.sunIntensity * 60.0 * day;
+
+    return sky;
 }
 
-float fbm(vec2 p, int oct, float lac, float gain) {
-    float n = 0.0, a = 0.5;
-    for(int i = 0; i < oct; i++) {
-        n += a * valueNoise(p);
-        p *= lac; a *= gain;
-    }
-    return n;
+// ────────────────────────────────────────────────
+// Seamless procedural grass texture
+// ────────────────────────────────────────────────
+vec3 grassTexture(vec2 uv) {
+    float n = noise(uv * 2.0) * 0.5 + noise(uv * 5.0) * 0.3 + noise(uv * 12.0) * 0.2;
+    vec3 dark = vec3(0.15, 0.35, 0.08);
+    vec3 light = vec3(0.25, 0.55, 0.12);
+    return mix(dark, light, n);
 }
 
-float fbm(vec2 p, int oct) { return fbm(p, oct, 2.02, 0.5); }
-float fbm(vec2 p)          { return fbm(p, 5, 2.02, 0.5); }
-float ridged(vec2 p)       { return 1.0 - abs(2.0 * (valueNoise(p) - 0.5)); }
-float cellular(vec2 p) {
-    vec2 i = floor(p), f = fract(p), md = vec2(8.0);
-    for(int y=-1;y<=1;y++)
-    for(int x=-1;x<=1;x++) {
-        vec2 o = hash22(i + vec2(x,y));
-        float d = length(f - o - vec2(x,y));
-        md = min(md, vec2(d, o.x + o.y * 17.3));
-    }
-    return md.x;
+// ────────────────────────────────────────────────
+// Sample ground with material tint
+// ────────────────────────────────────────────────
+vec3 sampleGround(vec3 hit) {
+    // Use RoughConcrete from materials.hpp as base
+    vec3 baseColor = vec3(0.45, 0.45, 0.42);  // RoughConcrete.baseColor.rgb
+    float roughness = 0.88;  // RoughConcrete.roughness
+    float specular = 0.22;  // RoughConcrete.specular
+
+    // Apply grass texture tint
+    vec3 tex = grassTexture(hit.xz) * baseColor;
+
+    vec3 normal = vec3(0,1,0);
+
+    float sun = max(0.0, dot(normal, pc.sunDir)) * pc.sunIntensity * 1.4;
+    float amb = 0.20 + 0.40 * pc.dayNightFactor;
+
+    vec3 color = tex * (sun + amb);
+
+    // Specular highlight (simple)
+    vec3 view = normalize(pc.cameraPos - hit);
+    vec3 halfV = normalize(pc.sunDir + view);
+    float spec = pow(max(0.0, dot(normal, halfV)), (1.0 - roughness) * 128.0) * specular;
+    color += vec3(1.0) * spec * pc.sunIntensity * pc.dayNightFactor;
+
+    // Wetness
+    float wet = pc.humidity * pc.precipitationFactor * 1.2;
+    color = mix(color, vec3(0.18, 0.26, 0.34), wet * 0.5);
+
+    // Fog
+    float dist = length(hit - pc.cameraPos);
+    float fog = 1.0 - exp(-dist * pc.fogDensity * 0.0004);
+    vec3 fogC = mix(vec3(0.72, 0.82, 0.96), vec3(0.42, 0.50, 0.68), pc.dayNightFactor * 0.35);
+    color = mix(color, fogC, fog);
+
+    return color;
 }
 
-// ─── Shapes ─────────────────────────────────────────────────────────────────
-float sdBox(vec2 p, vec2 b) {
-    vec2 d = abs(p)-b;
-    return length(max(d,0.0)) + min(max(d.x,d.y),0.0);
-}
-
-float sdHex(vec2 p, float r) {
-    p = abs(p); p.y -= 0.5*r;
-    return length(p - min(p.x, r)*vec2(0.8660254,0.5));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main ────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────
+// Main — your working version as base
+// ────────────────────────────────────────────────
 void main() {
-    ivec2 pix   = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 res   = imageSize(outputImage);
-    if (any(greaterThanEqual(pix, res))) return;
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
 
-    // ─── Correct perspective using global camera ─────────────────────────────
-    vec2 uv_ndc = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
-#if FLIP_VERTICALLY
-    uv_ndc.y = -uv_ndc.y;
-#endif
-    float aspect = float(res.x) / float(res.y);
+    vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
+    uv.x *= pc.aspectRatio;
 
-    float vfov_rad = radians(CAM_FOV);
-    float scaleY = tan(0.5 * vfov_rad);
-    float scaleX = scaleY * aspect;
+    float fov = 60.0;
+    float tanHalf = tan(radians(fov) * 0.5);
+    vec3 rayDir = normalize(vec3(uv.x * tanHalf, uv.y * tanHalf - 0.15, 1.0));
 
-    vec3 rd_local = normalize(vec3(uv_ndc.x * scaleX, uv_ndc.y * scaleY, -1.0));
+    vec3 ro = vec3(0.0, 5.0, 0.0);
 
-    vec3 right   = q_right(CAM_QUAT);
-    vec3 up      = q_up(CAM_QUAT);
-    vec3 forward = q_forward(CAM_QUAT);
+    vec3 color = sampleSky(rayDir);
 
-    vec3 rd = normalize(rd_local.x * right + rd_local.y * up + rd_local.z * forward);
-
-    vec3 ro = CAM_POS;
-
-    // ─── Scene logic (screen-space UV for 2D effects) ────────────────────────
-    vec2 uv = uv_ndc;
-    uv.x *= aspect;  // aspect-corrected for original scenes
-
-    float seed  = float(FS & 0xFFFFu) * 0.0001;
-    float sceneIdx = floor(mod(T, 90.0) / 10.0);   // 0 .. 8
-    float localT   = mod(T, 10.0);
-    float fade     = smoothstep(0.0, 1.5, localT) * smoothstep(10.0, 8.5, localT);
-
-    vec3 col = vec3(0.0);
-
-    if (sceneIdx == 0.0) {
-        vec2 p = uv * 2.8 + vec2(T*0.12, sin(T*0.18)*0.4);
-        float n = fbm(p*1.8 + T*0.22, 5);
-        n += ridged(p*4.2 - T*0.35)*0.25;
-        float hue = fract(n*0.28 + T*0.04);
-        col = 0.5 + 0.5*cos(TAU*(vec3(0.0,0.33,0.67) + hue));
-        col *= 1.0 + 0.4*sin(length(uv)*6.0 + T*0.7);
-    }
-    else if (sceneIdx == 1.0) {
-        vec2 p = uv;
-        float r = length(p), a = atan(p.y,p.x) + T*0.18;
-        float dist = r*5.0 + sin(T*0.45 + a*2.8)*0.7;
-        float n = fbm(vec2(a*5.0, dist*1.8) + T*0.25, 6);
-        col = vec3(0.04,0.15,0.6) * (n*1.8 + 0.6);
-        col += vec3(0.9,0.5,0.15) * pow(n,3.5)*2.2;
-        col *= 1.4 / (1.0 + r*2.1);
-    }
-    else if (sceneIdx == 2.0) {
-        vec2 p = uv;
-        float a = atan(p.y,p.x) + T*0.09, r = length(p);
-        float k = 7.0 + 1.5*sin(T*0.11);
-        a = mod(a + T*0.07, TAU/k) - TAU/(k*2.0);
-        p = r * vec2(cos(a), sin(a));
-        float n = fbm(p*10.0 + T*0.16, 4);
-        vec3 irid = 0.5 + 0.5*cos(TAU*(vec3(0.0,0.33,0.67) + n*1.3 + r*4.5 + T*0.08));
-        col = irid * (1.2 + n*1.5);
-        col *= smoothstep(0.95, 0.25, r);
-    }
-    else if (sceneIdx == 3.0) {
-        float balls = 0.0;
-        for(int i = 0; i < 8; i++) {
-            float fi = float(i);
-            vec2 pos = 0.75 * vec2(sin(T*0.55 + fi*2.1), cos(T*0.72 + fi*2.8));
-            float rad = 0.16 + 0.05*sin(T*2.3 + fi*11.0);
-            float d = length(uv - pos) - rad;
-            balls += 0.48 / max(0.01, abs(d));
-        }
-        col = tanh(balls*0.75) * (0.6 + 0.4*sin(T*0.45 + length(uv)*9.0 + vec3(0,1.8,3.6)));
-    }
-    else if (sceneIdx == 4.0) {
-        vec2 p = uv * 7.0 + T*0.08;
-        vec2 i = floor(p), f = fract(p);
-        float md = 8.0, glow = 0.0;
-        for(int y=-1;y<=1;y++)
-        for(int x=-1;x<=1;x++) {
-            vec2 o = hash22(i + vec2(x,y));
-            float d = length(f - o - vec2(x,y));
-            if (d < md) { md = d; glow = hash11(dot(i+vec2(x,y), vec2(13.7, 29.3))); }
-        }
-        col = vec3(0.12,0.08,0.25) * (1.0 - smoothstep(0.0,0.18,md));
-        col += vec3(0.9,0.6,0.3) * (1.0 - smoothstep(0.0,0.07,md)) * (0.6 + 0.4*sin(glow*TAU + T*1.1));
-    }
-    else if (sceneIdx == 5.0) {
-        vec2 p = uv * 11.0;
-        vec2 cell = floor(p);
-        vec2 f = fract(p);
-        float rot = floor(hash11(dot(cell,vec2(17.19,31.7)))) * TAU/4.0 + T*0.22;
-        vec2 q = mat2(cos(rot),-sin(rot),sin(rot),cos(rot)) * (f-0.5);
-        float shape = smoothstep(0.52,0.48,sdHex(q,0.85));
-        col = mix(vec3(0.03,0.02,0.09), vec3(0.8,0.45,0.15), shape);
-        col += 0.35 * sin(dot(cell + T*0.6, vec2(11.3,19.7))) * shape;
-    }
-    else if (sceneIdx == 6.0) {
-        vec2 p = uv * 2.4 + vec2(T*0.09, T*0.06);
-        float n = fbm(p*2.8 + T*0.14, 7);
-        col = vec3(0.01,0.03,0.14) * (0.8 + n*2.8);
-        col += vec3(0.7,0.9,1.2)*0.15 * pow(n, 2.5);
-    }
-    else if (sceneIdx == 7.0) {
-        col = vec3(0.0);
-        for(int i = 0; i < 14; i++) {
-            float fi = float(i);
-            vec2 pos = 1.1 * vec2(sin(T*0.38 + fi*1.9), cos(T*0.51 + fi*2.4));
-            float d = length(uv - pos) - 0.028;
-            float pulse = 0.5 + 0.5*sin(T*4.2 + fi*17.0);
-            col += vec3(1.0, 0.8 + 0.2*sin(fi*3.0), 0.5 + 0.5*cos(fi*4.1)) * exp(-d*60.0) * pulse;
-        }
-    }
-    else {
-        vec2 cu = uv * (1.0 + 0.04*sin(T*0.7 + uv.y*12.0));
-        float vig = 1.0 - 0.7*dot(cu,cu);
-        vig = pow(vig, 1.6);
-        col = vec3(0.05,0.12,0.08) * (1.0 + vig*1.4);
-        float sl = 0.5 + 0.5*sin(cu.y*1400.0 + T*22.0);
-        col *= 0.88 + 0.12*sl;
-        float ph = 0.82 + 0.18*sin(cu.x*TAU*4.0)*sin(cu.y*TAU*3.0);
-        col *= ph;
-        col += vec3(0.9,0.4,0.1) * (0.04 + 0.03*fract(sin(T*13.7)*43758.5453));
+    float t = -ro.y / rayDir.y;
+    if (rayDir.y < 0.0 && t > 0.001) {
+        vec3 hit = ro + rayDir * t;
+        color = sampleGround(hit);
     }
 
-    // ─── Post-process (identical to original) ────────────────────────────────
-    vec2 caOff = CHROMATIC_ABERRATION * (length(uv)-0.3) * vec2(1.0, -0.9);
-    vec3 ca = vec3(col.r*1.03, col.g, col.b*1.03);
-    col = mix(col, ca, 0.25 * fade);
+    color *= 1.5;
 
-    float vig = 1.0 - VIGNETTE_STRENGTH * dot(uv,uv);
-    vig = pow(vig, 1.5);
-    col *= 0.25 + 0.75*vig;
-
-    vec3 bloom = max(col - BLOOM_THRESHOLD, 0.0);
-    col += bloom * BLOOM_STRENGTH;
-
-    vec2 scr = uv * vec2(420.0, 320.0);
-    float ph = 0.88 + PHOSPHOR_INTENSITY * sin(scr.x * TAU * 3.5) * sin(scr.y * TAU * 2.5);
-    col *= ph;
-
-    float sl = 0.5 + 0.5 * sin(uv.y * 1100.0 + T*18.0);
-    col *= 0.94 + SCANLINE_INTENSITY*sl;
-
-    col = pow(col, vec3(0.4545));
-    col = col / (1.0 + col * 0.18);
-    col *= GLOBAL_BRIGHTNESS;
-
-    imageStore(outputImage, pix, vec4(col, 1.0));
+    imageStore(outputImage, pix, vec4(color, 1.0));
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
+// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 // =============================================================================
@@ -56,7 +56,6 @@ namespace Options::GameStyle
         PartyGame         = 18
     };
 
-    // Runtime values — modified by menu / config / launch args
     inline DimensionMode       CurrentDimension     = DimensionMode::Full3D;
     inline CameraPerspective   CurrentPerspective   = CameraPerspective::FirstPerson;
     inline GenrePreset         CurrentGenre         = GenrePreset::FPS;
@@ -91,20 +90,14 @@ namespace Options::Window {
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Camera {
 
-    // ────────────────────────────────────────────────
-    // Startup / Default camera state (true first-person)
-    // ────────────────────────────────────────────────
-    inline constexpr glm::vec3 START_POSITION    { 0.0f, 1.68f, 0.0f };   // Realistic adult eye height (~168 cm)
-    inline constexpr float     DEFAULT_FOV       = 90.0f;                // Vertical FOV — standard FPS (~106° horiz on 16:9)
+    inline constexpr glm::vec3 START_POSITION    { 0.0f, 1.68f, 0.0f };
+    inline constexpr float     DEFAULT_FOV       = 90.0f;
     inline constexpr float     DEFAULT_NEAR      = 0.05f;
     inline constexpr float     DEFAULT_FAR       = 5000.0f;
 
     inline constexpr float     DEFAULT_APERTURE       = 2.8f;
     inline constexpr float     DEFAULT_FOCUS_DISTANCE = 3.0f;
 
-    // ────────────────────────────────────────────────
-    // First-person immersion effects
-    // ────────────────────────────────────────────────
     inline constexpr bool  ENABLE_HEAD_BOB        = true;
     inline constexpr float HEAD_BOB_INTENSITY     = 0.035f;
     inline constexpr float HEAD_BOB_FREQUENCY     = 2.1f;
@@ -118,27 +111,18 @@ namespace Options::Camera {
     inline constexpr float SPRINT_FOV_BOOST       = 5.0f;
     inline constexpr float CROUCH_EYE_DROP        = 0.45f;
 
-    // ────────────────────────────────────────────────
-    // Input & control sensitivity
-    // ────────────────────────────────────────────────
-    inline constexpr float MOUSE_SENSITIVITY   = 0.11f;
-    inline constexpr bool  INVERT_MOUSE_Y      = false;
+    inline float MOUSE_SENSITIVITY   = 0.11f;
+    inline bool  INVERT_MOUSE_Y      = false;
 
-    inline constexpr float MOVEMENT_SPEED      = 5.2f;
-    inline constexpr float SPRINT_MULTIPLIER   = 1.8f;
+    inline float MOVEMENT_SPEED      = 5.2f;
+    inline float SPRINT_MULTIPLIER   = 1.8f;
 
-    inline constexpr float ZOOM_SENSITIVITY    = 1.0f;
+    inline float ZOOM_SENSITIVITY    = 1.0f;
 
-    // ────────────────────────────────────────────────
-    // Viewmodel / weapon (first-person arms/hands)
-    // ────────────────────────────────────────────────
     inline constexpr float VIEWMODEL_FOV          = 70.0f;
     inline constexpr float VIEWMODEL_SCALE        = 0.85f;
     inline constexpr float WEAPON_SWAY_INTENSITY  = 0.8f;
 
-    // ────────────────────────────────────────────────
-    // Cinematic / editor movement speeds
-    // ────────────────────────────────────────────────
     inline constexpr float DOLLY_SPEED       = 4.0f;
     inline constexpr float CRANE_SPEED       = 3.0f;
     inline constexpr float RACK_FOCUS_SPEED  = 2.5f;
@@ -216,4 +200,14 @@ namespace Options::Debug {
     inline constexpr bool    ENABLE_VALIDATION_LAYERS = true;
     inline constexpr bool    ENABLE_VERBOSE_LOGGING   = false;
     inline constexpr bool    DRAW_WIREFRAME           = false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Input Controls — remappable in menu (keys handled in InputManager)
+// ─────────────────────────────────────────────────────────────────────────────
+namespace Options::Input {
+    inline bool INVERT_MOUSE_Y        = false;
+    inline float MOUSE_SENSITIVITY    = 0.11f;
+    inline float MOVEMENT_SPEED       = 5.2f;
+    inline float SPRINT_MULTIPLIER    = 1.8f;
 }

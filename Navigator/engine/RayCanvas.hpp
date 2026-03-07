@@ -19,70 +19,8 @@
 #include <cstdint>
 #include <array>
 
-// ────────────────────────────────────────────────
-// Procedural AABB (for ray-AABB intersection acceleration)
-// ────────────────────────────────────────────────
-struct alignas(16) ProceduralAABB
-{
-    glm::vec3 minBounds;
-    uint32_t  materialIndex;        // index into material buffer
-
-    glm::vec3 maxBounds;
-    uint32_t  facetCount;           // how many child facets follow
-
-    glm::vec4 userData0;            // free parameters (scale, rotation seed, etc.)
-    glm::vec4 userData1;
-};
-
-// ────────────────────────────────────────────────
-// Camera uniform block — includes previous position and matrices
-// ────────────────────────────────────────────────
-struct CameraSceneData {
-    glm::mat4 viewInverse;
-    glm::mat4 projInverse;
-    glm::mat4 view;
-    glm::mat4 proj;
-
-    glm::mat4 prevView;
-    glm::mat4 prevProj;
-
-    glm::vec4 cameraPos;
-    glm::vec4 prevCameraPos;
-
-    double    exposure     = 1.0;
-    double    genesisTime  = 0.0;
-    uint32_t  randomSeed   = 12345u;
-    int       maxDepth     = Options::Rendering::MAX_RAY_RECURSION;
-
-    uint32_t  padding[2]   = {0, 0};
-};
-
-// ────────────────────────────────────────────────
-// Living world — enhanced for volumetrics, fire, water caustics, etc.
-// ────────────────────────────────────────────────
-struct LivingWorldData {
-    glm::vec4 sunDirAndIntensity;
-    glm::vec4 skyDayTop;
-    glm::vec4 skyDayHorizon;
-    glm::vec4 skyNight;
-    glm::vec4 groundColorDay;
-    glm::vec4 groundColorNight;
-    float     dayNightFactor;
-    float     cloudDensity;
-    float     fogDensity;
-    float     temperature;
-
-    float     volumetricDensity      = 0.015f;
-    float     volumetricAnisotropy   = 0.35f;
-    float     volumetricEmissionScale = 1.0f;
-    float     causticsStrength       = 0.0f;
-
-    uint32_t  frameSeed;
-    uint32_t  padding[2];
-};
-
 // =============================================================================
-// RayCanvas — Persistent compute-based renderer with temporal support
+// RayCanvas — Persistent compute-based renderer (push-constant only, no UBOs)
 // =============================================================================
 class RayCanvas {
 public:
@@ -96,9 +34,6 @@ public:
           destroyed_(false),
           firstFrame_(true),
           materialsHandle_(0),
-          proceduralAABBsHandle_(0),
-          cameraUBOHandle_(0),
-          livingWorldHandle_(0),
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
@@ -108,7 +43,6 @@ public:
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE)
     {
-        // Respect OptionsMenu resolution settings on creation
         updateInternalResolution();
 
         Swapchain::create(window, window_width_, window_height_);
@@ -117,19 +51,6 @@ public:
             LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain");
             std::abort();
         }
-
-        cameraUBOHandle_ = Memory::createBuffer(
-            sizeof(CameraSceneData),
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-            "CameraUBO"
-        );
-
-        livingWorldHandle_ = Memory::createBuffer(
-            sizeof(LivingWorldData),
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            "LivingWorld",
-            Memory::MemoryHint::HostVisible
-        );
 
         buildMaterialLibrary();
 
@@ -143,7 +64,6 @@ public:
 
         updateDescriptorSet();
 
-        // Force clear HDR on startup to prevent garbage accumulation
         clearHDRImages();
     }
 
@@ -164,10 +84,7 @@ public:
         vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
         vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
-        Memory::destroy(cameraUBOHandle_);
-        Memory::destroy(livingWorldHandle_);
         Memory::destroy(materialsHandle_);
-        Memory::destroy(proceduralAABBsHandle_);
 
         Pipeline::shutdown();
     }
@@ -175,7 +92,6 @@ public:
     void buildMaterialLibrary() {
         std::vector<Material> materials;
 
-        // Wrap each base MaterialLayer into a single-layer Material
         auto addBase = [&](const MaterialLayer& layer) {
             Material m{};
             m.layers[0] = layer;
@@ -184,70 +100,15 @@ public:
             materials.push_back(m);
         };
 
-        addBase(Materials::Mirror);
-        addBase(Materials::PolishedGold);
-        addBase(Materials::BrushedGold);
-        addBase(Materials::MatteBlackPlastic);
-        addBase(Materials::ClearGlass);
-        addBase(Materials::FrostedGlass);
-        addBase(Materials::Water);
-        addBase(Materials::Jade);
-        addBase(Materials::Skin);
-        addBase(Materials::Velvet);
-        addBase(Materials::NeonPink);
-        addBase(Materials::LightBulb);
-        addBase(Materials::SoapBubble);
-        addBase(Materials::CarPaintRed);
         addBase(Materials::RoughConcrete);
-        addBase(Materials::WornLeather);
-
-        // Add pre-defined layered combinations
-        materials.push_back(IridescentGold);
-        materials.push_back(FrostedJade);
-        materials.push_back(CyberSkin);
-
-        // Generate procedural variations for near-infinite variety
-        size_t baseCount = materials.size();
-        constexpr size_t TOTAL_MATERIALS = 8192;
-        for (size_t i = baseCount; materials.size() < TOTAL_MATERIALS; ++i) {
-            size_t baseIdx = (i - baseCount) % baseCount;
-            Material m = materials[baseIdx];
-
-            uint32_t seed = static_cast<uint32_t>(i) * 1664525u + 1013904223u;
-            float rnd1 = hash11(seed);
-            float rnd2 = hash11(seed + 1);
-            float rnd3 = hash11(seed + 2);
-
-            // Slight color variation
-            m.layers[0].baseColor.r += (rnd1 - 0.5f) * 0.15f;
-            m.layers[0].baseColor.g += (rnd2 - 0.5f) * 0.15f;
-            m.layers[0].baseColor.b += (rnd3 - 0.5f) * 0.15f;
-            m.layers[0].baseColor = glm::clamp(m.layers[0].baseColor, 0.0f, 1.0f);
-
-            // Roughness variation
-            m.layers[0].roughness = glm::clamp(m.layers[0].roughness + (rnd1 - 0.5f) * 0.4f, 0.0f, 1.0f);
-
-            // Randomly add thin-film or anisotropy to some
-            if (rnd2 > 0.7f) {
-                m.layers[0].thinFilm = 0.8f;
-                m.layers[0].thinFilmThickness_nm = 200.0f + rnd3 * 800.0f;
-                m.layers[0].flags |= MaterialFlags::THIN_FILM;
-            }
-
-            // Occasionally add a second layer for more complexity
-            if (rnd3 > 0.85f && m.layerCount < 5) {
-                size_t otherBase = (i + 17) % baseCount;
-                m.layers[m.layerCount] = materials[otherBase].layers[0];
-                m.layerBlendFactors[m.layerCount] = 0.2f + rnd1 * 0.6f;
-                m.layerCount++;
-            }
-
-            materials.push_back(m);
-        }
+        addBase(Materials::Water);
+        addBase(Materials::NeonPink);
 
         VkDeviceSize size = materials.size() * sizeof(Material);
         materialsHandle_ = Memory::createBuffer(size,
-                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                                 "MaterialsLibrary",
                                                 Memory::MemoryHint::HostVisible);
 
@@ -262,8 +123,7 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Material library built with {} materials", materials.size());
     }
 
-    void maybeUpdateCanvas() noexcept
-    {
+    void maybeUpdateCanvas() noexcept {
         if (destroyed_) return;
 
         int currentW = 0, currentH = 0;
@@ -273,27 +133,23 @@ public:
         bool wasMinimized  = minimized_;
         bool nowMinimized  = (currentW <= 0 || currentH <= 0);
 
-        if (nowMinimized)
-        {
+        if (nowMinimized) {
             minimized_ = true;
             return;
         }
 
-        if (sizeChanged || wasMinimized)
-        {
+        if (sizeChanged || wasMinimized) {
             vkDeviceWaitIdle(rtx().device);
             onResize(currentW, currentH);
             minimized_ = false;
         }
 
-        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_)
-        {
+        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
             LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
             return;
         }
 
-        if (firstFrame_)
-        {
+        if (firstFrame_) {
             TotalTime::get().seal();
             firstFrame_ = false;
             LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
@@ -304,14 +160,9 @@ public:
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
 
-        updateCameraUBO(now);
-        updateLivingWorldBuffer(now);
-        updateDescriptorSet();
-
         uint32_t imageIndex = 0;
         VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fci{};
-        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         vkCreateFence(rtx().device, &fci, nullptr, &fence);
 
         VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
@@ -320,15 +171,13 @@ public:
         vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(rtx().device, fence, nullptr);
 
-        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR)
-        {
+        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
             LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date — retrying next frame");
             minimized_ = true;
             return;
         }
 
-        if (acq != VK_SUCCESS)
-        {
+        if (acq != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
             if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
             return;
@@ -340,8 +189,7 @@ public:
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-        if (!firstFrame_)
-        {
+        if (!firstFrame_) {
             copyHDRtoPrevious(cmd);
         }
 
@@ -370,6 +218,9 @@ public:
 
         endSubmitAndWait(cmd);
 
+        // ────────────────────────────────────────────────
+        // Blit command buffer with vertical flip
+        // ────────────────────────────────────────────────
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
 
@@ -393,11 +244,21 @@ public:
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
 
-        Swapchain::scaleBlit(blitCmd,
-                             hdrOutputImage_,
-                             VkExtent2D{static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_)},
-                             swapImg,
-                             Swapchain::getExtent());
+        // Manual blit with Y-flip (fixes upside-down presentation)
+        VkImageBlit flipBlit{};
+        flipBlit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        flipBlit.srcOffsets[0] = { 0, 0, 0 };
+        flipBlit.srcOffsets[1] = { (int32_t)internal_width_, (int32_t)internal_height_, 1 };
+
+        flipBlit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        flipBlit.dstOffsets[0] = { 0, (int32_t)Swapchain::getExtent().height, 0 };           // top of src → bottom of dst
+        flipBlit.dstOffsets[1] = { (int32_t)Swapchain::getExtent().width, 0, 1 };            // bottom of src → top of dst
+
+        vkCmdBlitImage(blitCmd,
+                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &flipBlit,
+                       VK_FILTER_LINEAR);  // or VK_FILTER_NEAREST for sharp scaling
 
         VkImageMemoryBarrier presentBarrier{};
         presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -423,17 +284,14 @@ public:
 
         VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
 
-        if (pres == VK_SUCCESS)
-        {
+        if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(now);
         }
-        else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR)
-        {
+        else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
             LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date — recreate next frame");
             minimized_ = true;
         }
-        else if (pres != VK_SUCCESS)
-        {
+        else if (pres != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
@@ -457,10 +315,8 @@ public:
 
         Swapchain::recreate(window_width_, window_height_);
 
-        // Respect OptionsMenu resolution settings
         updateInternalResolution();
 
-        // Clear HDR images to prevent accumulation garbage/flicker on resize
         VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
@@ -492,27 +348,22 @@ private:
             internal_height_ = Options::Rendering::INTERNAL_HEIGHT;
         }
 
-        // Clamp to valid range if needed
         internal_width_  = std::max(320, internal_width_);
         internal_height_ = std::max(180, internal_height_);
 
-        LOG_INFO_CAT("RAYCANVAS", "Internal resolution set to {}x{} (based on OptionsMenu settings)", internal_width_, internal_height_);
+        LOG_INFO_CAT("RAYCANVAS", "Internal resolution set to {}x{}", internal_width_, internal_height_);
     }
 
     void createDescriptorPoolAndSet() noexcept {
-        VkDescriptorPoolSize poolSizes[5] = {
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  1},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}
+        VkDescriptorPoolSize poolSizes[1] = {
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
         };
 
         VkDescriptorPoolCreateInfo pci{};
         pci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         pci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
         pci.maxSets       = 1;
-        pci.poolSizeCount = 5;
+        pci.poolSizeCount = 1;
         pci.pPoolSizes    = poolSizes;
 
         vkh.checker(vkCreateDescriptorPool(rtx().device, &pci, nullptr, &descriptorPool_),
@@ -535,18 +386,15 @@ private:
         imgInfo.imageView   = hdrOutputView_;
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        VkDescriptorBufferInfo uboInfo{ Memory::getBuffer(cameraUBOHandle_), 0, VK_WHOLE_SIZE };
-        VkDescriptorBufferInfo worldInfo{ Memory::getBuffer(livingWorldHandle_), 0, VK_WHOLE_SIZE };
-        VkDescriptorBufferInfo matInfo{ Memory::getBuffer(materialsHandle_), 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet write{};
+        write.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet           = descriptorSet_;
+        write.dstBinding       = 0;
+        write.descriptorCount  = 1;
+        write.descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo       = &imgInfo;
 
-        VkWriteDescriptorSet writes[4]{};
-
-        writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 0, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  &imgInfo,   nullptr, nullptr };
-        writes[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 1, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &uboInfo,  nullptr };
-        writes[2] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 2, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &worldInfo,nullptr };
-        writes[3] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptorSet_, 3, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &matInfo,  nullptr };
-
-        vkUpdateDescriptorSets(rtx().device, 4, writes, 0, nullptr);
+        vkUpdateDescriptorSets(rtx().device, 1, &write, 0, nullptr);
     }
 
     void createPersistentHDR() noexcept {
@@ -669,21 +517,21 @@ private:
         barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr, 2, barriers);
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 2, barriers);
 
         VkImageCopy copyRegion{};
         copyRegion.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        copyRegion.srcOffset = {0,0,0};
+        copyRegion.srcOffset = {0, 0, 0};
         copyRegion.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        copyRegion.dstOffset = {0,0,0};
+        copyRegion.dstOffset = {0, 0, 0};
         copyRegion.extent = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
 
         vkCmdCopyImage(cmd,
-            hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            prevHdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &copyRegion);
+                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       prevHdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &copyRegion);
 
         VkImageMemoryBarrier postBarrier{};
         postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -695,95 +543,9 @@ private:
         postBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &postBarrier);
-    }
-
-    void updateLivingWorldBuffer(double now) noexcept {
-        LivingWorldData data{};
-
-        float dayLength = Options::Sky::DAY_LENGTH_SECONDS;
-        float dayFrac   = fmodf(static_cast<float>(now), dayLength) / dayLength;
-        float sunAngle  = dayFrac * 2.0f * glm::pi<float>() - glm::pi<float>() * 0.5f;
-
-        glm::vec3 sunDir = glm::normalize(glm::vec3(
-            cosf(sunAngle),
-            sinf(sunAngle) * 0.8f + 0.2f,
-            sinf(sunAngle * 1.5f) * 0.3f
-        ));
-
-        float sunHeight = sunDir.y;
-        float dayFactor = glm::smoothstep(-0.1f, 0.3f, sunHeight);
-        float intensity = glm::max(0.0f, sunHeight) * 4.0f + 0.1f;
-
-        data.sunDirAndIntensity     = glm::vec4(sunDir, intensity);
-        data.skyDayTop              = Options::Sky::SKY_ZENITH_DAY;
-        data.skyDayHorizon          = Options::Sky::SKY_HORIZON_DAY;
-        data.skyNight               = Options::Sky::SKY_ZENITH_NIGHT;
-        data.groundColorDay         = Options::Sky::GROUND_COLOR_DAY;
-        data.groundColorNight       = Options::Sky::GROUND_COLOR_NIGHT;
-        data.dayNightFactor         = dayFactor;
-        data.cloudDensity           = Options::Sky::CLOUD_DENSITY;
-        data.fogDensity             = Options::Sky::FOG_DENSITY;
-        data.temperature            = 20.0f + 10.0f * sinf(dayFrac * 2.0f * glm::pi<float>());
-
-        data.volumetricDensity      = 0.015f;
-        data.volumetricAnisotropy   = 0.35f;
-        data.volumetricEmissionScale= 1.0f;
-        data.causticsStrength       = 0.0f;
-
-        data.frameSeed              = static_cast<uint32_t>(now * 1000.0f);
-
-        auto* info = Memory::get(livingWorldHandle_);
-        if (info && info->mapped) {
-            std::memcpy(info->mapped, &data, sizeof(data));
-        } else {
-            auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(livingWorldHandle_, &data, sizeof(data));
-            if (stagingBuf != VK_NULL_HANDLE) {
-                vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
-                vkFreeMemory(rtx().device, stagingMem, nullptr);
-            }
-        }
-    }
-
-    void updateCameraUBO(double now) noexcept {
-        CameraSceneData data{};
-
-        using namespace Options::GameStyle;
-        if (CurrentPerspective == CameraPerspective::Orthographic2D ||
-            CurrentPerspective == CameraPerspective::SideScroller) {
-            float aspect = static_cast<float>(internal_width_) / static_cast<float>(internal_height_);
-            data.proj = glm::ortho(-aspect * 5.0f, aspect * 5.0f, -5.0f, 5.0f, 0.1f, 1000.0f);
-        } else {
-            data.proj = CAM.projection(static_cast<float>(internal_width_) / static_cast<float>(internal_height_));
-        }
-
-        static glm::mat4 lastView = data.view;
-        static glm::mat4 lastProj = data.proj;
-
-        data.prevView = lastView;
-        data.prevProj = lastProj;
-
-        data.view        = CAM.view();
-        data.viewInverse = glm::inverse(data.view);
-        data.projInverse = glm::inverse(data.proj);
-
-        data.cameraPos   = glm::vec4(CAM.position(), 1.0f);
-        data.prevCameraPos = glm::vec4(CAM.prevPosition(), 1.0f);
-
-        data.exposure    = Options::Rendering::EXPOSURE;
-        data.genesisTime = now;
-        data.randomSeed  = static_cast<uint32_t>(now * 1'000'000.0) ^ 0xCAFEBABEu;
-
-        lastView = data.view;
-        lastProj = data.proj;
-
-        auto [stagingBuf, stagingMem] = Memory::uploadToBuffer(cameraUBOHandle_, &data, sizeof(data));
-        if (stagingBuf != VK_NULL_HANDLE) {
-            vkDestroyBuffer(rtx().device, stagingBuf, nullptr);
-            vkFreeMemory(rtx().device, stagingMem, nullptr);
-        }
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &postBarrier);
     }
 
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
@@ -815,8 +577,7 @@ private:
         }
 
         VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fenceCI{};
-        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VkFenceCreateInfo fenceCI{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 
         if (vkCreateFence(rtx().device, &fenceCI, nullptr, &fence) != VK_SUCCESS) {
             vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
@@ -877,15 +638,6 @@ private:
         }
     }
 
-    static float hash11(uint32_t x) {
-        x ^= x >> 16;
-        x *= 0x7feb352dU;
-        x ^= x >> 15;
-        x *= 0x846ca68bU;
-        x ^= x >> 16;
-        return float(x) * (1.0f / 4294967296.0f);
-    }
-
 private:
     SDL_Window*    window_           = nullptr;
     int            window_width_     = 0;
@@ -897,9 +649,6 @@ private:
     bool           firstFrame_       = true;
 
     uint64_t       materialsHandle_          = 0;
-    uint64_t       proceduralAABBsHandle_    = 0;
-    uint64_t       cameraUBOHandle_          = 0;
-    uint64_t       livingWorldHandle_        = 0;
 
     VkImage        hdrOutputImage_           = VK_NULL_HANDLE;
     VkImageView    hdrOutputView_            = VK_NULL_HANDLE;
