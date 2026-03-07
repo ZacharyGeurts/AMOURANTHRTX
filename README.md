@@ -5,6 +5,8 @@ No demons permitted.
 https://x.com/ZacharyGeurts/status/2029738976299368778  
 
 Help yourself to the demos folder.  
+Navigator/compute/canvas.comp is to be the one file to update.  
+Overwrite with the pearls code to do the pearls demo. Have Grok write a new fun comp with rainbows or whatever.  
   
 [Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 We are not minimalist. We added every feature from every forum, efficently.  
