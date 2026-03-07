@@ -74,7 +74,7 @@ message(STATUS "Executable suffix:   ${EXE_SUFFIX}")
 add_compile_options(
     -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion
     -Wno-unused-but-set-variable -Wno-deprecated-declarations
-    -O3 -ffast-math -march=native -mtune=native
+    -Wno-unused-function -O3 -ffast-math -march=native -mtune=native
     -g -ggdb
 )
 
