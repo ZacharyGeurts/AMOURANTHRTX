@@ -46,7 +46,8 @@ The meaningful files are in include/engine and should be our final tree layout.
 The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
 If a bit of memory changes, and your program is not the one making changes, we exit.  
 This is trvial math and has "no cost" post compiling.  
-We do the same with time by locking our epoch and working off that.  
+We do the same with time by locking our epoch startup time and working off that.  
+We secure the input and "camera" as well.  
 We gather up the whole of RTX and secure and grant access with simply, rtx() singleton.  
 There is no hacking permissable within these walls. Tampering aborts.  
 Identifiable features of this software melts away on release build.  
@@ -62,8 +63,9 @@ GLM and build tools I was able to get with apt.
 The cmake build system needs internet to function and tries to help.  
 Uses tinyobj and is really smart everywhere really really.  
 
-You owe me 3% of every dollar I can make you. Of the 3 cents I send two of them over to Amouranth and Nick.  
-Or you can cut me out and just dono over at Ammo's twitch page.  
+We do a 3% profit share of every dollar I can make you. Of the 3 cents I send two of them over to Amouranth and Nick.  
+Or you can cut me out and just dono over at Ammo's twitch page if you just want to do that.  
+I'm on disability and doing fine with my "retirement".  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
 She steps on RTX and dominates it now.  
 
