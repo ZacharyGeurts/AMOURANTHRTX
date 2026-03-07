@@ -3,7 +3,7 @@
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 // =============================================================================
-// Inspired by Ellie Fier
+// Inspired by Ellie Fier Ellie Fier 
 // =============================================================================
 
 #pragma once

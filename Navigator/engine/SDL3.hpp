@@ -24,9 +24,6 @@
 // Globals — raw and eternal (no atomics where plain types suffice)
 // ────────────────────────────────────────────────
 inline SDL_Window*               g_window = nullptr;
-inline int                       g_resize_width = 0;         // plain int — matches SDL usage
-inline int                       g_resize_height = 0;        // plain int
-inline bool                      g_resize_requested = false;
 
 inline SDL_AudioDeviceID         g_audio_device = 0;
 inline SDL_AudioStream*          g_audio_stream = nullptr;
@@ -60,10 +57,6 @@ inline void sdl_window_create(int width, int height, const char* title) noexcept
 }
 
 inline bool sdl_poll_events(int& out_w, int& out_h, bool& quit, bool& toggle_fs) noexcept {
-    static int last_valid_w = 0;
-    static int last_valid_h = 0;
-    static bool is_minimized = false;
-
     SDL_Event ev;
     quit = toggle_fs = false;
     bool event_seen = false;
@@ -71,80 +64,62 @@ inline bool sdl_poll_events(int& out_w, int& out_h, bool& quit, bool& toggle_fs)
     while (SDL_PollEvent(&ev)) {
         event_seen = true;
 
-        // Forward every single event to InputManager — core of input supremacy
+        // Forward every event to InputManager first
         INPUT.pumpEvents(ev);
 
-        // Window-level handling (quit, resize, fullscreen toggle)
+        // Window-level handling only — no resize globals anymore
         switch (ev.type) {
             case SDL_EVENT_QUIT:
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED: {
                 LOG_INFO_CAT("SDL3_window", "Quit requested");
                 quit = true;
-            } break;
+                break;
+            }
 
             case SDL_EVENT_KEY_DOWN: {
                 if (ev.key.scancode == SDL_SCANCODE_F11) {
                     LOG_INFO_CAT("INPUT", "F11 pressed — toggling fullscreen");
                     toggle_fs = true;
                 }
-            } break;
+                break;
+            }
 
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
                 if (!Options::Window::ALLOW_RESIZE) {
                     LOG_INFO_CAT("SDL3_window", "Resize event ignored (ALLOW_RESIZE=false)");
-                    continue;
+                    break;
                 }
 
-                int w = ev.window.data1;
-                int h = ev.window.data2;
+                int ew = ev.window.data1;
+                int eh = ev.window.data2;
 
-                bool currently_minimized = (w <= 0 || h <= 0);
-
-                if (currently_minimized && !is_minimized) {
-                    is_minimized = true;
-                    LOG_INFO_CAT("SDL3_window", "Window minimized");
-                } else if (!currently_minimized && is_minimized) {
-                    is_minimized = false;
-                    last_valid_w = w;
-                    last_valid_h = h;
-                    g_resize_width = w;
-                    g_resize_height = h;
-                    g_resize_requested = true;
-                    LOG_INFO_CAT("SDL3_window", "Window restored — resize requested {}x{}", w, h);
-                } else if (!currently_minimized && (w != last_valid_w || h != last_valid_h)) {
-                    last_valid_w = w;
-                    last_valid_h = h;
-                    g_resize_width = w;
-                    g_resize_height = h;
-                    g_resize_requested = true;
-                    LOG_INFO_CAT("SDL3_window", "Resize event — new size {}x{}", w, h);
+                if (ew <= 0 || eh <= 0) {
+                    LOG_INFO_CAT("SDL3_window", "Window minimized (event size {}x{})", ew, eh);
+                } else {
+                    LOG_INFO_CAT("SDL3_window", "Resize event received — {}x{}", ew, eh);
+                    // No globals, no flags here — RayCanvas will detect & handle via SDL_GetWindowSizeInPixels
                 }
-            } break;
+                break;
+            }
 
             default:
-                // All other events (mouse, gamepad, text, focus, etc.) handled by INPUT.pumpEvents
+                // Everything else (mouse, gamepad, focus, text, etc.) already pumped to INPUT
                 break;
         }
     }
 
+    // Always provide current real pixel size to caller
+    // (RayCanvas ignores out_w/out_h now, but we keep them for compatibility)
     if (g_window != nullptr) {
-        int w, h;
+        int w = 0, h = 0;
         SDL_GetWindowSizeInPixels(g_window, &w, &h);
+
         out_w = (w > 0) ? w : 1;
         out_h = (h > 0) ? h : 1;
-
-        if (g_resize_requested) {
-            int pending_w = g_resize_width;
-            int pending_h = g_resize_height;
-            if (pending_w > 0 && pending_h > 0) {
-                out_w = pending_w;
-                out_h = pending_h;
-                last_valid_w = pending_w;
-                last_valid_h = pending_h;
-            }
-            g_resize_requested = false;
-        }
+    } else {
+        out_w = 1;
+        out_h = 1;
     }
 
     return event_seen;

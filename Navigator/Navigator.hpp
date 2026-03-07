@@ -311,9 +311,6 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
             break;
         }
 
-        // Update canvas size only if changed
-        raycanvas->onResize(w, h);
-
         // Render the frame
         raycanvas->maybeUpdateCanvas();
 

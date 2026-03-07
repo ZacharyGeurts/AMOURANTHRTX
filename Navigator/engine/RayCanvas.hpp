@@ -19,6 +19,8 @@
 #include <cstdint>
 #include <array>
 
+bool needs_swapchain_recreate = false;
+
 // =============================================================================
 // RayCanvas — Persistent compute-based renderer (push-constant only, no UBOs)
 // =============================================================================
@@ -43,7 +45,7 @@ public:
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE)
     {
-        updateInternalResolution();
+        updateInternalResolution();		
 
         Swapchain::create(window, window_width_, window_height_);
 
@@ -123,214 +125,269 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Material library built with {} materials", materials.size());
     }
 
-    void maybeUpdateCanvas() noexcept {
-        if (destroyed_) return;
+void maybeUpdateCanvas() noexcept {
+    if (destroyed_) return;
 
-        int currentW = 0, currentH = 0;
-        SDL_GetWindowSize(window_, &currentW, &currentH);
+    int currentW = 0, currentH = 0;
+    SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
 
-        bool sizeChanged   = (currentW != window_width_ || currentH != window_height_);
-        bool wasMinimized  = minimized_;
-        bool nowMinimized  = (currentW <= 0 || currentH <= 0);
+    bool nowMinimized = (currentW <= 0 || currentH <= 0);
 
-        if (nowMinimized) {
-            minimized_ = true;
-            return;
-        }
-
-        if (sizeChanged || wasMinimized) {
-            vkDeviceWaitIdle(rtx().device);
-            onResize(currentW, currentH);
-            minimized_ = false;
-        }
-
-        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
-            LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
-            return;
-        }
-
-        if (firstFrame_) {
-            TotalTime::get().seal();
-            firstFrame_ = false;
-            LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
-        }
-
-        double now = TotalTime::get().seconds();
-        static double lastKnownTime = 0.0;
-        if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
-        lastKnownTime = now;
-
-        uint32_t imageIndex = 0;
-        VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        vkCreateFence(rtx().device, &fci, nullptr, &fence);
-
-        VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
-                                                    VK_NULL_HANDLE, fence, &imageIndex);
-
-        vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(rtx().device, fence, nullptr);
-
-        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date — retrying next frame");
-            minimized_ = true;
-            return;
-        }
-
-        if (acq != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
-            if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
-            return;
-        }
-
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (!cmd) return;
-
-        transitionImageLayout(cmd, hdrOutputImage_,
-                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-
-        if (!firstFrame_) {
-            copyHDRtoPrevious(cmd);
-        }
-
-        VkDescriptorSet set = descriptorSet_;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
-                                0, 1, &set, 0, nullptr);
-
-        Pipeline::dispatch_canvas(cmd,
-                                  static_cast<uint32_t>(internal_width_),
-                                  static_cast<uint32_t>(internal_height_),
-                                  static_cast<float>(now));
-
-        VkImageMemoryBarrier postComputeBarrier{};
-        postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        postComputeBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        postComputeBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        postComputeBarrier.image = hdrOutputImage_;
-        postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
-
-        endSubmitAndWait(cmd);
-
-        // ────────────────────────────────────────────────
-        // Blit command buffer with vertical flip
-        // ────────────────────────────────────────────────
-        VkCommandBuffer blitCmd = beginTransientCommandBuffer();
-        if (!blitCmd) return;
-
-        VkImage swapImg = Swapchain::images[imageIndex];
-
-        VkImageMemoryBarrier swapBarrier{};
-        swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        swapBarrier.srcAccessMask = 0;
-        swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        swapBarrier.image = swapImg;
-        swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(blitCmd,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
-
-        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
-        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
-
-        // Manual blit with Y-flip (fixes upside-down presentation)
-        VkImageBlit flipBlit{};
-        flipBlit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        flipBlit.srcOffsets[0] = { 0, 0, 0 };
-        flipBlit.srcOffsets[1] = { (int32_t)internal_width_, (int32_t)internal_height_, 1 };
-
-        flipBlit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        flipBlit.dstOffsets[0] = { 0, (int32_t)Swapchain::getExtent().height, 0 };           // top of src → bottom of dst
-        flipBlit.dstOffsets[1] = { (int32_t)Swapchain::getExtent().width, 0, 1 };            // bottom of src → top of dst
-
-        vkCmdBlitImage(blitCmd,
-                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &flipBlit,
-                       VK_FILTER_LINEAR);  // or VK_FILTER_NEAREST for sharp scaling
-
-        VkImageMemoryBarrier presentBarrier{};
-        presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-        presentBarrier.image = swapImg;
-        presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(blitCmd,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
-
-        endSubmitAndWait(blitCmd);
-
-        VkPresentInfoKHR pi{};
-        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        pi.swapchainCount = 1;
-        pi.pSwapchains    = &Swapchain::swapchain.value;
-        pi.pImageIndices  = &imageIndex;
-
-        VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
-
-        if (pres == VK_SUCCESS) {
-            Swapchain::updateRefreshEstimate(now);
-        }
-        else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date — recreate next frame");
-            minimized_ = true;
-        }
-        else if (pres != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
-            if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
-        }
+    if (nowMinimized) {
+        minimized_ = true;
+        return;
     }
 
-    void onResize(int newWidth, int newHeight) noexcept {
-        if (newWidth <= 0 || newHeight <= 0) {
-            minimized_ = true;
-            return;
-        }
+    // Check if resize needed (either flagged, minimized recovery, or size mismatch)
+    bool needsResize = minimized_ ||
+                       (currentW != window_width_) ||
+                       (currentH != window_height_);
 
-        if (newWidth == window_width_ && newHeight == window_height_) return;
-
+    if (needsResize) {
         vkDeviceWaitIdle(rtx().device);
 
-        window_width_  = newWidth;
-        window_height_ = newHeight;
+        onResize(currentW, currentH);
+
+        // Re-query actual size after recreation (critical!)
+        SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
+        window_width_  = currentW;
+        window_height_ = currentH;
+
         minimized_ = false;
-
-        LOG_INFO_CAT("WINDOW", "Resizing to {}x{}", newWidth, newHeight);
-
-        Swapchain::recreate(window_width_, window_height_);
-
-        updateInternalResolution();
-
-        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
-        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (cmd) {
-            vkCmdClearColorImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
-            vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
-            endSubmitAndWait(cmd);
-        }
-
-        createPersistentHDR();
-        createPreviousHDR();
-        updateDescriptorSet();
     }
+
+    // Early out if resources invalid
+    if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
+        LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
+        return;
+    }
+
+    if (firstFrame_) {
+        TotalTime::get().seal();
+        firstFrame_ = false;
+        LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
+    }
+
+    double now = TotalTime::get().seconds();
+    static double lastKnownTime = 0.0;
+    if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
+    lastKnownTime = now;
+
+    uint32_t imageIndex = 0;
+
+    // Fully initialize fence create info to silence warning
+    VkFenceCreateInfo fci{};
+    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fci.pNext = nullptr;
+    fci.flags = 0;
+
+    VkFence fence = VK_NULL_HANDLE;
+    vkCreateFence(rtx().device, &fci, nullptr, &fence);
+
+    VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
+                                                VK_NULL_HANDLE, fence, &imageIndex);
+
+    vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(rtx().device, fence, nullptr);
+
+    if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — will recreate next frame");
+        minimized_ = true;  // triggers resize next frame
+        return;
+    }
+
+    if (acq != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
+        if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) {
+            destroyed_ = true;
+        }
+        return;
+    }
+
+    VkCommandBuffer cmd = beginTransientCommandBuffer();
+    if (!cmd) return;
+
+    transitionImageLayout(cmd, hdrOutputImage_,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    if (!firstFrame_) {
+        copyHDRtoPrevious(cmd);
+    }
+
+    VkDescriptorSet set = descriptorSet_;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
+                            0, 1, &set, 0, nullptr);
+
+    Pipeline::dispatch_canvas(cmd,
+                              static_cast<uint32_t>(internal_width_),
+                              static_cast<uint32_t>(internal_height_),
+                              static_cast<float>(now));
+
+    VkImageMemoryBarrier postComputeBarrier{};
+    postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    postComputeBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postComputeBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    postComputeBarrier.image = hdrOutputImage_;
+    postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
+
+    endSubmitAndWait(cmd);
+
+    // Blit pass
+    VkCommandBuffer blitCmd = beginTransientCommandBuffer();
+    if (!blitCmd) return;
+
+    VkImage swapImg = Swapchain::images[imageIndex];
+
+    VkImageMemoryBarrier swapBarrier{};
+    swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    swapBarrier.srcAccessMask = 0;
+    swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    swapBarrier.image = swapImg;
+    swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(blitCmd,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
+
+    VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
+
+    VkExtent2D swapExtent = Swapchain::getExtent();
+
+    VkImageBlit flipBlit{};
+    flipBlit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    flipBlit.srcOffsets[0] = { 0, 0, 0 };
+    flipBlit.srcOffsets[1] = { (int32_t)internal_width_, (int32_t)internal_height_, 1 };
+
+    flipBlit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    flipBlit.dstOffsets[0] = { 0, (int32_t)swapExtent.height, 0 };
+    flipBlit.dstOffsets[1] = { (int32_t)swapExtent.width, 0, 1 };
+
+    vkCmdBlitImage(blitCmd,
+                   hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   swapImg,         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &flipBlit,
+                   VK_FILTER_LINEAR);
+
+    VkImageMemoryBarrier presentBarrier{};
+    presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    presentBarrier.image = swapImg;
+    presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(blitCmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+
+    endSubmitAndWait(blitCmd);
+
+    VkPresentInfoKHR pi{};
+    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.swapchainCount = 1;
+    pi.pSwapchains    = &Swapchain::swapchain.value;
+    pi.pImageIndices  = &imageIndex;
+
+    VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
+
+    if (pres == VK_SUCCESS) {
+        Swapchain::updateRefreshEstimate(now);
+    }
+    else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
+        LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — recreate next frame");
+        minimized_ = true;
+    }
+    else if (pres != VK_SUCCESS) {
+        LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
+        if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
+    }
+}
+
+void onResize(int newWidth, int newHeight) noexcept {
+    if (newWidth <= 0 || newHeight <= 0) {
+        minimized_ = true;
+        return;
+    }
+
+    if (newWidth == window_width_ && newHeight == window_height_) {
+        return;
+    }
+
+    LOG_INFO_CAT("WINDOW", "Resizing to {}x{}", newWidth, newHeight);
+
+    vkDeviceWaitIdle(rtx().device);
+
+    // Destroy old resources first
+    if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
+    if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+    if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+
+    if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
+    if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+    if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+
+    hdrOutputView_   = VK_NULL_HANDLE;
+    hdrOutputImage_  = VK_NULL_HANDLE;
+    hdrOutputMemory_ = VK_NULL_HANDLE;
+    prevHdrOutputView_   = VK_NULL_HANDLE;
+    prevHdrOutputImage_  = VK_NULL_HANDLE;
+    prevHdrOutputMemory_ = VK_NULL_HANDLE;
+
+    window_width_  = newWidth;
+    window_height_ = newHeight;
+    minimized_ = false;
+
+    Swapchain::recreate(window_width_, window_height_);
+
+    // Re-query actual size (swapchain may have adjusted it)
+    int actualW = 0, actualH = 0;
+    SDL_GetWindowSizeInPixels(window_, &actualW, &actualH);
+    window_width_  = actualW;
+    window_height_ = actualH;
+
+    updateInternalResolution();
+
+    createPersistentHDR();
+    createPreviousHDR();
+
+    // Re-create descriptor set with new views
+    createDescriptorPoolAndSet();
+    updateDescriptorSet();
+
+    // Clear new images safely
+    VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    VkCommandBuffer cmd = beginTransientCommandBuffer();
+    if (cmd) {
+        transitionImageLayout(cmd, hdrOutputImage_,
+                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        transitionImageLayout(cmd, prevHdrOutputImage_,
+                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+        vkCmdClearColorImage(cmd, hdrOutputImage_,   VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+        vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+
+        endSubmitAndWait(cmd);
+    }
+
+    LOG_SUCCESS_CAT("RAYCANVAS", "Resize complete — {}x{} (internal {}x{})",
+                    window_width_, window_height_, internal_width_, internal_height_);
+}
 
     int  getWidth()  const noexcept { return window_width_; }
     int  getHeight() const noexcept { return window_height_; }
@@ -347,9 +404,6 @@ private:
             internal_width_  = Options::Rendering::INTERNAL_WIDTH;
             internal_height_ = Options::Rendering::INTERNAL_HEIGHT;
         }
-
-        internal_width_  = std::max(320, internal_width_);
-        internal_height_ = std::max(180, internal_height_);
 
         LOG_INFO_CAT("RAYCANVAS", "Internal resolution set to {}x{}", internal_width_, internal_height_);
     }
@@ -577,9 +631,12 @@ private:
         }
 
         VkFence fence = VK_NULL_HANDLE;
-        VkFenceCreateInfo fenceCI{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        VkFenceCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fci.pNext = nullptr;
+        fci.flags = 0;
 
-        if (vkCreateFence(rtx().device, &fenceCI, nullptr, &fence) != VK_SUCCESS) {
+        if (vkCreateFence(rtx().device, &fci, nullptr, &fence) != VK_SUCCESS) {
             vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
             return;
         }
