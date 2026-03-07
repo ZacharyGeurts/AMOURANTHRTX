@@ -32,16 +32,11 @@ Filenames, line numbers, function names.
 Debugging becomes a breeze.  
 
 This is RTX. This also is literally Grok designing himself.  
+We handle everything with a single hotswappable compute shader that can be graphics, AI, whatever RTX can do.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
 From there we implemented all of them, in small files that you can add to.  
 I added inspiration, imagination and guidance.  
 It is Zero cost. There is no minus 1 cost afaik.  
-
-Everything here is very well considered. One code for the world style.  
-The code is to be kept clean on my end.  
-Make your own copy and decide if you want future updates from me by checking commits.  
-This is pre-release software and compiles and pumps.  
-The meaningful files are in include/engine and should be our final tree layout.  
 
 The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
 If a bit of memory changes, and your program is not the one making changes, we exit.  
