@@ -3,7 +3,7 @@
 
 // ───────────────────────────────────────────────
 // === RENDERING & QUALITY CONTROLS ===
-#define FLIP_VERTICALLY             1
+#define FLIP_VERTICALLY             0
 #define ENABLE_GAMMA                0
 #define ACCUMULATION_SPEED          1.0
 #define MAX_MARCH_STEPS             120
