@@ -44,14 +44,14 @@ struct alignas(16) MaterialLayer {
     float coatRoughness                = 0.03f;
     float coatIOR                      = 1.50f;          // decoupled coat IOR
 
-    float fuzz                         = 0.0f;           // OpenPBR fuzz / microflake / evolved sheen
+    float fuzz                         = 0.0f;           // OpenPBR fuzz (microflake/sheen evo)
     glm::vec3 fuzzTint                 {1.0f, 1.0f, 1.0f};
     float fuzzRoughness                = 0.5f;           // fuzz lobe spread
 
     float anisotropy                   = 0.0f;           // -1..1
     float anisoRotation                = 0.0f;
 
-    // OpenPBR 1.2+ / 2025–2026 extensions
+    // OpenPBR 1.2 WIP / SIGGRAPH 2025 extensions
     float specularHaze                 = 0.0f;           // smudged/hazy specular strength
     float hazeSpread                   = 0.5f;           // haze lobe width
     float retroReflection              = 0.0f;           // retro tail boost (moon/road sign)
@@ -75,7 +75,7 @@ struct alignas(16) Material {
 
 namespace Materials {
 
-// ── Core OpenPBR production presets ───────────────────────────────────────
+// ── Core OpenPBR 1.1 / 1.2 production presets ─────────────────────────────
 
 inline constexpr MaterialLayer OpenPBR_DielectricBase {
     .baseColor   = {0.96f, 0.97f, 1.00f, 1.0f},
@@ -212,5 +212,68 @@ inline constexpr Material FrostedGlassObject = []() {
     m.layerCount   = 1;
     return m;
 }();
+
+// ── Additional 2026 production presets (now implemented) ───────────────────
+
+inline constexpr MaterialLayer OpenPBR_Chrome {
+    .baseColor             = {0.95f, 0.95f, 0.95f, 1.0f},
+    .metallic              = 1.0f,
+    .roughness             = 0.02f,
+    .specular              = 0.6f,
+    .ior                   = 1.0f,   // metals usually ignore IOR
+    .flags                 = 0
+};
+
+inline constexpr MaterialLayer OpenPBR_PolishedGold {
+    .baseColor             = {1.00f, 0.78f, 0.34f, 1.0f},
+    .metallic              = 1.0f,
+    .roughness             = 0.04f,
+    .specular              = 0.55f,
+    .flags                 = 0
+};
+
+inline constexpr MaterialLayer OpenPBR_BrushedMetal {
+    .baseColor             = {0.85f, 0.85f, 0.88f, 1.0f},
+    .metallic              = 1.0f,
+    .roughness             = 0.35f,
+    .anisotropy            = 0.75f,
+    .anisoRotation         = 0.0f,
+    .flags                 = MaterialFlags::ANISOTROPY
+};
+
+inline constexpr MaterialLayer OpenPBR_ClearGlass {
+    .baseColor             = {0.96f, 0.97f, 0.99f, 1.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.5f,
+    .ior                   = 1.50f,
+    .transmission          = 1.0f,
+    .transmissionRoughness = 0.0f,
+    .flags                 = MaterialFlags::TRANSMISSION
+};
+
+inline constexpr MaterialLayer OpenPBR_SkinBase {
+    .baseColor             = {0.88f, 0.62f, 0.54f, 1.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.38f,
+    .specular              = 0.48f,
+    .specularTint          = 0.15f,
+    .ior                   = 1.38f,
+    .subsurface            = 0.78f,
+    .subsurfaceColor       = {0.92f, 0.58f, 0.48f},
+    .subsurfaceRadiusScale = 1.4f,
+    .fuzz                  = 0.18f,
+    .fuzzTint              = {1.0f, 0.92f, 0.88f},
+    .fuzzRoughness         = 0.60f,
+    .flags                 = MaterialFlags::SUBSURFACE | MaterialFlags::FUZZ
+};
+
+inline constexpr MaterialLayer OpenPBR_NeonCyan {
+    .baseColor             = {0.0f, 0.0f, 0.0f, 1.0f},
+    .emissiveColor         = {0.1f, 1.0f, 1.0f, 8.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.9f,
+    .flags                 = MaterialFlags::EMISSIVE
+};
 
 } // namespace Materials
