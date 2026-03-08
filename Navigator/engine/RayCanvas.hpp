@@ -94,46 +94,55 @@ public:
     void buildMaterialLibrary() {
         std::vector<Material> materials;
 
-        // For single-layer base materials from namespace Materials
-        auto addBase = [&](const MaterialLayer& layer) {
+        // Helper: add a single-layer material from Materials namespace
+        auto addBase = [&](const MaterialLayer& layer, const char* name = nullptr) {
             Material m{};
-            m.layers[0]     = layer;
-            m.layerCount    = 1;
+            m.layers[0]            = layer;
+            m.layerCount           = 1;
             m.layerBlendFactors[0] = 1.0f;
             materials.push_back(m);
+            if (name) {
+                LOG_DEBUG_CAT("MATERIALS", "Added base material: {}", name);
+            }
         };
 
-        // For already-layered/complex materials (CarPaintBlue etc.)
-        auto addFullMaterial = [&](const Material& mat) {
+        // Helper: add a pre-defined layered material
+        auto addFull = [&](const Material& mat, const char* name = nullptr) {
             materials.push_back(mat);
+            if (name) {
+                LOG_DEBUG_CAT("MATERIALS", "Added full material: {}", name);
+            }
         };
 
-        // Single-layer Disney bases
-        addBase(Materials::Chrome);
-        addBase(Materials::PolishedGold);
-        addBase(Materials::BrushedMetal);
-        addBase(Materials::MattePlastic);
-        addBase(Materials::ClearCoatedPlastic);
-        addBase(Materials::Glass);
-        addBase(Materials::FrostedGlass);
-        addBase(Materials::Water);
-        addBase(Materials::Skin);
-        addBase(Materials::VelvetRed);
-        addBase(Materials::NeonCyan);
-        addBase(Materials::IridescentFilm);
+        // ── Core realistic bases ──────────────────────────────────────────────
+        addBase(Materials::OpenPBR_DielectricBase,      "Dielectric (glass-like)");
+        addBase(Materials::OpenPBR_Metal,               "Polished Metal / Gold");
 
-        // Layered / combined examples (full Material objects)
-        addFullMaterial(CarPaintBlue);
-        addFullMaterial(WornLeatherBrown);
-        addFullMaterial(CyberPunkSkin);
+        // ── Stylized Disney/Pixar 2026 tuned presets ──────────────────────────
+        addBase(Materials::DisneyCartoonSkin,           "Cartoon Character Skin");
+        addBase(Materials::DisneyVelvetFabric,          "Velvet / Fabric");
+        addBase(Materials::PixarToyPlastic,             "Toy Plastic (glossy)");
+        addBase(Materials::OpenPBR_GlossyPaint,         "Glossy Painted Surface");
+        addBase(Materials::OpenPBR_FrostedGlass,        "Frosted / Translucent Glass");
+
+        // ── Layered / complex examples ────────────────────────────────────────
+        addFull(Materials::DisneyPrincessGown,          "Princess Gown (velvet + satin)");
+        addFull(Materials::CartoonCharacterSkin,        "Enhanced Cartoon Skin");
+        addFull(Materials::ShinyRetroRobot,             "Shiny Retro Robot (paint + chrome)");
+
+        // Optional: add more procedural / experimental variants here in future
+        // e.g. addBase with procType = 1 (Perlin), procType = 2 (neural bake), etc.
 
         VkDeviceSize size = materials.size() * sizeof(Material);
-        materialsHandle_ = Memory::createBuffer(size,
-                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-                                                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                "MaterialsLibrary",
-                                                Memory::MemoryHint::HostVisible);
+
+        materialsHandle_ = Memory::createBuffer(
+            size,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            "MaterialsLibrary",
+            Memory::MemoryHint::HostVisible
+        );
 
         if (size > 0) {
             auto [staging, mem] = Memory::uploadToBuffer(materialsHandle_, materials.data(), size);
@@ -195,7 +204,6 @@ public:
 
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fci.pNext = nullptr;
         fci.flags = 0;
 
         VkFence fence = VK_NULL_HANDLE;
@@ -347,6 +355,7 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
+        // Destroy old HDR images & views
         if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
         if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
         if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
@@ -645,7 +654,6 @@ private:
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fci.pNext = nullptr;
         fci.flags = 0;
 
         if (vkCreateFence(rtx().device, &fci, nullptr, &fence) != VK_SUCCESS) {
