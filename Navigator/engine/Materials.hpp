@@ -1,18 +1,9 @@
 #pragma once
 
-// =============================================================================
-// AMOURANTH RTX Engine — Materials Library (C) 2025-2026 Zachary Robert Geurts
-// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
-// AMOURANTH FOREVER 💖
-// =============================================================================
-
 #include <glm/glm.hpp>
 #include <array>
 #include <cstdint>
 
-// ────────────────────────────────────────────────
-// Material Flags (bitfield – fast path decisions in shaders)
-// ────────────────────────────────────────────────
 namespace MaterialFlags {
     constexpr uint32_t TRANSMISSION     = 1u << 0;
     constexpr uint32_t SUBSURFACE       = 1u << 1;
@@ -26,21 +17,19 @@ namespace MaterialFlags {
     constexpr uint32_t DOUBLE_SIDED     = 1u << 9;
 }
 
-// ────────────────────────────────────────────────
-// Single Material Layer (16-byte aligned for GPU)
-// ────────────────────────────────────────────────
 struct alignas(16) MaterialLayer {
-    glm::vec4 baseColor             {1.0f, 1.0f, 1.0f, 1.0f};   // .a = opacity
-
-    glm::vec4 emissive              {0.0f, 0.0f, 0.0f, 0.0f};   // .a = emission multiplier
+    glm::vec4 baseColor             {1.0f, 1.0f, 1.0f, 1.0f};
+    glm::vec4 emissive              {0.0f, 0.0f, 0.0f, 0.0f};
 
     float     metallic              = 0.0f;
     float     roughness             = 0.5f;
     float     specular              = 0.5f;
-    float     ior                   = 1.50f;
+    float     specularTint          = 0.0f;
 
+    float     ior                   = 1.50f;
     float     transmission          = 0.0f;
     float     transmissionRoughness = 0.0f;
+
     float     thinFilm              = 0.0f;
     float     thinFilmThickness_nm  = 350.0f;
 
@@ -57,211 +46,391 @@ struct alignas(16) MaterialLayer {
     float     anisotropy            = 0.0f;
     float     anisoRotation         = 0.0f;
 
-    uint32_t  procType              = 0;                        // 0 = none, 1–N procedural types
+    uint32_t  procType              = 0;
     float     procScale             = 8.0f;
     float     procStrength          = 0.35f;
     float     procOffsetSeed        = 0.0f;
 
     uint32_t  flags                 = 0;
-    uint32_t  padding[3]            = {0,0,0};
+    uint32_t  padding[2]            = {0,0};
 };
 
-// ────────────────────────────────────────────────
-// Full Material — supports up to 5 layered combinations
-// (for near-infinite variety via blending)
-// ────────────────────────────────────────────────
 struct alignas(16) Material {
     std::array<MaterialLayer, 5> layers;
-    uint32_t                     layerCount = 1;                // 1–5
+    uint32_t                     layerCount = 1;
     float                        layerBlendFactors[5] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     uint32_t                     padding[2] = {0, 0};
 };
 
-// ────────────────────────────────────────────────
-// Pre-defined base materials (use as starting points / layers)
-// Indexed from 0 — expand freely
-// ────────────────────────────────────────────────
 namespace Materials {
 
-// 0 – Perfect Mirror (chrome-like)
-inline constexpr MaterialLayer Mirror {
-    .baseColor = {1.0f, 1.0f, 1.0f, 1.0f},
-    .metallic  = 1.0f,
-    .roughness = 0.0f,
-    .specular  = 0.8f
+inline constexpr MaterialLayer Chrome {
+    .baseColor             = {1.0f, 1.0f, 1.0f, 1.0f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 1.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 1 – Polished Gold
 inline constexpr MaterialLayer PolishedGold {
-    .baseColor = {1.00f, 0.78f, 0.34f, 1.0f},
-    .metallic  = 1.0f,
-    .roughness = 0.08f,
-    .specular  = 0.6f
+    .baseColor             = {1.00f, 0.78f, 0.34f, 1.0f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 1.0f,
+    .roughness             = 0.05f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 2 – Rough Gold (brushed)
-inline constexpr MaterialLayer BrushedGold {
-    .baseColor = {0.98f, 0.75f, 0.30f, 1.0f},
-    .metallic  = 1.0f,
-    .roughness = 0.45f,
-    .specular  = 0.55f,
-    .anisotropy = 0.6f
+inline constexpr MaterialLayer BrushedMetal {
+    .baseColor             = {0.95f, 0.95f, 0.95f, 1.0f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 1.0f,
+    .roughness             = 0.4f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.8f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 3 – Matte Black Plastic
-inline constexpr MaterialLayer MatteBlackPlastic {
-    .baseColor = {0.04f, 0.04f, 0.04f, 1.0f},
-    .roughness = 0.92f,
-    .specular  = 0.35f
+inline constexpr MaterialLayer MattePlastic {
+    .baseColor             = {0.05f, 0.05f, 0.05f, 1.0f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.9f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 4 – Clear Glass (perfect)
-inline constexpr MaterialLayer ClearGlass {
-    .baseColor              = {0.95f, 0.97f, 1.00f, 0.98f},
-    .roughness              = 0.00f,
-    .ior                    = 1.50f,
-    .transmission           = 1.0f,
-    .transmissionRoughness  = 0.0f
+inline constexpr MaterialLayer ClearCoatedPlastic {
+    .baseColor             = {0.8f, 0.1f, 0.1f, 1.0f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.3f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 1.0f,
+    .clearcoatRoughness    = 0.01f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 5 – Frosted Glass
+inline constexpr MaterialLayer Glass {
+    .baseColor             = {0.96f, 0.97f, 1.00f, 0.98f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 1.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
+};
+
 inline constexpr MaterialLayer FrostedGlass {
-    .baseColor              = {0.92f, 0.95f, 1.00f, 0.92f},
-    .roughness              = 0.12f,
-    .ior                    = 1.50f,
-    .transmission           = 0.95f,
-    .transmissionRoughness  = 0.18f
+    .baseColor             = {0.94f, 0.96f, 1.00f, 0.92f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.15f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.95f,
+    .transmissionRoughness = 0.2f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 6 – Water (puddle / thin layer)
 inline constexpr MaterialLayer Water {
-    .baseColor              = {0.90f, 0.96f, 1.00f, 0.85f},
-    .roughness              = 0.00f,
-    .ior                    = 1.33f,
-    .transmission           = 0.98f,
-    .transmissionRoughness  = 0.02f
+    .baseColor             = {0.92f, 0.97f, 1.00f, 0.85f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.33f,
+    .transmission          = 1.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 7 – Jade (translucent gem)
-inline constexpr MaterialLayer Jade {
-    .baseColor              = {0.20f, 0.90f, 0.50f, 1.0f},
-    .roughness              = 0.12f,
-    .ior                    = 1.52f,
-    .subsurface             = 0.65f,
-    .subsurfaceColor        = {0.10f, 0.80f, 0.40f},
-    .subsurfaceRadiusScale  = 1.2f
-};
-
-// 8 – Skin (human-like subsurface)
 inline constexpr MaterialLayer Skin {
-    .baseColor              = {0.80f, 0.55f, 0.45f, 1.0f},
-    .roughness              = 0.45f,
-    .specular               = 0.28f,
-    .subsurface             = 0.75f,
-    .subsurfaceColor        = {0.90f, 0.50f, 0.40f},
-    .subsurfaceRadiusScale  = 0.9f,
-    .sheen                  = 0.15f
+    .baseColor             = {0.82f, 0.55f, 0.48f, 1.0f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.4f,
+    .specular              = 0.3f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.8f,
+    .subsurfaceColor       = {0.92f, 0.48f, 0.38f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.2f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 9 – Velvet (fabric)
-inline constexpr MaterialLayer Velvet {
-    .baseColor = {0.15f, 0.05f, 0.08f, 1.0f},
-    .roughness = 0.85f,
-    .sheen     = 0.65f,
-    .sheenTint = {0.9f, 0.6f, 0.7f}
+inline constexpr MaterialLayer VelvetRed {
+    .baseColor             = {0.25f, 0.05f, 0.08f, 1.0f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.9f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.7f,
+    .sheenTint             = {0.92f, 0.55f, 0.6f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 10 – Emissive Neon Pink
-inline constexpr MaterialLayer NeonPink {
-    .baseColor = {1.0f, 0.10f, 0.60f, 1.0f},
-    .emissive  = {12.0f, 1.2f, 6.0f, 20.0f},
-    .roughness = 0.40f
+inline constexpr MaterialLayer NeonCyan {
+    .baseColor             = {0.05f, 1.0f, 0.95f, 1.0f},
+    .emissive              = {5.0f, 25.0f, 22.0f, 18.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.35f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.50f,
+    .transmission          = 0.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.0f,
+    .thinFilmThickness_nm  = 350.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
-// 11 – Emissive White Light Bulb
-inline constexpr MaterialLayer LightBulb {
-    .baseColor = {1.0f, 0.98f, 0.90f, 1.0f},
-    .emissive  = {8.0f, 7.5f, 6.0f, 15.0f},
-    .roughness = 0.70f
-};
-
-// 12 – Iridescent Soap Bubble (thin-film)
-inline constexpr MaterialLayer SoapBubble {
-    .baseColor              = {1.0f, 1.0f, 1.0f, 0.40f},
-    .roughness              = 0.00f,
-    .ior                    = 1.33f,
-    .transmission           = 0.95f,
-    .thinFilm               = 1.0f,
-    .thinFilmThickness_nm   = 480.0f
-};
-
-// 13 – Car Paint (clearcoat + metallic)
-inline constexpr MaterialLayer CarPaintRed {
-    .baseColor              = {0.90f, 0.10f, 0.12f, 1.0f},
-    .metallic               = 0.9f,
-    .roughness              = 0.04f,
-    .clearcoat              = 1.0f,
-    .clearcoatRoughness     = 0.02f
-};
-
-// 14 – Rough Concrete
-inline constexpr MaterialLayer RoughConcrete {
-    .baseColor = {0.45f, 0.45f, 0.42f, 1.0f},
-    .roughness = 0.88f,
-    .specular  = 0.22f
-};
-
-// 15 – Worn Leather
-inline constexpr MaterialLayer WornLeather {
-    .baseColor = {0.35f, 0.18f, 0.10f, 1.0f},
-    .roughness = 0.65f,
-    .specular  = 0.30f,
-    .sheen     = 0.12f
+inline constexpr MaterialLayer IridescentFilm {
+    .baseColor             = {1.0f, 1.0f, 1.0f, 0.35f},
+    .emissive              = {0.0f, 0.0f, 0.0f, 0.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.5f,
+    .specularTint          = 0.0f,
+    .ior                   = 1.33f,
+    .transmission          = 0.98f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 1.0f,
+    .thinFilmThickness_nm  = 420.0f,
+    .subsurface            = 0.0f,
+    .subsurfaceColor       = {0.8f, 0.6f, 0.5f},
+    .subsurfaceRadiusScale = 1.0f,
+    .clearcoat             = 0.0f,
+    .clearcoatRoughness    = 0.03f,
+    .sheen                 = 0.0f,
+    .sheenTint             = {1.0f, 1.0f, 1.0f},
+    .anisotropy            = 0.0f,
+    .anisoRotation         = 0.0f,
+    .procType              = 0,
+    .procScale             = 8.0f,
+    .procStrength          = 0.35f,
+    .procOffsetSeed        = 0.0f,
+    .flags                 = 0
 };
 
 } // namespace Materials
 
-// ────────────────────────────────────────────────
-// Example combined / layered materials (copy & modify)
-// ────────────────────────────────────────────────
-
-// Example: Gold with thin-film iridescence overlay
-inline constexpr Material IridescentGold = []() {
+// Layered examples (top-level, not inside Materials namespace)
+inline constexpr Material CarPaintBlue = []() {
     Material m{};
-    m.layers[0] = Materials::PolishedGold;
-    m.layers[1] = Materials::SoapBubble;
-    m.layerBlendFactors[0] = 0.85f;
-    m.layerBlendFactors[1] = 0.15f;
+    m.layers[0].baseColor = {0.05f, 0.25f, 0.95f, 1.0f};
+    m.layers[0].metallic  = 0.85f;
+    m.layers[0].roughness = 0.08f;
+    m.layers[1] = Materials::IridescentFilm;
+    m.layers[1].thinFilmThickness_nm = 520.0f;
+    m.layerBlendFactors[0] = 0.92f;
+    m.layerBlendFactors[1] = 0.08f;
     m.layerCount = 2;
     return m;
 }();
 
-// Example: Frosted Jade Glass
-inline constexpr Material FrostedJade = []() {
+inline constexpr Material WornLeatherBrown = []() {
     Material m{};
-    m.layers[0] = Materials::Jade;
-    m.layers[1] = Materials::FrostedGlass;
-    m.layerBlendFactors[0] = 0.70f;
-    m.layerBlendFactors[1] = 0.30f;
-    m.layerCount = 2;
+    m.layers[0].baseColor = {0.38f, 0.22f, 0.12f, 1.0f};
+    m.layers[0].roughness = 0.75f;
+    m.layers[0].sheen     = 0.25f;
+    m.layerCount = 1;
     return m;
 }();
 
-// Example: Neon-lit skin (cyberpunk)
-inline constexpr Material CyberSkin = []() {
+inline constexpr Material CyberPunkSkin = []() {
     Material m{};
     m.layers[0] = Materials::Skin;
-    m.layers[1] = Materials::NeonPink;
-    m.layerBlendFactors[0] = 0.80f;
-    m.layerBlendFactors[1] = 0.20f;
+    m.layers[1] = Materials::NeonCyan;
+    m.layerBlendFactors[0] = 0.75f;
+    m.layerBlendFactors[1] = 0.25f;
     m.layerCount = 2;
     return m;
 }();
-
-// Add more combinations here as needed...
-
-// ────────────────────────────────────────────────
-// Usage in RayCanvas / elsewhere:
-//   std::vector<Material> sceneMaterials = { Materials::PolishedGold, IridescentGold, FrostedJade, ... };
-//   Upload to GPU buffer → assign materialIndex per primitive
-// ────────────────────────────────────────────────
