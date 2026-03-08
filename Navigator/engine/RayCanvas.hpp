@@ -1,8 +1,9 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
-// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
+// AMOURANTH RTX Engine — RayCanvas (persistent compute renderer)
+// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -18,11 +19,13 @@
 #include <vector>
 #include <cstdint>
 #include <array>
+#include <format>
 
 bool needs_swapchain_recreate = false;
 
 // =============================================================================
-// RayCanvas — Persistent compute-based renderer (push-constant only, no UBOs)
+// RayCanvas — Persistent compute-based renderer
+// Fully supports layered OpenPBR materials (5 layers, all flags, procedural hints)
 // =============================================================================
 class RayCanvas {
 public:
@@ -45,7 +48,7 @@ public:
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE)
     {
-        updateInternalResolution();		
+        updateInternalResolution();
 
         Swapchain::create(window, window_width_, window_height_);
 
@@ -54,7 +57,7 @@ public:
             std::abort();
         }
 
-        buildMaterialLibrary();
+        buildMaterialLibrary();           // ← uploads full layered material buffer
 
         createPersistentHDR();
         createPreviousHDR();
@@ -64,9 +67,11 @@ public:
         Pipeline::create_pipeline_layout();
         Pipeline::create_canvas_pipeline();
 
-        updateDescriptorSet();
+        updateDescriptorSet();            // ← binds material storage buffer
 
         clearHDRImages();
+
+        LOG_SUCCESS_CAT("RAYCANVAS", "Initialized — ready for layered OpenPBR rendering");
     }
 
     ~RayCanvas() {
@@ -94,7 +99,7 @@ public:
     void buildMaterialLibrary() {
         std::vector<Material> materials;
 
-        // Helper: add a single-layer material from Materials namespace
+        // Helper: add single-layer preset
         auto addBase = [&](const MaterialLayer& layer, const char* name = nullptr) {
             Material m{};
             m.layers[0]            = layer;
@@ -106,19 +111,19 @@ public:
             }
         };
 
-        // Helper: add a pre-defined layered material
+        // Helper: add pre-defined layered material
         auto addFull = [&](const Material& mat, const char* name = nullptr) {
             materials.push_back(mat);
             if (name) {
-                LOG_DEBUG_CAT("MATERIALS", "Added full material: {}", name);
+                LOG_DEBUG_CAT("MATERIALS", "Added full layered material: {}", name);
             }
         };
 
         // ── Core realistic bases ──────────────────────────────────────────────
-        addBase(Materials::OpenPBR_DielectricBase,      "Dielectric (glass-like)");
+        addBase(Materials::OpenPBR_DielectricBase,      "Dielectric (plastic/ceramic)");
         addBase(Materials::OpenPBR_Metal,               "Polished Metal / Gold");
 
-        // ── Stylized Disney/Pixar 2026 tuned presets ──────────────────────────
+        // ── 2026 Disney/Pixar stylized presets ────────────────────────────────
         addBase(Materials::DisneyCartoonSkin,           "Cartoon Character Skin");
         addBase(Materials::DisneyVelvetFabric,          "Velvet / Fabric");
         addBase(Materials::PixarToyPlastic,             "Toy Plastic (glossy)");
@@ -130,8 +135,8 @@ public:
         addFull(Materials::CartoonCharacterSkin,        "Enhanced Cartoon Skin");
         addFull(Materials::ShinyRetroRobot,             "Shiny Retro Robot (paint + chrome)");
 
-        // Optional: add more procedural / experimental variants here in future
-        // e.g. addBase with procType = 1 (Perlin), procType = 2 (neural bake), etc.
+        // Optional: more bases can be added here (e.g. chrome, skin, neon, etc.)
+        // All presets from Materials.hpp are now supported via this upload
 
         VkDeviceSize size = materials.size() * sizeof(Material);
 
@@ -152,7 +157,7 @@ public:
             }
         }
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Material library built with {} materials", materials.size());
+        LOG_SUCCESS_CAT("RAYCANVAS", "Material library uploaded — {} materials (supports 5-layer blending + all flags)", materials.size());
     }
 
     void maybeUpdateCanvas() noexcept {
@@ -243,10 +248,12 @@ public:
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
                                 0, 1, &set, 0, nullptr);
 
+        // Dispatch with default material index 0 (can be per-primitive later)
         Pipeline::dispatch_canvas(cmd,
                                   static_cast<uint32_t>(internal_width_),
                                   static_cast<uint32_t>(internal_height_),
-                                  static_cast<float>(now));
+                                  static_cast<float>(now),
+                                  0 /* materialLibraryIndex */);
 
         VkImageMemoryBarrier postComputeBarrier{};
         postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -356,12 +363,12 @@ public:
         vkDeviceWaitIdle(rtx().device);
 
         // Destroy old HDR images & views
-        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
-        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_, nullptr);
+        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_, nullptr);
         if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
-        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
-        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_, nullptr);
+        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_, nullptr);
         if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
         hdrOutputView_   = VK_NULL_HANDLE;
@@ -430,15 +437,18 @@ private:
     }
 
     void createDescriptorPoolAndSet() noexcept {
-        VkDescriptorPoolSize poolSizes[1] = {
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+        // Pool must cover all bindings (storage image + material buffer + future slots)
+        VkDescriptorPoolSize poolSizes[] = {
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1},   // output
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1},   // materials
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  5},   // future: geometry, lights, etc.
         };
 
         VkDescriptorPoolCreateInfo pci{};
         pci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         pci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
         pci.maxSets       = 1;
-        pci.poolSizeCount = 1;
+        pci.poolSizeCount = std::size(poolSizes);
         pci.pPoolSizes    = poolSizes;
 
         vkh.checker(vkCreateDescriptorPool(rtx().device, &pci, nullptr, &descriptorPool_),
@@ -457,19 +467,34 @@ private:
     void updateDescriptorSet() noexcept {
         if (!hdrOutputView_) return;
 
+        std::array<VkWriteDescriptorSet, 2> writes{};
+
+        // Binding 0: HDR output storage image
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView   = hdrOutputView_;
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        VkWriteDescriptorSet write{};
-        write.sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet           = descriptorSet_;
-        write.dstBinding       = 0;
-        write.descriptorCount  = 1;
-        write.descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        write.pImageInfo       = &imgInfo;
+        writes[0].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet           = descriptorSet_;
+        writes[0].dstBinding       = 0;
+        writes[0].descriptorCount  = 1;
+        writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].pImageInfo       = &imgInfo;
 
-        vkUpdateDescriptorSets(rtx().device, 1, &write, 0, nullptr);
+        // Binding 4: Material library storage buffer
+        VkDescriptorBufferInfo matBufInfo{};
+        matBufInfo.buffer = Memory::getBuffer(materialsHandle_);
+        matBufInfo.offset = 0;
+        matBufInfo.range  = VK_WHOLE_SIZE;
+
+        writes[1].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet           = descriptorSet_;
+        writes[1].dstBinding       = 4;
+        writes[1].descriptorCount  = 1;
+        writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[1].pBufferInfo      = &matBufInfo;
+
+        vkUpdateDescriptorSets(rtx().device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
     void createPersistentHDR() noexcept {
@@ -725,7 +750,7 @@ private:
     bool           destroyed_        = false;
     bool           firstFrame_       = true;
 
-    uint64_t       materialsHandle_          = 0;
+    uint64_t       materialsHandle_          = 0;  // storage buffer handle for Material[]
 
     VkImage        hdrOutputImage_           = VK_NULL_HANDLE;
     VkImageView    hdrOutputView_            = VK_NULL_HANDLE;
