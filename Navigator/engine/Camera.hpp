@@ -1,8 +1,9 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
-// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
+// AMOURANTH RTX Engine — Camera (Cinematic Orbiting Edition)
+// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -20,6 +21,7 @@
 
 // ────────────────────────────────────────────────
 // Camera settings constants (for default view position and look offset)
+// ────────────────────────────────────────────────
 #define CAMERA_BASE_HEIGHT          4.5f
 #define CAMERA_HEIGHT_SWING         2.8f
 #define CAMERA_HEIGHT_FREQ          0.11f
@@ -27,7 +29,7 @@
 #define CAMERA_DISTANCE_SWING       4.5f
 #define CAMERA_DISTANCE_FREQ        0.08f
 #define CAMERA_FOV_SCALE            1.72f
-#define CAMERA_LOOK_AT_Y_OFFSET     -2.35f
+#define CAMERA_LOOK_AT_Y_OFFSET     -2.35f  // Look below horizon (toward ground/water)
 
 // ────────────────────────────────────────────────
 // Camera state (genesis-aware, transition-friendly)
@@ -60,34 +62,29 @@ public:
         return instance;
     }
 
-void reset() noexcept {
-    std::lock_guard<std::mutex> lock(mtx_);
-    
-    glm::vec3 startPos = glm::vec3(0.0f, CAMERA_BASE_HEIGHT, CAMERA_BASE_DISTANCE);  // 0, 4.5, 20 — keep this
-    
-    // ─── This is the important change ──────────────────────────────────────
-    // Look lower — toward the water / ball landing zone
-    glm::vec3 lookTarget = glm::vec3(2.0f, 2.0f, 2.0f);   // was probably -2.35 or 0 before
-    
-    // Or even stronger downward for testing:
-    // glm::vec3 lookTarget = glm::vec3(0.0f, -6.0f, 0.0f);
-    
-    glm::vec3 dir = glm::normalize(lookTarget - startPos);
-    glm::quat ori = glm::quatLookAt(dir, glm::vec3(0.0f, 1.0f, 0.0f));
+    void reset() noexcept {
+        std::lock_guard<std::mutex> lock(mtx_);
 
-    currentState_ = CameraState(
-        startPos,
-        ori,
-        Options::Camera::DEFAULT_FOV,
-        Options::Camera::DEFAULT_APERTURE,
-        Options::Camera::DEFAULT_FOCUS_DISTANCE
-    );
-    targetState_ = currentState_;
-    prevPosition_ = currentState_.position;
-    transitionProgress_ = 1.0f;
-    transitionStartGenesis_ = TotalTime::get().seconds();
-    invalidateCache();
-}
+        glm::vec3 startPos = glm::vec3(0.0f, CAMERA_BASE_HEIGHT, CAMERA_BASE_DISTANCE);
+
+        // Look lower — toward the water / ball landing zone
+        glm::vec3 lookTarget = glm::vec3(0.0f, CAMERA_LOOK_AT_Y_OFFSET, 0.0f);
+        glm::vec3 dir = glm::normalize(lookTarget - startPos);
+        glm::quat ori = glm::quatLookAt(dir, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        currentState_ = CameraState(
+            startPos,
+            ori,
+            Options::Camera::DEFAULT_FOV,
+            Options::Camera::DEFAULT_APERTURE,
+            Options::Camera::DEFAULT_FOCUS_DISTANCE
+        );
+        targetState_ = currentState_;
+        prevPosition_ = currentState_.position;
+        transitionProgress_ = 1.0f;
+        transitionStartGenesis_ = TotalTime::get().seconds();
+        invalidateCache();
+    }
 
     // Smooth transition to target state (duration in real seconds)
     void transitionTo(const CameraState& target, float durationSec = 1.5f) noexcept {
@@ -169,14 +166,14 @@ void reset() noexcept {
     // Cinematic movement helpers
     // ────────────────────────────────────────────────
     void zoom(float delta) noexcept {
-        float newFov = currentState_.fov - delta * Options::Camera::ZOOM_SENSITIVITY;
+        float newFov = currentState_.fov - delta * Options::Camera::ZoomSensitivity;
         setFov(newFov, false);
     }
 
     void dolly(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
         double now = TotalTime::get().seconds();
-        float scaled = amount * Options::Camera::DOLLY_SPEED * static_cast<float>(now - lastUpdateGenesis_);
+        float scaled = amount * Options::Camera::DollySpeed * static_cast<float>(now - lastUpdateGenesis_);
         prevPosition_ = currentState_.position;
         currentState_.position += currentState_.orientation * glm::vec3(0.0f, 0.0f, -scaled);
         targetState_.position = currentState_.position;
@@ -187,7 +184,7 @@ void reset() noexcept {
     void crane(float amount) noexcept {
         std::lock_guard<std::mutex> lock(mtx_);
         double now = TotalTime::get().seconds();
-        float scaled = amount * Options::Camera::CRANE_SPEED * static_cast<float>(now - lastUpdateGenesis_);
+        float scaled = amount * Options::Camera::CraneSpeed * static_cast<float>(now - lastUpdateGenesis_);
         prevPosition_ = currentState_.position;
         currentState_.position += glm::vec3(0.0f, scaled, 0.0f);
         targetState_.position = currentState_.position;
@@ -256,7 +253,7 @@ void reset() noexcept {
     }
 
     // ────────────────────────────────────────────────
-    // Getters — added missing orientation() getter
+    // Getters
     // ────────────────────────────────────────────────
     [[nodiscard]] glm::vec3 position()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return currentState_.position; }
     [[nodiscard]] glm::vec3 prevPosition() const noexcept { std::lock_guard<std::mutex> l(mtx_); return prevPosition_; }
@@ -310,7 +307,7 @@ inline Camera& CAM = Camera::get();
 inline void CAM_RESET()                         { CAM.reset(); }
 inline glm::vec3 CAM_POS()                      { return CAM.position(); }
 inline glm::vec3 CAM_PREV_POS()                 { return CAM.prevPosition(); }
-inline glm::quat CAM_ORI()                      { return CAM.orientation(); }   // new wrapper
+inline glm::quat CAM_ORI()                      { return CAM.orientation(); }
 inline glm::vec3 CAM_FWD()                      { return CAM.forward(); }
 inline void CAM_LOOK_AT(const glm::vec3& t)     { CAM.lookAt(t); }
 inline void CAM_DOLLY(float d)                  { CAM.dolly(d); }

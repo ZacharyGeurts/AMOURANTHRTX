@@ -1,8 +1,9 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
-// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
+// AMOURANTH RTX Engine — Options Menu (Living World Edition)
+// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
 // =============================================================================
 
@@ -57,8 +58,8 @@ namespace Options::GameStyle
     };
 
     inline DimensionMode       CurrentDimension     = DimensionMode::Full3D;
-    inline CameraPerspective   CurrentPerspective   = CameraPerspective::FirstPerson;
-    inline GenrePreset         CurrentGenre         = GenrePreset::FPS;
+    inline CameraPerspective   CurrentPerspective   = CameraPerspective::ThirdPerson;
+    inline GenrePreset         CurrentGenre         = GenrePreset::Simulation;
 
     inline bool Is3D()          { return CurrentDimension == DimensionMode::Full3D; }
     inline bool Is25D()         { return CurrentDimension == DimensionMode::TwoPointFiveD; }
@@ -86,48 +87,61 @@ namespace Options::Window {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Camera
+// Camera — Cinematic orbiting + adjustable parameters
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Camera {
 
-    inline constexpr glm::vec3 START_POSITION    { 0.0f, 1.68f, 0.0f };
-    inline constexpr float     DEFAULT_FOV       = 90.0f;
-    inline constexpr float     DEFAULT_NEAR      = 0.05f;
-    inline constexpr float     DEFAULT_FAR       = 5000.0f;
+    // ─── Core camera constants ──────────────────────────────────────────────
+    inline constexpr glm::vec3 START_POSITION         { 0.0f, 4.5f, 20.0f };  // default orbit start
+    inline constexpr float     DEFAULT_FOV            = 75.0f;               // vertical FOV (degrees)
+    inline constexpr float     DEFAULT_NEAR           = 0.05f;
+    inline constexpr float     DEFAULT_FAR            = 5000.0f;
 
-    inline constexpr float     DEFAULT_APERTURE       = 2.8f;
-    inline constexpr float     DEFAULT_FOCUS_DISTANCE = 3.0f;
+    inline constexpr float     DEFAULT_APERTURE       = 2.8f;                 // f-stop for DoF
+    inline constexpr float     DEFAULT_FOCUS_DISTANCE = 3.0f;                 // meters
 
-    inline constexpr bool  ENABLE_HEAD_BOB        = true;
-    inline constexpr float HEAD_BOB_INTENSITY     = 0.035f;
-    inline constexpr float HEAD_BOB_FREQUENCY     = 2.1f;
+    // ─── Cinematic orbiting settings ────────────────────────────────────────
+    inline constexpr float     BASE_HEIGHT            = 4.5f;                 // vertical orbit center
+    inline constexpr float     HEIGHT_SWING            = 2.8f;                 // vertical bob amplitude
+    inline constexpr float     HEIGHT_FREQ             = 0.11f;                // vertical bob frequency
 
-    inline constexpr bool  ENABLE_BREATHING       = true;
-    inline constexpr float BREATHING_INTENSITY    = 0.012f;
-    inline constexpr float BREATHING_FREQUENCY    = 0.18f;
+    inline constexpr float     BASE_DISTANCE          = 20.0f;                // distance from look target
+    inline constexpr float     DISTANCE_SWING         = 4.5f;                 // distance variation amplitude
+    inline constexpr float     DISTANCE_FREQ          = 0.08f;                // distance variation frequency
 
-    inline constexpr bool  ENABLE_CAMERA_SHAKE    = true;
+    inline constexpr float     LOOK_AT_Y_OFFSET       = -2.35f;               // look below horizon (toward ground/water)
 
-    inline constexpr float SPRINT_FOV_BOOST       = 5.0f;
-    inline constexpr float CROUCH_EYE_DROP        = 0.45f;
+    // ─── Runtime adjustable settings ────────────────────────────────────────
+    inline float               CurrentFOV             = DEFAULT_FOV;
+    inline float               MinFOV                 = 30.0f;
+    inline float               MaxFOV                 = 120.0f;
 
-    inline float MOUSE_SENSITIVITY   = 0.11f;
-    inline bool  INVERT_MOUSE_Y      = false;
+    inline float               MouseSensitivity       = 0.11f;
+    inline bool                InvertMouseY           = false;
 
-    inline float MOVEMENT_SPEED      = 5.2f;
-    inline float SPRINT_MULTIPLIER   = 1.8f;
+    inline float               MovementSpeed          = 5.2f;
+    inline float               SprintMultiplier       = 1.8f;
 
-    inline float ZOOM_SENSITIVITY    = 1.0f;
+    inline bool                EnableHeadBob          = true;
+    inline float               HeadBobIntensity       = 0.035f;
+    inline float               HeadBobFrequency       = 2.1f;
 
-    inline constexpr float VIEWMODEL_FOV          = 70.0f;
-    inline constexpr float VIEWMODEL_SCALE        = 0.85f;
-    inline constexpr float WEAPON_SWAY_INTENSITY  = 0.8f;
+    inline bool                EnableBreathing        = true;
+    inline float               BreathingIntensity     = 0.012f;
+    inline float               BreathingFrequency     = 0.18f;
 
-    inline constexpr float DOLLY_SPEED       = 4.0f;
-    inline constexpr float CRANE_SPEED       = 3.0f;
-    inline constexpr float RACK_FOCUS_SPEED  = 2.5f;
+    inline bool                EnableCameraShake      = true;
 
-} // namespace Options::Camera
+    // Depth of field / cinematic
+    inline float               Aperture               = DEFAULT_APERTURE;
+    inline float               FocusDistance          = DEFAULT_FOCUS_DISTANCE;
+
+    // Movement speeds & sensitivities
+    inline float               ZoomSensitivity        = 1.0f;
+    inline float               DollySpeed             = 4.0f;
+    inline float               CraneSpeed             = 3.0f;
+    inline float               RackFocusSpeed         = 2.5f;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Rendering & Performance
@@ -142,45 +156,53 @@ namespace Options::Rendering {
     inline constexpr float   EXPOSURE                 = 0.2f;
     inline constexpr bool    ENABLE_TONEMAP           = true;
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;
+
+    // Temporal accumulation strength (0.0 = no accumulation, 1.0 = freeze)
+    inline float             TemporalBlendStrength    = 0.92f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sky & Day/Night Cycle
+// Living World — Environment & Weather Controls
 // ─────────────────────────────────────────────────────────────────────────────
-namespace Options::Sky {
-    inline constexpr bool    ENABLE_DAY_NIGHT_CYCLE   = true;
-    inline constexpr float   DAY_LENGTH_SECONDS       = 1200.0f;
-    inline constexpr float   CYCLE_SPEED              = 1.0f;
-    inline constexpr float   START_TIME_OF_DAY        = 12.0f;
+namespace Options::LivingWorld {
 
-    inline constexpr bool    SUN_ENABLED              = true;
-    inline constexpr glm::vec3 SUN_COLOR              = glm::vec3(1.0f, 0.96f, 0.88f);
-    inline constexpr float   SUN_INTENSITY_DAY        = 12.0f;
-    inline constexpr float   SUN_INTENSITY_NIGHT      = 0.1f;
+    // Day/Night Cycle
+    inline bool              EnableDayNightCycle      = true;
+    inline float             DayLengthSeconds         = 1200.0f;   // full day in real seconds
+    inline float             CycleSpeedMultiplier     = 1.0f;      // 1.0 = real-time, >1 = faster
+    inline float             CurrentTimeOfDay         = 12.0f;     // 0..24 hours (updated by sim)
 
-    inline constexpr bool    MOON_ENABLED             = true;
-    inline constexpr glm::vec3 MOON_COLOR             = glm::vec3(0.9f, 0.95f, 1.0f);
-    inline constexpr float   MOON_INTENSITY           = 2.0f;
+    // Sun & Moon
+    inline bool              SunEnabled               = true;
+    inline glm::vec3         SunColor                 = glm::vec3(1.0f, 0.96f, 0.88f);
+    inline float             SunIntensityDay          = 12.0f;
+    inline float             SunIntensityNight        = 0.1f;
 
-    inline constexpr float   FOG_DENSITY              = 0.0008f;
-    inline constexpr float   CLOUD_DENSITY            = 0.4f;
+    inline bool              MoonEnabled              = true;
+    inline glm::vec3         MoonColor                = glm::vec3(0.9f, 0.95f, 1.0f);
+    inline float             MoonIntensity            = 2.0f;
 
-    inline constexpr glm::vec4 SKY_ZENITH_DAY         = glm::vec4(0.3f, 0.55f, 1.0f, 1.0f);
-    inline constexpr glm::vec4 SKY_HORIZON_DAY        = glm::vec4(0.6f, 0.8f, 1.0f, 1.0f);
-    inline constexpr glm::vec4 SKY_ZENITH_NIGHT       = glm::vec4(0.01f, 0.02f, 0.05f, 1.0f);
-    inline constexpr glm::vec4 SKY_HORIZON_NIGHT      = glm::vec4(0.03f, 0.03f, 0.08f, 1.0f);
+    // Atmosphere & Weather
+    inline float             FogDensity               = 0.0008f;
+    inline float             CloudCoverage            = 0.4f;
+    inline float             CloudAnimationSpeed      = 0.08f;
 
-    inline constexpr glm::vec4 GROUND_COLOR_DAY       = glm::vec4(0.18f, 0.35f, 0.12f, 1.0f);
-    inline constexpr glm::vec4 GROUND_COLOR_NIGHT     = glm::vec4(0.08f, 0.12f, 0.18f, 1.0f);
-}
+    inline float             WindStrength             = 0.6f;      // 0..1 — affects grass sway, clouds
+    inline glm::vec3         WindDirection            = glm::normalize(glm::vec3(0.7f, 0.0f, 0.3f));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LAS (Acceleration Structures)
-// ─────────────────────────────────────────────────────────────────────────────
-namespace Options::LAS {
-    inline constexpr bool    SYNC_REBUILD             = true;
-    inline constexpr bool    ENABLE_TLAS              = true;
-    inline constexpr bool    ENABLE_BLAS              = true;
+    inline float             TemperatureC             = 22.0f;     // -50..50 — tints grass/sky
+    inline float             Humidity                 = 0.65f;     // 0..1 — wetness, fog density
+    inline float             PrecipitationFactor      = 0.0f;      // 0..1 — rain/snow intensity
+    inline float             AirPressureKPa           = 101.3f;    // ~90..110 — weather pressure
+
+    // Ground / Vegetation
+    inline bool              EnableGrassSway          = true;
+    inline float             GrassSwayAmplitude       = 0.12f;
+    inline float             GrassWetShineBoost       = 1.8f;
+    inline float             TemperatureColorShift    = 0.4f;
+
+    // Debug & Visualization
+    inline uint32_t          DebugFlags               = 0;         // bitfield — passed to shader
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

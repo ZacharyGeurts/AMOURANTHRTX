@@ -1,6 +1,60 @@
 #version 460
 #extension GL_EXT_scalar_block_layout : enable
 
+// =============================================================================
+// TUNABLES — Adjust these freely to play with the world!
+// (Everything below is safe to change — core logic stays intact)
+// =============================================================================
+
+// Camera & View
+#define CAMERA_POS_X                0.0     // X offset from origin
+#define CAMERA_POS_Y                5.0     // Height above ground (your original value)
+#define CAMERA_POS_Z                0.0     // Z offset (pull back/forward)
+#define CAMERA_FOV                  60.0    // Vertical FOV in degrees
+#define CAMERA_LOOK_DOWN_OFFSET     -0.15   // Y bias in ray direction (makes it look slightly down)
+
+// Sky & Lighting
+#define SKY_NIGHT_ZENITH            vec3(0.15, 0.25, 0.50)
+#define SKY_NIGHT_HORIZON           vec3(0.02, 0.05, 0.15)
+#define SKY_DAY_ZENITH              vec3(0.50, 0.75, 1.00)
+#define SKY_DAY_HORIZON             vec3(0.70, 0.85, 1.00)
+#define SUN_HALO_POWER              60.0    // Sun bloom intensity multiplier
+#define SUN_HALO_INTENSITY          0.0
+#define SUN_HALO_EDGE_SHARPNESS     0.998   // Sun disk edge (lower = softer)
+#define MOON_HALO_POWER             20.0    // Moon glow intensity (optional)
+#define CLOUD_ANIMATION_SPEED       0.05    // Clouds move with wind/time
+#define CLOUD_COVERAGE_SCALE        0.7     // How strongly clouds darken sky
+
+// Grass & Ground
+#define GRASS_NOISE_SCALE1          2.0     // Large-scale grass variation
+#define GRASS_NOISE_SCALE2          5.0     // Medium detail
+#define GRASS_NOISE_SCALE3          12.0    // Fine detail
+#define GRASS_DARK                  vec3(0.15, 0.35, 0.08)
+#define GRASS_LIGHT                 vec3(0.25, 0.55, 0.12)
+#define WETNESS_MULTIPLIER          1.2     // How much rain/humidity darkens ground
+#define TEMP_COLOR_SHIFT_STRENGTH   0.5     // Cold → blue, hot → red/orange tint strength
+#define SPECULAR_POWER              128.0   // Shininess exponent
+#define SPECULAR_INTENSITY          0.22    // Base specular amount
+
+// Fog & Atmosphere
+#define FOG_DENSITY_BASE            0.0004  // km⁻¹ baseline
+#define FOG_DAY_COLOR               vec3(0.72, 0.82, 0.96)
+#define FOG_NIGHT_COLOR             vec3(0.42, 0.50, 0.68)
+#define FOG_DAY_NIGHT_BLEND         0.35    // How much night darkens fog
+
+// Post-process
+#define FINAL_EXPOSURE_BOOST        1.5     // Overall brightness multiplier
+#define VIGNETTE_STRENGTH           0.0     // Edge darkening (0 = off)
+
+// Debug / Visualization (set via pc.debugFlags bits in C++)
+#define DEBUG_SHOW_NORMALS          0       // 1 = show fake normals
+#define DEBUG_SHOW_WIND             0       // 1 = tint with wind direction
+#define DEBUG_SHOW_WETNESS          0       // 1 = visualize wetness only
+
+// =============================================================================
+// Shader code — DO NOT CHANGE BELOW UNLESS ADDING FEATURES
+// =============================================================================
+
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
 
@@ -66,13 +120,19 @@ vec3 sampleSky(vec3 dir) {
     float day = pc.dayNightFactor;
 
     vec3 sky = mix(
-        mix(vec3(0.15, 0.25, 0.50), vec3(0.02, 0.05, 0.15), 1.0 - y),
-        mix(vec3(0.50, 0.75, 1.00), vec3(0.70, 0.85, 1.00), 1.0 - y),
+        mix(SKY_NIGHT_ZENITH, SKY_NIGHT_HORIZON, 1.0 - y),
+        mix(SKY_DAY_ZENITH, SKY_DAY_HORIZON, 1.0 - y),
         day
     );
 
-    float sun = smoothstep(0.998, 0.9998, dot(dir, normalize(pc.sunDir)));
-    sky += vec3(1.4, 1.1, 0.8) * sun * pc.sunIntensity * 60.0 * day;
+    float sun = smoothstep(SUN_HALO_EDGE_SHARPNESS, 0.9998, dot(dir, normalize(pc.sunDir)));
+    sky += vec3(1.4, 1.1, 0.8) * sun * pc.sunIntensity * SUN_HALO_INTENSITY * day;
+
+    // Optional animated clouds (moved by wind)
+    vec2 cloudUV = dir.xz * 0.8 + pc.windDir.xz * pc.windStrength * pc.time * CLOUD_ANIMATION_SPEED;
+    float cloud = noise(cloudUV) * 0.6 + noise(cloudUV * 3.0) * 0.4;
+    cloud = smoothstep(0.45, 0.75, cloud * pc.cloudCoverage);
+    sky = mix(sky, vec3(0.98, 0.99, 1.00), cloud * CLOUD_COVERAGE_SCALE * day);
 
     return sky;
 }
@@ -81,22 +141,28 @@ vec3 sampleSky(vec3 dir) {
 // Seamless procedural grass texture
 // ────────────────────────────────────────────────
 vec3 grassTexture(vec2 uv) {
-    float n = noise(uv * 2.0) * 0.5 + noise(uv * 5.0) * 0.3 + noise(uv * 12.0) * 0.2;
-    vec3 dark = vec3(0.15, 0.35, 0.08);
-    vec3 light = vec3(0.25, 0.55, 0.12);
-    return mix(dark, light, n);
+    float n = noise(uv * GRASS_NOISE_SCALE1) * 0.5 +
+              noise(uv * GRASS_NOISE_SCALE2) * 0.3 +
+              noise(uv * GRASS_NOISE_SCALE3) * 0.2;
+    vec3 dark = GRASS_DARK;
+    vec3 light = GRASS_LIGHT;
+    vec3 base = mix(dark, light, n);
+
+    // Temperature tint — cold blue shift, hot red/orange
+    float tempNorm = clamp((pc.temperatureC + 30.0) / 80.0, 0.0, 1.0);
+    base *= mix(vec3(0.95, 1.0, 1.1), vec3(1.15, 0.95, 0.85), tempNorm * TEMP_COLOR_SHIFT_STRENGTH);
+
+    return base;
 }
 
 // ────────────────────────────────────────────────
 // Sample ground with material tint
 // ────────────────────────────────────────────────
 vec3 sampleGround(vec3 hit) {
-    // Use RoughConcrete from materials.hpp as base
     vec3 baseColor = vec3(0.45, 0.45, 0.42);  // RoughConcrete.baseColor.rgb
-    float roughness = 0.88;  // RoughConcrete.roughness
-    float specular = 0.22;  // RoughConcrete.specular
+    float roughness = 0.88;                   // RoughConcrete.roughness
+    float specular  = 0.22;                   // RoughConcrete.specular
 
-    // Apply grass texture tint
     vec3 tex = grassTexture(hit.xz) * baseColor;
 
     vec3 normal = vec3(0,1,0);
@@ -109,18 +175,29 @@ vec3 sampleGround(vec3 hit) {
     // Specular highlight (simple)
     vec3 view = normalize(pc.cameraPos - hit);
     vec3 halfV = normalize(pc.sunDir + view);
-    float spec = pow(max(0.0, dot(normal, halfV)), (1.0 - roughness) * 128.0) * specular;
+    float spec = pow(max(0.0, dot(normal, halfV)), (1.0 - roughness) * SPECULAR_POWER) * specular;
     color += vec3(1.0) * spec * pc.sunIntensity * pc.dayNightFactor;
 
     // Wetness
-    float wet = pc.humidity * pc.precipitationFactor * 1.2;
+    float wet = pc.humidity * pc.precipitationFactor * WETNESS_MULTIPLIER;
     color = mix(color, vec3(0.18, 0.26, 0.34), wet * 0.5);
 
     // Fog
     float dist = length(hit - pc.cameraPos);
-    float fog = 1.0 - exp(-dist * pc.fogDensity * 0.0004);
-    vec3 fogC = mix(vec3(0.72, 0.82, 0.96), vec3(0.42, 0.50, 0.68), pc.dayNightFactor * 0.35);
+    float fog = 1.0 - exp(-dist * pc.fogDensity * FOG_DENSITY_BASE);
+    vec3 fogC = mix(FOG_DAY_COLOR, FOG_NIGHT_COLOR, pc.dayNightFactor * FOG_DAY_NIGHT_BLEND);
     color = mix(color, fogC, fog);
+
+    // Debug modes (toggle in pc.debugFlags)
+    if ((pc.debugFlags & DEBUG_SHOW_NORMALS) != 0u) {
+        color = normal * 0.5 + 0.5;
+    }
+    if ((pc.debugFlags & DEBUG_SHOW_WIND) != 0u) {
+        color = mix(color, pc.windDir * 0.5 + 0.5, 0.5);
+    }
+    if ((pc.debugFlags & DEBUG_SHOW_WETNESS) != 0u) {
+        color = vec3(wet);
+    }
 
     return color;
 }
@@ -136,11 +213,10 @@ void main() {
     vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
     uv.x *= pc.aspectRatio;
 
-    float fov = 60.0;
-    float tanHalf = tan(radians(fov) * 0.5);
-    vec3 rayDir = normalize(vec3(uv.x * tanHalf, uv.y * tanHalf - 0.15, 1.0));
+    float tanHalf = tan(radians(CAMERA_FOV) * 0.5);
+    vec3 rayDir = normalize(vec3(uv.x * tanHalf, uv.y * tanHalf + CAMERA_LOOK_DOWN_OFFSET, 1.0));
 
-    vec3 ro = vec3(0.0, 5.0, 0.0);
+    vec3 ro = vec3(CAMERA_POS_X, CAMERA_POS_Y, CAMERA_POS_Z);
 
     vec3 color = sampleSky(rayDir);
 
@@ -150,7 +226,10 @@ void main() {
         color = sampleGround(hit);
     }
 
-    color *= 1.5;
+    color *= FINAL_EXPOSURE_BOOST;
+
+    float vig = 1.0 - dot(uv, uv) * VIGNETTE_STRENGTH;
+    color *= vig;
 
     imageStore(outputImage, pix, vec4(color, 1.0));
 }
