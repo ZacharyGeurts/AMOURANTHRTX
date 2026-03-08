@@ -146,7 +146,7 @@ public:
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             "MaterialsLibrary",
-            Memory::MemoryHint::HostVisible
+            Memory::MemoryHint::Auto
         );
 
         if (size > 0) {
