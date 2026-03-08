@@ -10,7 +10,8 @@
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "Camera.hpp"           // ← added: for CAM singleton access
+#include "Camera.hpp"           // ← for CAM singleton access
+#include "Materials.hpp"        // ← full material library access
 
 #include <algorithm>
 #include <vector>
@@ -27,29 +28,31 @@ namespace Pipeline {
 using u32 = std::uint32_t;
 
 // ────────────────────────────────────────────────
-// Descriptor bindings (matches your current shader)
+// Descriptor bindings — matches shader layout
 // ────────────────────────────────────────────────
-inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[5] = {
-    {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // outputImage
-    {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
-    {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
-    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
-    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // (unused or future)
+inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[6] = {
+    {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 0: outputImage
+    {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 1: scene uniforms (future)
+    {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 2: geometry / instances
+    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 3: lights / environment
+    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 4: material library (Material structs)
+    {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 5: textures / atlas (future)
 };
 
 inline constexpr VkShaderStageFlags COMPUTE_PUSH_MASK = VK_SHADER_STAGE_COMPUTE_BIT;
 
 // ────────────────────────────────────────────────
-// Push constants — matches current shader layout
+// Push constants — synced with shader
 // ────────────────────────────────────────────────
 struct PushConstants {
-    float    time;          // pc.time
-    u32      frameSeed;     // pc.frameSeed
-    glm::vec3 cameraPos;    // pc.cameraPos
-    float    _pad0;         // align vec3 to 16 bytes
-    glm::vec4 cameraQuat;   // pc.cameraQuat (xyzw)
-    float    cameraFov;     // pc.cameraFov
-    float    _pad1[3];      // pad to 16-byte multiple
+    float    time;              // total animation / render time
+    u32      frameSeed;         // per-frame RNG seed
+    glm::vec3 cameraPos;        // world-space camera position
+    float    _pad0;             // align vec3
+    glm::vec4 cameraQuat;       // camera orientation quaternion (xyzw)
+    float    cameraFov;         // vertical FOV in degrees
+    u32      materialLibraryIndex; // index into material storage buffer (0 = default)
+    float    _pad1[2];          // pad to 16-byte multiple
 };
 
 inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
@@ -144,7 +147,7 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 }
 
 // ────────────────────────────────────────────────
-// Initialize descriptor layout
+// Initialize descriptor layout (now includes material buffer)
 // ────────────────────────────────────────────────
 inline void initialize() noexcept {
     if (main_descriptor_layout != VK_NULL_HANDLE) return;
@@ -216,13 +219,13 @@ inline void create_canvas_pipeline(const std::string& shader_override = "", bool
                 "PIPELINE", "vkCreateComputePipelines");
 
     vkDestroyShaderModule(rtx().device, shader, nullptr);
-    LOG_SUCCESS_CAT("PIPELINE", "Canvas compute pipeline created");
+    LOG_SUCCESS_CAT("PIPELINE", "Canvas compute pipeline created (supports full layered materials)");
 }
 
 // ────────────────────────────────────────────────
-// Dispatch — now pushes real camera data
+// Dispatch — pushes camera + material library index
 // ────────────────────────────────────────────────
-inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float totalTime) noexcept {
+inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float totalTime, u32 materialIndex = 0) noexcept {
     if (canvas_pipeline == VK_NULL_HANDLE) {
         create_canvas_pipeline();
         if (canvas_pipeline == VK_NULL_HANDLE) return;
@@ -232,18 +235,14 @@ inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float to
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
 
-    // Real push constants — synced with shader
+    // Push real-time data + material selection
     PushConstants pc{};
-    pc.time       = totalTime;
-    pc.frameSeed  = static_cast<u32>(totalTime * 1000.0f) ^ 0xDEADBEEFu;
-
-    // Pull real camera data
-    pc.cameraPos  = CAM.position();
-    pc.cameraQuat = glm::vec4(CAM.orientation().x,
-                              CAM.orientation().y,
-                              CAM.orientation().z,
-                              CAM.orientation().w);
-    pc.cameraFov  = CAM.fov();
+    pc.time                = totalTime;
+    pc.frameSeed           = static_cast<u32>(totalTime * 1000.0f) ^ 0xDEADBEEFu;
+    pc.cameraPos           = CAM.position();
+    pc.cameraQuat          = glm::vec4(CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
+    pc.cameraFov           = CAM.fov();
+    pc.materialLibraryIndex = materialIndex;  // ← shader reads materials[pc.materialLibraryIndex]
 
     vkCmdPushConstants(cmd, pipeline_layout, COMPUTE_PUSH_MASK,
                        0, sizeof(PushConstants), &pc);
