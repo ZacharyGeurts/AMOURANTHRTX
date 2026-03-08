@@ -353,41 +353,41 @@ inline VulkanExtensions& ext() noexcept {
     return e;
 }
 
-// Memory namespace (unchanged, full version)
 namespace Memory {
-    inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE = 256ULL << 20;
-    inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD = 1ULL << 20;
 
-    enum class MemoryHint : uint8_t { Auto = 0, DeviceLocalOnly = 1, HostVisible = 2, DescriptorBuffer = 3 };
+inline constexpr VkDeviceSize DEFAULT_CHUNK_SIZE      = 256ULL << 20;
+inline constexpr VkDeviceSize HOST_VISIBLE_THRESHOLD  = 1ULL << 20;
 
-    [[nodiscard]] constexpr VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
-        return ((value + alignment - 1) / alignment) * alignment;
-    }
+enum class MemoryHint : uint8_t { Auto = 0, DeviceLocalOnly = 1, HostVisible = 2, DescriptorBuffer = 3 };
 
-    [[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags required, VkMemoryPropertyFlags preferred = 0) noexcept {
-        VkPhysicalDevice phys = rtx().physical;
-        VkPhysicalDeviceMemoryProperties memProps{};
-        vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
+[[nodiscard]] constexpr VkDeviceSize align_up(VkDeviceSize value, VkDeviceSize alignment) noexcept {
+    return ((value + alignment - 1) / alignment) * alignment;
+}
 
-        uint32_t best = ~0u;
-        int bestScore = -1;
+[[nodiscard]] inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags required, VkMemoryPropertyFlags preferred = 0) noexcept {
+    VkPhysicalDevice phys = rtx().physical;
+    VkPhysicalDeviceMemoryProperties memProps{};
+    vkGetPhysicalDeviceMemoryProperties(phys, &memProps);
 
-        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-            if ((typeFilter & (1u << i)) == 0) continue;
-            VkMemoryPropertyFlags flags = memProps.memoryTypes[i].propertyFlags;
-            if ((flags & required) != required) continue;
+    uint32_t best = ~0u;
+    int bestScore = -1;
 
-            int score = 0;
-            if (flags & preferred) score += 10;
-            if (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) score += 5;
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+        if ((typeFilter & (1u << i)) == 0) continue;
+        VkMemoryPropertyFlags flags = memProps.memoryTypes[i].propertyFlags;
+        if ((flags & required) != required) continue;
 
-            if (score > bestScore) {
-                bestScore = score;
-                best = i;
-            }
+        int score = 0;
+        if (flags & preferred) score += 10;
+        if (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) score += 5;
+
+        if (score > bestScore) {
+            bestScore = score;
+            best = i;
         }
-        return best;
     }
+    return best;
+}
 
 [[nodiscard]] inline VRAMReality measureReality() noexcept {
     static VRAMReality reality{};
@@ -446,13 +446,6 @@ namespace Memory {
                         (usage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT);
     if (isDescriptor) {
         usage |= VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    }
-
-    bool isSBT = (usage & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) || tag.find("SBT") != std::string_view::npos;
-    if (isSBT) {
-        size = std::max(size, VkDeviceSize(512));
-        size = align_up(size, VkDeviceSize(256));
-        usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     }
 
     bool wantHostVisible = hint == MemoryHint::HostVisible ||
@@ -568,7 +561,8 @@ inline void destroy(uint64_t handle) noexcept {
     uint64_t handle,
     const void* data,
     VkDeviceSize size,
-    VkCommandBuffer cmd = VK_NULL_HANDLE
+    VkCommandBuffer cmd = VK_NULL_HANDLE,
+    VkDeviceSize dstOffset = 0
 ) noexcept {
     auto* info = get(handle);
     if (!info || size > info->size) return {VK_NULL_HANDLE, VK_NULL_HANDLE};
@@ -600,10 +594,7 @@ inline void destroy(uint64_t handle) noexcept {
         return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     }
 
-    VkMemoryAllocateInfo stageMai{};
-    stageMai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    stageMai.allocationSize = stageReq.size;
-    stageMai.memoryTypeIndex = stageMemType;
+    VkMemoryAllocateInfo stageMai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, stageReq.size, stageMemType };
 
     VkDeviceMemory stageMem = VK_NULL_HANDLE;
     if (vkAllocateMemory(dev, &stageMai, nullptr, &stageMem) != VK_SUCCESS) {
@@ -647,7 +638,7 @@ inline void destroy(uint64_t handle) noexcept {
 
     VkBufferCopy copy{};
     copy.srcOffset = 0;
-    copy.dstOffset = info->offset;
+    copy.dstOffset = info->offset + dstOffset;
     copy.size = size;
 
     vkCmdCopyBuffer(targetCmd, stageBuf, info->buffer, 1, &copy);

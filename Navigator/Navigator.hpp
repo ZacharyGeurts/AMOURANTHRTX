@@ -275,8 +275,6 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     // IMPORTANT: Force correct initial size handling + camera reset
     int realWidth = 0, realHeight = 0;
     SDL_GetWindowSize(g_window, &realWidth, &realHeight);
-    LOG_INFO_CAT("MAIN", "Forcing initial resize to actual window size: {}x{}", realWidth, realHeight);
-    raycanvas->onResize(realWidth, realHeight);
 
     // Explicit camera reset — ensures valid position, orientation, and FOV before first frame
     CAM.reset();

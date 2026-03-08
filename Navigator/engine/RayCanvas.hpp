@@ -20,12 +20,12 @@
 #include <cstdint>
 #include <array>
 #include <format>
+#include <filesystem>
 
 bool needs_swapchain_recreate = false;
 
 // =============================================================================
 // RayCanvas — Persistent compute-based renderer
-// Fully supports layered OpenPBR materials (5 layers, all flags, procedural hints)
 // =============================================================================
 class RayCanvas {
 public:
@@ -48,7 +48,7 @@ public:
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE)
     {
-        updateInternalResolution();
+        updateInternalResolution();		
 
         Swapchain::create(window, window_width_, window_height_);
 
@@ -57,7 +57,7 @@ public:
             std::abort();
         }
 
-        buildMaterialLibrary();           // ← uploads full layered material buffer
+        buildMaterialLibrary();
 
         createPersistentHDR();
         createPreviousHDR();
@@ -67,11 +67,9 @@ public:
         Pipeline::create_pipeline_layout();
         Pipeline::create_canvas_pipeline();
 
-        updateDescriptorSet();            // ← binds material storage buffer
+        updateDescriptorSet();
 
         clearHDRImages();
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Initialized — ready for layered OpenPBR rendering");
     }
 
     ~RayCanvas() {
@@ -99,7 +97,7 @@ public:
     void buildMaterialLibrary() {
         std::vector<Material> materials;
 
-        // Helper: add single-layer preset
+        // Helper: add a single-layer material from Materials namespace
         auto addBase = [&](const MaterialLayer& layer, const char* name = nullptr) {
             Material m{};
             m.layers[0]            = layer;
@@ -111,19 +109,19 @@ public:
             }
         };
 
-        // Helper: add pre-defined layered material
+        // Helper: add a pre-defined layered material
         auto addFull = [&](const Material& mat, const char* name = nullptr) {
             materials.push_back(mat);
             if (name) {
-                LOG_DEBUG_CAT("MATERIALS", "Added full layered material: {}", name);
+                LOG_DEBUG_CAT("MATERIALS", "Added full material: {}", name);
             }
         };
 
         // ── Core realistic bases ──────────────────────────────────────────────
-        addBase(Materials::OpenPBR_DielectricBase,      "Dielectric (plastic/ceramic)");
+        addBase(Materials::OpenPBR_DielectricBase,      "Dielectric (glass-like)");
         addBase(Materials::OpenPBR_Metal,               "Polished Metal / Gold");
 
-        // ── 2026 Disney/Pixar stylized presets ────────────────────────────────
+        // ── Stylized Disney/Pixar 2026 tuned presets ──────────────────────────
         addBase(Materials::DisneyCartoonSkin,           "Cartoon Character Skin");
         addBase(Materials::DisneyVelvetFabric,          "Velvet / Fabric");
         addBase(Materials::PixarToyPlastic,             "Toy Plastic (glossy)");
@@ -135,8 +133,8 @@ public:
         addFull(Materials::CartoonCharacterSkin,        "Enhanced Cartoon Skin");
         addFull(Materials::ShinyRetroRobot,             "Shiny Retro Robot (paint + chrome)");
 
-        // Optional: more bases can be added here (e.g. chrome, skin, neon, etc.)
-        // All presets from Materials.hpp are now supported via this upload
+        // Optional: add more procedural / experimental variants here in future
+        // e.g. addBase with procType = 1 (Perlin), procType = 2 (neural bake), etc.
 
         VkDeviceSize size = materials.size() * sizeof(Material);
 
@@ -146,7 +144,7 @@ public:
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             "MaterialsLibrary",
-            Memory::MemoryHint::Auto
+            Memory::MemoryHint::HostVisible
         );
 
         if (size > 0) {
@@ -157,7 +155,7 @@ public:
             }
         }
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Material library uploaded — {} materials (supports 5-layer blending + all flags)", materials.size());
+        LOG_SUCCESS_CAT("RAYCANVAS", "Material library built with {} materials", materials.size());
     }
 
     void maybeUpdateCanvas() noexcept {
@@ -209,8 +207,6 @@ public:
 
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fci.flags = 0;
-
         VkFence fence = VK_NULL_HANDLE;
         vkCreateFence(rtx().device, &fci, nullptr, &fence);
 
@@ -221,7 +217,7 @@ public:
         vkDestroyFence(rtx().device, fence, nullptr);
 
         if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — will recreate next frame");
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — recreate next frame");
             minimized_ = true;
             return;
         }
@@ -248,12 +244,10 @@ public:
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
                                 0, 1, &set, 0, nullptr);
 
-        // Dispatch with default material index 0 (can be per-primitive later)
         Pipeline::dispatch_canvas(cmd,
                                   static_cast<uint32_t>(internal_width_),
                                   static_cast<uint32_t>(internal_height_),
-                                  static_cast<float>(now),
-                                  0 /* materialLibraryIndex */);
+                                  static_cast<float>(now));
 
         VkImageMemoryBarrier postComputeBarrier{};
         postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -337,12 +331,10 @@ public:
 
         if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(now);
-        }
-        else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
+        } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
             LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — recreate next frame");
             minimized_ = true;
-        }
-        else if (pres != VK_SUCCESS) {
+        } else if (pres != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
@@ -432,16 +424,14 @@ private:
             internal_width_  = Options::Rendering::INTERNAL_WIDTH;
             internal_height_ = Options::Rendering::INTERNAL_HEIGHT;
         }
-
-        LOG_INFO_CAT("RAYCANVAS", "Internal resolution set to {}x{}", internal_width_, internal_height_);
+        LOG_INFO_CAT("RAYCANVAS", "Internal resolution: {}x{}", internal_width_, internal_height_);
     }
 
     void createDescriptorPoolAndSet() noexcept {
-        // Pool must cover all bindings (storage image + material buffer + future slots)
         VkDescriptorPoolSize poolSizes[] = {
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1},   // output
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1},   // materials
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  5},   // future: geometry, lights, etc.
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1},  // materials
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  5}   // future expansion
         };
 
         VkDescriptorPoolCreateInfo pci{};
@@ -452,7 +442,7 @@ private:
         pci.pPoolSizes    = poolSizes;
 
         vkh.checker(vkCreateDescriptorPool(rtx().device, &pci, nullptr, &descriptorPool_),
-                    "vkCreateDescriptorPool", "RayCanvas");
+                    "DESCRIPTOR", "RayCanvas");
 
         VkDescriptorSetAllocateInfo ai{};
         ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -461,7 +451,7 @@ private:
         ai.pSetLayouts        = &Pipeline::main_descriptor_layout;
 
         vkh.checker(vkAllocateDescriptorSets(rtx().device, &ai, &descriptorSet_),
-                    "vkAllocateDescriptorSets", "RayCanvas");
+                    "DESCRIPTOR", "RayCanvas");
     }
 
     void updateDescriptorSet() noexcept {
@@ -469,7 +459,6 @@ private:
 
         std::array<VkWriteDescriptorSet, 2> writes{};
 
-        // Binding 0: HDR output storage image
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView   = hdrOutputView_;
         imgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -481,18 +470,17 @@ private:
         writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[0].pImageInfo       = &imgInfo;
 
-        // Binding 4: Material library storage buffer
-        VkDescriptorBufferInfo matBufInfo{};
-        matBufInfo.buffer = Memory::getBuffer(materialsHandle_);
-        matBufInfo.offset = 0;
-        matBufInfo.range  = VK_WHOLE_SIZE;
+        VkDescriptorBufferInfo matInfo{};
+        matInfo.buffer = Memory::getBuffer(materialsHandle_);
+        matInfo.offset = 0;
+        matInfo.range  = VK_WHOLE_SIZE;
 
         writes[1].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[1].dstSet           = descriptorSet_;
         writes[1].dstBinding       = 4;
         writes[1].descriptorCount  = 1;
         writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[1].pBufferInfo      = &matBufInfo;
+        writes[1].pBufferInfo      = &matInfo;
 
         vkUpdateDescriptorSets(rtx().device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
@@ -520,18 +508,19 @@ private:
         ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_),
-                    "vkCreateImage", "HDR");
+        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_), "MEMORY", "HDR Image");
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &req);
 
         uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        VkMemoryAllocateInfo mai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, req.size, memType };
+        VkMemoryAllocateInfo mai{};
+        mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize  = req.size;
+        mai.memoryTypeIndex = memType;
 
-        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_),
-                    "vkAllocateMemory", "HDR");
+        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_), "MEMORY", "HDR Memory");
 
         vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
 
@@ -542,8 +531,7 @@ private:
         vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_),
-                    "vkCreateImageView", "HDR");
+        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_), "MEMORY", "HDR View");
     }
 
     void createPreviousHDR() noexcept {
@@ -569,18 +557,19 @@ private:
         ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &prevHdrOutputImage_),
-                    "vkCreateImage", "Prev HDR");
+        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &prevHdrOutputImage_), "MEMORY", "Prev HDR Image");
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(rtx().device, prevHdrOutputImage_, &req);
 
         uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        VkMemoryAllocateInfo mai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, nullptr, req.size, memType };
+        VkMemoryAllocateInfo mai{};
+        mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize  = req.size;
+        mai.memoryTypeIndex = memType;
 
-        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &prevHdrOutputMemory_),
-                    "vkAllocateMemory", "Prev HDR");
+        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &prevHdrOutputMemory_), "MEMORY", "Prev HDR Memory");
 
         vkBindImageMemory(rtx().device, prevHdrOutputImage_, prevHdrOutputMemory_, 0);
 
@@ -591,8 +580,7 @@ private:
         vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &prevHdrOutputView_),
-                    "vkCreateImageView", "Prev HDR");
+        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &prevHdrOutputView_), "MEMORY", "Prev HDR View");
     }
 
     void copyHDRtoPrevious(VkCommandBuffer cmd) noexcept {
@@ -621,31 +609,31 @@ private:
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
                              0, 0, nullptr, 0, nullptr, 2, barriers);
 
-        VkImageCopy copyRegion{};
-        copyRegion.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        copyRegion.srcOffset = {0, 0, 0};
-        copyRegion.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        copyRegion.dstOffset = {0, 0, 0};
-        copyRegion.extent = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
+        VkImageCopy copy{};
+        copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.srcOffset = {0, 0, 0};
+        copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.dstOffset = {0, 0, 0};
+        copy.extent = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
 
         vkCmdCopyImage(cmd,
                        hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        prevHdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &copyRegion);
+                       1, &copy);
 
-        VkImageMemoryBarrier postBarrier{};
-        postBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        postBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        postBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        postBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        postBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        postBarrier.image = prevHdrOutputImage_;
-        postBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkImageMemoryBarrier post{};
+        post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        post.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        post.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        post.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        post.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        post.image = prevHdrOutputImage_;
+        post.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdPipelineBarrier(cmd,
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &postBarrier);
+                             0, 0, nullptr, 0, nullptr, 1, &post);
     }
 
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
@@ -656,13 +644,15 @@ private:
         alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc.commandBufferCount = 1;
 
-        if (vkAllocateCommandBuffers(rtx().device, &alloc, &cmd) != VK_SUCCESS) return VK_NULL_HANDLE;
+        VkResult res = vkAllocateCommandBuffers(rtx().device, &alloc, &cmd);
+        if (res != VK_SUCCESS) return VK_NULL_HANDLE;
 
         VkCommandBufferBeginInfo begin{};
         begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
+        res = vkBeginCommandBuffer(cmd, &begin);
+        if (res != VK_SUCCESS) {
             vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
             return VK_NULL_HANDLE;
         }
@@ -679,25 +669,17 @@ private:
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fci.pNext = nullptr;
         fci.flags = 0;
 
-        if (vkCreateFence(rtx().device, &fci, nullptr, &fence) != VK_SUCCESS) {
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-            return;
-        }
+        vkCreateFence(rtx().device, &fci, nullptr, &fence);
 
         VkSubmitInfo submit{};
         submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount = 1;
         submit.pCommandBuffers    = &cmd;
 
-        VkResult res = vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
-        if (res != VK_SUCCESS) {
-            vkDestroyFence(rtx().device, fence, nullptr);
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-            return;
-        }
-
+        vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
         vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(rtx().device, fence, nullptr);
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
@@ -715,7 +697,6 @@ private:
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
-            barrier.srcAccessMask = 0;
             barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
             barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -750,7 +731,9 @@ private:
     bool           destroyed_        = false;
     bool           firstFrame_       = true;
 
-    uint64_t       materialsHandle_          = 0;  // storage buffer handle for Material[]
+    uint64_t       materialsHandle_          = 0;
+    std::vector<Material> allMaterials;
+    uint32_t       materialCount = 0;
 
     VkImage        hdrOutputImage_           = VK_NULL_HANDLE;
     VkImageView    hdrOutputView_            = VK_NULL_HANDLE;
