@@ -10,6 +10,7 @@ Overwrite with the pearls code to do the pearls demo. Have Grok write a new fun 
   
 [Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 We are not minimalist. We added every feature from every forum, efficently.  
+Disney researched materials from 2012-2015 and we went with that.  
 How efficent? Zero cost computing.  
 gcc-14 C++23 Vulkan 1.4+ and SDL3 with inclusion of GLM.  
 
