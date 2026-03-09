@@ -69,9 +69,8 @@ GLM and build tools I was able to get with apt.
 The cmake build system needs internet to function and tries to help.  
 Uses tinyobj and is really smart everywhere really really.  
 
-We do a 3% profit share of every dollar I can make you. Of the 3 cents I send two of them over to Amouranth and Nick.  
-Or you can cut me out and just dono over at Ammo's twitch page if you just want to do that.  
-I'm on disability and doing fine with my "retirement".  
+We do a 3% profit share of every dollar we can make you. 
+I take 1% and 2% goes for the branding to Ammo and Nick.  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
 She steps on RTX and dominates it now.  
 
