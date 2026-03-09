@@ -150,8 +150,8 @@ namespace Options::Camera {
 // Rendering & Performance
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Rendering {
-    inline int     INTERNAL_WIDTH           = 1920;
-    inline int     INTERNAL_HEIGHT          = 1080;
+    inline int     INTERNAL_WIDTH           = 4096;
+    inline int     INTERNAL_HEIGHT          = 2160;
 
     inline constexpr bool    ACCUMULATION             = true;
     inline constexpr bool    ADAPTIVE_SAMPLING        = true;
@@ -165,7 +165,7 @@ namespace Options::Rendering {
     inline int     MaxSamplesPerPixel       = 4;      // slider: 1–8
     inline int     MaxRayRecursion          = 10;     // slider: 4–16
     inline float   QualityHeadroomThreshold = 0.75f;  // 0.6–0.9 (fraction of frame budget under which we boost)
-    inline float   MaxGPULoadPercent        = 95.0f;  // never exceed this % of target frame time
+    inline float   MaxGPULoadPercent        = 90.0f;  // never exceed this % of target frame time
 
     // Temporal accumulation strength (0.0 = no accumulation, 1.0 = freeze)
     inline float   TemporalBlendStrength    = 0.92f;  // slider: 0.0–1.0
@@ -180,7 +180,7 @@ namespace Options::LivingWorld {
     inline bool              EnableDayNightCycle      = true;
     inline float             DayLengthSeconds         = 60.0f;   // full day in real seconds 1200
     inline float             CycleSpeedMultiplier     = 1.0f;      // 1.0 = real-time, >1 = faster, <1 = slower
-    inline float             CurrentTimeOfDay         = 12.0f;     // 0..24 hours (updated by sim)
+    inline float             CurrentTimeOfDay         = 24.0f;     // 0..24 hours (updated by sim)
 
     // Sun & Moon
     inline bool              SunEnabled               = true;
