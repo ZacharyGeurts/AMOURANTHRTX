@@ -43,8 +43,8 @@ We track and tell you everything along the way.
 Filenames, line numbers, function names.  
 Debugging becomes a breeze.  
 
-This is RTX. This also is literally Grok designing himself.  
-We run zero overhead compute.  
+This is RTX. This also is literally AI designing itself.  
+We run zero overhead compute. The bottle sealed.  
 We handle everything with a single hotswappable compute shader that can be graphics, AI, whatever RTX can do.  
 You helped. We went on forums and got top 50 wants and needs for each component.  
 From there we implemented all of them, in small files that you can add to.  
