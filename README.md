@@ -56,6 +56,7 @@ We secure the input and "camera" as well.
 We gather up the whole of RTX and secure and grant access with simply, rtx() singleton.  
 There is no hacking permissable within these walls. Tampering aborts.  
 Identifiable features of this software melts away on release build.  
+We are the first, last, or another. Game over.  
 
 Development and memes https://x.com/ZacharyGeurts  
 I will come off as insane more than rarely if I think it is good for a joke.  
