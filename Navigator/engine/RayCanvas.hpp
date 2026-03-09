@@ -457,9 +457,6 @@ public:
             endSubmitAndWait(cmd);
         }
 
-        adaptiveFrameCount_ = 0;
-        lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
-
         LOG_SUCCESS_CAT("RAYCANVAS", "Resize complete — window {}x{} (rendered {}x{})",
                         window_width_, window_height_, render_width_, render_height_);
     }

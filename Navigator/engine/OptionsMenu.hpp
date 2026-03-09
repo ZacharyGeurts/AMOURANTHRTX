@@ -154,7 +154,7 @@ namespace Options::Rendering {
     inline int     INTERNAL_HEIGHT          = 2160;
 
     inline constexpr bool    ACCUMULATION             = false;
-    inline constexpr bool    ADAPTIVE_SAMPLING        = false;
+    inline constexpr bool    ADAPTIVE_SAMPLING        = true;
     inline constexpr int     MAX_RAY_RECURSION        = 8;
     inline constexpr float   EXPOSURE                 = 0.2f;
     inline constexpr bool    ENABLE_TONEMAP           = false;
