@@ -153,11 +153,11 @@ namespace Options::Rendering {
     inline int     INTERNAL_WIDTH           = 4096;
     inline int     INTERNAL_HEIGHT          = 2160;
 
-    inline constexpr bool    ACCUMULATION             = true;
-    inline constexpr bool    ADAPTIVE_SAMPLING        = true;
+    inline constexpr bool    ACCUMULATION             = false;
+    inline constexpr bool    ADAPTIVE_SAMPLING        = false;
     inline constexpr int     MAX_RAY_RECURSION        = 8;
     inline constexpr float   EXPOSURE                 = 0.2f;
-    inline constexpr bool    ENABLE_TONEMAP           = true;
+    inline constexpr bool    ENABLE_TONEMAP           = false;
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;
 
     // Adaptive quality controls
@@ -167,8 +167,8 @@ namespace Options::Rendering {
     inline float   QualityHeadroomThreshold = 0.75f;  // 0.6–0.9 (fraction of frame budget under which we boost)
     inline float   MaxGPULoadPercent        = 90.0f;  // never exceed this % of target frame time
 
-    // Temporal accumulation strength (0.0 = no accumulation, 1.0 = freeze)
-    inline float   TemporalBlendStrength    = 0.92f;  // slider: 0.0–1.0
+    // Temporal accumulation strength (0.0 = no accumulation)
+    inline float   TemporalBlendStrength    = 0.0f;  // slider: 0.0–1.0
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

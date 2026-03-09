@@ -47,12 +47,13 @@ public:
           prevHdrOutputMemory_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE),
-          timestampPool_(VK_NULL_HANDLE),
           adaptiveScale_(1.5f),
           lastPresentTime_s_(0.0),
           measuredRefreshRateHz_(60.0),
           lastFpsLog_(0.0),
           frameCount_(0),
+          lastAdaptiveAdjustTime_(0.0),
+          adaptiveFrameCount_(0),
           lastDispatchedW_(static_cast<uint32_t>(windowWidth)),
           lastDispatchedH_(static_cast<uint32_t>(windowHeight))
     {
@@ -62,13 +63,6 @@ public:
             LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain");
             std::abort();
         }
-
-        // Create timestamp query pool (2 queries: start + end)
-        VkQueryPoolCreateInfo qpci{};
-        qpci.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-        qpci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
-        qpci.queryCount = 2;
-        vkCreateQueryPool(rtx().device, &qpci, nullptr, &timestampPool_);
 
         buildMaterialLibrary();
 
@@ -94,10 +88,6 @@ public:
 
         vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
         vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
-
-        if (timestampPool_ != VK_NULL_HANDLE) {
-            vkDestroyQueryPool(rtx().device, timestampPool_, nullptr);
-        }
 
         destroyHDRResources();
 
@@ -162,6 +152,7 @@ public:
         if (destroyed_) return;
 
         frameCount_++;
+        adaptiveFrameCount_++;
 
         bool quit = false, fullscreen_toggle = false;
         int dummyW = 0, dummyH = 0;
@@ -204,6 +195,7 @@ public:
             TotalTime::get().seal();
             firstFrame_ = false;
             LOG_AMOURANTH("Genesis sealed — eternal canvas begins 💖");
+            lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
         }
 
         double now = TotalTime::get().seconds();
@@ -248,37 +240,32 @@ public:
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
                                 0, 1, &set, 0, nullptr);
 
-        // Timestamp: start
-        vkCmdResetQueryPool(cmd, timestampPool_, 0, 2);
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampPool_, 0);
-
         double delta_s = now - lastPresentTime_s_;
         lastPresentTime_s_ = now;
 
-        double frameBudget_us = 1000000.0 / measuredRefreshRateHz_;
-        double safe_headroom_us   = frameBudget_us * 0.88;
-        double danger_threshold_us = frameBudget_us * 1.08;
-
+        // === ADAPTIVE USING FRAME COUNTER VS REFRESH RATE (no GPU load logic) ===
         if (Options::Rendering::EnableAdaptiveQuality) {
-            double frameTime_us = delta_s * 1000000.0;
+            if (now - lastAdaptiveAdjustTime_ >= 1.5) {
+                double elapsed = now - lastAdaptiveAdjustTime_;
+                double currentFPS = (elapsed > 0.0) ? static_cast<double>(adaptiveFrameCount_) / elapsed : 60.0;
+                double targetFPS = measuredRefreshRateHz_;
 
-            if (frameTime_us < safe_headroom_us) {
-                float step = (frameTime_us < frameBudget_us * 0.75) ? 0.04f : 0.02f;
-                adaptiveScale_ += step;
-                adaptiveScale_ = std::min(adaptiveScale_, 4.0f);
-            }
-            else if (frameTime_us > danger_threshold_us) {
-                adaptiveScale_ -= 0.25f;
-                adaptiveScale_ = std::max(adaptiveScale_, 0.5f);
+                if (currentFPS > targetFPS * 1.07) {          // we have overhead / headroom
+                    adaptiveScale_ += 0.06f;
+                    adaptiveScale_ = std::min(adaptiveScale_, 4.0f);
+                } else if (currentFPS < targetFPS * 0.93) {   // behind refresh rate
+                    adaptiveScale_ -= 0.11f;
+                    adaptiveScale_ = std::max(adaptiveScale_, 0.55f);
+                }
+
+                adaptiveFrameCount_ = 0;
+                lastAdaptiveAdjustTime_ = now;
             }
         }
 
         updateRenderResolution();
 
         Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
-
-        // Timestamp: end
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, 1);
 
         lastDispatchedW_ = static_cast<uint32_t>(render_width_);
         lastDispatchedH_ = static_cast<uint32_t>(render_height_);
@@ -298,22 +285,6 @@ public:
                              0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
 
         endSubmitAndWait(cmd);
-
-        // Read timestamp results
-        uint64_t timestamps[2] = {0, 0};
-        VkResult queryRes = vkGetQueryPoolResults(rtx().device, timestampPool_, 0, 2,
-                                                  sizeof(timestamps), timestamps,
-                                                  sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
-
-        double gpuBusy_us = delta_s * 1000000.0;  // fallback to full frame time
-        if (queryRes == VK_SUCCESS && timestamps[1] > timestamps[0]) {
-            // Approximate: use average timestamp period (common fallback if not stored)
-            // In a real app, get this from vkGetPhysicalDeviceProperties
-            double timestampPeriod_ns = 1.0;  // placeholder — replace with actual from device props
-            double start_ns = static_cast<double>(timestamps[0]) * timestampPeriod_ns;
-            double end_ns   = static_cast<double>(timestamps[1]) * timestampPeriod_ns;
-            gpuBusy_us = (end_ns - start_ns) / 1000.0;
-        }
 
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
@@ -381,6 +352,7 @@ public:
 
         if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
+            measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
             LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — recreate next frame");
             minimized_ = true;
@@ -402,14 +374,6 @@ public:
 
             float supersampleFactor = (winW > 0) ? static_cast<float>(dispW) / static_cast<float>(winW) : 1.0f;
 
-            double frameBudget_us = 1000000.0 / measuredRefreshRateHz_;
-
-            float gpuBusyPercent = static_cast<float>((gpuBusy_us / frameBudget_us) * 100.0);
-
-            const char* busyEmoji = (gpuBusyPercent <  40.0f) ? "🟢" :
-                                    (gpuBusyPercent <  70.0f) ? "🟡" :
-                                    (gpuBusyPercent <  95.0f) ? "🟠" : "🔴";
-
             const char* stateEmoji = minimized_                       ? "🟥 minimized" :
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
                                      "✅ active";
@@ -417,10 +381,10 @@ public:
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
                           "              RayCanvas Status  •  t+{}s\n"
                           "  FPS:            {}     (avg frame {} µs)\n"
+                          "  Refresh Rate:   {:.1f} Hz (detected)\n"
                           "  Window:         {} x {}\n"
-                          "  Rendered:       {} x {}     (supersampling {}x)\n"
-                          "  Adaptive scale: {}x     (max allowed {}x{})\n"
-                          "  GPU busy:       ~{}% {}     (budget {} µs)\n"
+                          "  Rendered:       {} x {}     (supersampling {:.2f}x)\n"
+                          "  Adaptive scale: {:.2f}x\n"
                           "  State:          {}\n"
                           "  Adaptive qual:  {}\n"
                           "  Accumulation:   {}\n"
@@ -428,11 +392,10 @@ public:
                           "───────────────────────────────────────────────────────────────",
                           now * 0.1,
                           avgFps, avgDt_us,
+                          measuredRefreshRateHz_,
                           winW, winH,
                           dispW, dispH, supersampleFactor,
-                          adaptiveScale_, Options::Rendering::INTERNAL_WIDTH, Options::Rendering::INTERNAL_HEIGHT,
-                          static_cast<int>(std::round(gpuBusyPercent)), busyEmoji,
-                          frameBudget_us,
+                          adaptiveScale_,
                           stateEmoji,
                           Options::Rendering::EnableAdaptiveQuality ? "enabled" : "disabled",
                           Options::Rendering::ACCUMULATION ? "on" : "off",
@@ -493,6 +456,9 @@ public:
 
             endSubmitAndWait(cmd);
         }
+
+        adaptiveFrameCount_ = 0;
+        lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
 
         LOG_SUCCESS_CAT("RAYCANVAS", "Resize complete — window {}x{} (rendered {}x{})",
                         window_width_, window_height_, render_width_, render_height_);
@@ -801,8 +767,6 @@ private:
     VkDescriptorPool descriptorPool_         = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
 
-    VkQueryPool    timestampPool_            = VK_NULL_HANDLE;
-
     float          adaptiveScale_            = 1.5f;
     double         lastPresentTime_s_        = 0.0;
     double         measuredRefreshRateHz_    = 60.0;
@@ -810,10 +774,12 @@ private:
     double         lastFpsLog_               = 0.0;
     uint64_t       frameCount_               = 0;
 
+    // frame-counter adaptive (replaces all old GPU/timestamp logic)
+    double         lastAdaptiveAdjustTime_   = 0.0;
+    uint64_t       adaptiveFrameCount_       = 0;
+
     uint32_t       lastDispatchedW_          = 0;
     uint32_t       lastDispatchedH_          = 0;
-
-    double         gpuBusy_us                = 0.0;
 };
 
 inline RayCanvas* rayCanvas = nullptr;
