@@ -25,8 +25,6 @@
 #include <algorithm>
 #include <cmath>
 
-bool needs_swapchain_recreate = false;
-
 class RayCanvas {
 public:
     RayCanvas(int windowWidth, int windowHeight, SDL_Window* window)
@@ -86,8 +84,12 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
-        vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
+        if (descriptorSet_ != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
+        }
+        if (descriptorPool_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
+        }
 
         destroyHDRResources();
 
@@ -168,6 +170,7 @@ public:
             return;
         }
 
+        // === PURE SDL3 SIZE DETECTION (no extra flags) ===
         int currentW = 0, currentH = 0;
         SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
 
@@ -217,8 +220,8 @@ public:
         vkDestroyFence(rtx().device, fence, nullptr);
 
         if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — recreate next frame");
-            minimized_ = true;
+            // SDL3 already knows the new size — let next frame's size check handle it
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — SDL3 will trigger resize next frame");
             return;
         }
 
@@ -243,17 +246,16 @@ public:
         double delta_s = now - lastPresentTime_s_;
         lastPresentTime_s_ = now;
 
-        // === ADAPTIVE USING FRAME COUNTER VS REFRESH RATE (no GPU load logic) ===
         if (Options::Rendering::EnableAdaptiveQuality) {
             if (now - lastAdaptiveAdjustTime_ >= 1.5) {
                 double elapsed = now - lastAdaptiveAdjustTime_;
                 double currentFPS = (elapsed > 0.0) ? static_cast<double>(adaptiveFrameCount_) / elapsed : 60.0;
                 double targetFPS = measuredRefreshRateHz_;
 
-                if (currentFPS > targetFPS * 1.07) {          // we have overhead / headroom
+                if (currentFPS > targetFPS * 1.07) {
                     adaptiveScale_ += 0.06f;
                     adaptiveScale_ = std::min(adaptiveScale_, 4.0f);
-                } else if (currentFPS < targetFPS * 0.93) {   // behind refresh rate
+                } else if (currentFPS < targetFPS * 0.93) {
                     adaptiveScale_ -= 0.11f;
                     adaptiveScale_ = std::max(adaptiveScale_, 0.55f);
                 }
@@ -354,8 +356,7 @@ public:
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
             measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — recreate next frame");
-            minimized_ = true;
+            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — SDL3 will trigger resize next frame");
         } else if (pres != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
@@ -421,10 +422,25 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        destroyHDRResources();
+        // Destroy old HDR images & views
+        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_, nullptr);
+        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_, nullptr);
+        if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+
+        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_, nullptr);
+        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_, nullptr);
+        if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+
+        hdrOutputView_   = VK_NULL_HANDLE;
+        hdrOutputImage_  = VK_NULL_HANDLE;
+        hdrOutputMemory_ = VK_NULL_HANDLE;
+        prevHdrOutputView_   = VK_NULL_HANDLE;
+        prevHdrOutputImage_  = VK_NULL_HANDLE;
+        prevHdrOutputMemory_ = VK_NULL_HANDLE;
 
         window_width_  = newWidth;
         window_height_ = newHeight;
+        minimized_ = false;
 
         Swapchain::recreate(window_width_, window_height_);
 
@@ -437,6 +453,15 @@ public:
 
         createPersistentHDR();
         createPreviousHDR();
+
+        if (descriptorSet_ != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
+            descriptorSet_ = VK_NULL_HANDLE;
+        }
+        if (descriptorPool_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
+            descriptorPool_ = VK_NULL_HANDLE;
+        }
 
         createDescriptorPoolAndSet();
         updateDescriptorSet();
@@ -457,7 +482,7 @@ public:
             endSubmitAndWait(cmd);
         }
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Resize complete — window {}x{} (rendered {}x{})",
+        LOG_SUCCESS_CAT("RAYCANVAS", "Resize complete — {}x{} (internal {}x{})",
                         window_width_, window_height_, render_width_, render_height_);
     }
 
@@ -468,7 +493,9 @@ public:
 
 private:
     void updateRenderResolution() noexcept {
-        float scale = std::clamp(adaptiveScale_, 0.5f, 4.0f);
+        float scale = Options::Rendering::EnableAdaptiveQuality
+                      ? std::clamp(adaptiveScale_, 0.5f, 4.0f)
+                      : 1.0f;
 
         render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * scale));
         render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * scale));
@@ -600,9 +627,8 @@ private:
 
     void createDescriptorPoolAndSet() noexcept {
         VkDescriptorPoolSize poolSizes[] = {
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  5}
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   2},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  6}
         };
 
         VkDescriptorPoolCreateInfo pci{};
@@ -626,9 +652,9 @@ private:
     }
 
     void updateDescriptorSet() noexcept {
-        if (!hdrOutputView_) return;
+        if (!hdrOutputView_ || !prevHdrOutputView_) return;
 
-        std::array<VkWriteDescriptorSet, 2> writes{};
+        std::array<VkWriteDescriptorSet, 3> writes{};
 
         VkDescriptorImageInfo imgInfo{};
         imgInfo.imageView   = hdrOutputView_;
@@ -641,17 +667,28 @@ private:
         writes[0].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[0].pImageInfo       = &imgInfo;
 
+        VkDescriptorImageInfo prevImgInfo{};
+        prevImgInfo.imageView   = prevHdrOutputView_;
+        prevImgInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        writes[1].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet           = descriptorSet_;
+        writes[1].dstBinding       = 1;
+        writes[1].descriptorCount  = 1;
+        writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[1].pImageInfo       = &prevImgInfo;
+
         VkDescriptorBufferInfo matInfo{};
         matInfo.buffer = Memory::getBuffer(materialsHandle_);
         matInfo.offset = 0;
         matInfo.range  = VK_WHOLE_SIZE;
 
-        writes[1].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet           = descriptorSet_;
-        writes[1].dstBinding       = 4;
-        writes[1].descriptorCount  = 1;
-        writes[1].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[1].pBufferInfo      = &matInfo;
+        writes[2].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet           = descriptorSet_;
+        writes[2].dstBinding       = 4;
+        writes[2].descriptorCount  = 1;
+        writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[2].pBufferInfo      = &matInfo;
 
         vkUpdateDescriptorSets(rtx().device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
@@ -771,7 +808,6 @@ private:
     double         lastFpsLog_               = 0.0;
     uint64_t       frameCount_               = 0;
 
-    // frame-counter adaptive (replaces all old GPU/timestamp logic)
     double         lastAdaptiveAdjustTime_   = 0.0;
     uint64_t       adaptiveFrameCount_       = 0;
 

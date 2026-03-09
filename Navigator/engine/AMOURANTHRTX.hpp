@@ -985,6 +985,9 @@ struct Swapchain {
     inline static double lastPresentTime_s   = 0.0;
     inline static double smoothedRefresh_s   = 1.0 / 60.0;
 
+    // CENTRALIZED RESIZE HANDLING (SDL3 + sub/supersampling safe)
+    inline static bool                  needsRecreate    = false;
+
     // ────────────────────────────────────────────────────────────────
     // Create or recreate swapchain
     // ────────────────────────────────────────────────────────────────
@@ -1038,7 +1041,6 @@ struct Swapchain {
 
         constexpr std::array preferred = {
             VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
-            VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
             VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
         };
 
@@ -1120,6 +1122,7 @@ struct Swapchain {
         VkResult res = ext().vkCreateSwapchainKHR(device, &ci, nullptr, &newSwap);
         if (res != VK_SUCCESS) {
             minimized = true;
+            needsRecreate = true;  // retry next frame
             return;
         }
 
@@ -1150,6 +1153,7 @@ struct Swapchain {
 
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
+        needsRecreate = false;
 
         LOG_SUCCESS_CAT("SWAPCHAIN", "Created swapchain {}x{} ({} images, present mode {})",
                         extent.width, extent.height, actualCount, static_cast<int>(presentMode));
@@ -1212,6 +1216,32 @@ struct Swapchain {
     }
 
     // ────────────────────────────────────────────────────────────────
+    // SDL3-aware centralized resize handler (called every frame from RayCanvas)
+    // Handles sub/supersampling correctly because RayCanvas reads back extent after recreate
+    // ────────────────────────────────────────────────────────────────
+    static void recreateIfNeeded(SDL_Window* window) noexcept {
+        if (!window) return;
+
+        int currentW = 0, currentH = 0;
+        SDL_GetWindowSizeInPixels(window, &currentW, &currentH);
+
+        if (currentW <= 0 || currentH <= 0) {
+            minimized = true;
+            return;
+        }
+
+        if (minimized || currentW != extent.width || currentH != extent.height || needsRecreate) {
+            recreate(currentW, currentH);
+            minimized = false;
+            needsRecreate = false;
+        }
+    }
+
+    static void markNeedsRecreate() noexcept {
+        needsRecreate = true;
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // Helpers
     // ────────────────────────────────────────────────────────────────
     static void cleanupViewsAndSwapchain() noexcept {
@@ -1235,6 +1265,7 @@ struct Swapchain {
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
         minimized = false;
+        needsRecreate = false;
     }
 
     static void create(SDL_Window* window, int w, int h) noexcept {
@@ -1268,6 +1299,7 @@ struct Swapchain {
 // Resize handler
 inline void onResize() noexcept {
     rtx().las_dirty = true;
+    Swapchain::markNeedsRecreate();  // notify Swapchain (centralized)
 }
 
 // GLM → Vulkan transform matrix
