@@ -26,6 +26,15 @@ chmod +x linux.sh
 ./linux.sh --help
 ```
 
+Untested
+```
+.\windows.ps1                  # Build Release
+.\windows.ps1 -Run             # Build + launch .exe
+.\windows.ps1 -Debug           # Build Debug
+.\windows.ps1 -Run -Debug      # Debug build + launch
+.\windows.ps1 -Clean           # Purge build folder
+```
+
 Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
 X11, Wayland, Windows. Adaptable for Metal or Android with toolchains.  
 
