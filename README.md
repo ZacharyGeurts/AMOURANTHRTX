@@ -46,11 +46,6 @@ Debugging becomes a breeze.
 
 This is RTX. This also is literally AI designing itself.  
 We run zero overhead compute. The bottle sealed.  
-We handle everything with a single hotswappable compute shader that can be graphics, AI, whatever RTX can do.  
-You helped. We went on forums and got top 50 wants and needs for each component.  
-From there we implemented all of them, in small files that you can add to.  
-I added inspiration, imagination and guidance.  
-It is Zero cost. There is no minus 1 cost afaik.  
 
 The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
 If a bit of memory changes, and your program is not the one making changes, we exit.  
