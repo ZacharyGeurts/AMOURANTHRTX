@@ -13,6 +13,7 @@
 #include "OptionsMenu.hpp"
 #include "Pipeline.hpp"
 #include "Materials.hpp"
+#include "InputManager.hpp"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/rotate_vector.hpp>
@@ -34,8 +35,8 @@ public:
         : window_(window),
           window_width_(windowWidth),
           window_height_(windowHeight),
-          internal_width_(Options::Rendering::INTERNAL_WIDTH),
-          internal_height_(Options::Rendering::INTERNAL_HEIGHT),
+          internal_width_(windowWidth),
+          internal_height_(windowHeight),
           minimized_(false),
           destroyed_(false),
           firstFrame_(true),
@@ -43,11 +44,16 @@ public:
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
+          prevHdrOutputImage_(VK_NULL_HANDLE),
+          prevHdrOutputView_(VK_NULL_HANDLE),
+          prevHdrOutputMemory_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE),
           adaptiveScale_(1.0f),
           lastPresentTime_s_(0.0),
-          measuredRefreshRateHz_(60.0)
+          measuredRefreshRateHz_(60.0),
+          lastFpsLog_(0.0),
+          frameCount_(0)
     {
         updateInternalResolution();		
 
@@ -61,6 +67,7 @@ public:
         buildMaterialLibrary();
 
         createPersistentHDR();
+        createPreviousHDR();
         createDescriptorPoolAndSet();
 
         Pipeline::initialize();
@@ -81,9 +88,13 @@ public:
         vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
         vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
 
-        vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
-        vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
-        vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+        if (hdrOutputView_ != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
+        if (hdrOutputImage_ != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+
+        if (prevHdrOutputView_ != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
+        if (prevHdrOutputImage_ != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+        if (prevHdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
         Memory::destroy(materialsHandle_);
 
@@ -99,16 +110,12 @@ public:
             m.layerCount           = 1;
             m.layerBlendFactors[0] = 1.0f;
             materials.push_back(m);
-            if (name) {
-                LOG_DEBUG_CAT("MATERIALS", "Added base material: {}", name);
-            }
+            if (name) LOG_DEBUG_CAT("MATERIALS", "Added base material: {}", name);
         };
 
         auto addFull = [&](const Material& mat, const char* name = nullptr) {
             materials.push_back(mat);
-            if (name) {
-                LOG_DEBUG_CAT("MATERIALS", "Added full material: {}", name);
-            }
+            if (name) LOG_DEBUG_CAT("MATERIALS", "Added full material: {}", name);
         };
 
         addBase(Materials::OpenPBR_DielectricBase,      "Dielectric (glass-like)");
@@ -148,6 +155,23 @@ public:
 
     void maybeUpdateCanvas() noexcept {
         if (destroyed_) return;
+
+        frameCount_++;
+
+        // Input polling & handling (WASD, mouse, ESC quit)
+        bool quit = false, fullscreen_toggle = false;
+        int w = 0, h = 0;
+        sdl_poll_events(w, h, quit, fullscreen_toggle);
+
+        if (fullscreen_toggle) {
+            sdl_toggle_fullscreen();
+        }
+
+        if (quit) {
+            destroyed_ = true;
+            LOG_INFO_CAT("RAYCANVAS", "Quit signal received — exiting");
+            return;
+        }
 
         int currentW = 0, currentH = 0;
         SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
@@ -224,38 +248,32 @@ public:
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-        if (!firstFrame_) {
-            copyHDRtoPrevious(cmd);
-        }
-
         VkDescriptorSet set = descriptorSet_;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
                                 0, 1, &set, 0, nullptr);
 
-        // Adaptive internal resolution: scale up to 8K when GPU has headroom,
-        // but never exceed 95% of target frame time budget
+        // Adaptive internal resolution — base = window size, scale UP only for quality (no zoom out)
         double delta_s = now - lastPresentTime_s_;
         lastPresentTime_s_ = now;
 
-        double frameBudget = 1000000.0 / measuredRefreshRateHz_;  // target us per frame
-        double safetyMargin = frameBudget * 0.05;  // 5% headroom
+        double frameBudget = 1000000.0 / measuredRefreshRateHz_;
+        double safetyMargin = frameBudget * 0.05;
 
-        // If last frame was under budget, gently scale up
+        // Scale up when under budget (higher quality/supersampling)
         if (delta_s < frameBudget - safetyMargin) {
-            adaptiveScale_ = std::min(adaptiveScale_ + 0.02f, 8.0f);  // max 8× base (8K-ish)
+            adaptiveScale_ = std::min(adaptiveScale_ + 0.02f, 4.0f);  // max 4x for quality boost
         }
-        // If last frame was too slow, scale down quickly
-        else if (delta_s > frameBudget * 0.95) {
-            adaptiveScale_ = std::max(adaptiveScale_ - 0.08f, 0.5f);  // min 50% base
-        }
+        // Never scale down — lock at min 1.0 (no zoom out)
+        adaptiveScale_ = std::max(adaptiveScale_, 1.0f);
 
-        uint32_t targetW = static_cast<uint32_t>(std::clamp(static_cast<float>(internal_width_) * adaptiveScale_, 320.0f, 8192.0f));
-        uint32_t targetH = static_cast<uint32_t>(std::clamp(static_cast<float>(internal_height_) * adaptiveScale_, 180.0f, 8192.0f));
+        // Respect Options::Rendering max caps (e.g. your 90% setting)
+        uint32_t maxW = static_cast<uint32_t>(Options::Rendering::INTERNAL_WIDTH);
+        uint32_t maxH = static_cast<uint32_t>(Options::Rendering::INTERNAL_HEIGHT);
 
-        Pipeline::dispatch_canvas(cmd,
-                                  targetW,
-                                  targetH,
-                                  static_cast<float>(now));
+        uint32_t targetW = static_cast<uint32_t>(std::clamp(static_cast<float>(window_width_) * adaptiveScale_, 320.0f, static_cast<float>(maxW)));
+        uint32_t targetH = static_cast<uint32_t>(std::clamp(static_cast<float>(window_height_) * adaptiveScale_, 180.0f, static_cast<float>(maxH)));
+
+        Pipeline::dispatch_canvas(cmd, static_cast<int>(targetW), static_cast<int>(targetH), static_cast<float>(now));
 
         VkImageMemoryBarrier postComputeBarrier{};
         postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -304,8 +322,8 @@ public:
         flipBlit.srcOffsets[1] = { static_cast<int32_t>(targetW), static_cast<int32_t>(targetH), 1 };
 
         flipBlit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        flipBlit.dstOffsets[0] = { 0, (int32_t)swapExtent.height, 0 };
-        flipBlit.dstOffsets[1] = { (int32_t)swapExtent.width, 0, 1 };
+        flipBlit.dstOffsets[0] = { 0, static_cast<int32_t>(swapExtent.height), 0 };
+        flipBlit.dstOffsets[1] = { static_cast<int32_t>(swapExtent.width), 0, 1 };
 
         vkCmdBlitImage(blitCmd,
                        hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -346,6 +364,14 @@ public:
             LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
+
+        // 5-second FPS logger
+        if (now - lastFpsLog_ > 5.0) {
+            LOG_INFO_CAT("MAIN", "Average FPS: ~{:.1f} (dt avg = {:.3f}s)", 
+                         static_cast<double>(frameCount_) / (now - lastFpsLog_), (now - lastFpsLog_) / static_cast<double>(frameCount_));
+            lastFpsLog_ = now;
+            frameCount_ = 0;
+        }
     }
 
     void onResize(int newWidth, int newHeight) noexcept {
@@ -362,13 +388,14 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_, nullptr);
-        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_, nullptr);
-        if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+        // Destroy old HDR images & views
+        if (hdrOutputView_ != VK_NULL_HANDLE)   vkDestroyImageView (rtx().device, hdrOutputView_, nullptr);
+        if (hdrOutputImage_ != VK_NULL_HANDLE)  vkDestroyImage     (rtx().device, hdrOutputImage_, nullptr);
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
-        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_, nullptr);
-        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_, nullptr);
-        if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+        if (prevHdrOutputView_ != VK_NULL_HANDLE)   vkDestroyImageView (rtx().device, prevHdrOutputView_, nullptr);
+        if (prevHdrOutputImage_ != VK_NULL_HANDLE)  vkDestroyImage     (rtx().device, prevHdrOutputImage_, nullptr);
+        if (prevHdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
         hdrOutputView_   = VK_NULL_HANDLE;
         hdrOutputImage_  = VK_NULL_HANDLE;
@@ -423,15 +450,22 @@ public:
 
 private:
     void updateInternalResolution() noexcept {
+        // Base on actual window pixel size
+        internal_width_  = window_width_;
+        internal_height_ = window_height_;
+
+        // Respect Options::Rendering max caps (your 90% setting)
+        internal_width_  = std::min(internal_width_, Options::Rendering::INTERNAL_WIDTH);
+        internal_height_ = std::min(internal_height_, Options::Rendering::INTERNAL_HEIGHT);
+
+        // Optional game style min size (no zoom effect)
         using namespace Options::GameStyle;
         if (CurrentDimension == DimensionMode::Pure2D || CurrentDimension == DimensionMode::TwoPointFiveD) {
-            internal_width_  = std::min(Options::Rendering::INTERNAL_WIDTH, window_width_);
-            internal_height_ = std::min(Options::Rendering::INTERNAL_HEIGHT, window_height_);
-        } else {
-            internal_width_  = Options::Rendering::INTERNAL_WIDTH;
-            internal_height_ = Options::Rendering::INTERNAL_HEIGHT;
+            internal_width_  = std::max(320, internal_width_);
+            internal_height_ = std::max(180, internal_height_);
         }
-        LOG_INFO_CAT("RAYCANVAS", "Internal resolution: {}x{}", internal_width_, internal_height_);
+
+        LOG_INFO_CAT("RAYCANVAS", "Internal resolution conformed to window: {}x{} (capped by Options::Rendering)", internal_width_, internal_height_);
     }
 
     void createDescriptorPoolAndSet() noexcept {
@@ -495,9 +529,9 @@ private:
     void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_)   vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
-        if (hdrOutputImage_)  vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
-        if (hdrOutputMemory_) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
+        if (hdrOutputView_ != VK_NULL_HANDLE)   vkDestroyImageView(rtx().device, hdrOutputView_, nullptr);
+        if (hdrOutputImage_ != VK_NULL_HANDLE)  vkDestroyImage(rtx().device, hdrOutputImage_, nullptr);
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory(rtx().device, hdrOutputMemory_, nullptr);
 
         hdrOutputView_   = VK_NULL_HANDLE;
         hdrOutputImage_  = VK_NULL_HANDLE;
@@ -544,9 +578,9 @@ private:
     void createPreviousHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (prevHdrOutputView_)   vkDestroyImageView(rtx().device, prevHdrOutputView_, nullptr);
-        if (prevHdrOutputImage_)  vkDestroyImage(rtx().device, prevHdrOutputImage_, nullptr);
-        if (prevHdrOutputMemory_) vkFreeMemory(rtx().device, prevHdrOutputMemory_, nullptr);
+        if (prevHdrOutputView_ != VK_NULL_HANDLE)   vkDestroyImageView(rtx().device, prevHdrOutputView_, nullptr);
+        if (prevHdrOutputImage_ != VK_NULL_HANDLE)  vkDestroyImage(rtx().device, prevHdrOutputImage_, nullptr);
+        if (prevHdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory(rtx().device, prevHdrOutputMemory_, nullptr);
 
         prevHdrOutputView_   = VK_NULL_HANDLE;
         prevHdrOutputImage_  = VK_NULL_HANDLE;
@@ -588,59 +622,6 @@ private:
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &prevHdrOutputView_), "MEMORY", "Prev HDR View");
-    }
-
-    void copyHDRtoPrevious(VkCommandBuffer cmd) noexcept {
-        if (!prevHdrOutputImage_ || !hdrOutputImage_) return;
-
-        VkImageMemoryBarrier barriers[2]{};
-
-        barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        barriers[0].image = hdrOutputImage_;
-        barriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barriers[1].srcAccessMask = 0;
-        barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barriers[1].image = prevHdrOutputImage_;
-        barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0, 0, nullptr, 0, nullptr, 2, barriers);
-
-        VkImageCopy copy{};
-        copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        copy.srcOffset = {0, 0, 0};
-        copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        copy.dstOffset = {0, 0, 0};
-        copy.extent = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
-
-        vkCmdCopyImage(cmd,
-                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       prevHdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &copy);
-
-        VkImageMemoryBarrier post{};
-        post.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        post.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        post.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        post.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        post.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        post.image = prevHdrOutputImage_;
-        post.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 0, nullptr, 0, nullptr, 1, &post);
     }
 
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
@@ -723,6 +704,7 @@ private:
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (cmd) {
             vkCmdClearColorImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+            vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
             endSubmitAndWait(cmd);
         }
     }
@@ -754,6 +736,10 @@ private:
     float adaptiveScale_;
     double lastPresentTime_s_;
     double measuredRefreshRateHz_;
+
+    // FPS logger state
+    double lastFpsLog_;
+    uint64_t frameCount_;
 };
 
 inline RayCanvas* rayCanvas = nullptr;

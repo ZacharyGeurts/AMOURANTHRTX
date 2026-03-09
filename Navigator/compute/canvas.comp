@@ -2,18 +2,18 @@
 #extension GL_EXT_scalar_block_layout : enable
 
 // =============================================================================
-// TUNABLES — New adjustable settings for grass, ground, sky, fog, etc.
+// TUNABLES — Adjust these freely to play with the world!
 // (Everything below is safe to change — core logic stays intact)
 // =============================================================================
 
-// Camera & View (unchanged)
+// Camera & View
 #define CAMERA_POS_X                0.0     // X offset from origin
-#define CAMERA_POS_Y                4.5     // Height above ground
+#define CAMERA_POS_Y                5.0     // Height above ground (your original value)
 #define CAMERA_POS_Z                0.0     // Z offset (pull back/forward)
-#define CAMERA_FOV                  75.0    // Vertical FOV in degrees
-#define CAMERA_LOOK_DOWN_OFFSET     0.0   // Y bias in ray direction (look slightly down)
+#define CAMERA_FOV                  60.0    // Vertical FOV in degrees
+#define CAMERA_LOOK_DOWN_OFFSET     -0.15   // Y bias in ray direction (makes it look slightly down)
 
-// Sky & Lighting (unchanged)
+// Sky & Lighting
 #define SKY_NIGHT_ZENITH            vec3(0.15, 0.25, 0.50)
 #define SKY_NIGHT_HORIZON           vec3(0.02, 0.05, 0.15)
 #define SKY_DAY_ZENITH              vec3(0.50, 0.75, 1.00)
@@ -22,32 +22,27 @@
 #define SUN_HALO_INTENSITY          0.0
 #define SUN_HALO_EDGE_SHARPNESS     0.998   // Sun disk edge (lower = softer)
 #define MOON_HALO_POWER             20.0    // Moon glow intensity (optional)
-#define CLOUD_ANIMATION_SPEED       0.05    // Clouds move with wind/time (0.0 = static)
+#define CLOUD_ANIMATION_SPEED       0.05    // Clouds move with wind/time
 #define CLOUD_COVERAGE_SCALE        0.7     // How strongly clouds darken sky
 
-// Grass & Ground — original look preserved + new tunables
+// Grass & Ground
 #define GRASS_NOISE_SCALE1          2.0     // Large-scale grass variation
 #define GRASS_NOISE_SCALE2          5.0     // Medium detail
 #define GRASS_NOISE_SCALE3          12.0    // Fine detail
 #define GRASS_DARK                  vec3(0.15, 0.35, 0.08)
 #define GRASS_LIGHT                 vec3(0.25, 0.55, 0.12)
-#define GRASS_COLOR_VARIATION       0.15    // 0.0 = uniform green, 0.3 = subtle hue shifts (yellow/brown)
-#define GRASS_DENSITY               0.9     // 0.5 = sparse/thin, 1.0 = thick/full
-#define GRASS_BRIGHTNESS_CONTRAST   0.6     // 0.0 = flat color, 1.0 = strong dark/light contrast
-#define GRASS_SPECULAR_POWER        128.0   // Shininess exponent (higher = smaller, sharper highlights)
-#define GRASS_SPECULAR_INTENSITY    0.22    // Base specular amount (0.0 = no shine)
 #define WETNESS_MULTIPLIER          1.2     // How much rain/humidity darkens ground
-#define WET_SHINE_EXTRA             0.4     // Extra gloss when wet (0.0 = no shine boost)
 #define TEMP_COLOR_SHIFT_STRENGTH   0.5     // Cold → blue, hot → red/orange tint strength
+#define SPECULAR_POWER              128.0   // Shininess exponent
+#define SPECULAR_INTENSITY          0.22    // Base specular amount
 
-// Fog & Atmosphere — new breathing control
+// Fog & Atmosphere
 #define FOG_DENSITY_BASE            0.0004  // km⁻¹ baseline
 #define FOG_DAY_COLOR               vec3(0.72, 0.82, 0.96)
 #define FOG_NIGHT_COLOR             vec3(0.42, 0.50, 0.68)
 #define FOG_DAY_NIGHT_BLEND         0.35    // How much night darkens fog
-#define FOG_BREATHING_STRENGTH      0.08    // 0.0 = static fog, 0.2 = visible gentle pulse
 
-// Post-process (unchanged)
+// Post-process
 #define FINAL_EXPOSURE_BOOST        1.5     // Overall brightness multiplier
 #define VIGNETTE_STRENGTH           0.0     // Edge darkening (0 = off)
 
@@ -56,11 +51,8 @@
 #define DEBUG_SHOW_WIND             0       // 1 = tint with wind direction
 #define DEBUG_SHOW_WETNESS          0       // 1 = visualize wetness only
 
-// Day/Night Cycle (unchanged)
-#define DAY_NIGHT_CYCLE_LENGTH      1200.0  // adjustable in menu (seconds for full cycle)
-
 // =============================================================================
-// Shader code — original working version preserved exactly
+// Shader code — DO NOT CHANGE BELOW UNLESS ADDING FEATURES
 // =============================================================================
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -146,27 +138,17 @@ vec3 sampleSky(vec3 dir) {
 }
 
 // ────────────────────────────────────────────────
-// Seamless procedural grass texture — original preserved
+// Seamless procedural grass texture
 // ────────────────────────────────────────────────
 vec3 grassTexture(vec2 uv) {
     float n = noise(uv * GRASS_NOISE_SCALE1) * 0.5 +
               noise(uv * GRASS_NOISE_SCALE2) * 0.3 +
               noise(uv * GRASS_NOISE_SCALE3) * 0.2;
-
     vec3 dark = GRASS_DARK;
     vec3 light = GRASS_LIGHT;
+    vec3 base = mix(dark, light, n);
 
-    // New: subtle color variation (hue shift)
-    float hueVar = noise(uv * 50.0 + pc.time * 0.05) * GRASS_COLOR_VARIATION - (GRASS_COLOR_VARIATION * 0.5);
-    vec3 base = mix(dark, light, n + hueVar);
-
-    // New: density/clumpiness (thins out sparse areas)
-    base *= GRASS_DENSITY;
-
-    // New: brightness contrast range
-    base = mix(vec3(0.5), base, 1.0);
-
-    // Temperature tint
+    // Temperature tint — cold blue shift, hot red/orange
     float tempNorm = clamp((pc.temperatureC + 30.0) / 80.0, 0.0, 1.0);
     base *= mix(vec3(0.95, 1.0, 1.1), vec3(1.15, 0.95, 0.85), tempNorm * TEMP_COLOR_SHIFT_STRENGTH);
 
@@ -174,7 +156,7 @@ vec3 grassTexture(vec2 uv) {
 }
 
 // ────────────────────────────────────────────────
-// Sample ground with material tint — original preserved
+// Sample ground with material tint
 // ────────────────────────────────────────────────
 vec3 sampleGround(vec3 hit) {
     vec3 baseColor = vec3(0.45, 0.45, 0.42);  // RoughConcrete.baseColor.rgb
@@ -193,22 +175,20 @@ vec3 sampleGround(vec3 hit) {
     // Specular highlight (simple)
     vec3 view = normalize(pc.cameraPos - hit);
     vec3 halfV = normalize(pc.sunDir + view);
-    float spec = pow(max(0.0, dot(normal, halfV)), (1.0 - roughness) * GRASS_SPECULAR_POWER) * GRASS_SPECULAR_INTENSITY;
+    float spec = pow(max(0.0, dot(normal, halfV)), (1.0 - roughness) * SPECULAR_POWER) * specular;
     color += vec3(1.0) * spec * pc.sunIntensity * pc.dayNightFactor;
 
-    // Wetness — darkening + shine
+    // Wetness
     float wet = pc.humidity * pc.precipitationFactor * WETNESS_MULTIPLIER;
     color = mix(color, vec3(0.18, 0.26, 0.34), wet * 0.5);
-    color += vec3(0.08) * wet * WET_SHINE_EXTRA;  // extra gloss boost when wet
 
-    // Fog — gentle breathing
+    // Fog
     float dist = length(hit - pc.cameraPos);
-    float fogPulse = 1.0 + FOG_BREATHING_STRENGTH * sin(pc.time * 0.02);
-    float fog = 1.0 - exp(-dist * pc.fogDensity * FOG_DENSITY_BASE * fogPulse);
+    float fog = 1.0 - exp(-dist * pc.fogDensity * FOG_DENSITY_BASE);
     vec3 fogC = mix(FOG_DAY_COLOR, FOG_NIGHT_COLOR, pc.dayNightFactor * FOG_DAY_NIGHT_BLEND);
     color = mix(color, fogC, fog);
 
-    // Debug modes
+    // Debug modes (toggle in pc.debugFlags)
     if ((pc.debugFlags & DEBUG_SHOW_NORMALS) != 0u) {
         color = normal * 0.5 + 0.5;
     }
@@ -223,7 +203,7 @@ vec3 sampleGround(vec3 hit) {
 }
 
 // ────────────────────────────────────────────────
-// Main — your original working version preserved exactly
+// Main — your working version as base
 // ────────────────────────────────────────────────
 void main() {
     ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
