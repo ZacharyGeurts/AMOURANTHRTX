@@ -147,8 +147,8 @@ namespace Options::Camera {
 // Rendering & Performance
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Rendering {
-    inline constexpr int     INTERNAL_WIDTH           = 1920;
-    inline constexpr int     INTERNAL_HEIGHT          = 1080;
+    inline int     INTERNAL_WIDTH           = 1920;
+    inline int     INTERNAL_HEIGHT          = 1080;
 
     inline constexpr bool    ACCUMULATION             = true;
     inline constexpr bool    ADAPTIVE_SAMPLING        = true;
@@ -156,9 +156,13 @@ namespace Options::Rendering {
     inline constexpr float   EXPOSURE                 = 0.2f;
     inline constexpr bool    ENABLE_TONEMAP           = true;
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;
+    inline int     MaxSamplesPerPixel       = 4;      // slider: 1–8
+    inline int     MaxRayRecursion          = 8;     // slider: 4–16
+    inline bool    EnableAdaptiveQuality    = true;   // checkbox
+    inline float   QualityHeadroomThreshold = 0.75f;  // 0.6–0.9 (how much under target to boost)
 
     // Temporal accumulation strength (0.0 = no accumulation, 1.0 = freeze)
-    inline float             TemporalBlendStrength    = 0.92f;
+    inline float             TemporalBlendStrength    = 1.0f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -32,7 +32,6 @@ using u32 = std::uint32_t;
 // ────────────────────────────────────────────────
 inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[] = {
     {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 0: outputImage (HDR canvas)
-    // {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 1: prevImage (temporal accumulation) — UNCOMMENT WHEN READY
     {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 1: scene uniforms (future)
     {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 2: geometry / instances (SDF objects, future)
     {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 3: lights / environment (sun, moon, sky)
@@ -43,7 +42,7 @@ inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[] = {
 inline constexpr VkShaderStageFlags COMPUTE_PUSH_MASK = VK_SHADER_STAGE_COMPUTE_BIT;
 
 // ────────────────────────────────────────────────
-// Push constants — Living World parameters (synced with shader)
+// Push constants — Living World parameters + adaptive sampling
 // ────────────────────────────────────────────────
 struct alignas(16) PushConstants {
     float       time;               // total elapsed seconds
@@ -58,25 +57,30 @@ struct alignas(16) PushConstants {
     float       exposure;           // post-process exposure multiplier
 
     glm::vec3   sunDir;             // normalized sun direction
-    float       sunIntensity;       // sun strength (nits or arbitrary)
+    float       sunIntensity;       // sun strength
 
     glm::vec3   moonDir;            // normalized moon direction
     float       moonIntensity;      // moon strength
 
     glm::vec3   windDir;            // normalized wind direction
-    float       windStrength;       // 0..1 scale (affects vegetation sway)
+    float       windStrength;       // 0..1 scale
 
-    float       temperatureC;       // -50..50 °C (affects material tint, sky color)
-    float       humidity;           // 0..1 (wetness, fog density)
-    float       airPressureKPa;     // ~90..110 kPa (weather pressure)
-    float       precipitationFactor;// 0..1 (rain/snow intensity)
+    float       temperatureC;       // -50..50 °C
+    float       humidity;           // 0..1
+    float       airPressureKPa;     // ~90..110 kPa
+    float       precipitationFactor;// 0..1
 
-    float       fogDensity;         // km⁻¹ (fog falloff)
-    float       dayNightFactor;     // 0..1 (0=midnight, 1=noon — sky/lighting interp)
-    float       cloudCoverage;      // 0..1 (procedural cloud density)
-    u32         debugFlags;         // bitfield: wireframe, normals, material IDs, etc.
+    float       fogDensity;         // km⁻¹
+    float       dayNightFactor;     // 0..1
+    float       cloudCoverage;      // 0..1
+    u32         debugFlags;         // bitfield
 
-    float       pad1[4];            // pad to 16-byte multiple (future expansion)
+    // Adaptive sampling parameters (new — shader can use these)
+    int         samplesPerPixel;    // 1–16 (more = higher quality when fast)
+    float       temporalBlend;      // 0.75–0.98 (stronger when stable)
+    int         maxRecursion;       // 4–16 (more bounces when headroom)
+
+    float       pad1[4];            // pad to 16-byte multiple
 };
 
 inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
@@ -247,9 +251,12 @@ inline void create_canvas_pipeline(const std::string& shader_override = "", bool
 }
 
 // ────────────────────────────────────────────────
-// Dispatch — pushes full living world state using real CAM
+// Dispatch — pushes full living world state + adaptive sampling params
 // ────────────────────────────────────────────────
-inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float totalTime) noexcept {
+inline void dispatch_canvas(VkCommandBuffer cmd, 
+                            int width, int height, 
+                            float totalTime) noexcept
+{
     if (canvas_pipeline == VK_NULL_HANDLE) {
         create_canvas_pipeline();
         if (canvas_pipeline == VK_NULL_HANDLE) return;
@@ -259,19 +266,19 @@ inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float to
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
 
-    // Push real-time camera + living world state
+    // Push real-time camera + living world state + adaptive params
     PushConstants pc{};
     pc.time                = totalTime;
     pc.frameSeed           = static_cast<u32>(totalTime * 1000.0f) ^ 0xDEADBEEFu;
 
-    // Real camera from CAM singleton (cinematic orbiting + look offset)
+    // Real camera from CAM singleton
     pc.cameraPos           = CAM.position();
     pc.cameraQuat          = glm::vec4(CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
     pc.cameraFovDeg        = CAM.fov();
     pc.aspectRatio         = static_cast<float>(width) / static_cast<float>(height);
-    pc.exposure            = Options::Rendering::EXPOSURE;  // or dynamic
+    pc.exposure            = Options::Rendering::EXPOSURE;
 
-    // Living world environment (defaults — can be driven by simulation later)
+    // Living world environment
     pc.sunDir              = glm::normalize(glm::vec3(1.0f, 1.5f, 0.8f));
     pc.sunIntensity        = 5.0f;
     pc.moonDir             = glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f));
@@ -283,17 +290,22 @@ inline void dispatch_canvas(VkCommandBuffer cmd, u32 width, u32 height, float to
     pc.airPressureKPa      = 101.3f;
     pc.precipitationFactor = 0.0f;
     pc.fogDensity          = 0.0008f;
-    pc.dayNightFactor      = 0.8f;  // 0=night, 1=day — can be sin(time) based
+    pc.dayNightFactor      = 0.8f;
     pc.cloudCoverage       = 0.4f;
     pc.debugFlags          = 0;
+
+    // Adaptive sampling parameters
+    pc.samplesPerPixel     = Options::Rendering::MaxSamplesPerPixel;
+    pc.temporalBlend       = 0.0;
+    pc.maxRecursion        = Options::Rendering::MaxRayRecursion;
 
     vkCmdPushConstants(cmd, pipeline_layout, COMPUTE_PUSH_MASK,
                        0, sizeof(PushConstants), &pc);
 
-    u32 dx = (width  + 15) / 16;
-    u32 dy = (height + 15) / 16;
+    int dx = (width  + 15) / 16;
+    int dy = (height + 15) / 16;
 
-    vkCmdDispatch(cmd, dx, dy, 1);
+    vkCmdDispatch(cmd, static_cast<uint32_t>(dx), static_cast<uint32_t>(dy), 1);
 }
 
 // ────────────────────────────────────────────────

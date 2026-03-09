@@ -1183,15 +1183,15 @@ struct Swapchain {
                              0, 0, nullptr, 0, nullptr, 1, &barrier);
 
         VkImageBlit region{};
-        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.srcOffsets[0] = {0, 0, 0};
-        region.srcOffsets[1] = {static_cast<int32_t>(srcExtent.width),
-                                static_cast<int32_t>(srcExtent.height), 1};
+        region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        region.srcOffsets[0] = { 0, 0, 0 };
+        region.srcOffsets[1] = { static_cast<int32_t>(srcExtent.width),
+                                static_cast<int32_t>(srcExtent.height), 1 };
 
-        region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.dstOffsets[0] = {0, 0, 0};
-        region.dstOffsets[1] = {static_cast<int32_t>(dstExtent.width),
-                                static_cast<int32_t>(dstExtent.height), 1};
+        region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        region.dstOffsets[0] = { 0, 0, 0 };
+        region.dstOffsets[1] = { static_cast<int32_t>(dstExtent.width),
+                                static_cast<int32_t>(dstExtent.height), 1 };
 
         vkCmdBlitImage(cmd,
                        srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

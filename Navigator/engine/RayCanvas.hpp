@@ -46,7 +46,10 @@ public:
           prevHdrOutputView_(VK_NULL_HANDLE),
           prevHdrOutputMemory_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
-          descriptorSet_(VK_NULL_HANDLE)
+          descriptorSet_(VK_NULL_HANDLE),
+          adaptiveScale_(1.0f),
+          lastPresentTime_s_(0.0),
+          measuredRefreshRateHz_(60.0)
     {
         updateInternalResolution();		
 
@@ -244,9 +247,27 @@ public:
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
                                 0, 1, &set, 0, nullptr);
 
+        // Adaptive internal resolution: scale up to 8K when GPU has headroom,
+        // but never exceed 95% of target frame time budget
+        double delta_s = now - lastPresentTime_s_;
+        double frameBudget = 1000000.0 / measuredRefreshRateHz_;  // target us per frame
+        double safetyMargin = frameBudget * 0.05;  // 5% headroom
+
+        // If last frame was under budget, gently scale up
+        if (delta_s < frameBudget - safetyMargin) {
+            adaptiveScale_ = std::min(adaptiveScale_ + 0.02f, 8.0f);  // max 8× base (8K-ish)
+        }
+        // If last frame was too slow, scale down quickly
+        else if (delta_s > frameBudget * 0.95) {
+            adaptiveScale_ = std::max(adaptiveScale_ - 0.08f, 0.5f);  // min 50% base
+        }
+
+        uint32_t targetW = static_cast<uint32_t>(std::clamp(internal_width_ * adaptiveScale_, 320.0f, 8192.0f));
+        uint32_t targetH = static_cast<uint32_t>(std::clamp(internal_height_ * adaptiveScale_, 180.0f, 8192.0f));
+
         Pipeline::dispatch_canvas(cmd,
-                                  static_cast<uint32_t>(internal_width_),
-                                  static_cast<uint32_t>(internal_height_),
+                                  targetW,
+                                  targetH,
                                   static_cast<float>(now));
 
         VkImageMemoryBarrier postComputeBarrier{};
@@ -330,7 +351,7 @@ public:
         VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
 
         if (pres == VK_SUCCESS) {
-            Swapchain::updateRefreshEstimate(now);
+            Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
             LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — recreate next frame");
             minimized_ = true;
@@ -745,4 +766,9 @@ private:
 
     VkDescriptorPool descriptorPool_         = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
+
+    // Adaptive resolution state
+    float adaptiveScale_;
+    double lastPresentTime_s_;
+    double measuredRefreshRateHz_;
 };
