@@ -79,9 +79,13 @@ Currently it is intended to use Linux as your SDK and Ming to make your Windows 
 I am using X11 and Linux Mint.  
 
 I tried to keep the wiki smart enough that even a high school freshman can dream big.  
-Everyone gets the tab on their browser now for Grok and AI, up and comers would be foolish not to use it.  
+Everyone gets the tab on their browser now for AI, up and comers would be foolish not to use it.  
 
 You have no obligation to share code back with us.  
+The engine integrates and is your program when you modify it.  
+We compile to 5-10 megs ourselvess.  
+Operation is simple.  We are not a middleman, you just know where everything is.  
+SDL3 integration includes gamer paradise for input and audio.  
 
 Have your RTX at zero cost per watt with me.  
 [flashing lights warning](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif)  
