@@ -21,6 +21,7 @@
 #include <array>
 #include <format>
 #include <filesystem>
+#include <algorithm>
 
 bool needs_swapchain_recreate = false;
 
@@ -42,9 +43,6 @@ public:
           hdrOutputImage_(VK_NULL_HANDLE),
           hdrOutputView_(VK_NULL_HANDLE),
           hdrOutputMemory_(VK_NULL_HANDLE),
-          prevHdrOutputImage_(VK_NULL_HANDLE),
-          prevHdrOutputView_(VK_NULL_HANDLE),
-          prevHdrOutputMemory_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE),
           adaptiveScale_(1.0f),
@@ -63,7 +61,6 @@ public:
         buildMaterialLibrary();
 
         createPersistentHDR();
-        createPreviousHDR();
         createDescriptorPoolAndSet();
 
         Pipeline::initialize();
@@ -88,10 +85,6 @@ public:
         vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
         vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
-        vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
-        vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
-        vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
-
         Memory::destroy(materialsHandle_);
 
         Pipeline::shutdown();
@@ -100,7 +93,6 @@ public:
     void buildMaterialLibrary() {
         std::vector<Material> materials;
 
-        // Helper: add a single-layer material from Materials namespace
         auto addBase = [&](const MaterialLayer& layer, const char* name = nullptr) {
             Material m{};
             m.layers[0]            = layer;
@@ -112,7 +104,6 @@ public:
             }
         };
 
-        // Helper: add a pre-defined layered material
         auto addFull = [&](const Material& mat, const char* name = nullptr) {
             materials.push_back(mat);
             if (name) {
@@ -120,24 +111,18 @@ public:
             }
         };
 
-        // ── Core realistic bases ──────────────────────────────────────────────
         addBase(Materials::OpenPBR_DielectricBase,      "Dielectric (glass-like)");
         addBase(Materials::OpenPBR_Metal,               "Polished Metal / Gold");
 
-        // ── Stylized Disney/Pixar 2026 tuned presets ──────────────────────────
         addBase(Materials::DisneyCartoonSkin,           "Cartoon Character Skin");
         addBase(Materials::DisneyVelvetFabric,          "Velvet / Fabric");
         addBase(Materials::PixarToyPlastic,             "Toy Plastic (glossy)");
         addBase(Materials::OpenPBR_GlossyPaint,         "Glossy Painted Surface");
         addBase(Materials::OpenPBR_FrostedGlass,        "Frosted / Translucent Glass");
 
-        // ── Layered / complex examples ────────────────────────────────────────
         addFull(Materials::DisneyPrincessGown,          "Princess Gown (velvet + satin)");
         addFull(Materials::CartoonCharacterSkin,        "Enhanced Cartoon Skin");
         addFull(Materials::ShinyRetroRobot,             "Shiny Retro Robot (paint + chrome)");
-
-        // Optional: add more procedural / experimental variants here in future
-        // e.g. addBase with procType = 1 (Perlin), procType = 2 (neural bake), etc.
 
         VkDeviceSize size = materials.size() * sizeof(Material);
 
@@ -250,6 +235,8 @@ public:
         // Adaptive internal resolution: scale up to 8K when GPU has headroom,
         // but never exceed 95% of target frame time budget
         double delta_s = now - lastPresentTime_s_;
+        lastPresentTime_s_ = now;
+
         double frameBudget = 1000000.0 / measuredRefreshRateHz_;  // target us per frame
         double safetyMargin = frameBudget * 0.05;  // 5% headroom
 
@@ -262,8 +249,8 @@ public:
             adaptiveScale_ = std::max(adaptiveScale_ - 0.08f, 0.5f);  // min 50% base
         }
 
-        uint32_t targetW = static_cast<uint32_t>(std::clamp(internal_width_ * adaptiveScale_, 320.0f, 8192.0f));
-        uint32_t targetH = static_cast<uint32_t>(std::clamp(internal_height_ * adaptiveScale_, 180.0f, 8192.0f));
+        uint32_t targetW = static_cast<uint32_t>(std::clamp(static_cast<float>(internal_width_) * adaptiveScale_, 320.0f, 8192.0f));
+        uint32_t targetH = static_cast<uint32_t>(std::clamp(static_cast<float>(internal_height_) * adaptiveScale_, 180.0f, 8192.0f));
 
         Pipeline::dispatch_canvas(cmd,
                                   targetW,
@@ -314,7 +301,7 @@ public:
         VkImageBlit flipBlit{};
         flipBlit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
         flipBlit.srcOffsets[0] = { 0, 0, 0 };
-        flipBlit.srcOffsets[1] = { (int32_t)internal_width_, (int32_t)internal_height_, 1 };
+        flipBlit.srcOffsets[1] = { static_cast<int32_t>(targetW), static_cast<int32_t>(targetH), 1 };
 
         flipBlit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
         flipBlit.dstOffsets[0] = { 0, (int32_t)swapExtent.height, 0 };
@@ -375,7 +362,6 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        // Destroy old HDR images & views
         if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_, nullptr);
         if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_, nullptr);
         if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
@@ -518,15 +504,15 @@ private:
         hdrOutputMemory_ = VK_NULL_HANDLE;
 
         VkImageCreateInfo ci{};
-        ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        ci.imageType   = VK_IMAGE_TYPE_2D;
-        ci.format      = VK_FORMAT_R32G32B32A32_SFLOAT;
-        ci.extent      = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
-        ci.mipLevels   = 1;
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        ci.extent = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
+        ci.mipLevels = 1;
         ci.arrayLayers = 1;
-        ci.samples     = VK_SAMPLE_COUNT_1_BIT;
-        ci.tiling      = VK_IMAGE_TILING_OPTIMAL;
-        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_), "MEMORY", "HDR Image");
@@ -537,8 +523,8 @@ private:
         uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         VkMemoryAllocateInfo mai{};
-        mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        mai.allocationSize  = req.size;
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize = req.size;
         mai.memoryTypeIndex = memType;
 
         vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_), "MEMORY", "HDR Memory");
@@ -546,10 +532,10 @@ private:
         vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
 
         VkImageViewCreateInfo vi{};
-        vi.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        vi.image            = hdrOutputImage_;
-        vi.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
+        vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vi.image = hdrOutputImage_;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_), "MEMORY", "HDR View");
@@ -567,15 +553,15 @@ private:
         prevHdrOutputMemory_ = VK_NULL_HANDLE;
 
         VkImageCreateInfo ci{};
-        ci.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        ci.imageType   = VK_IMAGE_TYPE_2D;
-        ci.format      = VK_FORMAT_R32G32B32A32_SFLOAT;
-        ci.extent      = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
-        ci.mipLevels   = 1;
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        ci.extent = {static_cast<uint32_t>(internal_width_), static_cast<uint32_t>(internal_height_), 1};
+        ci.mipLevels = 1;
         ci.arrayLayers = 1;
-        ci.samples     = VK_SAMPLE_COUNT_1_BIT;
-        ci.tiling      = VK_IMAGE_TILING_OPTIMAL;
-        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &prevHdrOutputImage_), "MEMORY", "Prev HDR Image");
@@ -586,8 +572,8 @@ private:
         uint32_t memType = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         VkMemoryAllocateInfo mai{};
-        mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        mai.allocationSize  = req.size;
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize = req.size;
         mai.memoryTypeIndex = memType;
 
         vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &prevHdrOutputMemory_), "MEMORY", "Prev HDR Memory");
@@ -595,10 +581,10 @@ private:
         vkBindImageMemory(rtx().device, prevHdrOutputImage_, prevHdrOutputMemory_, 0);
 
         VkImageViewCreateInfo vi{};
-        vi.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        vi.image            = prevHdrOutputImage_;
-        vi.viewType         = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
+        vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vi.image = prevHdrOutputImage_;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &prevHdrOutputView_), "MEMORY", "Prev HDR View");
@@ -737,7 +723,6 @@ private:
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (cmd) {
             vkCmdClearColorImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
-            vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
             endSubmitAndWait(cmd);
         }
     }
@@ -753,8 +738,6 @@ private:
     bool           firstFrame_       = true;
 
     uint64_t       materialsHandle_          = 0;
-    std::vector<Material> allMaterials;
-    uint32_t       materialCount = 0;
 
     VkImage        hdrOutputImage_           = VK_NULL_HANDLE;
     VkImageView    hdrOutputView_            = VK_NULL_HANDLE;
@@ -772,3 +755,5 @@ private:
     double lastPresentTime_s_;
     double measuredRefreshRateHz_;
 };
+
+inline RayCanvas* rayCanvas = nullptr;

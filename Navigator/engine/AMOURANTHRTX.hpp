@@ -1476,7 +1476,7 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     rtx().instance = createVulkanInstance();
     if (rtx().instance == VK_NULL_HANDLE) return false;
 
-    if (!SDL_Vulkan_CreateSurface(window, rtx().instance, nullptr, &rtx().surface)) return false;
+    if (SDL_Vulkan_CreateSurface(window, rtx().instance, nullptr, &rtx().surface) == 0) return false;
 
     rtx().device = createLogicalDeviceAndSelectGPU(rtx().instance, rtx().surface);
     if (rtx().device == VK_NULL_HANDLE) return false;

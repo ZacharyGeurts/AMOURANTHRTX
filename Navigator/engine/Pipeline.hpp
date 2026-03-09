@@ -75,10 +75,10 @@ struct alignas(16) PushConstants {
     float       cloudCoverage;      // 0..1
     u32         debugFlags;         // bitfield
 
-    // Adaptive sampling parameters (new — shader can use these)
-    int         samplesPerPixel;    // 1–16 (more = higher quality when fast)
-    float       temporalBlend;      // 0.75–0.98 (stronger when stable)
-    int         maxRecursion;       // 4–16 (more bounces when headroom)
+    // Adaptive sampling parameters (pulled from Options::Rendering)
+    int         samplesPerPixel;    // from Options::Rendering::MaxSamplesPerPixel
+    float       temporalBlend;      // from Options::Rendering::TemporalBlendStrength (0.0 = sharp)
+    int         maxRecursion;       // from Options::Rendering::MaxRayRecursion
 
     float       pad1[4];            // pad to 16-byte multiple
 };
@@ -278,25 +278,26 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.aspectRatio         = static_cast<float>(width) / static_cast<float>(height);
     pc.exposure            = Options::Rendering::EXPOSURE;
 
-    // Living world environment
+    // Living world environment (pulled from Options::LivingWorld)
     pc.sunDir              = glm::normalize(glm::vec3(1.0f, 1.5f, 0.8f));
-    pc.sunIntensity        = 5.0f;
+    pc.sunIntensity        = Options::LivingWorld::SunIntensityDay +
+                             Options::LivingWorld::SunIntensityNight * 1.0f;
     pc.moonDir             = glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f));
-    pc.moonIntensity       = 0.4f;
-    pc.windDir             = glm::normalize(glm::vec3(0.7f, 0.0f, 0.3f));
-    pc.windStrength        = 0.6f;
-    pc.temperatureC        = 22.0f;
-    pc.humidity            = 0.65f;
-    pc.airPressureKPa      = 101.3f;
-    pc.precipitationFactor = 0.0f;
-    pc.fogDensity          = 0.0008f;
-    pc.dayNightFactor      = 0.8f;
-    pc.cloudCoverage       = 0.4f;
-    pc.debugFlags          = 0;
+    pc.moonIntensity       = Options::LivingWorld::MoonIntensity;
+    pc.windDir             = Options::LivingWorld::WindDirection;
+    pc.windStrength        = Options::LivingWorld::WindStrength;
+    pc.temperatureC        = Options::LivingWorld::TemperatureC;
+    pc.humidity            = Options::LivingWorld::Humidity;
+    pc.airPressureKPa      = Options::LivingWorld::AirPressureKPa;
+    pc.precipitationFactor = Options::LivingWorld::PrecipitationFactor;
+    pc.fogDensity          = Options::LivingWorld::FogDensity;
+    pc.dayNightFactor      = Options::LivingWorld::CurrentTimeOfDay / 24.0f;
+    pc.cloudCoverage       = Options::LivingWorld::CloudCoverage;
+    pc.debugFlags          = Options::LivingWorld::DebugFlags;
 
-    // Adaptive sampling parameters
-    pc.samplesPerPixel     = Options::Rendering::MaxSamplesPerPixel;
-    pc.temporalBlend       = 0.0;
+    // Adaptive sampling parameters (from Options::Rendering)
+    pc.samplesPerPixel     = Options::Rendering::EnableAdaptiveQuality ? Options::Rendering::MaxSamplesPerPixel : 1;
+    pc.temporalBlend       = Options::Rendering::TemporalBlendStrength;  // 0.0 = sharp, >0 = accumulation
     pc.maxRecursion        = Options::Rendering::MaxRayRecursion;
 
     vkCmdPushConstants(cmd, pipeline_layout, COMPUTE_PUSH_MASK,
