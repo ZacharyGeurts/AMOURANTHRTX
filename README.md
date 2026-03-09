@@ -83,7 +83,7 @@ Everyone gets the tab on their browser now for AI, up and comers would be foolis
 
 You have no obligation to share code back with us.  
 The engine integrates and is your program when you modify it.  
-We compile to 5-10 megs ourselvess.  
+We compile to 5-10 megs ourselves.  
 Operation is simple.  We are not a middleman, you just know where everything is.  
 SDL3 integration includes gamer paradise for input and audio.  
 
@@ -104,10 +104,10 @@ See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine in
 Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
-I would be taking a 1 to their 2 parts as far as distribution ratio.  
+   
 If they do not like my using their brand, they can come to Michigan and stream the firing.
 https://www.twitch.tv/AMOURANTH  
-I plan fireworks before 4th of July.  
+I plan fireworks for the 4th of July.  
 
 Current and archived content subject to license.  
 
