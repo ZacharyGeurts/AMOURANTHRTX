@@ -1,8 +1,8 @@
 No demons permitted.  
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
   
-3D Amouranth Cube Demo  
-https://x.com/ZacharyGeurts/status/2029738976299368778  
+Demonstration showcase  
+https://x.com/ZacharyGeurts/status/2031298561900446079  
 
 Help yourself to the demos folder.  
 Navigator/compute/canvas.comp is to be the one file to update.  
