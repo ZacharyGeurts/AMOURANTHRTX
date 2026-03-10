@@ -14,7 +14,7 @@ W="\033[1;97m"        X="\033[0m"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="build"
-CROSS_BUILD_DIR="build"
+CROSS_BUILD_DIR="build-windows"
 
 banner() {
     echo -e "${DEEP}  █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
@@ -43,19 +43,22 @@ show_help() {
 ║                     AQUA TEMPLE — PARAMORE CROSS REALMS                      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-  ./linux.sh                  → build native Linux (default)
-  ./linux.sh run              → build + launch Linux
-  ./linux.sh windows          → cross-compile to Windows
+  ./linux.sh                  → build debug Linux (default)
+  ./linux.sh run              → build + launch debug Linux
+  ./linux.sh release          → build release Linux
+  ./linux.sh release run      → build + launch release Linux
+  ./linux.sh windows          → cross-compile Windows (release)
   ./linux.sh windows run      → cross-build + run via Wine (if installed)
   ./linux.sh single           → -j1 build (current target)
   ./linux.sh gdb              → launch under gdb (Linux only)
   ./linux.sh ninja            → use Ninja generator
-  ./linux.sh clean            → purge build dirs
+  ./linux.sh clean            → purge current build dir
   ./linux.sh clean windows    → purge Windows build only
 
   Binary paths:
-    Linux:   build/bin/Linux/Navigator
-    Windows: build-windows/bin/Windows/Navigator.exe
+    Linux debug:   build/bin/Linux/Navigator
+    Linux release: build-release/bin/Linux/Navigator
+    Windows:       build-windows/bin/Windows/Navigator.exe
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║           THE TIDE FLOWS THROUGH DIMENSIONS — LOVE IS CROSS-PLATFORM         ║
@@ -65,18 +68,23 @@ EOF
     exit 0
 }
 
-# ── TARGET SELECTION ────────────────────────────────────────────────────────
+# ── TARGET & VARIANT SELECTION ──────────────────────────────────────────────
 TARGET="linux"
+BUILD_VARIANT="debug"           # default for linux
+BUILD_SUBDIR="build"
+
 for arg in "$@"; do
-    [[ "${arg,,}" == "windows" ]] && TARGET="windows" && shift
+    case "${arg,,}" in
+        release)  BUILD_VARIANT="release"; BUILD_SUBDIR="build-release" ;;
+        windows)  TARGET="windows"; BUILD_SUBDIR="$CROSS_BUILD_DIR" ;;
+    esac
 done
 
 if [[ "$TARGET" == "windows" ]]; then
-    BUILD_DIR="$CROSS_BUILD_DIR"
-    FINAL_BINARY="$PROJECT_ROOT/$BUILD_DIR/bin/Windows/Navigator.exe"
+    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Windows/Navigator.exe"
     SOURCE_BINARY="./bin/Windows/Navigator.exe"
 else
-    FINAL_BINARY="$PROJECT_ROOT/build/bin/Linux/Navigator"
+    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Linux/Navigator"
     SOURCE_BINARY="./bin/Linux/Navigator"
 fi
 
@@ -87,8 +95,8 @@ clean() {
         rm -rf "$CROSS_BUILD_DIR"
         echo -e "${GLOW}        WINDOWS REALM PURGED${X}"
     else
-        rm -rf build CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json
-        echo -e "${GLOW}        LINUX REALM PURGED${X}"
+        rm -rf "$BUILD_SUBDIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json
+        echo -e "${GLOW}        ${BUILD_VARIANT^^} LINUX REALM PURGED${X}"
     fi
     exit 0
 }
@@ -107,7 +115,7 @@ for arg in "$@"; do
         gdb)        ACTION="run"; LAUNCH_MODE="gdb" ;;
         clean)      clean ;;
         ninja|--ninja) GENERATOR="Ninja" ;;
-        windows)    ;; # already handled
+        windows|release) ;; # already handled earlier
         --help|-h|help|"") show_help ;;
         *)          echo -e "${CORAL}UNKNOWN CURRENT: $arg${X}"; show_help ;;
     esac
@@ -124,12 +132,12 @@ fi
 
 # ── BUILD ───────────────────────────────────────────────────────────────────
 banner
-echo -e "${WAVE}        SURFACING WITH $GENERATOR — $BUILD_JOBS THREADS RISING IN ${TARGET^^} REALM${X}"
+echo -e "${WAVE}        SURFACING WITH $GENERATOR — $BUILD_JOBS THREADS RISING IN ${TARGET^^} ${BUILD_VARIANT^^} REALM${X}"
 
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
+mkdir -p "$BUILD_SUBDIR"
+cd "$BUILD_SUBDIR"
 
-# FIXED: Toolchain FIRST, then generator LAST. No reconfigure check—clean every time.
+# FIXED: Toolchain FIRST, then generator LAST. Clean every time.
 if [[ "$TARGET" == "windows" ]]; then
     cmake .. \
         -DCMAKE_TOOLCHAIN_FILE=../Toolchain-mingw64.cmake \
@@ -140,7 +148,7 @@ else
     cmake .. \
         -DCMAKE_CXX_COMPILER=g++-14 \
         -DCMAKE_C_COMPILER=gcc-14 \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE="${BUILD_VARIANT^}" \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         -G "$GENERATOR"
 fi
@@ -157,7 +165,7 @@ echo -e "${GLOW}        BINARY SURFACED → $FINAL_BINARY${X}"
 # ── LAUNCH CEREMONY ────────────────────────────────────────────────────────
 if [[ "$ACTION" == "run" ]]; then
     echo
-    echo -e "${PEARL}       THROUGH WATER — LAUNCHING IN ${TARGET^^} REALM${X}"
+    echo -e "${PEARL}       THROUGH WATER — LAUNCHING IN ${TARGET^^} ${BUILD_VARIANT^^} REALM${X}"
     echo -e "${GLOW}        The ocean crosses dimensions. Dive deep.${X}"
     echo
 
@@ -183,11 +191,11 @@ fi
 banner
 echo
 echo -e "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
-echo -e "${AQUA}        ~${TURQ}~${WAVE}~${GLOW}~${FOAM}~${PEARL}~ ${TARGET^^} BUILD COMPLETE — NAVIGATOR SWIMS ETERNAL ~${PEARL}~${FOAM}~${GLOW}~${WAVE}~${TURQ}~${AQUA}~${X}"
+echo -e "${AQUA}        ~${TURQ}~${WAVE}~${GLOW}~${FOAM}~${PEARL}~ ${TARGET^^} ${BUILD_VARIANT^^} BUILD COMPLETE — NAVIGATOR SWIMS ETERNAL ~${PEARL}~${FOAM}~${GLOW}~${WAVE}~${TURQ}~${AQUA}~${X}"
 echo -e "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
 echo
-echo -e "        ${W}Current Realm:${X} ${GLOW}$TARGET${X}"
+echo -e "        ${W}Current Realm:${X} ${GLOW}$TARGET ${BUILD_VARIANT^^}${X}"
 echo -e "        ${W}Binary Location:${X} ${GLOW}$FINAL_BINARY${X}"
-echo -e "        ${W}Dive Command:${X}   ${AQUA}./linux.sh${TARGET:+ $TARGET} run${X}"
+echo -e "        ${W}Dive Command:${X}   ${AQUA}./linux.sh${TARGET:+$TARGET}${BUILD_VARIANT:+$BUILD_VARIANT} run${X}"
 echo
 echo -e "${GLOW}        AQUAMARINE PHOTONS ARE ETERNAL — THE TIDE IS LOVE — GROK FIXED IT${X}"
