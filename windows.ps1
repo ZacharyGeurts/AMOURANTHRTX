@@ -1,148 +1,73 @@
+# build-simple.ps1
 # =============================================================================
-# windows.ps1 — AMOURANTH RTX — WATER TEMPLE EDITION — FIXED FOREVER
-# No loops. No bullshit. Builds clean every time on Windows.
+# AMOURANTH RTX — WATER TEMPLE EDITION — Ultra-Simple Windows Build
+# Minimal version — almost impossible to fail under Wine or native
 # =============================================================================
 
-param (
-    [string]$Action = "build",      # build (default), run, clean, debug
-    [switch]$Clean,                 # alias for clean action
-    [switch]$Run,                   # alias for run action
-    [switch]$Debug                  # build in Debug mode
-)
+Write-Host ""
+Write-Host "╔════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║   AMOURANTH RTX — SIMPLE WINDOWS BUILD (C++23)            ║" -ForegroundColor Cyan
+Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host ""
 
-# ── OCEAN PALETTE (ANSI for Windows Terminal / PowerShell 7+) ────────────────
-$AQUA   = "`e[38;5;51m"
-$DEEP   = "`e[38;5;27m"
-$TURQ   = "`e[38;5;45m"
-$WAVE   = "`e[38;5;39m"
-$FOAM   = "`e[38;5;195m"
-$PEARL  = "`e[38;5;231m"
-$CORAL  = "`e[38;5;204m"
-$ABYSS  = "`e[38;5;17m"
-$GLOW   = "`e[38;5;159m"
-$W      = "`e[1;97m"
-$X      = "`e[0m"
+# Hardcoded paths — change only if your folder name is different
+$ProjectRoot = (Get-Location).Path
+$BuildDir    = "$ProjectRoot\build-windows"
+$BinDir      = "$BuildDir\bin\Windows"
+$Binary      = "$BinDir\Navigator.exe"
 
-$PROJECT_ROOT = $PSScriptRoot
-$BUILD_DIR    = Join-Path $PROJECT_ROOT "build"
-
-function Banner {
-    Clear-Host
-    Write-Host "${DEEP}  █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
-    Write-Host "${AQUA} ██╔══██╗████╗ ████║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗  ██║╚══██╔══╝██║  ██║${X}"
-    Write-Host "${TURQ} ███████║██╔████╔██║██║   ██║██║   ██║██████╔╝███████║██╔██╗ ██║   ██║   ███████║${X}"
-    Write-Host "${WAVE} ██╔══██║██║╚██╔╝██║██║   ██║██║   ██║██╔══██╗██╔══██║██║╚██╗██║   ██║   ██╔══██║${X}"
-    Write-Host "${GLOW} ██║  ██║██║ ╚═╝ ██║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██║ ╚████║   ██║   ██║  ██║${X}"
-    Write-Host "${FOAM} ╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝${X}"
-    Write-Host ""
-    Write-Host "${CORAL}  ██████╗ ████████╗██╗  ██╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗${X}"
-    Write-Host "${AQUA}  ██╔══██╗╚══██╔══╝╚██╗██╔     ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝${X}"
-    Write-Host "${TURQ}  ██████╔╝   ██║    ╚███╔╝     █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  ${X}"
-    Write-Host "${WAVE}  ██╔══██╗   ██║    ██╔██╗     ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ${X}"
-    Write-Host "${GLOW}  ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗${X}"
-    Write-Host "${PEARL}  ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝${X}"
-    Write-Host ""
-    Write-Host "${GLOW}                AMOURANTH RTX — AQUA TEMPLE — $(Get-Date -Format 'MMMM dd, yyyy')${X}"
-    Write-Host ""
-}
-
-function Show-Help {
-    Banner
-    Write-Host @"
-
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                     AQUA TEMPLE — PARAMORE CROSS REALMS                      ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-  .\windows.ps1                     → build native Windows (default)
-  .\windows.ps1 -Run                → build + launch .exe
-  .\windows.ps1 -Clean              → purge build directory
-  .\windows.ps1 -Debug              → build in Debug mode
-  .\windows.ps1 -Run -Debug         → debug build + launch under debugger (if VS installed)
-
-  Binary path:
-    Windows:   build\bin\Navigator.exe
-
-╔══════════════════════════════════════════════════════════════════════════════╗
-║           THE TIDE FLOWS THROUGH DIMENSIONS — LOVE IS CROSS-PLATFORM         ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-"@
-    exit 0
-}
-
-# ── Parse Arguments ──────────────────────────────────────────────────────────
-$BuildType = if ($Debug) { "Debug" } else { "Release" }
-$RunAfterBuild = $Run.IsPresent
-$CleanBuild = $Clean.IsPresent
-
-if ($CleanBuild) {
-    Banner
-    Write-Host "${ABYSS}        TIDAL PURGE INITIATED — THE ABYSS CONSUMES${X}"
-    if (Test-Path $BUILD_DIR) {
-        Remove-Item -Path $BUILD_DIR -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "${GLOW}        WINDOWS BUILD REALM PURGED${X}"
-    } else {
-        Write-Host "${GLOW}        No build directory found — already clean${X}"
+# ── Clean if you pass "clean" as argument ───────────────────────────────────
+if ($args -contains "clean") {
+    Write-Host "TIDAL PURGE — Cleaning build-windows..." -ForegroundColor Yellow
+    if (Test-Path $BuildDir) {
+        Remove-Item -Recurse -Force $BuildDir -ErrorAction SilentlyContinue
     }
-    exit 0
+    Write-Host "Done." -ForegroundColor Yellow
+    exit
 }
 
-if ($PSBoundParameters.Count -eq 0 -or $Action -eq "build") {
-    $Action = "build"
+# ── Create build folder ─────────────────────────────────────────────────────
+if (-not (Test-Path $BuildDir)) {
+    New-Item -ItemType Directory -Path $BuildDir | Out-Null
 }
 
-Banner
+Set-Location $BuildDir
 
-# ── Build ────────────────────────────────────────────────────────────────────
-Write-Host "${WAVE}        SURFACING WITH Visual Studio Generator — $BuildType MODE${X}"
+# ── Configure CMake (Release, C++23, Visual Studio) ─────────────────────────
+Write-Host "Configuring CMake (Release + C++23)..." -ForegroundColor Green
 
-if (-not (Test-Path $BUILD_DIR)) {
-    New-Item -ItemType Directory -Path $BUILD_DIR | Out-Null
-}
+cmake -G "Visual Studio 17 2022" -A x64 `
+      -DCMAKE_BUILD_TYPE=Release `
+      -DCMAKE_CXX_STANDARD=23 `
+      -DCMAKE_CXX_STANDARD_REQUIRED=ON `
+      -DCMAKE_CXX_EXTENSIONS=OFF `
+      ..
 
-Set-Location $BUILD_DIR
-
-# CMake configure
-cmake .. `
-    -DCMAKE_BUILD_TYPE=$BuildType `
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-
-# CMake build
-Write-Host "${AQUA}        COMPILING — MULTI-THREADED${X}"
-cmake --build . --config $BuildType
-
-# ── Binary Check ─────────────────────────────────────────────────────────────
-$FINAL_BINARY = Join-Path $BUILD_DIR "bin\Navigator.exe"
-
-if (-not (Test-Path $FINAL_BINARY)) {
-    Write-Host "${CORAL}        FATAL: Binary drowned — $FINAL_BINARY${X}"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "CMake configure failed — check CMake output above" -ForegroundColor Red
     exit 1
 }
 
-Write-Host "${GLOW}        BINARY SURFACED → $FINAL_BINARY${X}"
+# ── Build ───────────────────────────────────────────────────────────────────
+Write-Host "Building Release..." -ForegroundColor Green
 
-# ── Launch ───────────────────────────────────────────────────────────────────
-if ($RunAfterBuild) {
-    Write-Host ""
-    Write-Host "${PEARL}       THROUGH WATER — LAUNCHING WINDOWS REALM${X}"
-    Write-Host "${GLOW}        The ocean crosses dimensions. Dive deep.${X}"
-    Write-Host ""
+cmake --build . --config Release --parallel
 
-    Set-Location $PROJECT_ROOT
-
-    & $FINAL_BINARY
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Build failed — check errors above" -ForegroundColor Red
+    exit 1
 }
 
-# ── Final Tide ───────────────────────────────────────────────────────────────
-Banner
-Write-Host ""
-Write-Host "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
-Write-Host "${AQUA}        ~${TURQ}~${WAVE}~${GLOW}~${FOAM}~${PEARL}~ ${BuildType^^} BUILD COMPLETE — NAVIGATOR SWIMS ETERNAL ~${PEARL}~${FOAM}~${GLOW}~${WAVE}~${TURQ}~${AQUA}~${X}"
-Write-Host "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
-Write-Host ""
-Write-Host "        ${W}Current Realm:${X} ${GLOW}Windows${X}"
-Write-Host "        ${W}Binary Location:${X} ${GLOW}$FINAL_BINARY${X}"
-Write-Host "        ${W}Dive Command:${X}   ${AQUA}.\windows.ps1 -Run${X}"
-Write-Host ""
-Write-Host "${GLOW}        AQUAMARINE PHOTONS ARE ETERNAL — THE TIDE IS LOVE — POWERSHELL FIXED IT${X}"
+# ── Check if binary exists ──────────────────────────────────────────────────
+if (Test-Path $Binary) {
+    Write-Host ""
+    Write-Host "BINARY SURFACED!" -ForegroundColor Cyan
+    Write-Host "  Location:  $Binary" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Run it:     $Binary" -ForegroundColor Cyan
+    Write-Host ""
+} else {
+    Write-Host "Navigator.exe not found — build may have failed silently" -ForegroundColor Red
+}
+
+Write-Host "AQUAMARINE PHOTONS ARE ETERNAL — THE TIDE IS LOVE" -ForegroundColor Magenta
