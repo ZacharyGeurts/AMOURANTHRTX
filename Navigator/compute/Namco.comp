@@ -1,0 +1,224 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// Namco Pac-Man + Ghosts – One yellow Pac-Man + 4 classic ghosts
+// Stable heading, NO spinning, very slow smooth chomping (~0.33s full open)
+// Tiny scale, persistent direction, retro maze/dots/background kept
+// =============================================================================
+
+layout(push_constant) uniform Push {
+    float time;     // seconds
+} pc;
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+float hash11(float p) {
+    p = fract(p * .1031);
+    p *= p + 33.33;
+    return fract(2.0 * p * (p + 33.33));
+}
+
+vec2 hash22(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+float smin(float a, float b, float k) {
+    float h = max(k - abs(a - b), 0.0) / k;
+    return min(a, b) - k * h * h * 0.5 * (1.0 + h);
+}
+
+mat2 rot2(float a) {
+    float c = cos(a), s = sin(a);
+    return mat2(c, -s, s, c);
+}
+
+// ─── SDF primitives ─────────────────────────────────────────────────────────
+float sdCircle(vec2 p, float r) { return length(p) - r; }
+
+float sdPacMouth(vec2 p, float r, float open) {
+    float d = sdCircle(p, r);
+    float a = atan(p.y, p.x);
+    float sector = abs(mod(a + open * 1.5, 6.2832) - 3.1416);
+    float cut = sector < open ? 100.0 : -100.0;
+    return max(d, cut);
+}
+
+float sdEye(vec2 p, float size) {
+    vec2 eyeP = p * 1.4;
+    float iris  = sdPacMouth(eyeP - vec2(0.0, 0.15 * size), size * 0.35, 0.8);
+    float pupil = sdCircle(eyeP - vec2(0.0, 0.22 * size), size * 0.12);
+    return min(iris, pupil);
+}
+
+// Simple classic ghost: round top + wavy bottom skirt
+float sdGhost(vec2 p, float waveTime) {
+    float body = sdCircle(p, 1.0);
+    
+    // Wavy skirt bottom
+    vec2 skirt = p;
+    skirt.x += 0.18 * sin(14.0 * skirt.y + waveTime);
+    float wave = sdCircle(skirt - vec2(0.0, -0.85), 0.92);
+    return min(body, wave);
+}
+
+float sdPacCharacter(vec2 p, float scale, float mouthOpen) {
+    vec2 q = p / scale;
+    float body = sdPacMouth(q, 1.0, mouthOpen);
+    float eyes = min(
+        sdEye(q - vec2(-0.35, 0.35), 0.22),
+        sdEye(q - vec2( 0.35, 0.35), 0.22)
+    );
+    return min(body, eyes) * scale;
+}
+
+float sdGhostCharacter(vec2 p, float scale, float mouthOpen, float waveTime) {
+    vec2 q = p / scale;
+    float body = sdGhost(q, waveTime + mouthOpen * 2.0);  // slight wobble sync
+    // Big white eyes + black pupils
+    float le = sdCircle(q - vec2(-0.38, 0.38), 0.26);
+    float re = sdCircle(q - vec2( 0.38, 0.38), 0.26);
+    float whites = min(le, re);
+    float lp = sdCircle(q - vec2(-0.38, 0.32), 0.10);
+    float rp = sdCircle(q - vec2( 0.38, 0.32), 0.10);
+    float pupils = min(lp, rp);
+    float eyes = min(whites, pupils);
+    return min(body, eyes) * scale;
+}
+
+// ─── Maze & Dots (unchanged from your version) ──────────────────────────────
+float sdMaze(vec2 p) {
+    p *= 0.45;
+    vec2 cell = floor(p + 0.5);
+    vec2 frac = fract(p + 0.5) - 0.5;
+
+    bool isWall = false;
+    if (abs(cell.x) > 13.0 || abs(cell.y) > 15.0) isWall = true;
+    if (abs(cell.y) == 0.0 && abs(cell.x) < 13.0) isWall = false;
+    if (abs(cell.y) == 7.0) isWall = true;
+    if (abs(cell.x) == 0.0 || abs(cell.x) == 6.0) isWall = (abs(cell.y) > 3.0 && abs(cell.y) < 11.0);
+    if (abs(cell.x) == 3.0 || abs(cell.x) == 9.0) isWall = abs(cell.y) > 9.0;
+    if (cell.y > 4.0 && cell.y < 8.0 && abs(cell.x) < 4.0) isWall = true;
+
+    if (!isWall) return 100.0;
+    return max(abs(frac.x), abs(frac.y)) - 0.48;
+}
+
+float sdDots(vec2 p) {
+    vec2 grid = floor(p * 12.0 + 0.5);
+    vec2 fp = fract(p * 12.0 + 0.5) - 0.5;
+    float d = sdCircle(fp, 0.12);
+
+    if (sdMaze(p * 12.0 / 0.45) < 0.0) d = 100.0;
+
+    float eat = sin(pc.time * 12.0 + hash11(grid.x + grid.y * 31.0) * 6.28) * 0.5 + 0.5;
+    d += eat * 0.15;
+
+    return d * 0.08;
+}
+
+// ─── Main ───────────────────────────────────────────────────────────────────
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
+    uv.x *= float(dim.x) / float(dim.y);
+
+    vec3 color = mix(vec3(0.02, 0.04, 0.12), vec3(0.01, 0.02, 0.08), uv.y * 0.5 + 0.5);
+
+    float mazeD = sdMaze(uv);
+    if (mazeD < 0.02) {
+        color = mix(color, vec3(0.1, 0.6, 1.0), smoothstep(0.02, -0.01, mazeD));
+    }
+
+    float dotsD = sdDots(uv);
+    if (dotsD < 0.03) {
+        color += vec3(1.0, 0.9, 0.6) * smoothstep(0.03, 0.0, dotsD) * 1.2;
+    }
+
+    // ─── One Pac-Man + 4 ghosts – stable heading, very slow chomp ───────────
+    const int NUM_ENTITIES = 5;  // 0 = Pac-Man, 1-4 = ghosts
+    const float DT        = 0.12;
+    const float LERP_RATE = 4.0;
+
+    const vec3 ghostColors[4] = vec3[](
+        vec3(1.0, 0.22, 0.22),   // Blinky red
+        vec3(1.0, 0.55, 0.75),   // Pinky pink
+        vec3(0.25, 0.85, 1.0),   // Inky cyan
+        vec3(1.0, 0.65, 0.15)    // Clyde orange
+    );
+
+    for (int i = 0; i < NUM_ENTITIES; ++i) {
+        float fi = float(i);
+        float speed = (0.8 + fi * 0.12) * 0.05;  // slightly varied but still very slow
+
+        vec2 posNow = vec2(
+            sin(pc.time       * speed + fi * 2.1) * 0.82,
+            cos(pc.time       * speed * 0.7 + fi * 3.4) * 0.62
+        ) + hash22(vec2(fi)) * 0.18 - 0.09;
+
+        vec2 posPrev = vec2(
+            sin((pc.time-DT) * speed + fi * 2.1) * 0.82,
+            cos((pc.time-DT) * speed * 0.7 + fi * 3.4) * 0.62
+        ) + hash22(vec2(fi)) * 0.18 - 0.09;
+
+        vec2 vel = (posNow - posPrev) / DT;
+        vec2 targetDir = length(vel) > 0.0005 ? normalize(vel) : vec2(1.0, 0.0);
+
+        float moveStrength = smoothstep(0.0005, 0.004, length(vel));
+        vec2 heading = mix(targetDir, targetDir, moveStrength * LERP_RATE * DT);  // smooth follow
+
+        vec2 charPos = posNow;
+
+        float scale = 0.05;  // same tiny size as before
+
+        // Very slow chomp: ~0.33s to full open → lower freq, tighter range
+        float chomp = abs(sin(pc.time * 2.4 + fi * 1.8)) * 0.9;  // slower, ~0.33s half-cycle feel
+        float mouthOpen = 0.25 + chomp * 0.8;                    // gentle 0.25–1.05 rad
+
+        float animPhase = pc.time * 2.5 + fi * 4.0;  // for ghost wave
+
+        vec2 local = uv - charPos;
+
+        if (moveStrength > 0.12) {
+            local = rot2(atan(heading.y, heading.x)) * local;
+        }
+
+        float charD;
+        vec3 charCol;
+
+        if (i == 0) {
+            // Classic Pac-Man
+            charD = sdPacCharacter(local, scale, mouthOpen);
+            charCol = vec3(1.0, 0.92, 0.08);  // yellow
+        } else {
+            // Ghosts
+            charD = sdGhostCharacter(local, scale, mouthOpen, animPhase);
+            charCol = ghostColors[i-1];
+        }
+
+        if (charD < 0.01) {
+            color = mix(color, charCol, smoothstep(0.01, -0.005, charD));
+        }
+
+        if (charD > -0.14 && charD < 0.14) {
+            color += charCol * (1.0 - abs(charD / 0.14)) * 1.2;
+        }
+    }
+
+    float vig = length(uv) * 0.4;
+    color *= 1.0 - vig * vig * 0.6;
+
+    float scan = sin(uv.y * float(dim.y) * 3.14159 * 2.0) * 0.04;
+    color += scan;
+
+    color = pow(color, vec3(0.95));
+
+    imageStore(outputImage, pix, vec4(color, 1.0));
+}
