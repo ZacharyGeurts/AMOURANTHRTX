@@ -53,7 +53,9 @@ public:
           lastAdaptiveAdjustTime_(0.0),
           adaptiveFrameCount_(0),
           lastDispatchedW_(static_cast<uint32_t>(windowWidth)),
-          lastDispatchedH_(static_cast<uint32_t>(windowHeight))
+          lastDispatchedH_(static_cast<uint32_t>(windowHeight)),
+          needsRecreate_(false),
+          justResizedThisFrame_(false)
     {
         Swapchain::create(window, window_width_, window_height_);
 
@@ -170,7 +172,7 @@ public:
             return;
         }
 
-        // === PURE SDL3 SIZE DETECTION (no extra flags) ===
+        // ── Pure SDL3 size query (this is what SDL3 wants) ─────────────────
         int currentW = 0, currentH = 0;
         SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
 
@@ -183,10 +185,18 @@ public:
 
         bool sizeChanged = (currentW != window_width_) || (currentH != window_height_);
 
-        if (minimized_ || sizeChanged) {
+        if (minimized_ || sizeChanged || needsRecreate_) {
             vkDeviceWaitIdle(rtx().device);
-            onResize(currentW, currentH);
+            onResize(currentW, currentH);   // this now sets justResizedThisFrame_
             minimized_ = false;
+            needsRecreate_ = false;
+            justResizedThisFrame_ = true;   // ← force skip this frame (critical)
+            return;                         // ← early exit — no acquire/render/present this frame
+        }
+
+        // If we resized last frame, this frame is the first safe one — continue normally
+        if (justResizedThisFrame_) {
+            justResizedThisFrame_ = false;
         }
 
         if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
@@ -220,8 +230,8 @@ public:
         vkDestroyFence(rtx().device, fence, nullptr);
 
         if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-            // SDL3 already knows the new size — let next frame's size check handle it
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — SDL3 will trigger resize next frame");
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — forcing recreate next frame");
+            needsRecreate_ = true;
             return;
         }
 
@@ -356,7 +366,8 @@ public:
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
             measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — SDL3 will trigger resize next frame");
+            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — forcing recreate next frame");
+            needsRecreate_ = true;
         } else if (pres != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
@@ -414,7 +425,7 @@ public:
             return;
         }
 
-        if (newWidth == window_width_ && newHeight == window_height_) {
+        if (newWidth == window_width_ && newHeight == window_height_ && !needsRecreate_) {
             return;
         }
 
@@ -444,6 +455,7 @@ public:
 
         Swapchain::recreate(window_width_, window_height_);
 
+        // Re-query actual size after SDL3/Vulkan sync
         int actualW = 0, actualH = 0;
         SDL_GetWindowSizeInPixels(window_, &actualW, &actualH);
         window_width_  = actualW;
@@ -454,6 +466,7 @@ public:
         createPersistentHDR();
         createPreviousHDR();
 
+        // Rebuild descriptors
         if (descriptorSet_ != VK_NULL_HANDLE) {
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
             descriptorSet_ = VK_NULL_HANDLE;
@@ -813,6 +826,9 @@ private:
 
     uint32_t       lastDispatchedW_          = 0;
     uint32_t       lastDispatchedH_          = 0;
+
+    bool           needsRecreate_            = false;
+    bool           justResizedThisFrame_     = false;   // ← forces one clean frame skip after resize
 };
 
 inline RayCanvas* rayCanvas = nullptr;
