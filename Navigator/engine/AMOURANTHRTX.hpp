@@ -90,9 +90,9 @@ static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 1, 3);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 1, 6);
     appInfo.pEngineName        = "LIVING WORLD";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 1, 3);
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 1, 6);
     appInfo.apiVersion         = VK_API_VERSION_1_4;  // 2026 baseline
 
     uint32_t sdlCount = 0;
@@ -1077,7 +1077,7 @@ struct Swapchain {
         presentMode = chosenPM;
 
         // ── Image count ─────────────────────────────────────────────────
-        uint32_t imgCount = std::max(caps.minImageCount, 2u);
+        uint32_t imgCount = 2u;
         if (caps.maxImageCount > 0) {
             imgCount = std::min(imgCount, caps.maxImageCount);
         }

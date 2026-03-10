@@ -119,15 +119,6 @@ public:
         currentState_.focusDistance = glm::mix(currentState_.focusDistance, targetState_.focusDistance, t);
 
         invalidateCache();
-
-        // Optional debug log — remove once confirmed smooth
-        // static double lastLog = 0.0;
-        // if (nowGenesis - lastLog > 1.0) {
-        //     LOG_INFO_CAT("CAMERA", "Time: {:.2f}s | Pos: {:.1f},{:.1f},{:.1f} | Rot: {:.1f}",
-        //                  nowGenesis, currentState_.position.x, currentState_.position.y, currentState_.position.z,
-        //                  glm::degrees(glm::eulerAngles(currentState_.orientation).y));
-        //     lastLog = nowGenesis;
-        // }
     }
 
     // ────────────────────────────────────────────────

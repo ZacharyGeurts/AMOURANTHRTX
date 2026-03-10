@@ -46,6 +46,7 @@ public:
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE),
           adaptiveScale_(1.5f),
+          lastAppliedScale_(1.5f),
           lastPresentTime_s_(0.0),
           measuredRefreshRateHz_(60.0),
           lastFpsLog_(0.0),
@@ -172,7 +173,6 @@ public:
             return;
         }
 
-        // ── Pure SDL3 size query (this is what SDL3 wants) ─────────────────
         int currentW = 0, currentH = 0;
         SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
 
@@ -187,14 +187,13 @@ public:
 
         if (minimized_ || sizeChanged || needsRecreate_) {
             vkDeviceWaitIdle(rtx().device);
-            onResize(currentW, currentH);   // this now sets justResizedThisFrame_
+            onResize(currentW, currentH);
             minimized_ = false;
             needsRecreate_ = false;
-            justResizedThisFrame_ = true;   // ← force skip this frame (critical)
-            return;                         // ← early exit — no acquire/render/present this frame
+            justResizedThisFrame_ = true;
+            return;
         }
 
-        // If we resized last frame, this frame is the first safe one — continue normally
         if (justResizedThisFrame_) {
             justResizedThisFrame_ = false;
         }
@@ -255,22 +254,42 @@ public:
 
         lastPresentTime_s_ = now;
 
+        // Adaptive quality adjustment — 25% steps
         if (Options::Rendering::EnableAdaptiveQuality) {
-            if (now - lastAdaptiveAdjustTime_ >= 1.5) {
+            if (now - lastAdaptiveAdjustTime_ >= 1.0 && adaptiveFrameCount_ >= 8) {
                 double elapsed = now - lastAdaptiveAdjustTime_;
-                double currentFPS = (elapsed > 0.0) ? static_cast<double>(adaptiveFrameCount_) / elapsed : 60.0;
-                double targetFPS = measuredRefreshRateHz_;
+                double currentFPS = static_cast<double>(adaptiveFrameCount_) / elapsed;
+                double targetFPS = measuredRefreshRateHz_ * 1.08;  // ~8% headroom
 
-                if (currentFPS > targetFPS * 1.07) {
-                    adaptiveScale_ += 0.06f;
+                constexpr float STEP = 0.25f;
+
+                bool changed = false;
+
+                if (currentFPS > targetFPS * 1.12) {
+                    adaptiveScale_ += STEP;
                     adaptiveScale_ = std::min(adaptiveScale_, 4.0f);
-                } else if (currentFPS < targetFPS * 0.93) {
-                    adaptiveScale_ -= 0.11f;
+                    changed = true;
+                    LOG_INFO_CAT("ADAPTIVE", "↑ Quality boost to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
+                }
+                else if (currentFPS < targetFPS * 0.88) {
+                    adaptiveScale_ -= STEP;
                     adaptiveScale_ = std::max(adaptiveScale_, 0.55f);
+                    changed = true;
+                    LOG_INFO_CAT("ADAPTIVE", "↓ Quality drop to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
                 }
 
                 adaptiveFrameCount_ = 0;
                 lastAdaptiveAdjustTime_ = now;
+
+                // Only recreate resources if scale changed meaningfully
+                if (changed && std::abs(adaptiveScale_ - lastAppliedScale_) > 0.05f) {
+                    updateRenderResolution();
+                    destroyHDRResources();
+                    createPersistentHDR();
+                    createPreviousHDR();
+                    updateDescriptorSet();
+                    lastAppliedScale_ = adaptiveScale_;
+                }
             }
         }
 
@@ -432,7 +451,6 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        // Destroy old HDR images & views
         if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_, nullptr);
         if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_, nullptr);
         if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
@@ -454,7 +472,6 @@ public:
 
         Swapchain::recreate(window_width_, window_height_);
 
-        // Re-query actual size after SDL3/Vulkan sync
         int actualW = 0, actualH = 0;
         SDL_GetWindowSizeInPixels(window_, &actualW, &actualH);
         window_width_  = actualW;
@@ -465,7 +482,6 @@ public:
         createPersistentHDR();
         createPreviousHDR();
 
-        // Rebuild descriptors
         if (descriptorSet_ != VK_NULL_HANDLE) {
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
             descriptorSet_ = VK_NULL_HANDLE;
@@ -505,16 +521,24 @@ public:
 
 private:
     void updateRenderResolution() noexcept {
-        float scale = Options::Rendering::EnableAdaptiveQuality
-                      ? std::clamp(adaptiveScale_, 0.5f, 4.0f)
-                      : 1.0f;
+        // Adaptive supersampling factor — quality vs performance
+        float targetSupersample = Options::Rendering::EnableAdaptiveQuality
+                                ? std::clamp(adaptiveScale_, 0.55f, 4.0f)
+                                : 1.0f;
 
-        render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * scale));
-        render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * scale));
+        // Respect internal resolution cap
+        float maxAllowedW = static_cast<float>(Options::Rendering::INTERNAL_WIDTH)  / static_cast<float>(window_width_);
+        float maxAllowedH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
+        float maxAllowed = std::min(maxAllowedW, maxAllowedH);
 
-        render_width_  = std::min(render_width_,  Options::Rendering::INTERNAL_WIDTH);
-        render_height_ = std::min(render_height_, Options::Rendering::INTERNAL_HEIGHT);
+        float effectiveSupersample = std::min(targetSupersample, maxAllowed);
 
+        // Dispatched resolution = window × supersample factor
+        // Camera/projection in shader must use window_width/height (not render size!)
+        render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * effectiveSupersample));
+        render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * effectiveSupersample));
+
+        // Prevent crash-level low resolutions
         render_width_  = std::max(render_width_,  640);
         render_height_ = std::max(render_height_, 360);
     }
@@ -522,9 +546,9 @@ private:
     void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
-        if (hdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
-        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
+        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+        if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
         hdrOutputView_   = VK_NULL_HANDLE;
         hdrOutputImage_  = VK_NULL_HANDLE;
@@ -571,9 +595,9 @@ private:
     void createPreviousHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (prevHdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
-        if (prevHdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
-        if (prevHdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
+        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+        if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
         prevHdrOutputView_   = VK_NULL_HANDLE;
         prevHdrOutputImage_  = VK_NULL_HANDLE;
@@ -620,13 +644,13 @@ private:
     void destroyHDRResources() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
-        if (hdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
-        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
+        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+        if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
-        if (prevHdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
-        if (prevHdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
-        if (prevHdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
+        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+        if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
         hdrOutputView_     = VK_NULL_HANDLE;
         hdrOutputImage_    = VK_NULL_HANDLE;
@@ -814,6 +838,7 @@ private:
     VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
 
     float          adaptiveScale_            = 1.5f;
+    float          lastAppliedScale_         = 1.5f;
     double         lastPresentTime_s_        = 0.0;
     double         measuredRefreshRateHz_    = 60.0;
 
@@ -827,7 +852,7 @@ private:
     uint32_t       lastDispatchedH_          = 0;
 
     bool           needsRecreate_            = false;
-    bool           justResizedThisFrame_     = false;   // ← forces one clean frame skip after resize
+    bool           justResizedThisFrame_     = false;
 };
 
 inline RayCanvas* rayCanvas = nullptr;
