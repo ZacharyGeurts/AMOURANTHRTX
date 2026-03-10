@@ -3,9 +3,8 @@
 
 // =============================================================================
 // AMOURANTH RTX — Canvas Compute Shader
-// Living World Edition — Pac-Man homage (no googly eyes)
+// Living World Edition — Pac-Man homage (classic mouth behavior)
 // Power pellets floating, rough reflective materials, dim entity lighting only
-// Updated: maze-aligned dots, mouth never fully closes, classic-scale power pellets
 // =============================================================================
 
 // ─── Compile-time tuning ────────────────────────────────────────────────────
@@ -30,7 +29,6 @@
 #define GHOST_TILT_SMOOTH       8.0
 
 #define PACMAN_ROT_OFFSET       -1.57079632679  // +90° = π/2 radians
-#define MIN_MOUTH_OPEN          0.12            // never fully closes (~7°)
 
 // ─── Push constants ─────────────────────────────────────────────────────────
 layout(push_constant) uniform PushConstants {
@@ -87,11 +85,20 @@ mat2 rot2(float a) {
 float sdCircle(vec2 p, float r) { return length(p) - r; }
 
 // ─── SDF shapes ─────────────────────────────────────────────────────────────
-float sdPacMouth(vec2 p, float r, float open) {
+float sdPacMouth(vec2 p, float r, float openAngle) {
     float d = sdCircle(p, r);
+
+    // Classic Pac-Man: symmetric open (top/bottom jaw each move openAngle/2)
+    // openAngle = 0 → fully closed
+    // openAngle = ~1.0–1.4 radians → wide open like original game
+    float halfOpen = openAngle * 0.5;
+
     float a = atan(p.y, p.x);
-    float sector = abs(mod(a + open * 1.5, 6.283185) - 3.14159265);
-    return max(d, (sector < open) ? 100.0 : -100.0);
+    // Sector cut is symmetric around forward direction (after rotation)
+    float sector = abs(mod(a + 3.14159265, 6.283185) - 3.14159265); // centered at 0
+    float cut = (sector < halfOpen) ? 100.0 : -100.0;
+
+    return max(d, cut);
 }
 
 float sdGhostBody(vec2 p, float waveTime) {
@@ -132,14 +139,13 @@ float sdMaze(vec2 p) {
     return max(abs(frac.x), abs(frac.y)) - 0.48;
 }
 
-// ─── Dots (now using same maze scaling & layout) ────────────────────────────
+// ─── Dots ───────────────────────────────────────────────────────────────────
 float sdDots(vec2 p) {
-    vec2 mp = p * 0.45;                     // same scale as maze
+    vec2 mp = p * 0.45;
     vec2 grid = floor(mp * 12.0 + 0.5);
     vec2 fp   = fract(mp * 12.0 + 0.5) - 0.5;
     float d   = sdCircle(fp, 0.12);
 
-    // Hide dots inside walls (same check as maze)
     if (sdMaze(p) < 0.0) d = 100.0;
 
     float eat = sin(pc.time * DOT_PULSE_SPEED + hash11(grid.x + grid.y * 31.0) * 6.283185) * 0.5 + 0.5;
@@ -148,10 +154,10 @@ float sdDots(vec2 p) {
     return d * 0.08;
 }
 
-// ─── Power Pellet SDF (classic size ~2.3× normal dot) ──────────────────────
+// ─── Power Pellet ───────────────────────────────────────────────────────────
 float sdPowerPellet(vec2 p, vec2 center, float baseR) {
     vec2 lp = p - center;
-    float pulse = 0.03 * sin(pc.time * 5.0 + length(lp) * 12.0); // smaller pulse
+    float pulse = 0.03 * sin(pc.time * 5.0 + length(lp) * 12.0);
     float r = baseR + pulse;
     return sdCircle(lp, r);
 }
@@ -178,35 +184,30 @@ void main() {
     vec2 squareUV = uv;
     squareUV.x /= pc.aspectRatio;
 
-    // Dark floor, no ambient
     vec3 bg = vec3(0.008, 0.01, 0.015);
     vec3 color = bg;
 
-    // 1. Maze walls
+    // Maze walls
     float md = sdMaze(uv);
     if (md < GLOW_WIDTH) {
         float heightShade = 1.0 - (uv.y * 0.5 + 0.5) * WALL_HEIGHT_GRAD;
         vec3 wallBase = mix(vec3(0.02, 0.04, 0.12), vec3(0.04, 0.12, 0.35), heightShade);
-
         vec3 normal = normalize(vec3(md * 20.0, 0.5, 0.3));
-
         float glow = smoothstep(GLOW_WIDTH, -0.005, md);
         color = mix(color, wallBase, glow * 0.8);
-
         if (md > -0.04 && md < 0.0) {
             color *= mix(0.5, 1.0, smoothstep(-0.04, 0.0, md));
         }
     }
 
-    // 2. Dots (maze-aligned)
+    // Dots
     float dd = sdDots(uv);
     if (dd < GLOW_WIDTH) {
         color += vec3(0.9, 0.8, 0.5) * smoothstep(GLOW_WIDTH, 0.0, dd) * 0.8;
     }
 
-    // 3. Entities + dim lights
+    // Entities + lights
     const int N = 5;
-
     vec3 ghostCols[4] = vec3[](
         vec3(1.00, 0.22, 0.22),
         vec3(1.00, 0.55, 0.75),
@@ -218,7 +219,6 @@ void main() {
 
     for (int i = 0; i < N; ++i) {
         float fi = float(i);
-
         float speed = 0.05 + fi * 0.012;
 
         vec2 rawPos = vec2(
@@ -229,23 +229,19 @@ void main() {
         rawPos += hash22(vec2(fi)) * 0.14 - 0.07;
         vec2 pos = clamp(rawPos, vec2(-0.75), vec2(0.75));
 
-        vec2 prevRaw = vec2(
+        vec2 vel = pos - vec2(
             sin((pc.time - 0.12) * speed + fi * 2.1) * 0.60,
             cos((pc.time - 0.12) * speed * 0.7 + fi * 3.4) * 0.45
-        ) + hash22(vec2(fi)) * 0.14 - 0.07;
+        ) - hash22(vec2(fi)) * 0.14 + 0.07;
 
-        vec2 prev = clamp(prevRaw, vec2(-0.75), vec2(0.75));
-
-        vec2 vel = pos - prev;
         float velLen = length(vel);
-
         vec2 moveDir = (velLen > 0.0005) ? normalize(vel) : vec2(1.0, 0.0);
 
         vec2 local = squareUV - pos;
 
-        float chomp = abs(sin(pc.time * CHOMP_FREQ + fi * CHOMP_PHASE_SPREAD)) * 0.8;
-        float open  = 0.25 + chomp;
-        open = max(open, MIN_MOUTH_OPEN);  // never fully closes
+        // Classic Pac-Man chomp: 0 → fully closed, up to ~1.0–1.4 radians wide open
+        float chompPhase = abs(sin(pc.time * CHOMP_FREQ + fi * CHOMP_PHASE_SPREAD));
+        float openAngle = chompPhase * 1.2;           // max open ~68–80 degrees total
 
         float animT = pc.time * 2.5 + fi * 4.0;
 
@@ -255,7 +251,7 @@ void main() {
         if (i == 0) {
             float angle = atan(moveDir.y, moveDir.x) + PACMAN_ROT_OFFSET;
             local = rot2(angle) * local;
-            d = sdPacCharacter(local, open);
+            d = sdPacCharacter(local, openAngle);
         } else {
             vec2 tiltDir = (velLen > 0.0005) ? normalize(vel) : vec2(0.0);
             float tiltStrength = smoothstep(0.0005, 0.006, velLen);
@@ -263,7 +259,7 @@ void main() {
             tiltAngleRad += sin(pc.time * 1.8 + fi * 4.2) * 0.15 * tiltStrength;
             mat2 tiltRot = rot2(-tiltAngleRad * moveDir.x);
             local = tiltRot * local;
-            d = sdGhostCharacter(local, open, animT);
+            d = sdGhostCharacter(local, openAngle, animT);
         }
 
         float distToEntity = length(squareUV - pos);
@@ -280,7 +276,7 @@ void main() {
 
     color += lightAccum * 0.6;
 
-    // 4. Classic-scale floating power pellets
+    // Power pellets
     vec2 ppCenters[4] = vec2[](
         vec2(-0.55,  0.45),
         vec2( 0.55,  0.45),
@@ -294,7 +290,7 @@ void main() {
         vec2 center = ppCenters[j] + vec2(sin(pc.time * 0.8 + float(j)*1.5708)*0.03,
                                           cos(pc.time * 0.8 + float(j)*1.5708)*0.03);
 
-        float pd = sdPowerPellet(squareUV, center, 0.028); // ~2.3× normal dot radius
+        float pd = sdPowerPellet(squareUV, center, 0.028);
 
         if (pd < GLOW_WIDTH * 1.5) {
             vec3 normal = normalize(vec3(squareUV - center, 0.3));
@@ -314,7 +310,7 @@ void main() {
         }
     }
 
-    // Post effects
+    // Post
     float vig = length(uv) * 0.4;
     color *= 1.0 - vig * vig * 0.6;
 
