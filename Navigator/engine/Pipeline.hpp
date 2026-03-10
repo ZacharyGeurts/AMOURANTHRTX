@@ -10,8 +10,8 @@
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "Camera.hpp"           // ← for CAM singleton access
-#include "Materials.hpp"        // ← full material library access
+#include "Camera.hpp"           // CAM singleton
+#include "Materials.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -21,78 +21,88 @@
 #include <cstdint>
 #include <string>
 #include <expected>
-#include <ranges>
+#include <cmath>
 
 namespace Pipeline {
 
 using u32 = std::uint32_t;
 
 // ────────────────────────────────────────────────
-// Descriptor bindings — matches shader layout
-// ────────────────────────────────────────────────
-inline constexpr VkDescriptorSetLayoutBinding kCanvasBindings[] = {
-    {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 0: outputImage (HDR canvas)
-    {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 1: scene uniforms (future)
-    {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 2: geometry / instances (SDF objects, future)
-    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 3: lights / environment (sun, moon, sky)
-    {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 4: material library (Material structs)
-    {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},  // 5: textures / atlas / procedural data (future)
+// Descriptor bindings (matches shader)
+struct CanvasBindings {
+    static constexpr VkDescriptorSetLayoutBinding bindings[] = {
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // output HDR
+        {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // scene globals (future)
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // geometry/instances
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // lights/environment
+        {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // materials
+        {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // textures/procedural
+    };
 };
 
-inline constexpr VkShaderStageFlags COMPUTE_PUSH_MASK = VK_SHADER_STAGE_COMPUTE_BIT;
-
 // ────────────────────────────────────────────────
-// Push constants — Living World parameters + adaptive sampling
+// Push constants — full living world + camera + adaptive
+// Must stay aligned to 16 bytes
 // ────────────────────────────────────────────────
 struct alignas(16) PushConstants {
-    float       time;               // total elapsed seconds
-    u32         frameSeed;          // per-frame RNG seed
+    float       time;                   // total engine seconds
+    u32         frameSeed;              // RNG seed (frame-dependent)
 
-    glm::vec3   cameraPos;          // world-space camera position
-    float       pad0;               // align vec3
+    glm::vec3   cameraPos;              float pad0;
+    glm::vec4   cameraQuat;             // orientation xyzw
+    float       cameraFovDeg;
+    float       aspectRatio;
+    float       exposure;
 
-    glm::vec4   cameraQuat;         // camera orientation quaternion (xyzw)
-    float       cameraFovDeg;       // vertical FOV in degrees
-    float       aspectRatio;        // width / height
-    float       exposure;           // post-process exposure multiplier
+    glm::vec3   sunDir;                 float sunIntensity;
+    glm::vec3   moonDir;                float moonIntensity;
 
-    glm::vec3   sunDir;             // normalized sun direction
-    float       sunIntensity;       // sun strength
+    glm::vec3   windDir;                float windStrength;
+    float       temperatureC;
+    float       humidity;
+    float       airPressureKPa;
+    float       precipitationFactor;
 
-    glm::vec3   moonDir;            // normalized moon direction
-    float       moonIntensity;      // moon strength
+    float       fogDensity;
+    float       dayNightFactor;         // 0 = midnight, 0.5 = noon, etc.
+    float       cloudCoverage;
+    u32         debugFlags;
 
-    glm::vec3   windDir;            // normalized wind direction
-    float       windStrength;       // 0..1 scale
+    // Adaptive / quality controls
+    int         samplesPerPixel;
+    float       temporalBlendStrength;
+    int         maxRayRecursion;
 
-    float       temperatureC;       // -50..50 °C
-    float       humidity;           // 0..1
-    float       airPressureKPa;     // ~90..110 kPa
-    float       precipitationFactor;// 0..1
-
-    float       fogDensity;         // km⁻¹
-    float       dayNightFactor;     // 0..1
-    float       cloudCoverage;      // 0..1
-    u32         debugFlags;         // bitfield
-
-    // Adaptive sampling parameters (pulled from Options::Rendering)
-    int         samplesPerPixel;    // from Options::Rendering::MaxSamplesPerPixel
-    float       temporalBlend;      // from Options::Rendering::TemporalBlendStrength (0.0 = sharp)
-    int         maxRecursion;       // from Options::Rendering::MaxRayRecursion
-
-    float       pad1[4];            // pad to 16-byte multiple
+    float       pad1[3];                // keep multiple of 16 bytes
 };
 
+// ────────────────────────────────────────────────
 inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
 inline VkPipelineLayout      pipeline_layout        = VK_NULL_HANDLE;
 inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 
 // ────────────────────────────────────────────────
-// Load SPV shader — returns expected<module, error string>
+// Procedural sun/moon direction from time-of-day
+// ────────────────────────────────────────────────
+[[nodiscard]] inline glm::vec3 computeSunDirection(float todHours) noexcept {
+    float angle = (todHours / 24.0f) * glm::two_pi<float>() - glm::half_pi<float>();
+    return glm::normalize(glm::vec3(
+        std::cos(angle) * 0.8f,
+        std::sin(angle),
+        std::cos(angle) * 0.6f
+    ));
+}
+
+[[nodiscard]] inline glm::vec3 computeMoonDirection(float todHours) noexcept {
+    return -computeSunDirection(todHours);
+}
+
+// ────────────────────────────────────────────────
+// Load SPIR-V shader module
 // ────────────────────────────────────────────────
 [[nodiscard]] inline std::expected<VkShaderModule, std::string> load_canvas_shader(
-    const std::string& override_path = "",
-    bool verbose = false) noexcept 
+    [[maybe_unused]] const std::string& override_path = "",
+    [[maybe_unused]] bool verbose = false) noexcept
 {
     constexpr std::string_view shader_name = "canvas.spv";
     namespace fs = std::filesystem;
@@ -134,25 +144,13 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
         if (!file) continue;
 
         std::streamoff sz = file.tellg();
-        if (sz <= 0 || sz % 4 != 0) {
-            if (verbose) {
-                LOG_WARNING_CAT("PIPELINE", "Skipping invalid file size: {} bytes from {}", 
-                                static_cast<int64_t>(sz), path.string());
-            }
-            continue;
-        }
+        if (sz <= 0 || sz % 4 != 0) continue;
 
         file.seekg(0);
         code.resize(static_cast<size_t>(sz / 4));
         file.read(reinterpret_cast<char*>(code.data()), sz);
 
-        if (file.good()) {
-            if (verbose) {
-                LOG_SUCCESS_CAT("PIPELINE", "Loaded {} bytes from {}", 
-                                static_cast<int64_t>(sz), path.string());
-            }
-            break;
-        }
+        if (file.good()) break;
         code.clear();
     }
 
@@ -175,30 +173,30 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 }
 
 // ────────────────────────────────────────────────
-// Initialize descriptor layout (includes material buffer)
+// Initialize descriptor layout
 // ────────────────────────────────────────────────
 inline void initialize() noexcept {
-    if (main_descriptor_layout != VK_NULL_HANDLE) return;
+    if (main_descriptor_layout) return;
 
     VkDescriptorSetLayoutCreateInfo ci{};
     ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    ci.bindingCount = std::size(kCanvasBindings);
-    ci.pBindings    = kCanvasBindings;
+    ci.bindingCount = std::size(CanvasBindings::bindings);
+    ci.pBindings    = CanvasBindings::bindings;
 
     vkh.checker(vkCreateDescriptorSetLayout(rtx().device, &ci, nullptr, &main_descriptor_layout),
-                "DESCRIPTOR", "vkCreateDescriptorSetLayout");
+                "DESCRIPTOR", "main layout");
 }
 
 // ────────────────────────────────────────────────
-// Create pipeline layout with expanded push constants
+// Pipeline layout with push constants
 // ────────────────────────────────────────────────
 inline void create_pipeline_layout() noexcept {
-    if (pipeline_layout != VK_NULL_HANDLE) return;
+    if (pipeline_layout) return;
 
     initialize();
 
     VkPushConstantRange push{};
-    push.stageFlags = COMPUTE_PUSH_MASK;
+    push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     push.offset     = 0;
     push.size       = sizeof(PushConstants);
 
@@ -210,14 +208,14 @@ inline void create_pipeline_layout() noexcept {
     ci.pPushConstantRanges    = &push;
 
     vkh.checker(vkCreatePipelineLayout(rtx().device, &ci, nullptr, &pipeline_layout),
-                "PIPELINE", "vkCreatePipelineLayout");
+                "PIPELINE", "layout");
 }
 
 // ────────────────────────────────────────────────
-// Create / recreate compute pipeline
+// Create/recreate compute pipeline
 // ────────────────────────────────────────────────
 inline void create_canvas_pipeline(const std::string& shader_override = "", bool verbose = false) noexcept {
-    if (canvas_pipeline != VK_NULL_HANDLE) {
+    if (canvas_pipeline) {
         vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
         canvas_pipeline = VK_NULL_HANDLE;
     }
@@ -226,7 +224,7 @@ inline void create_canvas_pipeline(const std::string& shader_override = "", bool
 
     auto shader_result = load_canvas_shader(shader_override, verbose);
     if (!shader_result) {
-        LOG_ERROR_CAT("PIPELINE", "Shader load failed: {}", shader_result.error());
+        LOG_ERROR_CAT("PIPELINE", "Failed to load canvas shader: {}", shader_result.error());
         return;
     }
 
@@ -244,96 +242,102 @@ inline void create_canvas_pipeline(const std::string& shader_override = "", bool
     ci.layout = pipeline_layout;
 
     vkh.checker(vkCreateComputePipelines(rtx().device, VK_NULL_HANDLE, 1, &ci, nullptr, &canvas_pipeline),
-                "PIPELINE", "vkCreateComputePipelines");
+                "PIPELINE", "canvas compute");
 
     vkDestroyShaderModule(rtx().device, shader, nullptr);
-    LOG_SUCCESS_CAT("PIPELINE", "Canvas compute pipeline created (living world ready)");
+    LOG_SUCCESS_CAT("PIPELINE", "Living World canvas pipeline ready");
 }
 
 // ────────────────────────────────────────────────
-// Dispatch — pushes full living world state + adaptive sampling params
+// Dispatch — pushes full living world state
 // ────────────────────────────────────────────────
-inline void dispatch_canvas(VkCommandBuffer cmd, 
-                            int width, int height, 
+inline void dispatch_canvas(VkCommandBuffer cmd,
+                            int width, int height,
                             float totalTime) noexcept
 {
-    if (canvas_pipeline == VK_NULL_HANDLE) {
+    if (!canvas_pipeline) {
         create_canvas_pipeline();
-        if (canvas_pipeline == VK_NULL_HANDLE) return;
+        if (!canvas_pipeline) return;
     }
 
-    if (width == 0 || height == 0) return;
+    if (width <= 0 || height <= 0) return;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
 
-    // Push real-time camera + living world state + adaptive params
     PushConstants pc{};
-    pc.time                = totalTime;
-    pc.frameSeed           = static_cast<u32>(totalTime * 1000.0f) ^ 0xDEADBEEFu;
+    pc.time         = totalTime;
+    pc.frameSeed    = static_cast<u32>(totalTime * 987654.321f) ^ 0xCAFEBABEu;
 
-    // Real camera from CAM singleton
-    pc.cameraPos           = CAM.position();
-    pc.cameraQuat          = glm::vec4(CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
-    pc.cameraFovDeg        = CAM.fov();
-    pc.aspectRatio         = static_cast<float>(width) / static_cast<float>(height);
-    pc.exposure            = Options::Rendering::EXPOSURE;
+    // Camera
+    pc.cameraPos    = CAM.position();
+    pc.cameraQuat   = glm::vec4(CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
+    pc.cameraFovDeg = CAM.fov();
+    pc.aspectRatio  = static_cast<float>(width) / static_cast<float>(height);
+    pc.exposure     = Options::Rendering::EXPOSURE;
 
-    // Living world environment (pulled from Options::LivingWorld)
-    pc.sunDir              = glm::normalize(glm::vec3(1.0f, 1.5f, 0.8f));
-    pc.sunIntensity        = Options::LivingWorld::SunIntensityDay +
-                             Options::LivingWorld::SunIntensityNight * 1.0f;
-    pc.moonDir             = glm::normalize(glm::vec3(-0.5f, 0.3f, -0.8f));
-    pc.moonIntensity       = Options::LivingWorld::MoonIntensity;
-    pc.windDir             = Options::LivingWorld::WindDirection;
+    // Living World
+    float tod = Options::LivingWorld::CurrentTimeOfDay;  // 0..24
+    float todFrac = tod / 24.0f;
+
+    pc.sunDir       = computeSunDirection(tod);
+    pc.moonDir      = computeMoonDirection(tod);
+
+    float sunHeight = pc.sunDir.y;
+    pc.sunIntensity = Options::LivingWorld::SunIntensityDay * std::max(0.0f, sunHeight) +
+                      Options::LivingWorld::SunIntensityNight * (1.0f - std::max(0.0f, sunHeight));
+
+    pc.moonIntensity = Options::LivingWorld::MoonIntensity * (1.0f - std::max(0.0f, sunHeight));
+
+    pc.windDir             = glm::normalize(Options::LivingWorld::WindDirection);
     pc.windStrength        = Options::LivingWorld::WindStrength;
     pc.temperatureC        = Options::LivingWorld::TemperatureC;
     pc.humidity            = Options::LivingWorld::Humidity;
     pc.airPressureKPa      = Options::LivingWorld::AirPressureKPa;
     pc.precipitationFactor = Options::LivingWorld::PrecipitationFactor;
     pc.fogDensity          = Options::LivingWorld::FogDensity;
-    pc.dayNightFactor      = Options::LivingWorld::CurrentTimeOfDay / 24.0f;
+    pc.dayNightFactor      = todFrac;
     pc.cloudCoverage       = Options::LivingWorld::CloudCoverage;
     pc.debugFlags          = Options::LivingWorld::DebugFlags;
 
-    // Adaptive sampling parameters (from Options::Rendering)
-    pc.samplesPerPixel     = Options::Rendering::EnableAdaptiveQuality ? Options::Rendering::MaxSamplesPerPixel : 1;
-    pc.temporalBlend       = Options::Rendering::TemporalBlendStrength;  // 0.0 = sharp, >0 = accumulation
-    pc.maxRecursion        = Options::Rendering::MaxRayRecursion;
+    // Adaptive
+    bool adaptive = Options::Rendering::EnableAdaptiveQuality;
+    pc.samplesPerPixel     = adaptive ? Options::Rendering::MaxSamplesPerPixel : 1;
+    pc.temporalBlendStrength = Options::Rendering::TemporalBlendStrength;
+    pc.maxRayRecursion     = Options::Rendering::MaxRayRecursion;
 
-    vkCmdPushConstants(cmd, pipeline_layout, COMPUTE_PUSH_MASK,
+    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(PushConstants), &pc);
 
-    int dx = (width  + 15) / 16;
-    int dy = (height + 15) / 16;
-
-    vkCmdDispatch(cmd, static_cast<uint32_t>(dx), static_cast<uint32_t>(dy), 1);
+    // Safe unsigned dispatch grid calculation
+    u32 dx = (static_cast<u32>(width)  + 15u) / 16u;
+    u32 dy = (static_cast<u32>(height) + 15u) / 16u;
+    vkCmdDispatch(cmd, dx, dy, 1u);
 }
 
 // ────────────────────────────────────────────────
-// Shutdown — clean up all resources
+// Cleanup
 // ────────────────────────────────────────────────
 inline void shutdown() noexcept {
-    if (canvas_pipeline != VK_NULL_HANDLE) {
+    if (canvas_pipeline) {
         vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
         canvas_pipeline = VK_NULL_HANDLE;
     }
-
-    if (pipeline_layout != VK_NULL_HANDLE) {
+    if (pipeline_layout) {
         vkDestroyPipelineLayout(rtx().device, pipeline_layout, nullptr);
         pipeline_layout = VK_NULL_HANDLE;
     }
-
-    if (main_descriptor_layout != VK_NULL_HANDLE) {
+    if (main_descriptor_layout) {
         vkDestroyDescriptorSetLayout(rtx().device, main_descriptor_layout, nullptr);
         main_descriptor_layout = VK_NULL_HANDLE;
     }
 }
 
 // ────────────────────────────────────────────────
-// Developer hot-reload entry point
+// Hot-reload support
 // ────────────────────────────────────────────────
-inline void hot_reload_shader(const std::string& path = "compute/canvas.spv", bool verbose = false) noexcept {
-    LOG_INFO_CAT("PIPELINE", "Hot-reloading living world shader from: {}", path);
+inline void hot_reload_shader(const std::string& path = "compute/canvas.spv",
+                              [[maybe_unused]] bool verbose = false) noexcept {
+    LOG_INFO_CAT("PIPELINE", "Hot-reloading shader: {}", path);
     create_canvas_pipeline(path, verbose);
 }
 

@@ -5,6 +5,12 @@
 // (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
+//
+// PHILOSOPHY:
+//   - Perfect presentation timing is absolute priority — never miss VSync/present
+//   - Aggressive subsampling BELOW window resolution when GPU load is high
+//   - If GPU usage > MaxGPULoadPercent (default 90%), ALWAYS force subsampling
+//   - Absolute minimum render resolution: 320×200 (safety floor)
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -45,16 +51,15 @@ public:
           prevHdrOutputMemory_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE),
-          adaptiveScale_(1.5f),
-          lastAppliedScale_(1.5f),
+          adaptiveScale_(1.2f),
+          lastAppliedScale_(1.2f),
           lastPresentTime_s_(0.0),
-          measuredRefreshRateHz_(60.0),
+          measuredRefreshRateHz_(60.0f),
           lastFpsLog_(0.0),
           frameCount_(0),
           lastAdaptiveAdjustTime_(0.0),
           adaptiveFrameCount_(0),
-          lastDispatchedW_(static_cast<uint32_t>(windowWidth)),
-          lastDispatchedH_(static_cast<uint32_t>(windowHeight)),
+          lastAggressiveDownscaleTime_(0.0),
           needsRecreate_(false),
           justResizedThisFrame_(false)
     {
@@ -254,35 +259,87 @@ public:
 
         lastPresentTime_s_ = now;
 
-        // Adaptive quality adjustment — 25% steps
-        if (Options::Rendering::EnableAdaptiveQuality) {
-            if (now - lastAdaptiveAdjustTime_ >= 1.0 && adaptiveFrameCount_ >= 8) {
+        // ───────────────────────────────────────────────────────────────
+        // Adaptive resolution scaling — respect OptionsMenu values
+        // ───────────────────────────────────────────────────────────────
+        if (Options::Rendering::EnableAdaptiveResolution) {
+            if (now - lastAdaptiveAdjustTime_ >= 0.8 && adaptiveFrameCount_ >= 6) {
                 double elapsed = now - lastAdaptiveAdjustTime_;
                 double currentFPS = static_cast<double>(adaptiveFrameCount_) / elapsed;
-                double targetFPS = measuredRefreshRateHz_ * 1.08;  // ~8% headroom
+                double currentFrametime_ms = 1000.0 / currentFPS;
 
-                constexpr float STEP = 0.25f;
+                // Runtime-calculated thresholds
+                const float targetHeadroom       = 1.05f;
+                const float safeFrametimeMs      = 1000.0f / (measuredRefreshRateHz_ * targetHeadroom);
+                const float maxAllowedFrametime  = safeFrametimeMs * (Options::Rendering::MaxGPULoadPercent / 100.0f);
+
+                const float warningFrametimeMs   = safeFrametimeMs * 1.15f;
+                const float dangerFrametimeMs    = safeFrametimeMs * 1.40f;
+
+                const float upscalingThreshold   = 1.25f;
+                const float downscaleNormal      = 0.94f;
+                const float downscaleStrong      = 0.82f;
+                const float downscaleEmergency   = 0.65f;
+
+                double targetFPS = measuredRefreshRateHz_ * targetHeadroom;
 
                 bool changed = false;
 
-                if (currentFPS > targetFPS * 1.12) {
-                    adaptiveScale_ += STEP;
-                    adaptiveScale_ = std::min(adaptiveScale_, 4.0f);
-                    changed = true;
-                    LOG_INFO_CAT("ADAPTIVE", "↑ Quality boost to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
+                // If GPU load > MaxGPULoadPercent → force subsampling
+                if (currentFrametime_ms > maxAllowedFrametime) {
+                    float targetScale = Options::Rendering::MinResolutionScale * 1.15f;
+                    if (adaptiveScale_ > targetScale) {
+                        adaptiveScale_ = std::max(targetScale, adaptiveScale_ * 0.82f);
+                        changed = true;
+                        LOG_WARN_CAT("ADAPTIVE", "GPU > {:.0f}% — forcing subsampling to {:.2f}x (ft {:.1f}ms > {:.1f}ms)",
+                                     Options::Rendering::MaxGPULoadPercent, adaptiveScale_, currentFrametime_ms, maxAllowedFrametime);
+                    }
                 }
-                else if (currentFPS < targetFPS * 0.88) {
-                    adaptiveScale_ -= STEP;
-                    adaptiveScale_ = std::max(adaptiveScale_, 0.55f);
+
+                // Danger zone
+                if (currentFrametime_ms > dangerFrametimeMs) {
+                    adaptiveScale_ = std::min(adaptiveScale_, 0.70f);
+                    if (adaptiveScale_ > 0.55f) adaptiveScale_ *= 0.60f;
+                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
+                    lastAggressiveDownscaleTime_ = now;
+                    LOG_WARN_CAT("ADAPTIVE", "DANGER ZONE — forced subsampling to {:.2f}x (ft {:.1f}ms)", adaptiveScale_, currentFrametime_ms);
                     changed = true;
-                    LOG_INFO_CAT("ADAPTIVE", "↓ Quality drop to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
+                }
+                // Strong downscale
+                else if (currentFrametime_ms > warningFrametimeMs * 1.20f || currentFPS < targetFPS * downscaleEmergency) {
+                    adaptiveScale_ *= 0.72f;
+                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
+                    lastAggressiveDownscaleTime_ = now;
+                    LOG_WARN_CAT("ADAPTIVE", "Strong subsampling to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
+                    changed = true;
+                }
+                // Normal downscale
+                else if (currentFPS < targetFPS * downscaleStrong) {
+                    adaptiveScale_ -= Options::Rendering::ResolutionStepSize * 3.5f;
+                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
+                    LOG_INFO_CAT("ADAPTIVE", "↓ Subsampling to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
+                    changed = true;
+                }
+                else if (currentFPS < targetFPS * downscaleNormal) {
+                    adaptiveScale_ -= Options::Rendering::ResolutionStepSize * 2.0f;
+                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
+                    LOG_INFO_CAT("ADAPTIVE", "↓ Mild down to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
+                    changed = true;
+                }
+                // Upscale only when very safe
+                else if (currentFPS > targetFPS * upscalingThreshold &&
+                         now - lastAggressiveDownscaleTime_ > 5.0 &&
+                         currentFrametime_ms < safeFrametimeMs * 0.80f) {
+                    adaptiveScale_ += Options::Rendering::ResolutionStepSize;
+                    adaptiveScale_ = std::min(adaptiveScale_, Options::Rendering::MaxResolutionScale);
+                    LOG_INFO_CAT("ADAPTIVE", "↑ Quality up to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
+                    changed = true;
                 }
 
                 adaptiveFrameCount_ = 0;
                 lastAdaptiveAdjustTime_ = now;
 
-                // Only recreate resources if scale changed meaningfully
-                if (changed && std::abs(adaptiveScale_ - lastAppliedScale_) > 0.05f) {
+                if (changed && std::abs(adaptiveScale_ - lastAppliedScale_) > 0.06f) {
                     updateRenderResolution();
                     destroyHDRResources();
                     createPersistentHDR();
@@ -382,7 +439,7 @@ public:
 
         if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
-            measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
+            measuredRefreshRateHz_ = 1.0f / Swapchain::getSmoothedRefresh();
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
             LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — forcing recreate next frame");
             needsRecreate_ = true;
@@ -403,17 +460,19 @@ public:
             uint32_t dispH = lastDispatchedH_;
 
             float supersampleFactor = (winW > 0) ? static_cast<float>(dispW) / static_cast<float>(winW) : 1.0f;
+            const char* mode = (supersampleFactor < 0.98f) ? "SUBSAMPLING" :
+                               (supersampleFactor > 1.02f) ? "SUPERSAMPLING" : "NATIVE";
 
             const char* stateEmoji = minimized_                       ? "🟥 minimized" :
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
                                      "✅ active";
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
-                          "              RayCanvas Status  •  t+{}s\n"
-                          "  FPS:            {}     (avg frame {} µs)\n"
-                          "  Refresh Rate:   {:.1f} Hz (detected)\n"
+                          "              RayCanvas Status  •  t+{:.1f}s\n"
+                          "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
+                          "  Refresh Rate:   {:.1f} Hz\n"
                           "  Window:         {} x {}\n"
-                          "  Rendered:       {} x {}     (supersampling {:.2f}x)\n"
+                          "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
                           "  State:          {}\n"
                           "  Adaptive qual:  {}\n"
@@ -424,10 +483,10 @@ public:
                           avgFps, avgDt_us,
                           measuredRefreshRateHz_,
                           winW, winH,
-                          dispW, dispH, supersampleFactor,
+                          dispW, dispH, supersampleFactor, mode,
                           adaptiveScale_,
                           stateEmoji,
-                          Options::Rendering::EnableAdaptiveQuality ? "enabled" : "disabled",
+                          Options::Rendering::EnableAdaptiveResolution ? "enabled" : "disabled",
                           Options::Rendering::ACCUMULATION ? "on" : "off",
                           frameCount_
             );
@@ -521,26 +580,25 @@ public:
 
 private:
     void updateRenderResolution() noexcept {
-        // Adaptive supersampling factor — quality vs performance
-        float targetSupersample = Options::Rendering::EnableAdaptiveQuality
-                                ? std::clamp(adaptiveScale_, 0.55f, 4.0f)
+        float targetSupersample = Options::Rendering::EnableAdaptiveResolution
+                                ? std::clamp(adaptiveScale_,
+                                             Options::Rendering::MinResolutionScale,
+                                             Options::Rendering::MaxResolutionScale)
                                 : 1.0f;
 
-        // Respect internal resolution cap
+        // Respect any hard internal resolution cap from options
         float maxAllowedW = static_cast<float>(Options::Rendering::INTERNAL_WIDTH)  / static_cast<float>(window_width_);
         float maxAllowedH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
         float maxAllowed = std::min(maxAllowedW, maxAllowedH);
 
         float effectiveSupersample = std::min(targetSupersample, maxAllowed);
 
-        // Dispatched resolution = window × supersample factor
-        // Camera/projection in shader must use window_width/height (not render size!)
         render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * effectiveSupersample));
         render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * effectiveSupersample));
 
-        // Prevent crash-level low resolutions
-        render_width_  = std::max(render_width_,  640);
-        render_height_ = std::max(render_height_, 360);
+        // Absolute minimum resolution safety floor — never go below 320×200
+        render_width_  = std::max(render_width_,  320);
+        render_height_ = std::max(render_height_, 200);
     }
 
     void createPersistentHDR() noexcept {
@@ -837,16 +895,18 @@ private:
     VkDescriptorPool descriptorPool_         = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
 
-    float          adaptiveScale_            = 1.5f;
-    float          lastAppliedScale_         = 1.5f;
+    float          adaptiveScale_            = 1.2f;
+    float          lastAppliedScale_         = 1.2f;
     double         lastPresentTime_s_        = 0.0;
-    double         measuredRefreshRateHz_    = 60.0;
+    float          measuredRefreshRateHz_    = 60.0f;
 
     double         lastFpsLog_               = 0.0;
     uint64_t       frameCount_               = 0;
 
     double         lastAdaptiveAdjustTime_   = 0.0;
     uint64_t       adaptiveFrameCount_       = 0;
+
+    double         lastAggressiveDownscaleTime_ = 0.0;
 
     uint32_t       lastDispatchedW_          = 0;
     uint32_t       lastDispatchedH_          = 0;

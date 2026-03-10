@@ -54,7 +54,7 @@ namespace Options::GameStyle
         Simulation        = 15,
         Strategy          = 16,
         MMORPG            = 17,
-        PartyGame         = 18
+        PartyGame          = 18
     };
 
     inline DimensionMode       CurrentDimension     = DimensionMode::Full3D;
@@ -154,21 +154,33 @@ namespace Options::Rendering {
     inline int     INTERNAL_HEIGHT          = 2160;
 
     inline constexpr bool    ACCUMULATION             = false;
-    inline constexpr bool    ADAPTIVE_SAMPLING        = true;
+    inline constexpr bool    ADAPTIVE_SAMPLING        = true;   // per-pixel adaptive sampling (old name, kept for compat)
     inline constexpr int     MAX_RAY_RECURSION        = 8;
     inline constexpr float   EXPOSURE                 = 0.2f;
     inline constexpr bool    ENABLE_TONEMAP           = false;
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;
 
-    // Adaptive quality controls
-    inline bool    EnableAdaptiveQuality    = true;   // checkbox
-    inline int     MaxSamplesPerPixel       = 4;      // slider: 1–8
-    inline int     MaxRayRecursion          = 10;     // slider: 4–16
-    inline float   QualityHeadroomThreshold = 0.75f;  // 0.6–0.9 (fraction of frame budget under which we boost)
-    inline float   MaxGPULoadPercent        = 90.0f;  // never exceed this % of target frame time
+    // ─── New: Adaptive Resolution Scaling (dynamic supersampling ↔ subsampling) ───
+    inline bool    EnableAdaptiveResolution   = true;           // master toggle — dynamic internal resolution
+
+    inline float   TargetFramerate            = 60.0f;          // desired stable FPS (should match or be below measured refresh)
+    inline float   MinResolutionScale         = 0.45f;          // lowest allowed (0.45 = 45% of window res → deep subsampling)
+    inline float   MaxResolutionScale         = 2.2f;           // highest allowed supersampling when headroom exists
+    inline float   ResolutionStepSize         = 0.10f;          // granularity of adjustments (0.1 = 10% steps)
+
+    inline float   ResolutionAdjustHysteresis = 0.08f;          // deadband (% of target frametime) to prevent oscillation
+    inline float   AggressiveDownscaleThreshold = 1.35f;        // frametime > target * this → fast/strong downscale
+    inline float   HeadroomForUpscale         = 0.20f;          // need at least 20% spare GPU time to consider upscaling
+
+    // Legacy / related adaptive controls (still useful even with resolution scaling)
+    inline bool    EnableAdaptiveQuality      = true;           // per-pixel adaptive sampling toggle (if still used)
+    inline int     MaxSamplesPerPixel         = 4;              // slider: 1–8 (if using adaptive sampling)
+    inline int     MaxRayRecursion            = 10;             // slider: 4–16
+    inline float   QualityHeadroomThreshold   = 0.75f;          // 0.6–0.9 (fraction under frame budget to boost quality)
+    inline float   MaxGPULoadPercent          = 90.0f;          // never exceed this % of target frame time
 
     // Temporal accumulation strength (0.0 = no accumulation)
-    inline float   TemporalBlendStrength    = 0.0f;  // slider: 0.0–1.0
+    inline float   TemporalBlendStrength      = 0.0f;           // slider: 0.0–1.0
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
