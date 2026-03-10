@@ -8,9 +8,12 @@
 //
 // PHILOSOPHY:
 //   - Perfect presentation timing is absolute priority — never miss VSync/present
-//   - Aggressive subsampling BELOW window resolution when GPU load is high
-//   - If GPU usage > MaxGPULoadPercent (default 90%), ALWAYS force subsampling
-//   - Absolute minimum render resolution: 320×200 (safety floor)
+//   - Accurate GPU load via Vulkan timestamps (only metric we care about)
+//   - If GPU load > MaxGPULoadPercent → prepare to subsample
+//   - If GPU load ≤ MaxGPULoadPercent → prepare to supersample
+//   - Changes NEVER affect the current frame — only the next frame after present
+//   - Absolute minimum render resolution: 320×200 (hard safety — impossible to reach 0x0)
+//   - Robust fullscreen toggle: reset to safe scale, avoid blocking waits, quick recovery
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -26,8 +29,6 @@
 #include <vector>
 #include <cstdint>
 #include <array>
-#include <format>
-#include <filesystem>
 #include <algorithm>
 #include <cmath>
 
@@ -51,17 +52,20 @@ public:
           prevHdrOutputMemory_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
           descriptorSet_(VK_NULL_HANDLE),
-          adaptiveScale_(1.2f),
-          lastAppliedScale_(1.2f),
+          adaptiveScale_(1.0f),
+          lastAppliedScale_(1.0f),
           lastPresentTime_s_(0.0),
           measuredRefreshRateHz_(60.0f),
           lastFpsLog_(0.0),
           frameCount_(0),
           lastAdaptiveAdjustTime_(0.0),
           adaptiveFrameCount_(0),
-          lastAggressiveDownscaleTime_(0.0),
+          smoothedGpuTimeMs_(16.67),
+          timestampQueryPool_(VK_NULL_HANDLE),
+          timestampPeriodNs_(1.0),
           needsRecreate_(false),
-          justResizedThisFrame_(false)
+          justResizedThisFrame_(false),
+          postResizeGraceFrames_(0)
     {
         Swapchain::create(window, window_width_, window_height_);
 
@@ -69,6 +73,12 @@ public:
             LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain");
             std::abort();
         }
+
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(rtx().physical, &props);
+        timestampPeriodNs_ = props.limits.timestampPeriod;
+
+        createTimestampQueryPool();
 
         buildMaterialLibrary();
 
@@ -92,6 +102,9 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
+        if (timestampQueryPool_ != VK_NULL_HANDLE) {
+            vkDestroyQueryPool(rtx().device, timestampQueryPool_, nullptr);
+        }
         if (descriptorSet_ != VK_NULL_HANDLE) {
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
         }
@@ -170,6 +183,11 @@ public:
 
         if (fullscreen_toggle) {
             sdl_toggle_fullscreen();
+            if (Options::Rendering::EnableAdaptiveResolution) {
+                adaptiveScale_ = 0.75f;
+                postResizeGraceFrames_ = 6;
+                needsRecreate_ = true;
+            }
         }
 
         if (quit) {
@@ -191,8 +209,11 @@ public:
         bool sizeChanged = (currentW != window_width_) || (currentH != window_height_);
 
         if (minimized_ || sizeChanged || needsRecreate_) {
-            vkDeviceWaitIdle(rtx().device);
-            onResize(currentW, currentH);
+            if (sizeChanged) {
+                vkDeviceWaitIdle(rtx().device);
+            }
+
+            onResize(currentW, currentH, sizeChanged);
             minimized_ = false;
             needsRecreate_ = false;
             justResizedThisFrame_ = true;
@@ -204,7 +225,6 @@ public:
         }
 
         if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
-            LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
             return;
         }
 
@@ -234,13 +254,11 @@ public:
         vkDestroyFence(rtx().device, fence, nullptr);
 
         if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — forcing recreate next frame");
             needsRecreate_ = true;
             return;
         }
 
         if (acq != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
             if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) {
                 destroyed_ = true;
             }
@@ -249,6 +267,9 @@ public:
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
+
+        vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool_, 0);
 
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
@@ -259,103 +280,22 @@ public:
 
         lastPresentTime_s_ = now;
 
-        // ───────────────────────────────────────────────────────────────
-        // Adaptive resolution scaling — respect OptionsMenu values
-        // ───────────────────────────────────────────────────────────────
-        if (Options::Rendering::EnableAdaptiveResolution) {
-            if (now - lastAdaptiveAdjustTime_ >= 0.8 && adaptiveFrameCount_ >= 6) {
-                double elapsed = now - lastAdaptiveAdjustTime_;
-                double currentFPS = static_cast<double>(adaptiveFrameCount_) / elapsed;
-                double currentFrametime_ms = 1000.0 / currentFPS;
-
-                // Runtime-calculated thresholds
-                const float targetHeadroom       = 1.05f;
-                const float safeFrametimeMs      = 1000.0f / (measuredRefreshRateHz_ * targetHeadroom);
-                const float maxAllowedFrametime  = safeFrametimeMs * (Options::Rendering::MaxGPULoadPercent / 100.0f);
-
-                const float warningFrametimeMs   = safeFrametimeMs * 1.15f;
-                const float dangerFrametimeMs    = safeFrametimeMs * 1.40f;
-
-                const float upscalingThreshold   = 1.25f;
-                const float downscaleNormal      = 0.94f;
-                const float downscaleStrong      = 0.82f;
-                const float downscaleEmergency   = 0.65f;
-
-                double targetFPS = measuredRefreshRateHz_ * targetHeadroom;
-
-                bool changed = false;
-
-                // If GPU load > MaxGPULoadPercent → force subsampling
-                if (currentFrametime_ms > maxAllowedFrametime) {
-                    float targetScale = Options::Rendering::MinResolutionScale * 1.15f;
-                    if (adaptiveScale_ > targetScale) {
-                        adaptiveScale_ = std::max(targetScale, adaptiveScale_ * 0.82f);
-                        changed = true;
-                        LOG_WARN_CAT("ADAPTIVE", "GPU > {:.0f}% — forcing subsampling to {:.2f}x (ft {:.1f}ms > {:.1f}ms)",
-                                     Options::Rendering::MaxGPULoadPercent, adaptiveScale_, currentFrametime_ms, maxAllowedFrametime);
-                    }
-                }
-
-                // Danger zone
-                if (currentFrametime_ms > dangerFrametimeMs) {
-                    adaptiveScale_ = std::min(adaptiveScale_, 0.70f);
-                    if (adaptiveScale_ > 0.55f) adaptiveScale_ *= 0.60f;
-                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
-                    lastAggressiveDownscaleTime_ = now;
-                    LOG_WARN_CAT("ADAPTIVE", "DANGER ZONE — forced subsampling to {:.2f}x (ft {:.1f}ms)", adaptiveScale_, currentFrametime_ms);
-                    changed = true;
-                }
-                // Strong downscale
-                else if (currentFrametime_ms > warningFrametimeMs * 1.20f || currentFPS < targetFPS * downscaleEmergency) {
-                    adaptiveScale_ *= 0.72f;
-                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
-                    lastAggressiveDownscaleTime_ = now;
-                    LOG_WARN_CAT("ADAPTIVE", "Strong subsampling to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
-                    changed = true;
-                }
-                // Normal downscale
-                else if (currentFPS < targetFPS * downscaleStrong) {
-                    adaptiveScale_ -= Options::Rendering::ResolutionStepSize * 3.5f;
-                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
-                    LOG_INFO_CAT("ADAPTIVE", "↓ Subsampling to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
-                    changed = true;
-                }
-                else if (currentFPS < targetFPS * downscaleNormal) {
-                    adaptiveScale_ -= Options::Rendering::ResolutionStepSize * 2.0f;
-                    adaptiveScale_ = std::max(adaptiveScale_, Options::Rendering::MinResolutionScale);
-                    LOG_INFO_CAT("ADAPTIVE", "↓ Mild down to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
-                    changed = true;
-                }
-                // Upscale only when very safe
-                else if (currentFPS > targetFPS * upscalingThreshold &&
-                         now - lastAggressiveDownscaleTime_ > 5.0 &&
-                         currentFrametime_ms < safeFrametimeMs * 0.80f) {
-                    adaptiveScale_ += Options::Rendering::ResolutionStepSize;
-                    adaptiveScale_ = std::min(adaptiveScale_, Options::Rendering::MaxResolutionScale);
-                    LOG_INFO_CAT("ADAPTIVE", "↑ Quality up to {:.2f}x (FPS {:.1f})", adaptiveScale_, currentFPS);
-                    changed = true;
-                }
-
-                adaptiveFrameCount_ = 0;
-                lastAdaptiveAdjustTime_ = now;
-
-                if (changed && std::abs(adaptiveScale_ - lastAppliedScale_) > 0.06f) {
-                    updateRenderResolution();
-                    destroyHDRResources();
-                    createPersistentHDR();
-                    createPreviousHDR();
-                    updateDescriptorSet();
-                    lastAppliedScale_ = adaptiveScale_;
-                }
-            }
-        }
-
         updateRenderResolution();
 
-        Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
+        float dispatchScale = adaptiveScale_;
+        if (postResizeGraceFrames_ > 0) {
+            dispatchScale = std::min(dispatchScale, 0.85f);
+            postResizeGraceFrames_--;
+        }
 
-        lastDispatchedW_ = static_cast<uint32_t>(render_width_);
-        lastDispatchedH_ = static_cast<uint32_t>(render_height_);
+        int dispatchW = static_cast<int>(std::round(static_cast<float>(window_width_) * dispatchScale));
+        int dispatchH = static_cast<int>(std::round(static_cast<float>(window_height_) * dispatchScale));
+        dispatchW = std::max(320, dispatchW);
+        dispatchH = std::max(200, dispatchH);
+
+        Pipeline::dispatch_canvas(cmd, dispatchW, dispatchH, static_cast<float>(now));
+
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
 
         VkImageMemoryBarrier postComputeBarrier{};
         postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -372,6 +312,20 @@ public:
                              0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
 
         endSubmitAndWait(cmd);
+
+        uint64_t timestamps[2] = {};
+        if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
+                                  sizeof(timestamps), timestamps, sizeof(uint64_t),
+                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
+            double gpuTimeMs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs_ / 1'000'000.0;
+            smoothedGpuTimeMs_ = 0.72 * smoothedGpuTimeMs_ + 0.28 * gpuTimeMs;
+        }
+
+        if (Options::Rendering::EnableAdaptiveResolution) {
+            adjustAdaptiveScale(now);
+        } else {
+            adaptiveScale_ = 1.0f;
+        }
 
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
@@ -441,10 +395,8 @@ public:
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
             measuredRefreshRateHz_ = 1.0f / Swapchain::getSmoothedRefresh();
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — forcing recreate next frame");
             needsRecreate_ = true;
         } else if (pres != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
 
@@ -456,12 +408,12 @@ public:
             int winW = window_width_;
             int winH = window_height_;
 
-            uint32_t dispW = lastDispatchedW_;
-            uint32_t dispH = lastDispatchedH_;
+            float scaleFactor = (winW > 0) ? static_cast<float>(render_width_) / static_cast<float>(winW) : 1.0f;
+            const char* mode = (scaleFactor < 0.98f) ? "SUBSAMPLING" :
+                               (scaleFactor > 1.02f) ? "SUPERSAMPLING" : "NATIVE";
 
-            float supersampleFactor = (winW > 0) ? static_cast<float>(dispW) / static_cast<float>(winW) : 1.0f;
-            const char* mode = (supersampleFactor < 0.98f) ? "SUBSAMPLING" :
-                               (supersampleFactor > 1.02f) ? "SUPERSAMPLING" : "NATIVE";
+            float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.05f);
+            float gpuLoadPercent = (targetFrameMs > 0.001f) ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0f : 0.0f;
 
             const char* stateEmoji = minimized_                       ? "🟥 minimized" :
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
@@ -469,11 +421,12 @@ public:
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
                           "              RayCanvas Status  •  t+{:.1f}s\n"
-                          "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
-                          "  Refresh Rate:   {:.1f} Hz\n"
+                          "  FPS:            {}     (avg frame {:.0f} µs)\n"
+                          "  Refresh Rate:   {} Hz\n"
                           "  Window:         {} x {}\n"
-                          "  Rendered:       {} x {}     ({:.2f}x — {})\n"
+                          "  Rendered:       {} x {}     ({:.2f}x — Resampled)\n"
                           "  Adaptive scale: {:.2f}x\n"
+                          "  GPU load:       {:.1f}%   (smoothed {:.1f} ms)\n"
                           "  State:          {}\n"
                           "  Adaptive qual:  {}\n"
                           "  Accumulation:   {}\n"
@@ -483,8 +436,9 @@ public:
                           avgFps, avgDt_us,
                           measuredRefreshRateHz_,
                           winW, winH,
-                          dispW, dispH, supersampleFactor, mode,
+                          render_width_, render_height_, scaleFactor,
                           adaptiveScale_,
+                          gpuLoadPercent, smoothedGpuTimeMs_,
                           stateEmoji,
                           Options::Rendering::EnableAdaptiveResolution ? "enabled" : "disabled",
                           Options::Rendering::ACCUMULATION ? "on" : "off",
@@ -496,7 +450,7 @@ public:
         }
     }
 
-    void onResize(int newWidth, int newHeight) noexcept {
+    void onResize(int newWidth, int newHeight, bool fromUserResize = false) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
             return;
@@ -506,28 +460,20 @@ public:
             return;
         }
 
-        LOG_INFO_CAT("WINDOW", "Resizing to {}x{}", newWidth, newHeight);
+        if (fromUserResize) {
+            vkDeviceWaitIdle(rtx().device);
+        }
 
-        vkDeviceWaitIdle(rtx().device);
-
-        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_, nullptr);
-        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_, nullptr);
-        if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
-
-        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_, nullptr);
-        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_, nullptr);
-        if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
-
-        hdrOutputView_   = VK_NULL_HANDLE;
-        hdrOutputImage_  = VK_NULL_HANDLE;
-        hdrOutputMemory_ = VK_NULL_HANDLE;
-        prevHdrOutputView_   = VK_NULL_HANDLE;
-        prevHdrOutputImage_  = VK_NULL_HANDLE;
-        prevHdrOutputMemory_ = VK_NULL_HANDLE;
+        destroyHDRResources();
 
         window_width_  = newWidth;
         window_height_ = newHeight;
         minimized_ = false;
+
+        if (fromUserResize && Options::Rendering::EnableAdaptiveResolution) {
+            adaptiveScale_ = 0.75f;
+            postResizeGraceFrames_ = 8;
+        }
 
         Swapchain::recreate(window_width_, window_height_);
 
@@ -568,9 +514,6 @@ public:
 
             endSubmitAndWait(cmd);
         }
-
-        LOG_SUCCESS_CAT("RAYCANVAS", "Resize complete — {}x{} (internal {}x{})",
-                        window_width_, window_height_, render_width_, render_height_);
     }
 
     int  getWidth()  const noexcept { return window_width_; }
@@ -579,26 +522,85 @@ public:
     bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
+    void adjustAdaptiveScale(double now) noexcept {
+        double elapsed = now - lastAdaptiveAdjustTime_;
+        if (elapsed < 0.35 || adaptiveFrameCount_ < 3) return;
+
+        float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.05f);
+        float gpuLoadPercent = (targetFrameMs > 0.001f)
+                             ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0f
+                             : 0.0f;
+
+        float targetScale = adaptiveScale_;
+
+        constexpr float CRITICAL_LOAD_PCT = 150.0f;
+        constexpr float SEVERE_LOAD_PCT   = 220.0f;
+
+        float downMult = 0.82f;
+        float upMult   = (postResizeGraceFrames_ > 0) ? 1.08f : 1.14f;
+
+        if (gpuLoadPercent > SEVERE_LOAD_PCT) {
+            downMult = 0.50f;           // very aggressive drop
+        } else if (gpuLoadPercent > CRITICAL_LOAD_PCT) {
+            downMult = 0.65f;           // strong drop
+        } else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
+            downMult = 0.82f;           // normal downscale
+        } else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.78f) {
+            targetScale *= upMult;
+        } else {
+            adaptiveFrameCount_ = 0;
+            lastAdaptiveAdjustTime_ = now;
+            return;
+        }
+
+        if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
+            targetScale *= downMult;
+
+            // Extra emergency clamp if still extremely overloaded
+            if (gpuLoadPercent > 300.0f) {
+                targetScale = std::min(targetScale, 0.30f);
+            } else if (gpuLoadPercent > 200.0f) {
+                targetScale = std::min(targetScale, 0.40f);
+            }
+        }
+
+        targetScale = std::clamp(targetScale,
+                                 Options::Rendering::MinResolutionScale,
+                                 Options::Rendering::MaxResolutionScale);
+
+        if (std::abs(targetScale - adaptiveScale_) > 0.025f) {
+            adaptiveScale_ = targetScale;
+            needsRecreate_ = true;
+        }
+
+        adaptiveFrameCount_ = 0;
+        lastAdaptiveAdjustTime_ = now;
+    }
+
     void updateRenderResolution() noexcept {
-        float targetSupersample = Options::Rendering::EnableAdaptiveResolution
-                                ? std::clamp(adaptiveScale_,
-                                             Options::Rendering::MinResolutionScale,
-                                             Options::Rendering::MaxResolutionScale)
-                                : 1.0f;
+        float scale = Options::Rendering::EnableAdaptiveResolution
+                    ? adaptiveScale_
+                    : 1.0f;
 
-        // Respect any hard internal resolution cap from options
-        float maxAllowedW = static_cast<float>(Options::Rendering::INTERNAL_WIDTH)  / static_cast<float>(window_width_);
-        float maxAllowedH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
-        float maxAllowed = std::min(maxAllowedW, maxAllowedH);
+        float maxW = static_cast<float>(Options::Rendering::INTERNAL_WIDTH)  / static_cast<float>(window_width_);
+        float maxH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
+        scale = std::min(scale, std::min(maxW, maxH));
 
-        float effectiveSupersample = std::min(targetSupersample, maxAllowed);
+        int proposedW = static_cast<int>(std::round(static_cast<float>(window_width_)  * scale));
+        int proposedH = static_cast<int>(std::round(static_cast<float>(window_height_) * scale));
 
-        render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * effectiveSupersample));
-        render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * effectiveSupersample));
+        render_width_  = std::max(320, proposedW);
+        render_height_ = std::max(200, proposedH);
+    }
 
-        // Absolute minimum resolution safety floor — never go below 320×200
-        render_width_  = std::max(render_width_,  320);
-        render_height_ = std::max(render_height_, 200);
+    void createTimestampQueryPool() noexcept {
+        VkQueryPoolCreateInfo qci{};
+        qci.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        qci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
+        qci.queryCount = 2;
+
+        vkh.checker(vkCreateQueryPool(rtx().device, &qci, nullptr, &timestampQueryPool_),
+                    "QUERY", "Timestamp Pool");
     }
 
     void createPersistentHDR() noexcept {
@@ -700,8 +702,6 @@ private:
     }
 
     void destroyHDRResources() noexcept {
-        vkDeviceWaitIdle(rtx().device);
-
         if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
         if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
         if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
@@ -895,8 +895,8 @@ private:
     VkDescriptorPool descriptorPool_         = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
 
-    float          adaptiveScale_            = 1.2f;
-    float          lastAppliedScale_         = 1.2f;
+    float          adaptiveScale_            = 1.0f;
+    float          lastAppliedScale_         = 1.0f;
     double         lastPresentTime_s_        = 0.0;
     float          measuredRefreshRateHz_    = 60.0f;
 
@@ -906,13 +906,14 @@ private:
     double         lastAdaptiveAdjustTime_   = 0.0;
     uint64_t       adaptiveFrameCount_       = 0;
 
-    double         lastAggressiveDownscaleTime_ = 0.0;
-
-    uint32_t       lastDispatchedW_          = 0;
-    uint32_t       lastDispatchedH_          = 0;
-
     bool           needsRecreate_            = false;
     bool           justResizedThisFrame_     = false;
+
+    int            postResizeGraceFrames_    = 0;
+
+    VkQueryPool    timestampQueryPool_       = VK_NULL_HANDLE;
+    double         timestampPeriodNs_        = 1.0;
+    double         smoothedGpuTimeMs_        = 16.67;
 };
 
 inline RayCanvas* rayCanvas = nullptr;

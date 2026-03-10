@@ -161,8 +161,9 @@ namespace Options::Rendering {
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;
 
     // ─── New: Adaptive Resolution Scaling (dynamic supersampling ↔ subsampling) ───
-    inline bool    EnableAdaptiveResolution   = true;           // master toggle — dynamic internal resolution
+    inline constexpr float   MaxGPULoadPercent          = 90.0f;// Throttle cap for adaptive rendering
 
+    inline bool    EnableAdaptiveResolution   = true;           // master toggle — dynamic internal resolution
     inline float   TargetFramerate            = 60.0f;          // desired stable FPS (should match or be below measured refresh)
     inline float   MinResolutionScale         = 0.45f;          // lowest allowed (0.45 = 45% of window res → deep subsampling)
     inline float   MaxResolutionScale         = 2.2f;           // highest allowed supersampling when headroom exists
@@ -176,8 +177,7 @@ namespace Options::Rendering {
     inline bool    EnableAdaptiveQuality      = true;           // per-pixel adaptive sampling toggle (if still used)
     inline int     MaxSamplesPerPixel         = 4;              // slider: 1–8 (if using adaptive sampling)
     inline int     MaxRayRecursion            = 10;             // slider: 4–16
-    inline float   QualityHeadroomThreshold   = 0.75f;          // 0.6–0.9 (fraction under frame budget to boost quality)
-    inline float   MaxGPULoadPercent          = 90.0f;          // never exceed this % of target frame time
+    inline float   QualityHeadroomThreshold   = 0.75f;  
 
     // Temporal accumulation strength (0.0 = no accumulation)
     inline float   TemporalBlendStrength      = 0.0f;           // slider: 0.0–1.0

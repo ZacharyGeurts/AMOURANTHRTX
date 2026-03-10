@@ -1154,9 +1154,6 @@ struct Swapchain {
         lastPresentTime_s = 0.0;
         smoothedRefresh_s = 1.0 / 60.0;
         needsRecreate = false;
-
-        LOG_SUCCESS_CAT("SWAPCHAIN", "Created swapchain {}x{} ({} images, present mode {})",
-                        extent.width, extent.height, actualCount, static_cast<int>(presentMode));
     }
 
     // ────────────────────────────────────────────────────────────────
