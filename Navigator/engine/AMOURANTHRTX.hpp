@@ -1229,12 +1229,6 @@ struct Swapchain {
             minimized = true;
             return;
         }
-
-        if (minimized || currentW != extent.width || currentH != extent.height || needsRecreate) {
-            recreate(currentW, currentH);
-            minimized = false;
-            needsRecreate = false;
-        }
     }
 
     static void markNeedsRecreate() noexcept {

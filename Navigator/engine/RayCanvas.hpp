@@ -253,7 +253,6 @@ public:
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
                                 0, 1, &set, 0, nullptr);
 
-        double delta_s = now - lastPresentTime_s_;
         lastPresentTime_s_ = now;
 
         if (Options::Rendering::EnableAdaptiveQuality) {
@@ -373,7 +372,7 @@ public:
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
 
-        if (now - lastFpsLog_ >= 50.0) {
+        if (now - lastFpsLog_ >= 5.0) {
             double elapsed     = now - lastFpsLog_;
             double avgFps      = (frameCount_ > 0) ? static_cast<double>(frameCount_) / elapsed : 0.0;
             double avgDt_us    = (frameCount_ > 0) ? (elapsed * 1000000.0) / static_cast<double>(frameCount_) : 0.0;
