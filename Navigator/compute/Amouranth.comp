@@ -16,7 +16,7 @@
 // ── Animation & Jiggle ─────────────────────────────────────────────────────
 #define GLOBAL_SCALE                1.32
 #define JUMP_FREQ                   1.8
-#define JUMP_AMP                    0.16
+#define JUMP_AMP                    0.26
 #define GRAVITY_DAMP                0.92
 #define BREATH_SPEED                0.75
 #define BREATH_AMP                  0.016
@@ -24,10 +24,10 @@
 #define HEAD_TILT_AMP               0.09
 #define ARM_SWAY_FREQ               0.58
 #define ARM_SWAY_AMP                0.06
-#define BOOB_JIGGLE_FREQ            2.1
+#define BOOB_JIGGLE_FREQ            0.1
 #define BOOB_JIGGLE_AMP_LEFT        0.11
 #define BOOB_JIGGLE_AMP_RIGHT       0.11
-#define BOOB_JIGGLE_DAMP            3.5
+#define BOOB_JIGGLE_DAMP            0.5
 #define BOOB_JIGGLE_PHASE_DIFF      1.6
 
 // ── Face & Eyes ─────────────────────────────────────────────────────────────
@@ -67,13 +67,13 @@
 #define BOOB_BASE_Y                 1.098     // moved down 10% from original
 #define BOOB_BASE_Z                 0.16
 #define BOOB_SEPARATION             0.20
-#define BOOB_RADIUS_LEFT            0.2035    // increased 10% from original
-#define BOOB_RADIUS_RIGHT           0.2035
+#define BOOB_RADIUS_LEFT            0.3
+#define BOOB_RADIUS_RIGHT           0.3
 
 #define HAT_Y_OFFSET                1.38
 #define HAT_HEIGHT                  1.50
 #define HAT_RADIUS_TOP              0.24
-#define HAT_BRIM_WIDTH              1.10
+#define HAT_BRIM_WIDTH              0.2
 #define HAT_BRIM_THICKNESS          0.09
 #define HAT_TILT_FACTOR             0.65
 #define HAT_CREASE_AMP              0.032
