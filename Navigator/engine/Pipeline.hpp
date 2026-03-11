@@ -111,7 +111,7 @@ inline VkPipeline            raymarch_pipeline      = VK_NULL_HANDLE;  // rename
 [[nodiscard]] inline std::expected<VkShaderModule, std::string> load_raymarch_shader(
     const std::string& override_path = "") noexcept
 {
-    constexpr std::string_view shader_name = "canvas.spv";
+    constexpr std::string_view shader_name = "CANVAS.spv";
     namespace fs = std::filesystem;
 
     std::vector<fs::path> candidates;
