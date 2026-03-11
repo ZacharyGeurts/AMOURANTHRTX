@@ -1,0 +1,242 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// MIA MAKES MUSIC – Wide Piano Keyboard Opal Tribute 2026 (Fully Tunable)
+// Wide rectangular keyboard-like gem with black/white keys, opal iridescence
+// Floating musical notes, pulsing glow, rich marble table
+// All key parameters exposed as #defines for easy tweaking
+// 💜🎹 Enjoy experimenting!
+// =============================================================================
+
+layout(push_constant) uniform Push {
+    float time;     // seconds
+} pc;
+
+// ────────────────────────────────────────────────
+// === TUNING PARAMETERS – Change these! ===
+// ────────────────────────────────────────────────
+
+// === Layout & Scale ===
+#define KEYBOARD_WIDTH_SCALE      3.40      // How wide the keyboard appears (higher = wider)
+#define KEYBOARD_HEIGHT_SCALE     1.00      // Vertical stretch (usually keep near 1.0)
+#define GEM_SCALE                 1.0      // Overall size of the object
+#define ASPECT_ZOOM               1.45      // How much the centered object fills the screen
+
+// === Rotation & Animation ===
+#define ROT_SPEED_Y               0.009     // Main horizontal spin speed (smaller = slower)
+#define ROT_SPEED_X               0.006     // Vertical tilt oscillation speed
+#define X_TILT_AMP                0.18      // Max vertical tilt angle amplitude
+#define Y_TILT_AMP                0.10      // Extra gentle side-to-side breathing
+#define PULSE_SPEED               2.8       // How fast "pressed" keys glow pulses
+#define PULSE_PHASE_OFFSET        3.14      // Shift pulsing between keys (radians)
+
+// === Key Geometry ===
+#define KEYS_VISIBLE              88       // Approx number of white keys shown (affects density)
+#define WHITE_KEY_RAISE           0.060     // How much white keys protrude upward
+#define BLACK_KEY_RECESSED        -0.040    // How much black keys are sunken
+#define KEY_BEVEL_AMOUNT          0.035     // Edge rounding/bevel strength between keys
+#define KEY_EDGE_SHARPNESS        0.04      // Smaller = sharper key transitions
+
+// === Material & Opal Properties ===
+#define OPAL_MILK_BASE            vec3(0.97, 0.95, 0.99)
+#define BLACK_KEY_TINT            vec3(0.18, 0.16, 0.22)
+#define IOR                       1.46
+#define THIN_FILM_STRENGTH        1.55      // Iridescence intensity
+#define FILM_SPEED                1.4       // How fast color play shifts
+#define FILM_SCALE                65.0      // Spatial frequency of iridescence bands
+#define SUBSURFACE_GLOW_STRENGTH  0.45      // White key soft inner glow
+#define SPECULAR_POWER_BASE       90.0      // Base shininess exponent
+#define SPECULAR_POWER_SCALE      550.0     // How much fresnel boosts specular
+
+// === Sparkle & Fire ===
+#define SCINTILLATION_AMP         0.75      // Overall fire/sparkle strength
+#define SCINTILLATION_SPEED       2.2       // How fast sparkle twinkles
+#define SCINTILLATION_FREQ        22.0      // Spatial sparkle frequency
+#define NOTE_PARTICLE_BOOST       1.5       // Extra sparkle when near floating notes
+
+// === Floating Musical Notes ===
+#define NOTE_PARTICLE_COUNT       4         // Number of orbiting note spheres (0 = disable)
+#define NOTE_PARTICLE_SIZE        0.04      // Radius of each note particle
+#define NOTE_ORBIT_SPEED          1.2       // Base speed of note movement
+#define NOTE_ORBIT_RADIUS_X       0.4
+#define NOTE_ORBIT_RADIUS_Y       0.3
+#define NOTE_ORBIT_RADIUS_Z       0.25
+
+// === Lighting ===
+#define LIGHT_DIRECTION           normalize(vec3(0.75, 1.0, 1.4))
+#define AMBIENT_LIGHT             vec3(0.10, 0.11, 0.18)
+#define DIFFUSE_MULTIPLIER        2.5
+#define SPECULAR_MULTIPLIER       3.4
+#define BOUNCE_MULTIPLIER         1.8
+#define THIN_FILM_MULTIPLIER      1.7
+#define SCINT_MULTIPLIER          1.2
+
+// === Vignette & Post ===
+#define GEM_RIM_VIGNETTE          1.1       // How strong the per-gem edge fade is
+#define OVERALL_VIGNETTE          0.55      // Screen corner darkening strength
+#define CHROMATIC_ABERRATION      0.6       // Subtle color fringing strength (0 = off)
+
+// ────────────────────────────────────────────────
+// SDF: Wide piano keyboard with keys
+// ────────────────────────────────────────────────
+float sdf_piano_keyboard(vec3 p) {
+    vec3 q = abs(p);
+    float slab = max(max(q.x - 1.55 * KEYBOARD_WIDTH_SCALE, 
+                         q.y - 0.48 * KEYBOARD_HEIGHT_SCALE), 
+                     q.z - 0.18);
+    
+    float key_pos   = p.x * KEYS_VISIBLE;
+    float key_id    = floor(key_pos);
+    float key_frac  = fract(key_pos);
+    
+    bool is_black = (mod(key_id + 0.5, 7.0) > 0.6 && mod(key_id + 0.5, 7.0) < 3.4) ||
+                    (mod(key_id + 0.5, 7.0) > 4.1 && mod(key_id + 0.5, 7.0) < 6.0);
+    
+    float key_height = is_black ? BLACK_KEY_RECESSED : WHITE_KEY_RAISE;
+    float bevel = smoothstep(KEY_EDGE_SHARPNESS, 0.0, min(key_frac, 1.0 - key_frac)) * KEY_BEVEL_AMOUNT;
+    
+    float key_sdf = abs(p.z - key_height) - 0.12 + bevel;
+    
+    return max(slab, key_sdf);
+}
+
+// ────────────────────────────────────────────────
+// Floating note particles
+// ────────────────────────────────────────────────
+float sdf_note_particle(vec3 p, float seed) {
+    float phase = pc.time * NOTE_ORBIT_SPEED + seed * 6.283185;
+    vec3 offset = vec3(sin(phase) * NOTE_ORBIT_RADIUS_X,
+                       cos(phase * 1.35 + seed * 1.3) * NOTE_ORBIT_RADIUS_Y,
+                       sin(phase * 0.8 + seed * 2.1) * NOTE_ORBIT_RADIUS_Z);
+    return length(p - offset) - NOTE_PARTICLE_SIZE;
+}
+
+// ────────────────────────────────────────────────
+// Marble table with staff lines & subtle key reflections
+// ────────────────────────────────────────────────
+vec3 marble_table(vec2 uv) {
+    vec2 t = uv + vec2(pc.time * 0.005, sin(pc.time * 0.003) * 0.015);
+    vec3 col = vec3(0.006, 0.005, 0.011);
+
+    float vein = 0.5 + 0.5 * sin(t.x * 3.2 + t.y * 1.6 + pc.time * 0.01);
+    col += vec3(0.022, 0.018, 0.030) * smoothstep(0.35, 0.75, vein) * 0.6;
+
+    float staff = 0.0;
+    for (float i = -2.0; i <= 2.0; ++i) {
+        float line_pos = fract((uv.y + pc.time * 0.0025) * 22.0 + i * 0.25) - 0.5;
+        staff += smoothstep(0.003, 0.0, abs(line_pos)) * 0.09;
+    }
+    col += vec3(0.045, 0.04, 0.07) * staff * 0.65;
+
+    float key_refl = sin(uv.x * 45.0 + pc.time * 0.4) * 0.5 + 0.5;
+    col += mix(vec3(0.01,0.01,0.015), vec3(0.04,0.035,0.05), key_refl) * 0.12;
+
+    float n = fract(sin(dot(t * 18.0, vec2(12.9898, 78.233))) * 43758.5453);
+    col += vec3(0.008, 0.007, 0.011) * n * 0.22;
+
+    return col;
+}
+
+// Rotation matrices
+mat3 rotY(float a) { float c=cos(a), s=sin(a); return mat3(c,0,s, 0,1,0, -s,0,c); }
+mat3 rotX(float a) { float c=cos(a), s=sin(a); return mat3(1,0,0, 0,c,-s, 0,s,c); }
+
+// ────────────────────────────────────────────────
+// Main compute shader
+// ────────────────────────────────────────────────
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = vec2(pix) / vec2(dim);
+    vec3 color = marble_table(uv);
+
+    vec2 aspect = vec2(dim.x / float(dim.y), 1.0);
+    vec2 centered = (uv - 0.5) * aspect * ASPECT_ZOOM;
+    vec3 pos = vec3(centered, 0.0);
+
+    float angY = pc.time * ROT_SPEED_Y + 2.718;
+    float angX = sin(pc.time * ROT_SPEED_X + 1.57) * X_TILT_AMP + sin(pc.time * 0.3) * Y_TILT_AMP;
+    mat3 rot   = rotY(angY) * rotX(angX);
+    mat3 invRot = transpose(rot);
+
+    vec3 p_obj = rot * pos / GEM_SCALE;
+
+    float d_keys = sdf_piano_keyboard(p_obj);
+
+    float d_notes = 1e6;
+#if NOTE_PARTICLE_COUNT > 0
+    for (float i = 0.0; i < float(NOTE_PARTICLE_COUNT); ++i) {
+        d_notes = min(d_notes, sdf_note_particle(p_obj * 1.8, i * 6.283185));
+    }
+#endif
+    float d = min(d_keys, d_notes);
+
+    if (d < 0.038) {
+        vec3 eps = vec3(0.012, 0.0, 0.012);
+        vec3 nor = normalize(vec3(
+            min(sdf_piano_keyboard(p_obj + eps.xyy), sdf_note_particle(p_obj + eps.xyy, 0.0)) -
+            min(sdf_piano_keyboard(p_obj - eps.xyy), sdf_note_particle(p_obj - eps.xyy, 0.0)),
+            min(sdf_piano_keyboard(p_obj + eps.yxy), sdf_note_particle(p_obj + eps.yxy, 0.0)) -
+            min(sdf_piano_keyboard(p_obj - eps.yxy), sdf_note_particle(p_obj - eps.yxy, 0.0)),
+            min(sdf_piano_keyboard(p_obj + eps.yyx), sdf_note_particle(p_obj + eps.yyx, 0.0)) -
+            min(sdf_piano_keyboard(p_obj - eps.yyx), sdf_note_particle(p_obj - eps.yyx, 0.0))
+        ));
+
+        vec3 V = normalize(invRot * vec3(0,0,-1));
+        vec3 L = normalize(invRot * LIGHT_DIRECTION);
+        vec3 H = normalize(L + V);
+
+        float NoV = max(0.0, dot(nor, V));
+        float NoL = max(0.0, dot(nor, L));
+        float NoH = max(0.0, dot(nor, H));
+
+        float F0   = pow((1.0 - IOR)/(1.0 + IOR), 2.0);
+        float fres = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0);
+
+        float key_pos = p_obj.x * KEYS_VISIBLE;
+        bool is_black = (mod(floor(key_pos + 0.5) + 0.5, 7.0) > 0.6 && mod(floor(key_pos + 0.5) + 0.5, 7.0) < 3.4) ||
+                        (mod(floor(key_pos + 0.5) + 0.5, 7.0) > 4.1 && mod(floor(key_pos + 0.5) + 0.5, 7.0) < 6.0);
+        vec3 base_tint = is_black ? BLACK_KEY_TINT : OPAL_MILK_BASE;
+
+        float pulse = 0.5 + 0.5 * sin(pc.time * PULSE_SPEED + key_pos * PULSE_PHASE_OFFSET);
+        vec3 opal_tint = base_tint * (1.0 + (is_black ? 0.0 : SUBSURFACE_GLOW_STRENGTH * pulse));
+
+        vec3 diff = opal_tint * (NoL * 0.0004 + AMBIENT_LIGHT * 1.65);
+
+        float spec_pow = SPECULAR_POWER_BASE + SPECULAR_POWER_SCALE * fres;
+        float spec = pow(NoH, spec_pow) * fres * SPECULAR_MULTIPLIER;
+
+        float intern = pow(max(0.0, dot(-L, nor)), 2.8) * 1.0;
+        vec3 bounce = opal_tint * intern * BOUNCE_MULTIPLIER * (0.65 + fres);
+
+        float film_phase = length(pos.xy) * FILM_SCALE + pc.time * FILM_SPEED + p_obj.x * 12.0 + p_obj.y * 8.0;
+        float film = sin(film_phase) * 0.5 + 0.5;
+        vec3 play_color = 0.5 + 0.5 * cos(pc.time * 0.9 + vec3(0.1, 2.3, 4.4) + film * 6.283185 * 1.2);
+        vec3 thin_film = play_color * THIN_FILM_STRENGTH * fres * (1.2 + NoV * 1.5);
+
+        float scint = pow(0.5 + 0.5 * sin(pc.time * SCINTILLATION_SPEED + length(pos.xy) * SCINTILLATION_FREQ + p_obj.z * 10.0), 4.0);
+        scint *= SCINTILLATION_AMP * fres * (1.0 + (d < 0.02 ? NOTE_PARTICLE_BOOST : 0.0));
+
+        color += diff * DIFFUSE_MULTIPLIER;
+        color += vec3(spec) * SPECULAR_MULTIPLIER;
+        color += bounce * BOUNCE_MULTIPLIER;
+        color += thin_film * THIN_FILM_MULTIPLIER;
+        color += opal_tint * scint * SCINT_MULTIPLIER;
+
+        color += vec3(0.03, -0.015, -0.025) * fres * CHROMATIC_ABERRATION;
+
+        float vig = 1.0 - length(centered) * GEM_RIM_VIGNETTE;
+        color *= 0.85 + 0.4 * vig;
+    }
+
+    float overall_vig = 1.0 - dot(centered, centered) * OVERALL_VIGNETTE;
+    color *= overall_vig;
+
+    imageStore(outputImage, pix, vec4(color, 1.0));
+}
