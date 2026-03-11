@@ -22,7 +22,7 @@ https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki
 Welcome to the community.  
 Releases is the latest stable.  
 Use the green code button above to download zip for latest beta.  
-Preferred method with git.  
+Preferred method  to get beta is with git.  
 ```
 git clone https://github.com/ZacharyGeurts/AMOURANTHRTX
 cd AMOURANTHRTX
