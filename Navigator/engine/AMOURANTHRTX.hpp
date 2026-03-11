@@ -1064,16 +1064,6 @@ struct Swapchain {
 
         VkPresentModeKHR chosenPM = VK_PRESENT_MODE_FIFO_KHR;  // safe fallback
 
-        if (!Options::Window::VSYNC) {
-            // Our own relaxed pacing is in control → prefer IMMEDIATE for lowest latency
-            // Timing cache prevents over-submit / excessive tearing
-            if (std::find(modes.begin(), modes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end()) {
-                chosenPM = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            }
-            // No MAILBOX attempt — we know it's unavailable and not needed
-        } 
-        // else: user explicitly wants driver V-Sync → FIFO (zero tearing, higher latency)
-
         presentMode = chosenPM;
 
         // ── Image count ─────────────────────────────────────────────────

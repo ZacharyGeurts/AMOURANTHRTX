@@ -519,7 +519,7 @@ public:
 private:
 void adjustAdaptiveScale(double now) noexcept {
     double elapsed = now - lastAdaptiveAdjustTime_;
-    if (elapsed < 0.4 || adaptiveFrameCount_ < 4) return;  // slightly longer to stabilize
+    if (elapsed < 1.0) return;  // eyeballs prefer clockwork
 
     float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f);
     float gpuLoadPercent = (targetFrameMs > 0.001f)
@@ -566,8 +566,6 @@ void adjustAdaptiveScale(double now) noexcept {
                               : Options::Rendering::ResolutionAdjustHysteresis;
 
     if (shouldAdjust && std::abs(targetScale - adaptiveScale_) > effectiveHysteresis) {
-        LOG_DEBUG_CAT("ADAPTIVE", "Adjusting scale: %.3f → %.3f (load %.1f%%, upMult=%.2f)",
-                      adaptiveScale_, targetScale, gpuLoadPercent, upMult);
         adaptiveScale_ = targetScale;
         needsRecreate_ = true;
     }

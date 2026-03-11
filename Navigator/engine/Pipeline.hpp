@@ -299,11 +299,9 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.cloudCoverage       = Options::LivingWorld::CloudCoverage;
     pc.debugFlags          = Options::LivingWorld::DebugFlags;
 
-    // Adaptive
-    bool adaptive = Options::Rendering::EnableAdaptiveQuality;
-    pc.samplesPerPixel     = adaptive ? Options::Rendering::MaxSamplesPerPixel : 1;
+    pc.samplesPerPixel     = Options::Rendering::MAX_SAMPLES_PER_PIXEL;
     pc.temporalBlendStrength = Options::Rendering::TemporalBlendStrength;
-    pc.maxRayRecursion     = Options::Rendering::MaxRayRecursion;
+    pc.maxRayRecursion     = Options::Rendering::MAX_RAY_RECURSION;
 
     vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(PushConstants), &pc);
