@@ -34,37 +34,34 @@
 class RayCanvas {
 public:
     RayCanvas(int windowWidth, int windowHeight, SDL_Window* window)
-        : window_(window)
-        , window_width_(windowWidth)
-        , window_height_(windowHeight)
-        , render_width_(windowWidth)
-        , render_height_(windowHeight)
-        , minimized_(false)
-        , destroyed_(false)
-        , firstFrame_(true)
-        , materialsHandle_(0)
-        , hdrOutputImage_(VK_NULL_HANDLE)
-        , hdrOutputView_(VK_NULL_HANDLE)
-        , hdrOutputMemory_(VK_NULL_HANDLE)
-        , prevHdrOutputImage_(VK_NULL_HANDLE)
-        , prevHdrOutputView_(VK_NULL_HANDLE)
-        , prevHdrOutputMemory_(VK_NULL_HANDLE)
-        , descriptorPool_(VK_NULL_HANDLE)
-        , descriptorSet_(VK_NULL_HANDLE)
-        , adaptiveScale_(1.0f)
-        , lastAppliedScale_(1.0f)
-        , lastPresentTime_s_(0.0)
-        , measuredRefreshRateHz_(60.0f)
-        , lastFpsLog_(0.0)
-        , frameCount_(0)
-        , lastAdaptiveAdjustTime_(0.0)
-        , adaptiveFrameCount_(0)
-        , needsRecreate_(false)
-        , justResizedThisFrame_(false)
-        , postResizeGraceFrames_(0)
-        , timestampQueryPool_(VK_NULL_HANDLE)
-        , timestampPeriodNs_(1.0)
-        , smoothedGpuTimeMs_(16.67)
+        : window_(window),
+          window_width_(windowWidth),
+          window_height_(windowHeight),
+          render_width_(windowWidth),
+          render_height_(windowHeight),
+          minimized_(false),
+          destroyed_(false),
+          firstFrame_(true),
+          materialsHandle_(0),
+          hdrOutputImage_(VK_NULL_HANDLE),
+          hdrOutputView_(VK_NULL_HANDLE),
+          hdrOutputMemory_(VK_NULL_HANDLE),
+          prevHdrOutputImage_(VK_NULL_HANDLE),
+          prevHdrOutputView_(VK_NULL_HANDLE),
+          prevHdrOutputMemory_(VK_NULL_HANDLE),
+          descriptorPool_(VK_NULL_HANDLE),
+          descriptorSet_(VK_NULL_HANDLE),
+          adaptiveScale_(1.5f),
+          lastPresentTime_s_(0.0),
+          measuredRefreshRateHz_(60.0),
+          lastFpsLog_(0.0),
+          frameCount_(0),
+          lastAdaptiveAdjustTime_(0.0),
+          adaptiveFrameCount_(0),
+          lastDispatchedW_(static_cast<uint32_t>(windowWidth)),
+          lastDispatchedH_(static_cast<uint32_t>(windowHeight)),
+          needsRecreate_(false),
+          justResizedThisFrame_(false)
     {
         Swapchain::create(window, window_width_, window_height_);
 
@@ -72,12 +69,6 @@ public:
             LOG_FATAL_CAT("RAYCANVAS", "Failed to create swapchain");
             std::abort();
         }
-
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(rtx().physical, &props);
-        timestampPeriodNs_ = props.limits.timestampPeriod;
-
-        createTimestampQueryPool();
 
         buildMaterialLibrary();
 
@@ -101,9 +92,6 @@ public:
 
         vkDeviceWaitIdle(rtx().device);
 
-        if (timestampQueryPool_ != VK_NULL_HANDLE) {
-            vkDestroyQueryPool(rtx().device, timestampQueryPool_, nullptr);
-        }
         if (descriptorSet_ != VK_NULL_HANDLE) {
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
         }
@@ -203,11 +191,8 @@ public:
         bool sizeChanged = (currentW != window_width_) || (currentH != window_height_);
 
         if (minimized_ || sizeChanged || needsRecreate_) {
-            if (sizeChanged) {
-                vkDeviceWaitIdle(rtx().device);
-            }
-
-            onResize(currentW, currentH, sizeChanged);
+            vkDeviceWaitIdle(rtx().device);
+            onResize(currentW, currentH);
             minimized_ = false;
             needsRecreate_ = false;
             justResizedThisFrame_ = true;
@@ -219,6 +204,7 @@ public:
         }
 
         if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
+            LOG_WARNING_CAT("RAYCANVAS", "Invalid state — skipping frame");
             return;
         }
 
@@ -248,6 +234,7 @@ public:
         vkDestroyFence(rtx().device, fence, nullptr);
 
         if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
+            LOG_WARNING_CAT("SWAPCHAIN", "Acquire out-of-date/suboptimal — forcing recreate next frame");
             needsRecreate_ = true;
             return;
         }
@@ -263,9 +250,6 @@ public:
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
-        vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
-
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
@@ -275,20 +259,34 @@ public:
 
         lastPresentTime_s_ = now;
 
-        updateRenderResolution();
+        if (Options::Rendering::EnableAdaptiveResolution) {
+            if (now - lastAdaptiveAdjustTime_ >= 1.5) {
+                double elapsed = now - lastAdaptiveAdjustTime_;
+                double currentFPS = (elapsed > 0.0) ? static_cast<double>(adaptiveFrameCount_) / elapsed : 60.0;
+                double targetFPS = measuredRefreshRateHz_;
 
-        float dispatchScale = adaptiveScale_;
-        if (postResizeGraceFrames_ > 0) {
-            dispatchScale = std::min(dispatchScale, 0.85f);
-            postResizeGraceFrames_--;
+                if (currentFPS > targetFPS * 1.07) {
+                    adaptiveScale_ += 0.06f;
+                    adaptiveScale_ = std::min(adaptiveScale_, 4.0f);
+                } else if (currentFPS < targetFPS * 0.93) {
+                    adaptiveScale_ -= 0.11f;
+                    adaptiveScale_ = std::max(adaptiveScale_, 0.55f);
+                }
+
+                adaptiveFrameCount_ = 0;
+                lastAdaptiveAdjustTime_ = now;
+            }
         }
 
-        int dispatchW = static_cast<int>(std::round(static_cast<float>(window_width_) * dispatchScale));
-        int dispatchH = static_cast<int>(std::round(static_cast<float>(window_height_) * dispatchScale));
+        updateRenderResolution();
 
-        Pipeline::dispatch_canvas(cmd, dispatchW, dispatchH, static_cast<float>(now));
+        Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
 
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
+        // Always copy current HDR → previous HDR every frame (accumulation at 1.0)
+        copyCurrentToPreviousHDR(cmd);
+
+        lastDispatchedW_ = static_cast<uint32_t>(render_width_);
+        lastDispatchedH_ = static_cast<uint32_t>(render_height_);
 
         VkImageMemoryBarrier postComputeBarrier{};
         postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -305,23 +303,6 @@ public:
                              0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
 
         endSubmitAndWait(cmd);
-
-        uint64_t timestamps[2] = {};
-        if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
-                                  sizeof(timestamps), timestamps, sizeof(uint64_t),
-                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
-            double gpuTimeMs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs_ / 1'000'000.0;
-
-            // Asymmetric smoothing: react faster when load increases
-            double alpha = (gpuTimeMs > smoothedGpuTimeMs_) ? 0.65 : 0.25;
-            smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
-        }
-
-        if (Options::Rendering::EnableAdaptiveResolution) {
-            adjustAdaptiveScale(now);
-        } else {
-            adaptiveScale_ = 1.0f;
-        }
 
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
@@ -389,8 +370,9 @@ public:
 
         if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
-            measuredRefreshRateHz_ = 1.0f / Swapchain::getSmoothedRefresh();
+            measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
+            LOG_WARNING_CAT("SWAPCHAIN", "Present out-of-date/suboptimal — forcing recreate next frame");
             needsRecreate_ = true;
         } else if (pres != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
@@ -405,25 +387,22 @@ public:
             int winW = window_width_;
             int winH = window_height_;
 
-            float scaleFactor = (winW > 0) ? static_cast<float>(render_width_) / static_cast<float>(winW) : 1.0f;
-            const char* mode = (scaleFactor < 0.98f) ? "SUBSAMPLING" :
-                               (scaleFactor > 1.02f) ? "SUPERSAMPLING" : "NATIVE";
+            uint32_t dispW = lastDispatchedW_;
+            uint32_t dispH = lastDispatchedH_;
 
-            float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f); // more headroom
-            float gpuLoadPercent = (targetFrameMs > 0.001f) ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0f : 0.0f;
+            float supersampleFactor = (winW > 0) ? static_cast<float>(dispW) / static_cast<float>(winW) : 1.0f;
 
             const char* stateEmoji = minimized_                       ? "🟥 minimized" :
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
                                      "✅ active";
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
-                          "              RayCanvas Status  •  t+{:.1f}s\n"
-                          "  FPS:            {}     (avg frame {:.0f} µs)\n"
-                          "  Refresh Rate:   {} Hz\n"
+                          "              RayCanvas Status  •  t+{}s\n"
+                          "  FPS:            {}     (avg frame {} µs)\n"
+                          "  Refresh Rate:   {:.1f} Hz (detected)\n"
                           "  Window:         {} x {}\n"
-                          "  Rendered:       {} x {}     ({:.2f}x — {})\n"
+                          "  Rendered:       {} x {}     (supersampling {:.2f}x)\n"
                           "  Adaptive scale: {:.2f}x\n"
-                          "  GPU load:       {:.1f}%   (smoothed {:.1f} ms)\n"
                           "  State:          {}\n"
                           "  Adaptive qual:  {}\n"
                           "  Accumulation:   {}\n"
@@ -433,9 +412,8 @@ public:
                           avgFps, avgDt_us,
                           measuredRefreshRateHz_,
                           winW, winH,
-                          render_width_, render_height_, scaleFactor, mode,
+                          dispW, dispH, supersampleFactor,
                           adaptiveScale_,
-                          gpuLoadPercent, smoothedGpuTimeMs_,
                           stateEmoji,
                           Options::Rendering::EnableAdaptiveResolution ? "enabled" : "disabled",
                           Options::Rendering::ACCUMULATION ? "on" : "off",
@@ -447,7 +425,7 @@ public:
         }
     }
 
-    void onResize(int newWidth, int newHeight, bool fromUserResize = false) noexcept {
+    void onResize(int newWidth, int newHeight) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
             return;
@@ -457,18 +435,15 @@ public:
             return;
         }
 
-        if (fromUserResize) {
-            vkDeviceWaitIdle(rtx().device);
-        }
+        LOG_INFO_CAT("WINDOW", "Resizing to {}x{}", newWidth, newHeight);
+
+        vkDeviceWaitIdle(rtx().device);
 
         destroyHDRResources();
 
         window_width_  = newWidth;
         window_height_ = newHeight;
         minimized_ = false;
-
-        // No forced low-res start — let adaptive system handle it naturally
-        // postResizeGraceFrames_ = 6;  // optional: keep a short grace period if desired
 
         Swapchain::recreate(window_width_, window_height_);
 
@@ -509,6 +484,9 @@ public:
 
             endSubmitAndWait(cmd);
         }
+
+        LOG_SUCCESS_CAT("RAYCANVAS", "Resize complete — {}x{} (internal {}x{})",
+                        window_width_, window_height_, render_width_, render_height_);
     }
 
     int  getWidth()  const noexcept { return window_width_; }
@@ -517,96 +495,80 @@ public:
     bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
-void adjustAdaptiveScale(double now) noexcept {
-    double elapsed = now - lastAdaptiveAdjustTime_;
-    if (elapsed < 1.0) return;  // eyeballs prefer clockwork
+    void copyCurrentToPreviousHDR(VkCommandBuffer cmd) noexcept {
+        if (!cmd || !hdrOutputImage_ || !prevHdrOutputImage_) return;
 
-    float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f);
-    float gpuLoadPercent = (targetFrameMs > 0.001f)
-                         ? (static_cast<float>(smoothedGpuTimeMs_) / targetFrameMs) * 100.0f
-                         : 0.0f;
+        VkImageMemoryBarrier barriers[2]{};
 
-    float targetScale = adaptiveScale_;
+        barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barriers[0].image = hdrOutputImage_;
+        barriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    constexpr float CRITICAL = 150.0f;
-    constexpr float SEVERE   = 220.0f;
+        barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barriers[1].srcAccessMask = 0;
+        barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barriers[1].image = prevHdrOutputImage_;
+        barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    float downMult = 0.82f;
-    float upMult   = (postResizeGraceFrames_ > 0) ? 1.08f : 1.18f;  // stronger up when safe
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 2, barriers);
 
-    bool shouldAdjust = false;
+        VkImageCopy copy{};
+        copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.srcOffset = {0, 0, 0};
+        copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.dstOffset = {0, 0, 0};
+        copy.extent = {static_cast<uint32_t>(render_width_), static_cast<uint32_t>(render_height_), 1};
 
-    if (gpuLoadPercent > SEVERE) {
-        downMult = 0.55f;
-        shouldAdjust = true;
-    } else if (gpuLoadPercent > CRITICAL) {
-        downMult = 0.68f;
-        shouldAdjust = true;
-    } else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
-        downMult = 0.82f;
-        shouldAdjust = true;
-    } else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.80f) {  // <72% → more eager up
-        // Changed from 0.72f to 0.80f so 24-29% definitely triggers up
-        targetScale *= upMult;
-        shouldAdjust = true;
+        vkCmdCopyImage(cmd,
+                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       prevHdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &copy);
+
+        VkImageMemoryBarrier prevBack{};
+        prevBack.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        prevBack.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        prevBack.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        prevBack.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        prevBack.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        prevBack.image = prevHdrOutputImage_;
+        prevBack.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &prevBack);
     }
-
-    if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
-        targetScale *= downMult;
-        if (gpuLoadPercent > 280.0f) targetScale = std::min(targetScale, 0.40f);
-    }
-
-    targetScale = std::clamp(targetScale,
-                             Options::Rendering::MinResolutionScale,
-                             Options::Rendering::MaxResolutionScale);
-
-    // Lower hysteresis when climbing (allow smaller steps up)
-    float effectiveHysteresis = (targetScale > adaptiveScale_) 
-                              ? 0.035f   // ~3.5% for up
-                              : Options::Rendering::ResolutionAdjustHysteresis;
-
-    if (shouldAdjust && std::abs(targetScale - adaptiveScale_) > effectiveHysteresis) {
-        adaptiveScale_ = targetScale;
-        needsRecreate_ = true;
-    }
-
-    adaptiveFrameCount_ = 0;
-    lastAdaptiveAdjustTime_ = now;
-}
 
     void updateRenderResolution() noexcept {
         float scale = Options::Rendering::EnableAdaptiveResolution
-                    ? adaptiveScale_
-                    : 1.0f;
-
-        // Optional cap so we never exceed configured internal max resolution
-        float maxW = static_cast<float>(Options::Rendering::INTERNAL_WIDTH)  / static_cast<float>(window_width_);
-        float maxH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
-        scale = std::min(scale, std::min(maxW, maxH));
+                      ? std::clamp(adaptiveScale_, 0.5f, 4.0f)
+                      : 1.0f;
 
         render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * scale));
         render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * scale));
 
-        // No hard-coded 320×200 floor — respect MinResolutionScale from menu
-        // If you want any minimum pixels at all, it must come from the options
-    }
+        render_width_  = std::min(render_width_,  Options::Rendering::INTERNAL_WIDTH);
+        render_height_ = std::min(render_height_, Options::Rendering::INTERNAL_HEIGHT);
 
-    void createTimestampQueryPool() noexcept {
-        VkQueryPoolCreateInfo qci{};
-        qci.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-        qci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
-        qci.queryCount = 2;
-
-        vkh.checker(vkCreateQueryPool(rtx().device, &qci, nullptr, &timestampQueryPool_),
-                    "QUERY", "Timestamp Pool");
+        render_width_  = std::max(render_width_,  640);
+        render_height_ = std::max(render_height_, 360);
     }
 
     void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
-        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
-        if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+        if (hdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
+        if (hdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
 
         hdrOutputView_   = VK_NULL_HANDLE;
         hdrOutputImage_  = VK_NULL_HANDLE;
@@ -621,7 +583,7 @@ void adjustAdaptiveScale(double now) noexcept {
         ci.arrayLayers = 1;
         ci.samples     = VK_SAMPLE_COUNT_1_BIT;
         ci.tiling      = VK_IMAGE_TILING_OPTIMAL;
-        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_), "MEMORY", "HDR Image");
@@ -653,9 +615,9 @@ void adjustAdaptiveScale(double now) noexcept {
     void createPreviousHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
-        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
-        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
-        if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+        if (prevHdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
+        if (prevHdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+        if (prevHdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
         prevHdrOutputView_   = VK_NULL_HANDLE;
         prevHdrOutputImage_  = VK_NULL_HANDLE;
@@ -670,7 +632,7 @@ void adjustAdaptiveScale(double now) noexcept {
         ci.arrayLayers = 1;
         ci.samples     = VK_SAMPLE_COUNT_1_BIT;
         ci.tiling      = VK_IMAGE_TILING_OPTIMAL;
-        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &prevHdrOutputImage_), "MEMORY", "Prev HDR Image");
@@ -700,13 +662,15 @@ void adjustAdaptiveScale(double now) noexcept {
     }
 
     void destroyHDRResources() noexcept {
-        if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
-        if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
-        if (hdrOutputMemory_) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+        vkDeviceWaitIdle(rtx().device);
 
-        if (prevHdrOutputView_)   vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
-        if (prevHdrOutputImage_)  vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
-        if (prevHdrOutputMemory_) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
+        if (hdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
+        if (hdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
+        if (hdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, hdrOutputMemory_, nullptr);
+
+        if (prevHdrOutputView_   != VK_NULL_HANDLE) vkDestroyImageView (rtx().device, prevHdrOutputView_,   nullptr);
+        if (prevHdrOutputImage_  != VK_NULL_HANDLE) vkDestroyImage     (rtx().device, prevHdrOutputImage_,  nullptr);
+        if (prevHdrOutputMemory_ != VK_NULL_HANDLE) vkFreeMemory       (rtx().device, prevHdrOutputMemory_, nullptr);
 
         hdrOutputView_     = VK_NULL_HANDLE;
         hdrOutputImage_    = VK_NULL_HANDLE;
@@ -848,10 +812,16 @@ void adjustAdaptiveScale(double now) noexcept {
         } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
             barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
             barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
         }
 
         vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
@@ -869,46 +839,45 @@ void adjustAdaptiveScale(double now) noexcept {
     }
 
 private:
-    SDL_Window*    window_                    = nullptr;
-    int            window_width_              = 0;
-    int            window_height_             = 0;
-    int            render_width_              = 0;
-    int            render_height_             = 0;
+    SDL_Window*    window_           = nullptr;
+    int            window_width_     = 0;
+    int            window_height_    = 0;
 
-    bool           minimized_                 = false;
-    bool           destroyed_                 = false;
-    bool           firstFrame_                = true;
+    int            render_width_     = 0;
+    int            render_height_    = 0;
 
-    uint64_t       materialsHandle_           = 0;
+    bool           minimized_        = false;
+    bool           destroyed_        = false;
+    bool           firstFrame_       = true;
 
-    VkImage        hdrOutputImage_            = VK_NULL_HANDLE;
-    VkImageView    hdrOutputView_             = VK_NULL_HANDLE;
-    VkDeviceMemory hdrOutputMemory_           = VK_NULL_HANDLE;
+    uint64_t       materialsHandle_          = 0;
 
-    VkImage        prevHdrOutputImage_        = VK_NULL_HANDLE;
-    VkImageView    prevHdrOutputView_         = VK_NULL_HANDLE;
-    VkDeviceMemory prevHdrOutputMemory_       = VK_NULL_HANDLE;
+    VkImage        hdrOutputImage_           = VK_NULL_HANDLE;
+    VkImageView    hdrOutputView_            = VK_NULL_HANDLE;
+    VkDeviceMemory hdrOutputMemory_          = VK_NULL_HANDLE;
 
-    VkDescriptorPool descriptorPool_          = VK_NULL_HANDLE;
-    VkDescriptorSet  descriptorSet_           = VK_NULL_HANDLE;
+    VkImage        prevHdrOutputImage_       = VK_NULL_HANDLE;
+    VkImageView    prevHdrOutputView_        = VK_NULL_HANDLE;
+    VkDeviceMemory prevHdrOutputMemory_      = VK_NULL_HANDLE;
 
-    float          adaptiveScale_             = 1.0f;
-    float          lastAppliedScale_          = 1.0f;
+    VkDescriptorPool descriptorPool_         = VK_NULL_HANDLE;
+    VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
 
-    double         lastPresentTime_s_         = 0.0;
-    float          measuredRefreshRateHz_     = 60.0f;
-    double         lastFpsLog_                = 0.0;
-    uint64_t       frameCount_                = 0;
-    double         lastAdaptiveAdjustTime_    = 0.0;
-    uint64_t       adaptiveFrameCount_        = 0;
+    float          adaptiveScale_            = 1.5f;
+    double         lastPresentTime_s_        = 0.0;
+    double         measuredRefreshRateHz_    = 60.0;
 
-    bool           needsRecreate_             = false;
-    bool           justResizedThisFrame_      = false;
-    int            postResizeGraceFrames_     = 0;
+    double         lastFpsLog_               = 0.0;
+    uint64_t       frameCount_               = 0;
 
-    VkQueryPool    timestampQueryPool_        = VK_NULL_HANDLE;
-    double         timestampPeriodNs_         = 1.0;
-    double         smoothedGpuTimeMs_         = 16.67;
+    double         lastAdaptiveAdjustTime_   = 0.0;
+    uint64_t       adaptiveFrameCount_       = 0;
+
+    uint32_t       lastDispatchedW_          = 0;
+    uint32_t       lastDispatchedH_          = 0;
+
+    bool           needsRecreate_            = false;
+    bool           justResizedThisFrame_     = false;
 };
 
 inline RayCanvas* rayCanvas = nullptr;
