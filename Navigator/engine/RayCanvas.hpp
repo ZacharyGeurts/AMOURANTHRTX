@@ -228,9 +228,9 @@ public:
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
                              0,
-                             0, nullptr,               // no memory barriers
-                             0, nullptr,               // no buffer barriers
-                             1, &postComputeBarrier);  // image barrier
+                             0, nullptr,
+                             0, nullptr,
+                             1, &postComputeBarrier);
 
         endSubmitAndWait(cmd);
 
@@ -342,7 +342,9 @@ public:
                                (scaleFactor > 1.02f) ? "SUPERSAMPLING" : "NATIVE";
 
             float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f);
-            float gpuLoadPercent = (targetFrameMs > 0.001f) ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0f : 0.0f;
+            float gpuLoadPercent = (targetFrameMs > 0.001f)
+                                 ? static_cast<float>(smoothedGpuTimeMs_ / targetFrameMs) * 100.0f
+                                 : 0.0f;
 
             const char* stateEmoji = minimized_                       ? "🟥 minimized" :
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
@@ -772,22 +774,17 @@ private:
     void buildMaterialLibrary() {
         std::vector<Material> materials;
 
-        auto add = [&](const MaterialLayer& layer, const char* name = nullptr) {
-            Material m{};
-            m.layers[0]            = layer;
-            m.layerCount           = 1;
-            m.layerBlendFactors[0] = 1.0f;
-            materials.push_back(m);
-            if (name) LOG_DEBUG_CAT("MATERIALS", "Added: {}", name);
-        };
+        // Use the new full constexpr array from Materials.hpp
+        materials.reserve(MAT_COUNT);
 
-        add(Materials::OpenPBR_ClearGlass,      "Clear Crystal");
-        add(Materials::OpenPBR_FrostedGlass,    "Frosted Gem");
-        add(Materials::OpenPBR_GlossyPaint,     "Glossy Surface");
-        add(Materials::OpenPBR_Metal,           "Metallic Facet");
-        add(Materials::DisneyVelvetFabric,      "Velvet Accent");
-        add(Materials::DisneyCartoonSkin,       "Cartoon Glow");
-        add(Materials::PixarToyPlastic,         "Toy Plastic");
+        for (size_t i = 0; i < MAT_COUNT; ++i) {
+            if (Materials::AllMaterials[i].layerCount > 0) {
+                materials.push_back(Materials::AllMaterials[i]);
+            }
+        }
+
+        // Optional: log how many we actually loaded
+        LOG_DEBUG_CAT("MATERIALS", "Loading {} materials from constexpr array", materials.size());
 
         VkDeviceSize size = materials.size() * sizeof(Material);
 
@@ -808,7 +805,7 @@ private:
             }
         }
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Material library built ({} materials)", materials.size());
+        LOG_SUCCESS_CAT("RAYCANVAS", "Material library built ({} materials loaded)", materials.size());
     }
 
 private:
