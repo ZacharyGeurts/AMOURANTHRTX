@@ -259,8 +259,8 @@ endif()
 # =============================================================================
 # SINGLE SHADER COMPILATION
 # =============================================================================
-set(SHADER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/compute/canvas.comp")
-set(SHADER_OUT "${BIN_DIR}/compute/canvas.spv")
+set(SHADER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/compute/CANVAS.comp")
+set(SHADER_OUT "${BIN_DIR}/compute/CANVAS.spv")
 
 add_custom_command(
     OUTPUT "${SHADER_OUT}"
@@ -273,7 +273,7 @@ add_custom_command(
             "${SHADER_SRC}" -o "${SHADER_OUT}"
     COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${SHADER_OUT}"
     DEPENDS "${SHADER_SRC}"
-    COMMENT "Compiling single compute shader → compute/canvas.spv"
+    COMMENT "Compiling single compute shader → compute/CANVAS.spv"
     VERBATIM
 )
 
