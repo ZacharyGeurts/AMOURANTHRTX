@@ -261,7 +261,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     // Step 6: Pipeline setup — single compute shader only
     Pipeline::initialize();               // creates descriptor layout
     Pipeline::create_pipeline_layout();   // creates pipeline layout with push constants
-    Pipeline::create_canvas_pipeline();   // creates the actual compute pipeline
+    Pipeline::create_raymarch_pipeline();   // creates the actual compute pipeline
 
     LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
 

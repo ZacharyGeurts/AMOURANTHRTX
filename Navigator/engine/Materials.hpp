@@ -1,5 +1,20 @@
 #pragma once
 
+// =============================================================================
+// AMOURANTH RTX Engine — Materials Library
+// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial
+// AMOURANTH FOREVER 💖
+//
+// Philosophy:
+//   - All materials are OpenPBR 1.1/1.2 compliant (SIGGRAPH 2025 baseline)
+//   - Layered materials via Material struct (up to 5 layers)
+//   - Heavy emphasis on glass/crystal/transmissive presets (high IOR, transmission, thin-film)
+//   - Realistic sparkle via specular, haze, retroreflection, anisotropy
+//   - Stylized Disney/Pixar presets for entities (cartoon skin, velvet, toy plastic)
+//   - All constexpr for compile-time evaluation and zero runtime cost
+// =============================================================================
+
 #include <glm/glm.hpp>
 #include <array>
 #include <cstdint>
@@ -38,20 +53,20 @@ struct alignas(16) MaterialLayer {
 
     float subsurface                   = 0.0f;           // Burley/EON strength
     glm::vec3 subsurfaceColor          {0.8f, 0.6f, 0.5f};
-    float subsurfaceRadiusScale        = 1.2f;           // modern: higher for softer cartoon SSS
+    float subsurfaceRadiusScale        = 1.2f;
 
     float coat                         = 0.0f;           // OpenPBR coat layer strength
     float coatRoughness                = 0.03f;
-    float coatIOR                      = 1.50f;          // decoupled coat IOR
+    float coatIOR                      = 1.50f;
 
     float fuzz                         = 0.0f;           // OpenPBR fuzz (microflake/sheen evo)
     glm::vec3 fuzzTint                 {1.0f, 1.0f, 1.0f};
-    float fuzzRoughness                = 0.5f;           // fuzz lobe spread
+    float fuzzRoughness                = 0.5f;
 
     float anisotropy                   = 0.0f;           // -1..1
     float anisoRotation                = 0.0f;
 
-    // OpenPBR 1.2 WIP / SIGGRAPH 2025 extensions
+    // OpenPBR 1.2+ extensions
     float specularHaze                 = 0.0f;           // smudged/hazy specular strength
     float hazeSpread                   = 0.5f;           // haze lobe width
     float retroReflection              = 0.0f;           // retro tail boost (moon/road sign)
@@ -77,6 +92,7 @@ namespace Materials {
 
 // ── Core OpenPBR 1.1 / 1.2 production presets ─────────────────────────────
 
+// Dielectric base (default for most non-metals)
 inline constexpr MaterialLayer OpenPBR_DielectricBase {
     .baseColor   = {0.96f, 0.97f, 1.00f, 1.0f},
     .metallic    = 0.0f,
@@ -86,15 +102,64 @@ inline constexpr MaterialLayer OpenPBR_DielectricBase {
     .flags       = 0
 };
 
+// Metal base (gold example)
 inline constexpr MaterialLayer OpenPBR_Metal {
-    .baseColor   = {1.00f, 0.78f, 0.34f, 1.0f},  // gold example
+    .baseColor   = {1.00f, 0.78f, 0.34f, 1.0f},
     .metallic    = 1.0f,
     .roughness   = 0.08f,
     .specular    = 0.5f,
     .flags       = 0
 };
 
-// ── 2026 Disney/Pixar stylized tuned presets ──────────────────────────────
+// ── Glass / Crystal presets (high transmission, sparkle) ──────────────────
+
+// Clear glass (high transparency, sharp reflections)
+inline constexpr MaterialLayer OpenPBR_ClearGlass {
+    .baseColor             = {0.96f, 0.97f, 0.99f, 1.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.5f,
+    .ior                   = 1.50f,
+    .transmission          = 1.0f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 0.3f,
+    .thinFilmThickness_nm  = 350.0f,
+    .specularHaze          = 0.08f,
+    .flags                 = MaterialFlags::TRANSMISSION | MaterialFlags::THIN_FILM | MaterialFlags::SPECULAR_HAZE
+};
+
+// Frosted / translucent glass (milky diffusion, soft sparkle)
+inline constexpr MaterialLayer OpenPBR_FrostedGlass {
+    .baseColor             = {0.97f, 0.98f, 0.99f, 1.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.52f,
+    .ior                   = 1.48f,
+    .transmission          = 0.94f,
+    .transmissionRoughness = 0.45f,
+    .subsurface            = 0.18f,
+    .subsurfaceColor       = {0.98f, 0.96f, 0.94f},
+    .subsurfaceRadiusScale = 0.9f,
+    .specularHaze          = 0.22f,
+    .flags                 = MaterialFlags::TRANSMISSION | MaterialFlags::SUBSURFACE | MaterialFlags::SPECULAR_HAZE
+};
+
+// Thin-film iridescent glass (CD/DVD-like rainbow edges)
+inline constexpr MaterialLayer OpenPBR_IridescentGlass {
+    .baseColor             = {0.98f, 0.98f, 0.99f, 1.0f},
+    .metallic              = 0.0f,
+    .roughness             = 0.0f,
+    .specular              = 0.5f,
+    .ior                   = 1.50f,
+    .transmission          = 0.98f,
+    .transmissionRoughness = 0.0f,
+    .thinFilm              = 1.0f,
+    .thinFilmThickness_nm  = 420.0f,   // stronger rainbow shift
+    .specularHaze          = 0.12f,
+    .flags                 = MaterialFlags::TRANSMISSION | MaterialFlags::THIN_FILM | MaterialFlags::SPECULAR_HAZE
+};
+
+// ── Stylized / Disney/Pixar presets ───────────────────────────────────────
 
 inline constexpr MaterialLayer DisneyCartoonSkin {
     .baseColor             = {0.90f, 0.64f, 0.56f, 1.0f},
@@ -152,29 +217,12 @@ inline constexpr MaterialLayer OpenPBR_GlossyPaint {
     .flags                 = MaterialFlags::CLEARCOAT | MaterialFlags::SPECULAR_HAZE
 };
 
-// ── 2026+ Frosted / Translucent / Etched Glass preset ─────────────────────
-
-inline constexpr MaterialLayer OpenPBR_FrostedGlass {
-    .baseColor             = {0.97f, 0.98f, 0.99f, 1.0f},  // near neutral white
-    .metallic              = 0.0f,
-    .roughness             = 0.0f,                         // base reflection remains relatively sharp
-    .specular              = 0.52f,
-    .ior                   = 1.48f,
-    .transmission          = 0.94f,
-    .transmissionRoughness = 0.45f,                        // primary frosted diffusion control (0.35–0.65 typical)
-    .subsurface            = 0.18f,                        // subtle milky volume look
-    .subsurfaceColor       = {0.98f, 0.96f, 0.94f},
-    .subsurfaceRadiusScale = 0.9f,
-    .specularHaze          = 0.22f,                        // extra softening of specular highlights
-    .flags                 = MaterialFlags::TRANSMISSION | MaterialFlags::SUBSURFACE | MaterialFlags::SPECULAR_HAZE
-};
-
-// ── Example layered / combined materials ──────────────────────────────────
+// ── Layered / combined materials ──────────────────────────────────────────
 
 inline constexpr Material DisneyPrincessGown = []() {
     Material m{};
     m.layers[0] = DisneyVelvetFabric;                      // main velvet body
-    m.layers[1] = PixarToyPlastic;                         // glossy satin trim / accents
+    m.layers[1] = PixarToyPlastic;                         // glossy satin trim
     m.layers[1].baseColor    = {0.98f, 0.94f, 0.48f, 1.0f};
     m.layers[1].specularHaze = 0.18f;
     m.layerBlendFactors[0]   = 0.78f;
@@ -186,7 +234,7 @@ inline constexpr Material DisneyPrincessGown = []() {
 inline constexpr Material CartoonCharacterSkin = []() {
     Material m{};
     m.layers[0]                   = DisneyCartoonSkin;
-    m.layers[0].retroReflection   = 0.12f;                 // stronger rim lighting pop
+    m.layers[0].retroReflection   = 0.12f;                 // rim lighting pop
     m.layers[0].fuzz              = 0.24f;
     m.layerCount = 1;
     return m;
@@ -212,68 +260,5 @@ inline constexpr Material FrostedGlassObject = []() {
     m.layerCount   = 1;
     return m;
 }();
-
-// ── Additional 2026 production presets (now implemented) ───────────────────
-
-inline constexpr MaterialLayer OpenPBR_Chrome {
-    .baseColor             = {0.95f, 0.95f, 0.95f, 1.0f},
-    .metallic              = 1.0f,
-    .roughness             = 0.02f,
-    .specular              = 0.6f,
-    .ior                   = 1.0f,   // metals usually ignore IOR
-    .flags                 = 0
-};
-
-inline constexpr MaterialLayer OpenPBR_PolishedGold {
-    .baseColor             = {1.00f, 0.78f, 0.34f, 1.0f},
-    .metallic              = 1.0f,
-    .roughness             = 0.04f,
-    .specular              = 0.55f,
-    .flags                 = 0
-};
-
-inline constexpr MaterialLayer OpenPBR_BrushedMetal {
-    .baseColor             = {0.85f, 0.85f, 0.88f, 1.0f},
-    .metallic              = 1.0f,
-    .roughness             = 0.35f,
-    .anisotropy            = 0.75f,
-    .anisoRotation         = 0.0f,
-    .flags                 = MaterialFlags::ANISOTROPY
-};
-
-inline constexpr MaterialLayer OpenPBR_ClearGlass {
-    .baseColor             = {0.96f, 0.97f, 0.99f, 1.0f},
-    .metallic              = 0.0f,
-    .roughness             = 0.0f,
-    .specular              = 0.5f,
-    .ior                   = 1.50f,
-    .transmission          = 1.0f,
-    .transmissionRoughness = 0.0f,
-    .flags                 = MaterialFlags::TRANSMISSION
-};
-
-inline constexpr MaterialLayer OpenPBR_SkinBase {
-    .baseColor             = {0.88f, 0.62f, 0.54f, 1.0f},
-    .metallic              = 0.0f,
-    .roughness             = 0.38f,
-    .specular              = 0.48f,
-    .specularTint          = 0.15f,
-    .ior                   = 1.38f,
-    .subsurface            = 0.78f,
-    .subsurfaceColor       = {0.92f, 0.58f, 0.48f},
-    .subsurfaceRadiusScale = 1.4f,
-    .fuzz                  = 0.18f,
-    .fuzzTint              = {1.0f, 0.92f, 0.88f},
-    .fuzzRoughness         = 0.60f,
-    .flags                 = MaterialFlags::SUBSURFACE | MaterialFlags::FUZZ
-};
-
-inline constexpr MaterialLayer OpenPBR_NeonCyan {
-    .baseColor             = {0.0f, 0.0f, 0.0f, 1.0f},
-    .emissiveColor         = {0.1f, 1.0f, 1.0f, 8.0f},
-    .metallic              = 0.0f,
-    .roughness             = 0.9f,
-    .flags                 = MaterialFlags::EMISSIVE
-};
 
 } // namespace Materials

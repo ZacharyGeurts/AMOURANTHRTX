@@ -1,10 +1,13 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine — Pipeline (Living World Edition)
+// AMOURANTH RTX Engine — Pipeline (pure raymarched 3D)
 // (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
+//
+// Pure raymarching pipeline — no 2D SDF canvas layer anymore
+// Loads raymarch.spv (full-scene raymarcher)
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -28,29 +31,31 @@ namespace Pipeline {
 using u32 = std::uint32_t;
 
 // ────────────────────────────────────────────────
-// Descriptor bindings (matches shader)
-struct CanvasBindings {
+// Descriptor bindings (matches shader set=0)
+// Order must match shader bindings exactly
+// ────────────────────────────────────────────────
+struct RaymarchBindings {
     static constexpr VkDescriptorSetLayoutBinding bindings[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // output HDR
-        {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // scene globals (future)
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // geometry/instances
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // output HDR image
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // previous HDR (for accumulation/TAA)
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // geometry/instances (optional)
         {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // lights/environment
         {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // materials
-        {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // textures/procedural
+        {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // textures / procedural data
     };
 };
 
 // ────────────────────────────────────────────────
-// Push constants — full living world + camera + adaptive
-// Must stay aligned to 16 bytes
+// Push constants — same as before (camera + raymarch tunables)
+// Must stay 16-byte aligned
 // ────────────────────────────────────────────────
 struct alignas(16) PushConstants {
-    float       time;                   // total engine seconds
-    u32         frameSeed;              // RNG seed (frame-dependent)
+    float       time;                   // Engine seconds
+    u32         frameSeed;              // Per-frame RNG seed
 
     glm::vec3   cameraPos;              float pad0;
-    glm::vec4   cameraQuat;             // orientation xyzw
-    float       cameraFovDeg;
+    glm::vec4   cameraQuat;             // Orientation quaternion
+    float       cameraFovDeg;           // Vertical FOV degrees
     float       aspectRatio;
     float       exposure;
 
@@ -64,25 +69,28 @@ struct alignas(16) PushConstants {
     float       precipitationFactor;
 
     float       fogDensity;
-    float       dayNightFactor;         // 0 = midnight, 0.5 = noon, etc.
+    float       dayNightFactor;
     float       cloudCoverage;
+
     u32         debugFlags;
 
-    // Adaptive / quality controls
-    int         samplesPerPixel;
-    float       temporalBlendStrength;
-    int         maxRayRecursion;
+    // Raymarching quality controls
+    float       raymarchMaxDist;
+    float       raymarchEpsilon;
+    u32         raymarchMaxSteps;
 
-    float       pad1[3];                // keep multiple of 16 bytes
+    float       pad1[3];                // Padding to 16-byte alignment
 };
 
 // ────────────────────────────────────────────────
+// Global pipeline objects
+// ────────────────────────────────────────────────
 inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
 inline VkPipelineLayout      pipeline_layout        = VK_NULL_HANDLE;
-inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
+inline VkPipeline            raymarch_pipeline      = VK_NULL_HANDLE;  // renamed from canvas_pipeline
 
 // ────────────────────────────────────────────────
-// Procedural sun/moon direction from time-of-day
+// Sun/moon direction helpers (unchanged)
 // ────────────────────────────────────────────────
 [[nodiscard]] inline glm::vec3 computeSunDirection(float todHours) noexcept {
     float angle = (todHours / 24.0f) * glm::two_pi<float>() - glm::half_pi<float>();
@@ -98,11 +106,10 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 }
 
 // ────────────────────────────────────────────────
-// Load SPIR-V shader module
+// Load SPIR-V (default: raymarch.spv)
 // ────────────────────────────────────────────────
-[[nodiscard]] inline std::expected<VkShaderModule, std::string> load_canvas_shader(
-    [[maybe_unused]] const std::string& override_path = "",
-    [[maybe_unused]] bool verbose = false) noexcept
+[[nodiscard]] inline std::expected<VkShaderModule, std::string> load_raymarch_shader(
+    const std::string& override_path = "") noexcept
 {
     constexpr std::string_view shader_name = "canvas.spv";
     namespace fs = std::filesystem;
@@ -125,7 +132,6 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
     candidates.emplace_back(cwd / "compute" / shader_name);
     candidates.emplace_back(cwd / "bin" / "Linux" / "compute" / shader_name);
 
-    // Project root heuristic
     fs::path root = cwd;
     for (int i = 0; i < 6; ++i) {
         if (fs::exists(root / "CMakeLists.txt") || fs::exists(root / "Navigator")) break;
@@ -155,7 +161,7 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
     }
 
     if (code.empty()) {
-        return std::unexpected(std::format("canvas.spv not found — checked {} paths", candidates.size()));
+        return std::unexpected(std::format("raymarch.spv not found — checked {} paths", candidates.size()));
     }
 
     VkShaderModuleCreateInfo ci{};
@@ -173,22 +179,22 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 }
 
 // ────────────────────────────────────────────────
-// Initialize descriptor layout
+// Initialize descriptor layout (once)
 // ────────────────────────────────────────────────
 inline void initialize() noexcept {
     if (main_descriptor_layout) return;
 
     VkDescriptorSetLayoutCreateInfo ci{};
     ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    ci.bindingCount = std::size(CanvasBindings::bindings);
-    ci.pBindings    = CanvasBindings::bindings;
+    ci.bindingCount = std::size(RaymarchBindings::bindings);
+    ci.pBindings    = RaymarchBindings::bindings;
 
     vkh.checker(vkCreateDescriptorSetLayout(rtx().device, &ci, nullptr, &main_descriptor_layout),
                 "DESCRIPTOR", "main layout");
 }
 
 // ────────────────────────────────────────────────
-// Pipeline layout with push constants
+// Create pipeline layout with push constants
 // ────────────────────────────────────────────────
 inline void create_pipeline_layout() noexcept {
     if (pipeline_layout) return;
@@ -212,19 +218,19 @@ inline void create_pipeline_layout() noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Create/recreate compute pipeline
+// Create or recreate the raymarching compute pipeline
 // ────────────────────────────────────────────────
-inline void create_canvas_pipeline(const std::string& shader_override = "", bool verbose = false) noexcept {
-    if (canvas_pipeline) {
-        vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
-        canvas_pipeline = VK_NULL_HANDLE;
+inline void create_raymarch_pipeline(const std::string& shader_override = "") noexcept {
+    if (raymarch_pipeline) {
+        vkDestroyPipeline(rtx().device, raymarch_pipeline, nullptr);
+        raymarch_pipeline = VK_NULL_HANDLE;
     }
 
     create_pipeline_layout();
 
-    auto shader_result = load_canvas_shader(shader_override, verbose);
+    auto shader_result = load_raymarch_shader(shader_override);
     if (!shader_result) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to load canvas shader: {}", shader_result.error());
+        LOG_ERROR_CAT("PIPELINE", "Failed to load raymarch shader: {}", shader_result.error());
         return;
     }
 
@@ -241,28 +247,28 @@ inline void create_canvas_pipeline(const std::string& shader_override = "", bool
     ci.stage  = stage;
     ci.layout = pipeline_layout;
 
-    vkh.checker(vkCreateComputePipelines(rtx().device, VK_NULL_HANDLE, 1, &ci, nullptr, &canvas_pipeline),
-                "PIPELINE", "canvas compute");
+    vkh.checker(vkCreateComputePipelines(rtx().device, VK_NULL_HANDLE, 1, &ci, nullptr, &raymarch_pipeline),
+                "PIPELINE", "raymarch compute");
 
     vkDestroyShaderModule(rtx().device, shader, nullptr);
-    LOG_SUCCESS_CAT("PIPELINE", "Living World canvas pipeline ready");
+    LOG_SUCCESS_CAT("PIPELINE", "Raymarching pipeline ready");
 }
 
 // ────────────────────────────────────────────────
-// Dispatch — pushes full living world state
+// Dispatch the raymarching compute shader
 // ────────────────────────────────────────────────
-inline void dispatch_canvas(VkCommandBuffer cmd,
-                            int width, int height,
-                            float totalTime) noexcept
+inline void dispatch_raymarch(VkCommandBuffer cmd,
+                              int width, int height,
+                              float totalTime) noexcept
 {
-    if (!canvas_pipeline) {
-        create_canvas_pipeline();
-        if (!canvas_pipeline) return;
+    if (!raymarch_pipeline) {
+        create_raymarch_pipeline();
+        if (!raymarch_pipeline) return;
     }
 
     if (width <= 0 || height <= 0) return;
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, raymarch_pipeline);
 
     PushConstants pc{};
     pc.time         = totalTime;
@@ -276,7 +282,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.exposure     = Options::Rendering::EXPOSURE;
 
     // Living World
-    float tod = Options::LivingWorld::CurrentTimeOfDay;  // 0..24
+    float tod = Options::LivingWorld::CurrentTimeOfDay;
     float todFrac = tod / 24.0f;
 
     pc.sunDir       = computeSunDirection(tod);
@@ -299,14 +305,14 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.cloudCoverage       = Options::LivingWorld::CloudCoverage;
     pc.debugFlags          = Options::LivingWorld::DebugFlags;
 
-    pc.samplesPerPixel     = Options::Rendering::MAX_SAMPLES_PER_PIXEL;
-    pc.temporalBlendStrength = Options::Rendering::TemporalBlendStrength;
-    pc.maxRayRecursion     = Options::Rendering::MAX_RAY_RECURSION;
+    // Raymarching tunables
+    pc.raymarchMaxDist     = Options::Rendering::RaymarchMaxDistance;
+    pc.raymarchEpsilon     = Options::Rendering::RaymarchEpsilon;
+    pc.raymarchMaxSteps    = Options::Rendering::RaymarchMaxSteps;
 
     vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(PushConstants), &pc);
 
-    // Safe unsigned dispatch grid calculation
     u32 dx = (static_cast<u32>(width)  + 15u) / 16u;
     u32 dy = (static_cast<u32>(height) + 15u) / 16u;
     vkCmdDispatch(cmd, dx, dy, 1u);
@@ -316,9 +322,9 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
 // Cleanup
 // ────────────────────────────────────────────────
 inline void shutdown() noexcept {
-    if (canvas_pipeline) {
-        vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
-        canvas_pipeline = VK_NULL_HANDLE;
+    if (raymarch_pipeline) {
+        vkDestroyPipeline(rtx().device, raymarch_pipeline, nullptr);
+        raymarch_pipeline = VK_NULL_HANDLE;
     }
     if (pipeline_layout) {
         vkDestroyPipelineLayout(rtx().device, pipeline_layout, nullptr);
@@ -331,12 +337,11 @@ inline void shutdown() noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Hot-reload support
+// Hot-reload shader
 // ────────────────────────────────────────────────
-inline void hot_reload_shader(const std::string& path = "compute/canvas.spv",
-                              [[maybe_unused]] bool verbose = false) noexcept {
-    LOG_INFO_CAT("PIPELINE", "Hot-reloading shader: {}", path);
-    create_canvas_pipeline(path, verbose);
+inline void hot_reload_shader(const std::string& path = "compute/raymarch.spv") noexcept {
+    LOG_INFO_CAT("PIPELINE", "Hot-reloading raymarch shader: {}", path);
+    create_raymarch_pipeline(path);
 }
 
 } // namespace Pipeline
