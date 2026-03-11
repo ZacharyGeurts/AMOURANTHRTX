@@ -150,13 +150,15 @@ namespace Options::Camera {
 // Rendering & Performance
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Rendering {
-    inline int     INTERNAL_WIDTH           = 4096;
-    inline int     INTERNAL_HEIGHT          = 2160;
+	// This can be higher or lower than your window or fullscreen size.
+	// It will adapt to system load and keep below value. 4096x2160 = True 4K
+    inline int     INTERNAL_WIDTH           = 4096; // Max internal resolution
+    inline int     INTERNAL_HEIGHT          = 2160; // Max internal resolution
 
     inline constexpr bool    ACCUMULATION             = false;
     inline constexpr bool    ADAPTIVE_SAMPLING        = true;   // per-pixel adaptive sampling (old name, kept for compat)
     inline constexpr int     MAX_RAY_RECURSION        = 8;
-    inline constexpr float   EXPOSURE                 = 0.2f;
+    inline constexpr float   EXPOSURE                 = 0.0f;
     inline constexpr bool    ENABLE_TONEMAP           = false;
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;
 
@@ -165,18 +167,18 @@ namespace Options::Rendering {
 
     inline bool    EnableAdaptiveResolution   = true;           // master toggle — dynamic internal resolution
     inline float   TargetFramerate            = 60.0f;          // desired stable FPS (should match or be below measured refresh)
-    inline float   MinResolutionScale         = 0.90f;          // lowest allowed (0.45 = 45% of window res → deep subsampling)
-    inline float   MaxResolutionScale         = 10.0f;          // highest allowed supersampling when headroom exists
+    inline float   MinResolutionScale         = 0.10f;          // lowest allowed (0.10 = 10% of window res → deep subsampling)
+    inline float   MaxResolutionScale         = 1.2f;           // highest allowed supersampling when headroom exists
     inline float   ResolutionStepSize         = 0.10f;          // granularity of adjustments (0.1 = 10% steps)
 
-    inline float   ResolutionAdjustHysteresis = 0.08f;          // deadband (% of target frametime) to prevent oscillation
+    inline float   ResolutionAdjustHysteresis = 0.20f;          // deadband (% of target frametime) to prevent oscillation
     inline float   AggressiveDownscaleThreshold = 1.35f;        // frametime > target * this → fast/strong downscale
     inline float   HeadroomForUpscale         = 0.20f;          // need at least 20% spare GPU time to consider upscaling
 
     // Legacy / related adaptive controls (still useful even with resolution scaling)
     inline bool    EnableAdaptiveQuality      = true;           // per-pixel adaptive sampling toggle (if still used)
     inline int     MaxSamplesPerPixel         = 4;              // slider: 1–8 (if using adaptive sampling)
-    inline int     MaxRayRecursion            = 10;             // slider: 4–16
+    inline int     MaxRayRecursion            = 8;             // slider: 4–16
     inline float   QualityHeadroomThreshold   = 0.75f;  
 
     // Temporal accumulation strength (0.0 = no accumulation)

@@ -12,8 +12,7 @@
 //   - If GPU load > MaxGPULoadPercent → prepare to subsample
 //   - If GPU load ≤ MaxGPULoadPercent → prepare to supersample
 //   - Changes NEVER affect the current frame — only the next frame after present
-//   - Absolute minimum render resolution: 320×200 (hard safety)
-//   - On resize/fullscreen: force to ~320×200, then normal adaptive climb
+//   - All resolution limits and behavior driven by Options::Rendering (menu)
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -35,37 +34,37 @@
 class RayCanvas {
 public:
     RayCanvas(int windowWidth, int windowHeight, SDL_Window* window)
-        : window_(window),
-          window_width_(windowWidth),
-          window_height_(windowHeight),
-          render_width_(windowWidth),
-          render_height_(windowHeight),
-          minimized_(false),
-          destroyed_(false),
-          firstFrame_(true),
-          materialsHandle_(0),
-          hdrOutputImage_(VK_NULL_HANDLE),
-          hdrOutputView_(VK_NULL_HANDLE),
-          hdrOutputMemory_(VK_NULL_HANDLE),
-          prevHdrOutputImage_(VK_NULL_HANDLE),
-          prevHdrOutputView_(VK_NULL_HANDLE),
-          prevHdrOutputMemory_(VK_NULL_HANDLE),
-          descriptorPool_(VK_NULL_HANDLE),
-          descriptorSet_(VK_NULL_HANDLE),
-          adaptiveScale_(1.0f),
-          lastAppliedScale_(1.0f),
-          lastPresentTime_s_(0.0),
-          measuredRefreshRateHz_(60.0f),
-          lastFpsLog_(0.0),
-          frameCount_(0),
-          lastAdaptiveAdjustTime_(0.0),
-          adaptiveFrameCount_(0),
-          smoothedGpuTimeMs_(16.67),
-          timestampQueryPool_(VK_NULL_HANDLE),
-          timestampPeriodNs_(1.0),
-          needsRecreate_(false),
-          justResizedThisFrame_(false),
-          postResizeGraceFrames_(0)
+        : window_(window)
+        , window_width_(windowWidth)
+        , window_height_(windowHeight)
+        , render_width_(windowWidth)
+        , render_height_(windowHeight)
+        , minimized_(false)
+        , destroyed_(false)
+        , firstFrame_(true)
+        , materialsHandle_(0)
+        , hdrOutputImage_(VK_NULL_HANDLE)
+        , hdrOutputView_(VK_NULL_HANDLE)
+        , hdrOutputMemory_(VK_NULL_HANDLE)
+        , prevHdrOutputImage_(VK_NULL_HANDLE)
+        , prevHdrOutputView_(VK_NULL_HANDLE)
+        , prevHdrOutputMemory_(VK_NULL_HANDLE)
+        , descriptorPool_(VK_NULL_HANDLE)
+        , descriptorSet_(VK_NULL_HANDLE)
+        , adaptiveScale_(1.0f)
+        , lastAppliedScale_(1.0f)
+        , lastPresentTime_s_(0.0)
+        , measuredRefreshRateHz_(60.0f)
+        , lastFpsLog_(0.0)
+        , frameCount_(0)
+        , lastAdaptiveAdjustTime_(0.0)
+        , adaptiveFrameCount_(0)
+        , needsRecreate_(false)
+        , justResizedThisFrame_(false)
+        , postResizeGraceFrames_(0)
+        , timestampQueryPool_(VK_NULL_HANDLE)
+        , timestampPeriodNs_(1.0)
+        , smoothedGpuTimeMs_(16.67)
     {
         Swapchain::create(window, window_width_, window_height_);
 
@@ -265,7 +264,7 @@ public:
         if (!cmd) return;
 
         vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampQueryPool_, 0);
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
 
         transitionImageLayout(cmd, hdrOutputImage_,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
@@ -286,8 +285,6 @@ public:
 
         int dispatchW = static_cast<int>(std::round(static_cast<float>(window_width_) * dispatchScale));
         int dispatchH = static_cast<int>(std::round(static_cast<float>(window_height_) * dispatchScale));
-        dispatchW = std::max(320, dispatchW);
-        dispatchH = std::max(200, dispatchH);
 
         Pipeline::dispatch_canvas(cmd, dispatchW, dispatchH, static_cast<float>(now));
 
@@ -314,7 +311,10 @@ public:
                                   sizeof(timestamps), timestamps, sizeof(uint64_t),
                                   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
             double gpuTimeMs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs_ / 1'000'000.0;
-            smoothedGpuTimeMs_ = 0.72 * smoothedGpuTimeMs_ + 0.28 * gpuTimeMs;
+
+            // Asymmetric smoothing: react faster when load increases
+            double alpha = (gpuTimeMs > smoothedGpuTimeMs_) ? 0.65 : 0.25;
+            smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
         }
 
         if (Options::Rendering::EnableAdaptiveResolution) {
@@ -409,7 +409,7 @@ public:
             const char* mode = (scaleFactor < 0.98f) ? "SUBSAMPLING" :
                                (scaleFactor > 1.02f) ? "SUPERSAMPLING" : "NATIVE";
 
-            float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.05f);
+            float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f); // more headroom
             float gpuLoadPercent = (targetFrameMs > 0.001f) ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0f : 0.0f;
 
             const char* stateEmoji = minimized_                       ? "🟥 minimized" :
@@ -467,13 +467,8 @@ public:
         window_height_ = newHeight;
         minimized_ = false;
 
-        // Force internal resolution to ~320×200 on any real resize / fullscreen change
-        if (fromUserResize && Options::Rendering::EnableAdaptiveResolution) {
-            adaptiveScale_ = std::min(320.0f / static_cast<float>(window_width_),
-                                      200.0f / static_cast<float>(window_height_));
-            // Optional short grace period at low res before aggressive upscaling
-            postResizeGraceFrames_ = 6;
-        }
+        // No forced low-res start — let adaptive system handle it naturally
+        // postResizeGraceFrames_ = 6;  // optional: keep a short grace period if desired
 
         Swapchain::recreate(window_width_, window_height_);
 
@@ -522,62 +517,71 @@ public:
     bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
-    void adjustAdaptiveScale(double now) noexcept {
-        double elapsed = now - lastAdaptiveAdjustTime_;
-        if (elapsed < 0.35 || adaptiveFrameCount_ < 3) return;
+void adjustAdaptiveScale(double now) noexcept {
+    double elapsed = now - lastAdaptiveAdjustTime_;
+    if (elapsed < 0.4 || adaptiveFrameCount_ < 4) return;  // slightly longer to stabilize
 
-        float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.05f);
-        float gpuLoadPercent = (targetFrameMs > 0.001f)
-                             ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0f
-                             : 0.0f;
+    float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f);
+    float gpuLoadPercent = (targetFrameMs > 0.001f)
+                         ? (static_cast<float>(smoothedGpuTimeMs_) / targetFrameMs) * 100.0f
+                         : 0.0f;
 
-        float targetScale = adaptiveScale_;
+    float targetScale = adaptiveScale_;
 
-        constexpr float CRITICAL_LOAD_PCT = 150.0f;
-        constexpr float SEVERE_LOAD_PCT   = 220.0f;
+    constexpr float CRITICAL = 150.0f;
+    constexpr float SEVERE   = 220.0f;
 
-        float downMult = 0.82f;
-        float upMult   = (postResizeGraceFrames_ > 0) ? 1.08f : 1.14f;
+    float downMult = 0.82f;
+    float upMult   = (postResizeGraceFrames_ > 0) ? 1.08f : 1.18f;  // stronger up when safe
 
-        if (gpuLoadPercent > SEVERE_LOAD_PCT) {
-            downMult = 0.50f;
-        } else if (gpuLoadPercent > CRITICAL_LOAD_PCT) {
-            downMult = 0.65f;
-        } else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
-            downMult = 0.82f;
-        } else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.78f) {
-            targetScale *= upMult;
-        } else {
-            adaptiveFrameCount_ = 0;
-            lastAdaptiveAdjustTime_ = now;
-            return;
-        }
+    bool shouldAdjust = false;
 
-        if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
-            targetScale *= downMult;
-
-            if (gpuLoadPercent > 300.0f) targetScale = std::min(targetScale, 0.30f);
-            else if (gpuLoadPercent > 200.0f) targetScale = std::min(targetScale, 0.40f);
-        }
-
-        targetScale = std::clamp(targetScale,
-                                 Options::Rendering::MinResolutionScale,
-                                 Options::Rendering::MaxResolutionScale);
-
-        if (std::abs(targetScale - adaptiveScale_) > 0.025f) {
-            adaptiveScale_ = targetScale;
-            needsRecreate_ = true;
-        }
-
-        adaptiveFrameCount_ = 0;
-        lastAdaptiveAdjustTime_ = now;
+    if (gpuLoadPercent > SEVERE) {
+        downMult = 0.55f;
+        shouldAdjust = true;
+    } else if (gpuLoadPercent > CRITICAL) {
+        downMult = 0.68f;
+        shouldAdjust = true;
+    } else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
+        downMult = 0.82f;
+        shouldAdjust = true;
+    } else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.80f) {  // <72% → more eager up
+        // Changed from 0.72f to 0.80f so 24-29% definitely triggers up
+        targetScale *= upMult;
+        shouldAdjust = true;
     }
+
+    if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
+        targetScale *= downMult;
+        if (gpuLoadPercent > 280.0f) targetScale = std::min(targetScale, 0.40f);
+    }
+
+    targetScale = std::clamp(targetScale,
+                             Options::Rendering::MinResolutionScale,
+                             Options::Rendering::MaxResolutionScale);
+
+    // Lower hysteresis when climbing (allow smaller steps up)
+    float effectiveHysteresis = (targetScale > adaptiveScale_) 
+                              ? 0.035f   // ~3.5% for up
+                              : Options::Rendering::ResolutionAdjustHysteresis;
+
+    if (shouldAdjust && std::abs(targetScale - adaptiveScale_) > effectiveHysteresis) {
+        LOG_DEBUG_CAT("ADAPTIVE", "Adjusting scale: %.3f → %.3f (load %.1f%%, upMult=%.2f)",
+                      adaptiveScale_, targetScale, gpuLoadPercent, upMult);
+        adaptiveScale_ = targetScale;
+        needsRecreate_ = true;
+    }
+
+    adaptiveFrameCount_ = 0;
+    lastAdaptiveAdjustTime_ = now;
+}
 
     void updateRenderResolution() noexcept {
         float scale = Options::Rendering::EnableAdaptiveResolution
                     ? adaptiveScale_
                     : 1.0f;
 
+        // Optional cap so we never exceed configured internal max resolution
         float maxW = static_cast<float>(Options::Rendering::INTERNAL_WIDTH)  / static_cast<float>(window_width_);
         float maxH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
         scale = std::min(scale, std::min(maxW, maxH));
@@ -585,8 +589,8 @@ private:
         render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * scale));
         render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * scale));
 
-        render_width_  = std::max(320, render_width_);
-        render_height_ = std::max(200, render_height_);
+        // No hard-coded 320×200 floor — respect MinResolutionScale from menu
+        // If you want any minimum pixels at all, it must come from the options
     }
 
     void createTimestampQueryPool() noexcept {
@@ -867,49 +871,46 @@ private:
     }
 
 private:
-    SDL_Window*    window_           = nullptr;
-    int            window_width_     = 0;
-    int            window_height_    = 0;
+    SDL_Window*    window_                    = nullptr;
+    int            window_width_              = 0;
+    int            window_height_             = 0;
+    int            render_width_              = 0;
+    int            render_height_             = 0;
 
-    int            render_width_     = 0;
-    int            render_height_    = 0;
+    bool           minimized_                 = false;
+    bool           destroyed_                 = false;
+    bool           firstFrame_                = true;
 
-    bool           minimized_        = false;
-    bool           destroyed_        = false;
-    bool           firstFrame_       = true;
+    uint64_t       materialsHandle_           = 0;
 
-    uint64_t       materialsHandle_          = 0;
+    VkImage        hdrOutputImage_            = VK_NULL_HANDLE;
+    VkImageView    hdrOutputView_             = VK_NULL_HANDLE;
+    VkDeviceMemory hdrOutputMemory_           = VK_NULL_HANDLE;
 
-    VkImage        hdrOutputImage_           = VK_NULL_HANDLE;
-    VkImageView    hdrOutputView_            = VK_NULL_HANDLE;
-    VkDeviceMemory hdrOutputMemory_          = VK_NULL_HANDLE;
+    VkImage        prevHdrOutputImage_        = VK_NULL_HANDLE;
+    VkImageView    prevHdrOutputView_         = VK_NULL_HANDLE;
+    VkDeviceMemory prevHdrOutputMemory_       = VK_NULL_HANDLE;
 
-    VkImage        prevHdrOutputImage_       = VK_NULL_HANDLE;
-    VkImageView    prevHdrOutputView_        = VK_NULL_HANDLE;
-    VkDeviceMemory prevHdrOutputMemory_      = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool_          = VK_NULL_HANDLE;
+    VkDescriptorSet  descriptorSet_           = VK_NULL_HANDLE;
 
-    VkDescriptorPool descriptorPool_         = VK_NULL_HANDLE;
-    VkDescriptorSet  descriptorSet_          = VK_NULL_HANDLE;
+    float          adaptiveScale_             = 1.0f;
+    float          lastAppliedScale_          = 1.0f;
 
-    float          adaptiveScale_            = 1.0f;
-    float          lastAppliedScale_         = 1.0f;
-    double         lastPresentTime_s_        = 0.0;
-    float          measuredRefreshRateHz_    = 60.0f;
+    double         lastPresentTime_s_         = 0.0;
+    float          measuredRefreshRateHz_     = 60.0f;
+    double         lastFpsLog_                = 0.0;
+    uint64_t       frameCount_                = 0;
+    double         lastAdaptiveAdjustTime_    = 0.0;
+    uint64_t       adaptiveFrameCount_        = 0;
 
-    double         lastFpsLog_               = 0.0;
-    uint64_t       frameCount_               = 0;
+    bool           needsRecreate_             = false;
+    bool           justResizedThisFrame_      = false;
+    int            postResizeGraceFrames_     = 0;
 
-    double         lastAdaptiveAdjustTime_   = 0.0;
-    uint64_t       adaptiveFrameCount_       = 0;
-
-    bool           needsRecreate_            = false;
-    bool           justResizedThisFrame_     = false;
-
-    int            postResizeGraceFrames_    = 0;
-
-    VkQueryPool    timestampQueryPool_       = VK_NULL_HANDLE;
-    double         timestampPeriodNs_        = 1.0;
-    double         smoothedGpuTimeMs_        = 16.67;
+    VkQueryPool    timestampQueryPool_        = VK_NULL_HANDLE;
+    double         timestampPeriodNs_         = 1.0;
+    double         smoothedGpuTimeMs_         = 16.67;
 };
 
 inline RayCanvas* rayCanvas = nullptr;

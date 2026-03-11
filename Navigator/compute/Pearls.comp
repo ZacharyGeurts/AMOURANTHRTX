@@ -31,7 +31,7 @@
 // ───────────────────────────────────────────────
 // BALL COUNT & SPAWNING
 #define MAX_BALLS                   48
-#define BALL_SPAWN_INTERVAL         101.135
+#define BALL_SPAWN_INTERVAL         1.0
 #define MAX_BOUNCES_PER_BALL        5
 
 // ───────────────────────────────────────────────
