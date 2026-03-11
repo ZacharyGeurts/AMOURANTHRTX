@@ -12,8 +12,8 @@
 //   - If GPU load > MaxGPULoadPercent → prepare to subsample
 //   - If GPU load ≤ MaxGPULoadPercent → prepare to supersample
 //   - Changes NEVER affect the current frame — only the next frame after present
-//   - Absolute minimum render resolution: 320×200 (hard safety — impossible to reach 0x0)
-//   - Robust fullscreen toggle: reset to safe scale, avoid blocking waits, quick recovery
+//   - Absolute minimum render resolution: 320×200 (hard safety)
+//   - On resize/fullscreen: force to ~320×200, then normal adaptive climb
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -183,11 +183,6 @@ public:
 
         if (fullscreen_toggle) {
             sdl_toggle_fullscreen();
-            if (Options::Rendering::EnableAdaptiveResolution) {
-                adaptiveScale_ = 0.75f;
-                postResizeGraceFrames_ = 6;
-                needsRecreate_ = true;
-            }
         }
 
         if (quit) {
@@ -259,6 +254,7 @@ public:
         }
 
         if (acq != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
             if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) {
                 destroyed_ = true;
             }
@@ -397,6 +393,7 @@ public:
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
             needsRecreate_ = true;
         } else if (pres != VK_SUCCESS) {
+            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
 
@@ -424,7 +421,7 @@ public:
                           "  FPS:            {}     (avg frame {:.0f} µs)\n"
                           "  Refresh Rate:   {} Hz\n"
                           "  Window:         {} x {}\n"
-                          "  Rendered:       {} x {}     ({:.2f}x — Resampled)\n"
+                          "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
                           "  GPU load:       {:.1f}%   (smoothed {:.1f} ms)\n"
                           "  State:          {}\n"
@@ -436,7 +433,7 @@ public:
                           avgFps, avgDt_us,
                           measuredRefreshRateHz_,
                           winW, winH,
-                          render_width_, render_height_, scaleFactor,
+                          render_width_, render_height_, scaleFactor, mode,
                           adaptiveScale_,
                           gpuLoadPercent, smoothedGpuTimeMs_,
                           stateEmoji,
@@ -470,9 +467,12 @@ public:
         window_height_ = newHeight;
         minimized_ = false;
 
+        // Force internal resolution to ~320×200 on any real resize / fullscreen change
         if (fromUserResize && Options::Rendering::EnableAdaptiveResolution) {
-            adaptiveScale_ = 0.75f;
-            postResizeGraceFrames_ = 8;
+            adaptiveScale_ = std::min(320.0f / static_cast<float>(window_width_),
+                                      200.0f / static_cast<float>(window_height_));
+            // Optional short grace period at low res before aggressive upscaling
+            postResizeGraceFrames_ = 6;
         }
 
         Swapchain::recreate(window_width_, window_height_);
@@ -540,11 +540,11 @@ private:
         float upMult   = (postResizeGraceFrames_ > 0) ? 1.08f : 1.14f;
 
         if (gpuLoadPercent > SEVERE_LOAD_PCT) {
-            downMult = 0.50f;           // very aggressive drop
+            downMult = 0.50f;
         } else if (gpuLoadPercent > CRITICAL_LOAD_PCT) {
-            downMult = 0.65f;           // strong drop
+            downMult = 0.65f;
         } else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
-            downMult = 0.82f;           // normal downscale
+            downMult = 0.82f;
         } else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.78f) {
             targetScale *= upMult;
         } else {
@@ -556,12 +556,8 @@ private:
         if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
             targetScale *= downMult;
 
-            // Extra emergency clamp if still extremely overloaded
-            if (gpuLoadPercent > 300.0f) {
-                targetScale = std::min(targetScale, 0.30f);
-            } else if (gpuLoadPercent > 200.0f) {
-                targetScale = std::min(targetScale, 0.40f);
-            }
+            if (gpuLoadPercent > 300.0f) targetScale = std::min(targetScale, 0.30f);
+            else if (gpuLoadPercent > 200.0f) targetScale = std::min(targetScale, 0.40f);
         }
 
         targetScale = std::clamp(targetScale,
@@ -586,11 +582,11 @@ private:
         float maxH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
         scale = std::min(scale, std::min(maxW, maxH));
 
-        int proposedW = static_cast<int>(std::round(static_cast<float>(window_width_)  * scale));
-        int proposedH = static_cast<int>(std::round(static_cast<float>(window_height_) * scale));
+        render_width_  = static_cast<int>(std::round(static_cast<float>(window_width_)  * scale));
+        render_height_ = static_cast<int>(std::round(static_cast<float>(window_height_) * scale));
 
-        render_width_  = std::max(320, proposedW);
-        render_height_ = std::max(200, proposedH);
+        render_width_  = std::max(320, render_width_);
+        render_height_ = std::max(200, render_height_);
     }
 
     void createTimestampQueryPool() noexcept {

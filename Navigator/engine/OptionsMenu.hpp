@@ -165,8 +165,8 @@ namespace Options::Rendering {
 
     inline bool    EnableAdaptiveResolution   = true;           // master toggle — dynamic internal resolution
     inline float   TargetFramerate            = 60.0f;          // desired stable FPS (should match or be below measured refresh)
-    inline float   MinResolutionScale         = 0.45f;          // lowest allowed (0.45 = 45% of window res → deep subsampling)
-    inline float   MaxResolutionScale         = 2.2f;           // highest allowed supersampling when headroom exists
+    inline float   MinResolutionScale         = 0.90f;          // lowest allowed (0.45 = 45% of window res → deep subsampling)
+    inline float   MaxResolutionScale         = 10.0f;          // highest allowed supersampling when headroom exists
     inline float   ResolutionStepSize         = 0.10f;          // granularity of adjustments (0.1 = 10% steps)
 
     inline float   ResolutionAdjustHysteresis = 0.08f;          // deadband (% of target frametime) to prevent oscillation
