@@ -5,8 +5,10 @@ Demonstration showcase
 https://x.com/ZacharyGeurts/status/2031298561900446079  
 
 Help yourself to the demos folder.  
+
 Navigator/compute/canvas.comp is to be the one file to update.  
-Overwrite with the pearls code to do the pearls demo.  
+
+Overwrite the canvas.comp and rebuild.  
 Have Grok write a new fun comp with rainbows or whatever.  
   
 [Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)  
