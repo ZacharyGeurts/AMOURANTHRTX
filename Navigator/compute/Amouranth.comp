@@ -3,8 +3,8 @@
 
 // =============================================================================
 // AMOURANTH RTX – denim jorts + vivid red-pink V-neck shirt, felt+leather cowboy hat
-// Shirt: vivid red-pink textured fabric (torso + boobs + V-neck + LEFT quad only)
-// Denim: thighs + RIGHT quad + butt
+// Shirt: vivid red-pink textured fabric (torso + boobs + V-neck + BOTH quad bulges)
+// Denim jorts: main thigh capsules + butt (covers thighs)
 // Skin: neck, head, arms, calves, feet
 // =============================================================================
 
@@ -16,12 +16,12 @@
 #define SHIRT_COLOR                 vec3(0.92, 0.18, 0.28)   // vivid red-pink
 #define SHIRT_TEXTURE_AMP           1.10
 #define SHIRT_ROUGHNESS             0.48
-#define SHIRT_SPECULAR              0.18
+#define SHIRT_SPECULAR              0.0
 
 #define DENIM_COLOR                 vec3(0.18, 0.28, 0.48)   // deep blue denim
 #define DENIM_TEXTURE_AMP           1.40
 #define DENIM_ROUGHNESS             0.65
-#define DENIM_SPECULAR              0.10
+#define DENIM_SPECULAR              0.0
 
 #define HAT_FELT_COLOR              vec3(0.28, 0.22, 0.18)
 #define HAT_LEATHER_BAND_COLOR      vec3(0.32, 0.18, 0.09)
@@ -68,10 +68,10 @@
 
 // ── Sizes & Positions ───────────────────────────────────────────────────────
 #define BOOB_BASE_Y                 0.98
-#define BOOB_BASE_Z                 0.2
-#define BOOB_SEPARATION             0.18
-#define BOOB_RADIUS_LEFT            0.23
-#define BOOB_RADIUS_RIGHT           0.23
+#define BOOB_BASE_Z                 0.24
+#define BOOB_SEPARATION             0.12
+#define BOOB_RADIUS_LEFT            0.2
+#define BOOB_RADIUS_RIGHT           0.2
 
 #define HEAD_Y_OFFSET               -0.19
 #define HAT_X_OFFSET                0.0
@@ -162,8 +162,8 @@
 const int MAT_SKIN     = 1;
 const int MAT_HAIR     = 2;
 const int MAT_HAT      = 3;
-const int MAT_SHIRT    = 4;   // V-neck shirt + boobs + left quad bulge
-const int MAT_DENIM    = 5;   // thighs + right quad + butt
+const int MAT_SHIRT    = 4;   // V-neck shirt + boobs + BOTH quad bulges
+const int MAT_DENIM    = 5;   // main thigh capsules + butt
 const int MAT_STOCKING = 6;
 const int MAT_HEEL     = 7;
 
@@ -482,15 +482,13 @@ Hit map(vec3 pos) {
     vec3 thighL = p - thighL_pos; thighL.xz *= rot2(legSway);
 
     float thighBaseL = sdCapsule(thighL, vec3(0,0.4,0), vec3(0,-LEG_LENGTH+0.3,0), THIGH_RADIUS);
+    denimD = min(denimD, thighBaseL);
 
-    // LEFT quad bulge → shirt (pink)
+    // LEFT quad bulge → shirt
     vec3 quadBulgeL = p - (thighL_pos + vec3(0.0,0.15,0.04));
     quadBulgeL.xz *= rot2(legSway);
     float quadL = sdEllipsoid(quadBulgeL, vec3(THIGH_RADIUS+QUAD_BULGE,0.22,THIGH_RADIUS+0.02));
     shirtD = min(shirtD, quadL);
-
-    // rest of left thigh → denim
-    denimD = min(denimD, thighBaseL);
 
     vec3 calfL_pos = vec3(-0.18, 0.55-LEG_LENGTH+jump*0.1, 0.0);
     vec3 calfL = p - calfL_pos; calfL.xz *= rot2(legSway*1.5);
@@ -507,15 +505,13 @@ Hit map(vec3 pos) {
     vec3 thighR = p - thighR_pos; thighR.xz *= rot2(-legSway);
 
     float thighBaseR = sdCapsule(thighR, vec3(0,0.4,0), vec3(0,-LEG_LENGTH+0.3,0), THIGH_RADIUS);
+    denimD = min(denimD, thighBaseR);
 
-    // RIGHT quad bulge → denim
+    // RIGHT quad bulge → shirt
     vec3 quadBulgeR = p - (thighR_pos + vec3(0.0,0.15,0.04));
     quadBulgeR.xz *= rot2(-legSway);
     float quadR = sdEllipsoid(quadBulgeR, vec3(THIGH_RADIUS+QUAD_BULGE,0.22,THIGH_RADIUS+0.02));
-    denimD = min(denimD, quadR);
-
-    // rest of right thigh → denim
-    denimD = min(denimD, thighBaseR);
+    shirtD = min(shirtD, quadR);
 
     vec3 calfR_pos = vec3(0.18, 0.55-LEG_LENGTH+jump*0.1, 0.0);
     vec3 calfR = p - calfR_pos; calfR.xz *= rot2(-legSway*1.5);
