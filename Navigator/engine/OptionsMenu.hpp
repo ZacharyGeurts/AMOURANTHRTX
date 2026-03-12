@@ -43,7 +43,7 @@ namespace Options::GameStyle
         TextOnly       = 0,     // Console/text output only — zero GPU usage, debug/fallback mode
         Pure2D         = 1,     // Fast 2D SDF canvas (classic Pac-Man style, very low GPU cost)
         TwoPointFiveD  = 2,     // Layered 2.5D with parallax/billboards (medium GPU cost)
-        Full3D         = 3      // Full raymarched 3D world (crystal/gems style, highest GPU cost)
+        Full3D         = 3      // Full raymarched 3D world (highest GPU cost)
     };
 
     // CameraPerspective — how the world is framed and navigated
@@ -124,7 +124,7 @@ namespace Options::Window {
 namespace Options::Camera {
 
     inline constexpr glm::vec3 START_POSITION         { 0.0f, 4.5f, 0.0f }; // Initial world-space position
-    inline constexpr float     DEFAULT_FOV            = 75.0f;             // Vertical FOV in degrees
+    inline constexpr float     DEFAULT_FOV            = 72.0f;             // Vertical FOV in degrees
     inline constexpr float     DEFAULT_NEAR           = 0.05f;             // Near plane (prevents z-fighting)
     inline constexpr float     DEFAULT_FAR            = 5000.0f;           // Far plane (culling distance)
 
@@ -182,10 +182,10 @@ namespace Options::Rendering {
 
     // Core resolution & dispatch settings
     inline int     INTERNAL_WIDTH           = 4915;                        // Max internal render width
-    inline int     INTERNAL_HEIGHT          = 2592;                        // Max internal render height
+    inline int     INTERNAL_HEIGHT          = 4592;                        // Max internal render height
 
     // Temporal & sampling quality
-    inline constexpr bool    ACCUMULATION             = false;             // Temporal reprojection/accumulation (denoising)
+    inline constexpr bool    ACCUMULATION             = true;             // Temporal reprojection/accumulation (denoising)
     inline constexpr bool    ADAPTIVE_SAMPLING        = true;              // Per-pixel quality scaling
     inline constexpr int     MAX_SAMPLES_PER_PIXEL    = 4;                 // Adaptive max samples (higher = cleaner)
     inline constexpr int     MAX_RAY_RECURSION        = 8;                 // Max ray bounces (only in raymarched mode)
@@ -193,19 +193,19 @@ namespace Options::Rendering {
     inline constexpr bool    ENABLE_TONEMAP           = false;             // Apply HDR → LDR tonemapping
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;                // Compute workgroup size (must match shader)
 
-    inline constexpr float   MaxGPULoadPercent        = 90.0f;             // Target max GPU utilization before downscaling
+    inline constexpr float   MaxGPULoadPercent        = 95.0f;             // Target max GPU utilization before downscaling
 
     // Dynamic resolution scaling (DRS)
     inline bool    EnableAdaptiveResolution   = true;
     inline float   MinResolutionScale         = 0.10f;                     // Lowest allowed scale (heavy fallback)
     inline float   MaxResolutionScale         = 1.2f;                      // Highest supersampling allowed
-    inline float   ResolutionStepSize         = 0.01f;
+    inline float   ResolutionStepSize         = 0.1f;
 
-    inline float   ResolutionAdjustHysteresis = 0.10f;                     // Anti-oscillation threshold
+    inline float   ResolutionAdjustHysteresis = 0.9f;                     // Anti-oscillation threshold do not move deadzone
     inline float   AggressiveDownscaleThreshold = 1.35f;                   // Frametime multiplier for strong downscale
-    inline float   HeadroomForUpscale         = 0.10f;                     // Spare GPU time needed to upscale
+    inline float   HeadroomForUpscale         = 0.10f;                     // affects MaxGPULoadPercent
 
-    inline float   TemporalBlendStrength      = 0.0f;                      // Temporal reprojection blending strength
+    inline float   TemporalBlendStrength      = 0.0f;                      // Frame blend, motionbluresque
 
     // ─── Hybrid / Raymarching Mode Selection ───────────────────────────────
     // Controls shader path: 2D SDF canvas vs full 3D raymarching vs hybrid blend.

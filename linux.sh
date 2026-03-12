@@ -14,6 +14,7 @@ W="\033[1;97m"        X="\033[0m"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="build"
+BUILD_RELEASE_DIR="build-release"
 CROSS_BUILD_DIR="build-windows"
 
 banner() {
@@ -52,8 +53,8 @@ show_help() {
   ./linux.sh single           → -j1 build (current target)
   ./linux.sh gdb              → launch under gdb (Linux only)
   ./linux.sh ninja            → use Ninja generator
-  ./linux.sh clean            → purge current build dir
-  ./linux.sh clean windows    → purge Windows build only
+  ./linux.sh clean            → rm -rf ALL build folders (build*, build-windows, CMakeCache, etc.)
+  ./linux.sh clean windows    → rm -rf build-windows only
 
   Binary paths:
     Linux debug:   build/bin/Linux/Navigator
@@ -88,15 +89,27 @@ else
     SOURCE_BINARY="./bin/Linux/Navigator"
 fi
 
-clean() {
+clean_all() {
     banner
-    echo -e "${ABYSS}        TIDAL PURGE INITIATED — THE ABYSS CONSUMES${X}"
-    if [[ "$TARGET" == "windows" ]]; then
+    echo -e "${ABYSS}        TIDAL PURGE INITIATED — THE ABYSS CONSUMES EVERYTHING${X}"
+    
+    rm -rf "$BUILD_DIR" "$BUILD_RELEASE_DIR" "$CROSS_BUILD_DIR" \
+           CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json \
+           build-*/ CMakeFiles-*/ CMakeCache-*.txt
+    
+    echo -e "${GLOW}        ALL BUILD REALMS PURGED — FRESH OCEAN AWAITS${X}"
+    echo -e "${PEARL}        (build, build-release, build-windows, cmake caches, etc. gone forever)${X}"
+    exit 0
+}
+
+clean_specific() {
+    banner
+    if [[ "$1" == "windows" ]]; then
         rm -rf "$CROSS_BUILD_DIR"
         echo -e "${GLOW}        WINDOWS REALM PURGED${X}"
     else
-        rm -rf "$BUILD_SUBDIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json
-        echo -e "${GLOW}        ${BUILD_VARIANT^^} LINUX REALM PURGED${X}"
+        rm -rf "$BUILD_DIR" "$BUILD_RELEASE_DIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json
+        echo -e "${GLOW}        LINUX REALMS PURGED (debug + release)${X}"
     fi
     exit 0
 }
@@ -113,7 +126,13 @@ for arg in "$@"; do
         run)        ACTION="run" ;;
         single)     ACTION="run"; BUILD_JOBS="1" ;;
         gdb)        ACTION="run"; LAUNCH_MODE="gdb" ;;
-        clean)      clean ;;
+        clean)      
+            if [[ $# -gt 1 && "${2,,}" == "windows" ]]; then
+                clean_specific "windows"
+            else
+                clean_all
+            fi
+            ;;
         ninja|--ninja) GENERATOR="Ninja" ;;
         windows|release) ;; # already handled earlier
         --help|-h|help|"") show_help ;;
@@ -137,7 +156,7 @@ echo -e "${WAVE}        SURFACING WITH $GENERATOR — $BUILD_JOBS THREADS RISING
 mkdir -p "$BUILD_SUBDIR"
 cd "$BUILD_SUBDIR"
 
-# FIXED: Toolchain FIRST, then generator LAST. Clean every time.
+# Toolchain FIRST, then generator LAST. Clean build every time (no incremental cruft).
 if [[ "$TARGET" == "windows" ]]; then
     cmake .. \
         -DCMAKE_TOOLCHAIN_FILE=../Toolchain-mingw64.cmake \
