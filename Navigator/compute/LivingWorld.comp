@@ -2,9 +2,10 @@
 #extension GL_EXT_scalar_block_layout : enable
 
 // =============================================================================
-// AMOURANTH RTX Engine — Living World Canvas Shader
+// AMOURANTH RTX Engine — Living World Canvas Shader (CANVAS.comp)
 // Simple procedural ray marcher (sky + infinite ground plane)
-// Fully driven by push constants from Pipeline / OptionsMenu
+// Fully driven by push constants from Pipeline / OptionsMenu / Controller
+// No external textures — pure procedural
 // =============================================================================
 
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -32,13 +33,30 @@ layout(push_constant) uniform PushConstants {
     float       fogDensity;
     float       dayNightFactor;         // 0..1 (midnight → noon → midnight)
     float       cloudCoverage;
-    uint        debugFlags;
 
-    float       pad1[3];
+    uint        debugFlags;             // bitfield for visualization
+
+    // Raymarching quality
+    float       raymarchMaxDist;
+    float       raymarchEpsilon;
+    uint        raymarchMaxSteps;
+
+    // Controller / Input (digital + analog)
+    uint        controllerInput;        // bitfield: forward, backward, left, right, sprint, crouch, jump, interact, shoot
+    float       leftStickX;             // [-1,1] strafe
+    float       leftStickY;             // [-1,1] forward/back
+    float       rightStickX;            // [-1,1] look yaw
+    float       rightStickY;            // [-1,1] look pitch
+    float       leftTrigger;            // [0,1] secondary / aim
+    float       rightTrigger;           // [0,1] primary / sprint
+    float       mouseX;                 // normalized [0,1] screen space
+    float       mouseY;                 // normalized [0,1]
+
+    float       pad1[2];                // 16-byte alignment
 } pc;
 
 // ────────────────────────────────────────────────
-// Helpers
+// Noise helpers
 // ────────────────────────────────────────────────
 float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -64,13 +82,13 @@ float noise(vec2 p) {
 }
 
 // ────────────────────────────────────────────────
-// Sky with animated clouds & sun/moon halo
+// Sky with animated clouds, sun/moon, day/night transition
 // ────────────────────────────────────────────────
 vec3 sampleSky(vec3 dir) {
     float up = max(0.0, dir.y);
     float day = pc.dayNightFactor;
 
-    // Base sky gradient
+    // Base gradient
     vec3 zenithDay   = vec3(0.50, 0.75, 1.00);
     vec3 horizonDay  = vec3(0.70, 0.85, 1.00);
     vec3 zenithNight = vec3(0.15, 0.25, 0.50);
@@ -82,19 +100,18 @@ vec3 sampleSky(vec3 dir) {
         day
     );
 
-    // Sun halo
+    // Sun halo + disk
     float sunDot = max(0.0, dot(dir, pc.sunDir));
     float sunDisk = smoothstep(0.9990, 0.9999, sunDot);
     float sunHalo = pow(sunDot, 60.0) * pc.sunIntensity * 1.4;
     sky += vec3(1.40, 1.10, 0.80) * (sunDisk + sunHalo) * day;
 
-    // Moon glow (optional subtle)
+    // Moon glow
     float moonDot = max(0.0, dot(dir, pc.moonDir));
     sky += vec3(0.90, 0.95, 1.00) * pow(moonDot, 20.0) * pc.moonIntensity * (1.0 - day);
 
-    // Animated clouds (wind + time driven)
-    vec2 cloudUV = dir.xz * 1.2;
-    cloudUV += pc.windDir.xz * pc.windStrength * pc.time * 0.08;
+    // Animated clouds (wind-driven)
+    vec2 cloudUV = dir.xz * 1.2 + pc.windDir.xz * pc.windStrength * pc.time * 0.08;
     float cloud = noise(cloudUV * 0.8) * 0.55 +
                   noise(cloudUV * 2.5) * 0.30 +
                   noise(cloudUV * 7.0) * 0.15;
@@ -105,7 +122,7 @@ vec3 sampleSky(vec3 dir) {
 }
 
 // ────────────────────────────────────────────────
-// Procedural grass / ground color
+// Procedural ground (grass + wetness + temperature tint)
 // ────────────────────────────────────────────────
 vec3 grassTexture(vec2 uv) {
     float n1 = noise(uv * 2.0);
@@ -117,7 +134,7 @@ vec3 grassTexture(vec2 uv) {
     vec3 light = vec3(0.25, 0.55, 0.12);
     vec3 base  = mix(dark, light, n);
 
-    // Temperature tint (cold → blue shift, hot → red/orange)
+    // Temperature tint
     float tempNorm = clamp((pc.temperatureC + 30.0) / 80.0, 0.0, 1.0);
     base *= mix(vec3(0.92, 0.98, 1.10), vec3(1.18, 0.92, 0.82), tempNorm * 0.6);
 
@@ -127,21 +144,21 @@ vec3 grassTexture(vec2 uv) {
 vec3 sampleGround(vec3 hitPos) {
     vec3 tex = grassTexture(hitPos.xz * 0.4);
 
-    // Simple lighting
+    // Lighting
     vec3 normal = vec3(0.0, 1.0, 0.0);
     float sunLit = max(0.0, dot(normal, pc.sunDir));
     float ambient = 0.20 + 0.45 * pc.dayNightFactor;
 
     vec3 color = tex * (sunLit * pc.sunIntensity * 1.5 + ambient);
 
-    // Simple specular (wet surfaces shine more)
+    // Specular (wetness)
     vec3 viewDir = normalize(pc.cameraPos - hitPos);
     vec3 halfVec = normalize(pc.sunDir + viewDir);
     float spec = pow(max(0.0, dot(normal, halfVec)), 64.0);
     float wetness = pc.humidity * pc.precipitationFactor * 1.3;
     color += vec3(0.9, 0.95, 1.0) * spec * wetness * pc.sunIntensity;
 
-    // Wet tint (darker + slight blue)
+    // Wet tint
     color = mix(color, vec3(0.18, 0.26, 0.34), wetness * 0.6);
 
     // Fog
@@ -150,18 +167,40 @@ vec3 sampleGround(vec3 hitPos) {
     vec3 fogColor = mix(vec3(0.72, 0.82, 0.96), vec3(0.42, 0.50, 0.68), pc.dayNightFactor * 0.4);
     color = mix(color, fogColor, fogAmt);
 
-    // Debug visualization
-    if ((pc.debugFlags & 1u) != 0u) { // bit 0: normals
-        color = normal * 0.5 + 0.5;
-    }
-    if ((pc.debugFlags & 2u) != 0u) { // bit 1: wind dir
-        color = mix(color, pc.windDir * 0.5 + 0.5, 0.6);
-    }
-    if ((pc.debugFlags & 4u) != 0u) { // bit 2: wetness
-        color = vec3(wetness);
-    }
+    // Debug modes
+    if ((pc.debugFlags & 1u) != 0u) color = normal * 0.5 + 0.5;          // normals
+    if ((pc.debugFlags & 2u) != 0u) color = mix(color, pc.windDir * 0.5 + 0.5, 0.6); // wind dir
+    if ((pc.debugFlags & 4u) != 0u) color = vec3(wetness);               // wetness
 
     return color;
+}
+
+// ────────────────────────────────────────────────
+// Controller-driven player movement in shader (simple demo)
+// ────────────────────────────────────────────────
+vec3 applyControllerMovement(vec3 pos) {
+    vec3 move = vec3(0.0);
+
+    // Digital buttons (bitfield)
+    if ((pc.controllerInput & INPUT_FORWARD) != 0u)  move.z -= 1.0;
+    if ((pc.controllerInput & INPUT_BACKWARD) != 0u) move.z += 1.0;
+    if ((pc.controllerInput & INPUT_LEFT) != 0u)     move.x -= 1.0;
+    if ((pc.controllerInput & INPUT_RIGHT) != 0u)    move.x += 1.0;
+
+    // Analog left stick override/add
+    move.x += pc.leftStickX * 1.2;
+    move.z += pc.leftStickY * 1.2;
+
+    // Sprint boost
+    float sprint = ((pc.controllerInput & INPUT_SPRINT) != 0u || pc.rightTrigger > 0.3) ? 2.5 : 1.0;
+
+    // Apply movement (scaled by time for smooth animation)
+    pos += normalize(move) * sprint * 0.5 * pc.time * 0.1;
+
+    // Optional right stick look hint (e.g. tilt sky or objects)
+    // vec2 look = vec2(pc.rightStickX, pc.rightStickY);
+
+    return pos;
 }
 
 // ────────────────────────────────────────────────
@@ -172,33 +211,41 @@ void main() {
     ivec2 dim = imageSize(outputImage);
     if (any(greaterThanEqual(pix, dim))) return;
 
-    // Normalized device coordinates [-1,1]
+    // Normalized device coords [-1,1]
     vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
     uv.x *= pc.aspectRatio;
 
-    // Simple FOV projection (no quaternion rotation yet — add if needed)
+    // FOV projection (simple, no quat rotation yet — add if needed)
     float tanHalfFov = tan(radians(pc.cameraFovDeg) * 0.5);
     vec3 rayDir = normalize(vec3(uv.x * tanHalfFov, uv.y * tanHalfFov, 1.0));
 
-    vec3 ro = pc.cameraPos;
+    // Controller movement (affects ray origin for demo)
+    vec3 ro = applyControllerMovement(pc.cameraPos);
 
     vec3 color = sampleSky(rayDir);
 
-    // Ground plane intersection (y=0)
+    // Ground plane (y=0)
     if (rayDir.y < 0.0) {
         float t = -ro.y / rayDir.y;
-        if (t > 0.001) {
+        if (t > 0.001 && t < pc.raymarchMaxDist) {
             vec3 hit = ro + rayDir * t;
             color = sampleGround(hit);
         }
     }
 
-    // Final post
+    // Post-process
     color *= pc.exposure;
 
-    // Optional subtle vignette
+    // Subtle vignette
     float vig = 1.0 - length(uv) * 0.12;
     color *= vig;
+
+    // Optional debug tint (mouse position)
+    if ((pc.debugFlags & 8u) != 0u) { // bit 3: mouse cursor tint
+        vec2 mouseUV = vec2(pc.mouseX, pc.mouseY);
+        float distToMouse = length(uv - mouseUV * 2.0 + 1.0);
+        color += vec3(0.8, 0.3, 0.9) * (1.0 - smoothstep(0.0, 0.3, distToMouse));
+    }
 
     imageStore(outputImage, pix, vec4(color, 1.0));
 }

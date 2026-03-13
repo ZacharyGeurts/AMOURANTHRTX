@@ -8,7 +8,7 @@
 //
 // Pure 3D raymarching — owns HDR pair, descriptors, materials, adaptive dispatch,
 // timing, resize, SDL event polling, quit detection, fullscreen toggle
-// Uses TotalTime monolith for all timing
+// Uses CANVAS.spv (compiled from CANVAS.comp) via Pipeline
 // Fully integrated with current SDL3.hpp and Materials library
 // =============================================================================
 
@@ -78,7 +78,7 @@ public:
 
         Pipeline::initialize();
         Pipeline::create_pipeline_layout();
-        Pipeline::create_raymarch_pipeline();
+        Pipeline::create_canvas_pipeline();  // Loads CANVAS.spv
 
         updateDescriptorSet();
         clearHDRImages();
@@ -226,7 +226,7 @@ public:
 
         updateRenderResolution();
 
-        Pipeline::dispatch_raymarch(cmd, render_width_, render_height_, static_cast<float>(now));
+        Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
 
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
 
@@ -286,7 +286,7 @@ public:
                              0, nullptr,
                              1, &swapBarrier);
 
-        VkClearColorValue clearBlack = { .float32 = {0.0, 0.0, 0.0, 1.0} };
+        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
 
@@ -373,7 +373,7 @@ public:
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
                           "  GPU load:       {:.1f}%   (smoothed {:.1f} ms)\n"
-                          "  Render Path:    Pure Raymarched 3D\n"
+                          "  Render Path:    Pure Raymarched 3D (CANVAS.spv)\n"
                           "  State:          {}\n"
                           "  Adaptive qual:  {}\n"
                           "  Accumulation:   {}\n"
@@ -792,7 +792,6 @@ private:
     }
 
     void buildMaterialLibrary() noexcept {
-        // Upload the full constexpr array to GPU storage buffer
         VkDeviceSize size = sizeof(Materials::AllMaterials);
 
         materialsHandle_ = Memory::createBuffer(

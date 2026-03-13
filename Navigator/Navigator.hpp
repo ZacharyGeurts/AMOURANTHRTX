@@ -6,7 +6,6 @@
 // AMOURANTH FOREVER 💖
 //
 // Main engine entry point — called from developer's empty main.cpp
-// Developers link against this header and call navigator_main(argc, argv)
 // =============================================================================
 
 #include "engine/Camera.hpp"
@@ -22,19 +21,18 @@
 
 #include <memory>
 #include <format>
+#include <chrono>
 
-// Global canvas — persistent compute-driven screen updater
+// Global canvas
 inline std::unique_ptr<RayCanvas> raycanvas;
 
-// Sacrificial Splash — skippable with any input, plays audio sequence
+// Sacrificial Splash — skippable with any input, plays single WAV audio
 static inline void showSacrificialSplash() noexcept {
     constexpr int W = 1280, H = 720;
     constexpr const char* TITLE = "AMOURANTHRTX";
 
     SDL_Window* splashWin = SDL_CreateWindow(
-        TITLE,
-        W, H,
-        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN
+        TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN
     );
     if (!splashWin) {
         LOG_ERROR_CAT("SPLASH", "Create splash window failed: {}", SDL_GetError());
@@ -48,7 +46,6 @@ static inline void showSacrificialSplash() noexcept {
                               bounds.y + (bounds.h - H)/2);
     }
 
-    // Try to set icon (silent fail OK)
     const char* iconPaths[] = {"assets/textures/ammo.ico", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
         if (SDL_Surface* surf = IMG_Load(iconPaths[i])) {
@@ -65,7 +62,6 @@ static inline void showSacrificialSplash() noexcept {
         return;
     }
 
-    // Load splash texture (fallback hot pink)
     SDL_Texture* tex = nullptr;
     const char* texPaths[] = {"assets/textures/ammo.png", nullptr};
     for (int i = 0; texPaths[i]; ++i) {
@@ -80,7 +76,6 @@ static inline void showSacrificialSplash() noexcept {
         float tw = 0, th = 0;
         SDL_GetTextureSize(tex, &tw, &th);
         SDL_FRect dst{ (W - tw)*0.5f, (H - th)*0.5f, tw, th };
-
         SDL_SetRenderDrawColor(splashRen, 0, 0, 0, 255);
         SDL_RenderClear(splashRen);
         SDL_RenderTexture(splashRen, tex, nullptr, &dst);
@@ -93,20 +88,21 @@ static inline void showSacrificialSplash() noexcept {
     SDL_RenderPresent(splashRen);
 
     // ─────────────────────────────────────────────────────────────
-    // Audio sequence using new SDL3.playSound API
+    // Audio — single WAV file, no chaining needed
     // ─────────────────────────────────────────────────────────────
     SDL3.playSound("assets/audio/splash.wav", "play");
-    SDL3.playSound("assets/audio/splash.mp3", "play");
-    SDL3.playSound("assets/audio/splash.mp3", "play");
 
+    // ─────────────────────────────────────────────────────────────
     // Visual timeout + input skip (~3.4s max)
+    // ─────────────────────────────────────────────────────────────
     double start = TotalTime::get().seconds();
     bool skip = false;
 
     while (TotalTime::get().seconds() - start < 3.4 && !skip) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            SDL3.pump(e);  // forward to input system
+            SDL3.pump(e);
+
             if (e.type == SDL_EVENT_QUIT ||
                 e.type == SDL_EVENT_KEY_DOWN ||
                 e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
@@ -116,9 +112,18 @@ static inline void showSacrificialSplash() noexcept {
                 break;
             }
         }
+
+        SDL_Delay(1);
     }
 
-    // ── Cleanup ───────────────────────────────────────────────────
+    // Stop any lingering audio
+    for (int s = 0; s < MAX_SLOTS; ++s) {
+        if (SDL3.isTrackPlaying(s)) {
+            SDL3.playSound("", "stop", s);
+        }
+    }
+
+    // Cleanup
     if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(splashRen);
     SDL_DestroyWindow(splashWin);
@@ -126,23 +131,18 @@ static inline void showSacrificialSplash() noexcept {
     LOG_SUCCESS_CAT("SPLASH", "Sacrificial splash completed (skipped={})", skip ? "yes" : "no");
 }
 
-// =============================================================================
-// Engine-private memory initialization
-// =============================================================================
+// Engine memory init
 static inline void EngineMemoryInit() noexcept {
-    LOG_SUCCESS_CAT("MEMORY", "Engine memory ready (no global buffers needed for single-shader mode)");
+    LOG_SUCCESS_CAT("MEMORY", "Engine memory ready");
 }
 
-// =============================================================================
-// Main entry point — called from developer's empty main.cpp
-// =============================================================================
-inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
-{
+// Main entry point
+inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     install_apocalypse_handler();
     Logging::Logger::get().startup();
-    LOG_SUCCESS_CAT("MAIN", "Apocalypse handler installed — logger started");
+    LOG_SUCCESS_CAT("MAIN", "Apocalypse handler & logger ready");
 
-    // Step 1: Create window (Vulkan-ready)
+    // Window
     SDL_Window* window = SDL_CreateWindow(
         "AMOURANTHRTX",
         Options::Window::DEFAULT_WIDTH,
@@ -154,17 +154,16 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         return 1;
     }
 
-    // Step 2: Initialize SDL3 system (audio, input, ttf, etc.)
+    // SDL3 init
     if (!SDL3.init(window)) {
         LOG_FATAL_CAT("SDL3", "SDL3.init failed");
         SDL_DestroyWindow(window);
         return 1;
     }
 
-    // Step 3: Show sacrificial splash
     showSacrificialSplash();
 
-    // Step 4: Vulkan instance & surface
+    // Vulkan setup
     VkInstance instance = createVulkanInstance();
     if (instance == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("VULKAN", "Instance creation failed");
@@ -196,15 +195,12 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         return 1;
     }
 
-    VkQueue graphics_queue = VK_NULL_HANDLE, present_queue = VK_NULL_HANDLE;
-    VkQueue compute_queue  = VK_NULL_HANDLE, transfer_queue  = VK_NULL_HANDLE;
+    VkQueue graphics_queue{}, present_queue{}, compute_queue{}, transfer_queue{};
+    vkGetDeviceQueue(device, graphics_family,   0, &graphics_queue);
+    vkGetDeviceQueue(device, present_family,    0, &present_queue);
+    vkGetDeviceQueue(device, compute_family,    0, &compute_queue);
+    vkGetDeviceQueue(device, transfer_family,   0, &transfer_queue);
 
-    vkGetDeviceQueue(device, graphics_family, 0, &graphics_queue);
-    vkGetDeviceQueue(device, present_family,   0, &present_queue);
-    vkGetDeviceQueue(device, compute_family,   0, &compute_queue);
-    vkGetDeviceQueue(device, transfer_family,  0, &transfer_queue);
-
-    // Seal core Vulkan objects
     rtx().instance         = instance;
     rtx().device           = device;
     rtx().surface          = surface;
@@ -217,16 +213,13 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     rtx().transfer_family  = transfer_family;
     rtx().compute_family   = compute_family;
 
-    // Transient command pool
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolInfo.queueFamilyIndex = rtx().graphics_family;
 
-    VkResult res = vkCreateCommandPool(device, &poolInfo, nullptr, &rtx().transient_pool);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "Transient pool failed: {}", vkh.result(res));
+    if (vkCreateCommandPool(device, &poolInfo, nullptr, &rtx().transient_pool) != VK_SUCCESS) {
+        LOG_FATAL_CAT("VULKAN", "Transient pool creation failed");
         vkDestroyDevice(device, nullptr);
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
@@ -237,11 +230,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     LOG_SUCCESS_CAT("VULKAN", "Transient command pool created");
 
-    // Step 5: Create swapchain
-    Swapchain::create(window,
-                      Options::Window::DEFAULT_WIDTH,
-                      Options::Window::DEFAULT_HEIGHT);
-
+    Swapchain::create(window, Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
     if (!Swapchain::swapchain.valid()) {
         LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed");
         vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
@@ -256,46 +245,49 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", 
                  Swapchain::getExtent().width, Swapchain::getExtent().height);
 
-    // Step 6: Engine memory init
     EngineMemoryInit();
 
-    // Step 7: Pipeline setup
     Pipeline::initialize();
     Pipeline::create_pipeline_layout();
-    Pipeline::create_raymarch_pipeline();
+    Pipeline::create_canvas_pipeline();  // Loads CANVAS.spv
 
     LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
 
-    // Step 8: Create RayCanvas
     raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
         window
     );
 
-    // Reset camera
     CAM.reset();
-    LOG_INFO_CAT("CAMERA", "Reset complete — pos: {} {} {} | fov: {}",
-                 CAM.position().x, CAM.position().y, CAM.position().z, CAM.fov());
+    CAM.setMode(CameraMode::FreeLook3D);
+    LOG_INFO_CAT("CAMERA", "Reset complete — mode: {}, pos: {} {} {} | fov: {} | zoom: {}",
+                 static_cast<int>(CAM.mode()),
+                 CAM.position().x, CAM.position().y, CAM.position().z,
+                 CAM.fov(), CAM.zoom());
 
     LOG_AMOURANTH("Genesis sealed — eternal compute begins");
 
-    // ────────────────────────────────────────────────
-    // Main loop — RayCanvas owns rendering, we pump events
-    // ────────────────────────────────────────────────
-    // double lastFrameTime = TotalTime::get().seconds();  // unused — removed warning
+    // Main loop
+    auto prevTime = std::chrono::steady_clock::now();
 
     while (true) {
+        auto now = std::chrono::steady_clock::now();
+        float dt = std::chrono::duration<float>(now - prevTime).count();
+        prevTime = now;
+
+        CAM.update(dt);
+
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            SDL3.pump(ev);  // forward to input & callbacks
+            SDL3.pump(ev);
 
-            // App-level quit / resize handling (example)
             if (ev.type == SDL_EVENT_QUIT) {
                 goto cleanup;
             }
+
             if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
-                // Trigger swapchain recreation if needed
+                // Swapchain recreation handled in RayCanvas if needed
             }
         }
 
@@ -305,11 +297,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     }
 
 cleanup:
-    // Cleanup in reverse order
     raycanvas.reset();
     Pipeline::shutdown();
     SDL3.shutdown();
     SDL_DestroyWindow(window);
 
+    LOG_SUCCESS_CAT("MAIN", "Engine shutdown complete");
     return 0;
 }
