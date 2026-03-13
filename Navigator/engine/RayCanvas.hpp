@@ -431,7 +431,7 @@ public:
         createDescriptorPoolAndSet();
         updateDescriptorSet();
 
-        VkClearColorValue clearBlack = { .float32 = {0.0, 0.0, 0.0, 1.0} };
+        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
