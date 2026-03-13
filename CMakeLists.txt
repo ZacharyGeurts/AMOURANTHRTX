@@ -2,147 +2,129 @@ cmake_minimum_required(VERSION 3.21)
 project(AMOURANTH_RTX LANGUAGES CXX)
 
 # =============================================================================
-# FETCHCONTENT + GIT HELPERS
+# USER-CONFIGURABLE OPTIONS
+# =============================================================================
+option(BUILD_SHARED_LIBS "Build shared libraries (overrides static preference)" OFF)
+option(DISABLE_TRACE_AND_DEBUG_LOGS "Disable trace & debug logging" ON)
+option(ENABLE_EXTRA_WARNINGS "Enable even more warnings for our code" ON)
+
+option(FETCH_SDL3        "Fetch & build SDL3 from main branch"          ON)
+option(FETCH_SDL3_IMAGE  "Fetch & build SDL3_image from main branch"   ON)
+option(FETCH_SDL3_MIXER  "Fetch & build SDL3_mixer from main branch"   ON)
+option(FETCH_SDL3_TTF    "Fetch & build SDL3_ttf from main branch"     ON)
+
+# SDL3_image formats
+option(SDL3IMAGE_PNG     "Enable PNG support"  ON)
+option(SDL3IMAGE_JPG     "Enable JPEG support" ON)
+option(SDL3IMAGE_AVIF    "Enable AVIF support" OFF)
+option(SDL3IMAGE_JXL     "Enable JPEG-XL"      OFF)
+option(SDL3IMAGE_WEBP    "Enable WebP"         OFF)
+option(SDL3IMAGE_TIFF    "Enable TIFF"         OFF)
+
+# =============================================================================
+# FETCHCONTENT + GIT + VERBOSE DOWNLOADS
 # =============================================================================
 include(FetchContent)
 find_package(Git REQUIRED)
 
-function(git_clone_if_missing URL REPO TAG DEST)
-    if(NOT EXISTS "${DEST}/.git")
-        message(STATUS "Cloning ${REPO} (${TAG}) → ${DEST}")
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch ${TAG} ${URL} "${DEST}"
-            RESULT_VARIABLE GIT_RESULT
-            ERROR_QUIET
-        )
-        if(NOT GIT_RESULT EQUAL "0")
-            message(FATAL_ERROR "Failed to git clone ${REPO}")
-        endif()
-    else()
-        message(STATUS "${REPO} already present – skipping clone")
-    endif()
-endfunction()
+# Show download progress, clone output, etc. (very useful!)
+set(FETCHCONTENT_QUIET OFF CACHE BOOL "Show FetchContent download progress" FORCE)
+set(FETCHCONTENT_FULLY_DISCONNECTED OFF)  # force actual download
 
 # =============================================================================
-# C++23 + TOOLCHAIN SELECTION
+# C++23 + TOOLCHAIN
 # =============================================================================
 if(CMAKE_CROSSCOMPILING)
     find_program(GCC14_BIN x86_64-w64-mingw32-g++)
     if(NOT GCC14_BIN)
         message(FATAL_ERROR "MinGW-w64 GCC 14+ required for cross-compile")
     endif()
-    message(STATUS "Toolchain: MinGW-w64 cross-compile (Windows target)")
+    set(TARGET_PLATFORM "Windows")
+    set(EXE_SUFFIX ".exe")
+    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Windows")
+    message(STATUS "Cross-compiling → Windows (MinGW-w64)")
 else()
     find_program(GCC14_BIN g++-14)
     if(NOT GCC14_BIN)
         message(FATAL_ERROR "GCC 14+ required for native build")
     endif()
-    message(STATUS "Toolchain: Native GCC 14 (Linux target)")
+    set(TARGET_PLATFORM "Linux")
+    set(EXE_SUFFIX "")
+    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Linux")
+    message(STATUS "Native build → Linux")
 endif()
 
 set(CMAKE_CXX_COMPILER ${GCC14_BIN})
-
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
-
-# =============================================================================
-# PLATFORM & TARGET DETECTION
-# =============================================================================
-if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "AMOURANTH RTX builds are ONLY supported on Linux hosts.")
-endif()
-
-if(CMAKE_CROSSCOMPILING)
-    set(TARGET_PLATFORM "Windows")
-    set(EXE_SUFFIX ".exe")
-    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Windows")
-else()
-    set(TARGET_PLATFORM "Linux")
-    set(EXE_SUFFIX "")
-    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Linux")
-endif()
 
 message(STATUS "Target platform:     ${TARGET_PLATFORM}")
 message(STATUS "Output directory:    ${BIN_DIR}")
 message(STATUS "Executable suffix:   ${EXE_SUFFIX}")
 
 # =============================================================================
-# COMPILER FLAGS — Aggressive & Modern
+# COMPILER FLAGS
 # =============================================================================
-add_compile_options(
-    -Wall -Wextra -Wpedantic -Wshadow -Wconversion
-    -Wno-unused-but-set-variable -Wno-deprecated-declarations
-    -Wno-unused-function -O3 -ffast-math -march=native -mtune=native
-    -g -ggdb
+set(OUR_WARNING_FLAGS
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wunused -Wunused-parameter
+)
+if(ENABLE_EXTRA_WARNINGS)
+    list(APPEND OUR_WARNING_FLAGS -Wdouble-promotion -Wformat=2 -Wnull-dereference)
+endif()
+
+set(COMMON_OPT_FLAGS
+    -O3 -ffast-math -march=native -mtune=native -g -ggdb
 )
 
-# Prefer mold linker when available (much faster on Linux host)
 find_program(MOLD_EXECUTABLE mold)
 if(MOLD_EXECUTABLE)
     add_link_options(-fuse-ld=mold)
-    message(STATUS "Linker: mold")
+    message(STATUS "Using mold linker")
 endif()
 
-# Windows-specific hardening + FULLY STATIC linking
 if(TARGET_PLATFORM STREQUAL "Windows")
     add_compile_options(
-        -fstack-protector-strong
-        -fcf-protection=full
-        -D_FORTIFY_SOURCE=3
-        -Wa,-mbig-obj
-        -fno-ident
+        -fstack-protector-strong -fcf-protection=full -D_FORTIFY_SOURCE=3
+        -Wa,-mbig-obj -fno-ident
     )
     add_link_options(
-        -static
-        -static-libgcc
-        -static-libstdc++
+        -static -static-libgcc -static-libstdc++
         -Wl,--whole-archive -lwinpthread -lgcc -lgcc_eh -Wl,--no-whole-archive
-        -Wl,--dynamicbase,--nxcompat,--high-entropy-va
-        -Wl,--build-id
+        -Wl,--dynamicbase,--nxcompat,--high-entropy-va -Wl,--build-id
     )
 endif()
 
-option(DISABLE_TRACE_AND_DEBUG_LOGS "Disable trace & debug logging" ON)
 if(DISABLE_TRACE_AND_DEBUG_LOGS)
     add_definitions(-DDISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
 # =============================================================================
-# DIRECTORY CREATION — Developer-friendly empty folders
+# DIRECTORIES & ASSETS
 # =============================================================================
 set(DEVELOPER_DIRS
     assets/fonts assets/textures assets/models assets/materials assets/scenes
     assets/audio assets/scripts Navigator/compute
 )
-
 foreach(D ${DEVELOPER_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
 endforeach()
-
 file(MAKE_DIRECTORY "${BIN_DIR}/compute")
 
-# =============================================================================
-# COPY ASSETS TO OUTPUT DIRECTORY
-# =============================================================================
-set(ASSETS_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
-set(ASSETS_DEST_DIR "${BIN_DIR}/assets")
-
-add_custom_command(
-    OUTPUT "${ASSETS_DEST_DIR}/.assets_copied"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${ASSETS_DEST_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${ASSETS_SRC_DIR}" "${ASSETS_DEST_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E touch "${ASSETS_DEST_DIR}/.assets_copied"
-    DEPENDS "${ASSETS_SRC_DIR}"
-    COMMENT "Copying assets/ → ${ASSETS_DEST_DIR}"
-    VERBATIM
-)
-
-add_custom_target(copy_assets ALL
-    DEPENDS "${ASSETS_DEST_DIR}/.assets_copied"
-)
+set(ASSETS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+set(ASSETS_DST "${BIN_DIR}/assets")
+if(EXISTS "${ASSETS_SRC}")
+    add_custom_command(
+        OUTPUT  "${ASSETS_DST}/.copied"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ASSETS_DST}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${ASSETS_SRC}" "${ASSETS_DST}"
+        COMMAND ${CMAKE_COMMAND} -E touch "${ASSETS_DST}/.copied"
+        DEPENDS "${ASSETS_SRC}"
+        COMMENT "Copying assets → ${ASSETS_DST}"
+    )
+    add_custom_target(copy_assets ALL DEPENDS "${ASSETS_DST}/.copied")
+endif()
 
 # =============================================================================
 # DEPENDENCIES
@@ -150,7 +132,7 @@ add_custom_target(copy_assets ALL
 find_package(PkgConfig REQUIRED)
 find_package(Vulkan REQUIRED)
 if(Vulkan_VERSION VERSION_LESS "1.3.250")
-    message(FATAL_ERROR "Vulkan SDK >= 1.3.250 REQUIRED")
+    message(FATAL_ERROR "Vulkan SDK >= 1.3.250 required")
 endif()
 
 find_program(GLSLC glslc REQUIRED HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
@@ -158,52 +140,109 @@ find_program(SPIRV_VAL spirv-val HINTS $ENV{VULKAN_SDK}/bin /usr/bin)
 
 find_package(OpenMP REQUIRED)
 find_package(Freetype REQUIRED)
-find_package(glm REQUIRED)
 
-if(TARGET_PLATFORM STREQUAL "Linux")
-    pkg_check_modules(SDL3 REQUIRED sdl3)
-    pkg_check_modules(SDL3_IMAGE REQUIRED sdl3-image)
+# Force static builds
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+# ── SDL3 core ────────────────────────────────────────────────────────────────
+if(FETCH_SDL3)
+    message(STATUS "Fetching SDL3 (main branch)...")
+    FetchContent_Declare(
+        SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG        main
+        GIT_PROGRESS   TRUE   # shows clone progress
+    )
+    FetchContent_MakeAvailable(SDL3)
+    message(STATUS "SDL3 fetched and made available")
 endif()
 
-if(TARGET_PLATFORM STREQUAL "Windows")
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-    find_library(SDL3_LIB      NAMES SDL3      PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
-    find_library(SDL3_IMAGE_LIB NAMES SDL3_image PATHS /usr/x86_64-w64-mingw32/lib REQUIRED)
+# ── SDL3_image ───────────────────────────────────────────────────────────────
+if(FETCH_SDL3_IMAGE)
+    message(STATUS "Fetching SDL3_image (main branch)...")
+    FetchContent_Declare(
+        SDL3_image
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
+        GIT_TAG        main
+        GIT_PROGRESS   TRUE
+    )
+    set(SDL3IMAGE_INSTALL   OFF CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_SAMPLES   OFF CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_TESTS     OFF CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_PNG   ${SDL3IMAGE_PNG}   CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_JPG   ${SDL3IMAGE_JPG}   CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_AVIF  ${SDL3IMAGE_AVIF}  CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_JXL   ${SDL3IMAGE_JXL}   CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_WEBP  ${SDL3IMAGE_WEBP}  CACHE BOOL "" FORCE)
+    set(SDL3IMAGE_TIFF  ${SDL3IMAGE_TIFF}  CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(SDL3_image)
+    message(STATUS "SDL3_image fetched and made available")
 endif()
 
-# tinyobjloader — fetch and silence sign-conversion warning only for its source
+# ── SDL3_mixer ───────────────────────────────────────────────────────────────
+if(FETCH_SDL3_MIXER)
+    message(STATUS "Fetching SDL3_mixer (main branch)...")
+    FetchContent_Declare(
+        SDL3_mixer
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL_mixer.git
+        GIT_TAG        main
+        GIT_PROGRESS   TRUE
+    )
+    set(SDL3MIXER_INSTALL OFF CACHE BOOL "" FORCE)
+    set(SDL3MIXER_SAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(SDL3_mixer)
+    message(STATUS "SDL3_mixer fetched and made available")
+endif()
+
+# ── SDL3_ttf ────────────────────────────────────────────────────────────────
+if(FETCH_SDL3_TTF)
+    message(STATUS "Fetching SDL3_ttf (main branch)...")
+    FetchContent_Declare(
+        SDL3_ttf
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL_ttf.git
+        GIT_TAG        main
+        GIT_PROGRESS   TRUE
+    )
+    set(SDL3TTF_INSTALL   OFF CACHE BOOL "" FORCE)
+    set(SDL3TTF_SAMPLES   OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(SDL3_ttf)
+    message(STATUS "SDL3_ttf fetched and made available")
+endif()
+
+# glm & tinyobjloader
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG        master
+)
+FetchContent_MakeAvailable(glm)
+
 FetchContent_Declare(
     tinyobjloader
     GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
     GIT_TAG        release
 )
 FetchContent_MakeAvailable(tinyobjloader)
-
 set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
-
-# Silence tinyobjloader sign-conversion warning (harmless)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(${TINYOBJLOADER_SRC}
-        PROPERTIES COMPILE_FLAGS "-Wno-sign-conversion"
-    )
-endif()
+set_source_files_properties(${TINYOBJLOADER_SRC} PROPERTIES COMPILE_OPTIONS "-Wno-sign-conversion;-w")
 
 # =============================================================================
-# SOURCE FILES
+# SOURCES
 # =============================================================================
-set(ALL_SOURCES
+set(OUR_SOURCES
     Navigator/main.cpp
-    ${TINYOBJLOADER_SRC}
 )
 
+set(ALL_SOURCES ${OUR_SOURCES} ${TINYOBJLOADER_SRC})
+
 # =============================================================================
-# EXECUTABLE — Console app
+# EXECUTABLE
 # =============================================================================
 add_executable(amouranth_engine ${ALL_SOURCES})
 set_target_properties(amouranth_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
     OUTPUT_NAME "Navigator"
-    SUFFIX "${EXE_SUFFIX}"
+    SUFFIX      "${EXE_SUFFIX}"
 )
 
 if(TARGET_PLATFORM STREQUAL "Windows" OR MINGW)
@@ -214,29 +253,42 @@ if(MINGW)
     set_target_properties(amouranth_engine PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
 endif()
 
+foreach(SRC ${OUR_SOURCES})
+    set_source_files_properties(${SRC} PROPERTIES COMPILE_OPTIONS "${OUR_WARNING_FLAGS};${COMMON_OPT_FLAGS}")
+endforeach()
+
 # =============================================================================
 # INCLUDES & DEFINES
 # =============================================================================
-target_include_directories(amouranth_engine PRIVATE
+target_include_directories(amouranth_engine SYSTEM BEFORE PRIVATE
     ${Vulkan_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
-    ${glm_INCLUDE_DIRS}
+    ${glm_SOURCE_DIR}
     ${tinyobjloader_SOURCE_DIR}
-    Navigator/engine
 )
 
-if(TARGET_PLATFORM STREQUAL "Linux")
-    target_include_directories(amouranth_engine PRIVATE
-        ${SDL3_INCLUDE_DIRS}
-        ${SDL3_IMAGE_INCLUDE_DIRS}
-    )
-endif()
+# Explicit SDL includes — fixes "IMG_INIT_PNG not declared" etc.
+target_include_directories(amouranth_engine SYSTEM PRIVATE
+    ${sdl3_SOURCE_DIR}/include
+    ${sdl3_image_SOURCE_DIR}/include
+    ${sdl3_mixer_SOURCE_DIR}/include
+    ${sdl3_ttf_SOURCE_DIR}/include
+)
+
+target_include_directories(amouranth_engine PRIVATE Navigator/engine)
 
 target_compile_definitions(amouranth_engine PRIVATE
     GLM_ENABLE_EXPERIMENTAL
     GLM_FORCE_RADIANS
     GLM_FORCE_DEPTH_ZERO_TO_ONE
+    HAVE_SDL3_MIXER
+    HAVE_SDL3_IMAGE
+    HAVE_SDL3_TTF
 )
+
+if(DISABLE_TRACE_AND_DEBUG_LOGS)
+    target_compile_definitions(amouranth_engine PRIVATE DISABLE_TRACE_AND_DEBUG_LOGS)
+endif()
 
 # =============================================================================
 # LINKING
@@ -247,23 +299,33 @@ target_link_libraries(amouranth_engine PRIVATE
     Freetype::Freetype
 )
 
+if(FETCH_SDL3 OR FETCH_SDL3_IMAGE OR FETCH_SDL3_MIXER OR FETCH_SDL3_TTF)
+    target_link_libraries(amouranth_engine PRIVATE SDL3::SDL3)
+endif()
+
+if(FETCH_SDL3_IMAGE)
+    target_link_libraries(amouranth_engine PRIVATE SDL3_image::SDL3_image)
+endif()
+
+if(FETCH_SDL3_MIXER)
+    target_link_libraries(amouranth_engine PRIVATE SDL3_mixer::SDL3_mixer)
+endif()
+
+if(FETCH_SDL3_TTF)
+    target_link_libraries(amouranth_engine PRIVATE SDL3_ttf::SDL3_ttf)
+endif()
+
 if(TARGET_PLATFORM STREQUAL "Linux")
-    target_link_libraries(amouranth_engine PRIVATE
-        dl m pthread
-        ${SDL3_LIBRARIES}
-        ${SDL3_IMAGE_LIBRARIES}
-    )
+    target_link_libraries(amouranth_engine PRIVATE dl m pthread)
 elseif(TARGET_PLATFORM STREQUAL "Windows")
     target_link_libraries(amouranth_engine PRIVATE
-        ${SDL3_LIB}
-        ${SDL3_IMAGE_LIB}
         kernel32 user32 gdi32 winmm imm32 ole32 oleaut32 version uuid
         setupapi cfgmgr32 dbghelp
     )
 endif()
 
 # =============================================================================
-# SHADER COMPILATION — Respect build type (Debug → -g -O0, Release → -O)
+# SHADERS
 # =============================================================================
 set(SHADER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/compute/CANVAS.comp")
 set(SHADER_OUT "${BIN_DIR}/compute/CANVAS.spv")
@@ -278,36 +340,39 @@ add_custom_command(
     OUTPUT "${SHADER_OUT}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/compute"
     COMMAND ${GLSLC}
-            -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
-            ${GLSLC_FLAGS}
-            --target-spv=spv1.6 --target-env=vulkan1.4
-            -fshader-stage=comp
-            "${SHADER_SRC}" -o "${SHADER_OUT}"
-    COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${SHADER_OUT}" || true  # don't fail build on validation warning
+        -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+        ${GLSLC_FLAGS}
+        --target-spv=spv1.6 --target-env=vulkan1.4
+        -fshader-stage=comp
+        "${SHADER_SRC}" -o "${SHADER_OUT}"
+    COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${SHADER_OUT}" || true
     DEPENDS "${SHADER_SRC}"
-    COMMENT "Compiling compute shader → compute/CANVAS.spv (${CMAKE_BUILD_TYPE})"
+    COMMENT "Compiling compute shader → CANVAS.spv"
     VERBATIM
 )
-
 add_custom_target(shaders ALL DEPENDS "${SHADER_OUT}")
 
 # =============================================================================
-# MAKE EXECUTABLE DEPEND ON ASSETS + SHADERS
+# DEPENDENCIES
 # =============================================================================
-add_dependencies(amouranth_engine copy_assets shaders)
+add_dependencies(amouranth_engine shaders)
+if(TARGET copy_assets)
+    add_dependencies(amouranth_engine copy_assets)
+endif()
 
 # =============================================================================
-# FINAL STATUS
+# FINAL REPORT
 # =============================================================================
 message(STATUS "")
 message(STATUS "==================================================================")
-message(STATUS " Target:          ${BIN_DIR}/Navigator${EXE_SUFFIX}")
+message(STATUS " Target:       ${BIN_DIR}/Navigator${EXE_SUFFIX}")
 if(TARGET_PLATFORM STREQUAL "Windows")
-    message(STATUS " Run (Linux host): wine ${BIN_DIR}/Navigator.exe")
+    message(STATUS " Run (on host): wine ${BIN_DIR}/Navigator.exe")
 else()
-    message(STATUS " Run:              ${BIN_DIR}/Navigator")
+    message(STATUS " Run:           ${BIN_DIR}/Navigator")
 endif()
-message(STATUS " Assets:           ${BIN_DIR}/assets/")
-message(STATUS " Shader:           ${SHADER_OUT}")
-message(STATUS " Build type:       ${CMAKE_BUILD_TYPE}")
+message(STATUS " Build type:    ${CMAKE_BUILD_TYPE}")
+message(STATUS " Static linking: yes (SDL family + most deps)")
+message(STATUS " SDL3_image formats: PNG:${SDL3IMAGE_PNG} JPG:${SDL3IMAGE_JPG} AVIF:${SDL3IMAGE_AVIF} JXL:${SDL3IMAGE_JXL} WEBP:${SDL3IMAGE_WEBP} TIFF:${SDL3IMAGE_TIFF}")
+message(STATUS " Fetching: SDL3=${FETCH_SDL3} image=${FETCH_SDL3_IMAGE} mixer=${FETCH_SDL3_MIXER} ttf=${FETCH_SDL3_TTF}")
 message(STATUS "==================================================================")

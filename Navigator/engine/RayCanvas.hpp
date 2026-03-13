@@ -6,8 +6,10 @@
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
 //
-// Pure 3D raymarching — no 2D canvas
-// Owns HDR pair, descriptors, materials, adaptive dispatch, timing, resize
+// Pure 3D raymarching — owns HDR pair, descriptors, materials, adaptive dispatch,
+// timing, resize, SDL event polling, quit detection, fullscreen toggle
+// Uses TotalTime monolith for all timing
+// Fully integrated with current SDL3.hpp and Materials library
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -16,10 +18,11 @@
 #include "OptionsMenu.hpp"
 #include "Pipeline.hpp"
 #include "Materials.hpp"
-#include "InputManager.hpp"
+#include "SDL3.hpp"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/rotate_vector.hpp>
+
 #include <vector>
 #include <cstdint>
 #include <array>
@@ -46,9 +49,9 @@ public:
         , prevHdrOutputMemory_(VK_NULL_HANDLE)
         , descriptorPool_(VK_NULL_HANDLE)
         , descriptorSet_(VK_NULL_HANDLE)
-        , adaptiveScale_(1.0f)
+        , adaptiveScale_(1.0)
         , lastPresentTime_s_(0.0)
-        , measuredRefreshRateHz_(60.0f)
+        , measuredRefreshRateHz_(60.0)
         , lastFpsLog_(0.0)
         , frameCount_(0)
         , lastAdaptiveAdjustTime_(0.0)
@@ -67,7 +70,7 @@ public:
         timestampPeriodNs_ = props.limits.timestampPeriod;
 
         createTimestampQueryPool();
-        buildMaterialLibrary();
+        buildMaterialLibrary();  // uploads full Materials::AllMaterials array
         updateRenderResolution();
         createPersistentHDR();
         createPreviousHDR();
@@ -104,16 +107,48 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Destroyed");
     }
 
+    // Main frame update — called every loop from navigator_main
     void maybeUpdateCanvas() noexcept {
         if (destroyed_) return;
 
         frameCount_++;
 
-        bool quit = false, fullscreen_toggle = false;
-        int dummyW = 0, dummyH = 0;
-        sdl_poll_events(dummyW, dummyH, quit, fullscreen_toggle);
+        double now = TotalTime::get().seconds();
 
-        if (fullscreen_toggle) sdl_toggle_fullscreen();
+        // ── Poll SDL events (RayCanvas owns polling) ─────────────────────────────
+        int currentW = window_width_;
+        int currentH = window_height_;
+        bool quit = false;
+        bool fullscreen_toggle = false;
+
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            SDL3.pump(ev);  // forward to input system
+
+            // Quit detection
+            if (ev.type == SDL_EVENT_QUIT) {
+                quit = true;
+            }
+
+            // Resize detection
+            if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
+                currentW = ev.window.data1;
+                currentH = ev.window.data2;
+            }
+
+            // Fullscreen toggle (F11 or Alt+Enter)
+            if (ev.type == SDL_EVENT_KEY_DOWN) {
+                bool altPressed = (ev.key.mod & SDL_KMOD_ALT) != 0;
+                if (ev.key.scancode == SDL_SCANCODE_F11 ||
+                    (ev.key.scancode == SDL_SCANCODE_RETURN && altPressed)) {
+                    fullscreen_toggle = true;
+                }
+            }
+        }
+
+        if (fullscreen_toggle) {
+            toggleFullscreen();
+        }
 
         if (quit) {
             destroyed_ = true;
@@ -121,9 +156,7 @@ public:
             return;
         }
 
-        int currentW = 0, currentH = 0;
-        SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
-
+        // ── Handle resize / minimize ─────────────────────────────────────────────
         bool nowMinimized = (currentW <= 0 || currentH <= 0);
         if (nowMinimized) {
             minimized_ = true;
@@ -146,10 +179,9 @@ public:
             TotalTime::get().seal();
             firstFrame_ = false;
             LOG_AMOURANTH("Raymarch engine sealed — rendering begins 💖");
-            lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
+            lastAdaptiveAdjustTime_ = now;
         }
 
-        double now = TotalTime::get().seconds();
         static double lastKnownTime = 0.0;
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
@@ -229,7 +261,7 @@ public:
         if (Options::Rendering::EnableAdaptiveResolution) {
             adjustAdaptiveScale(now);
         } else {
-            adaptiveScale_ = 1.0f;
+            adaptiveScale_ = 1.0;
         }
 
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
@@ -254,7 +286,7 @@ public:
                              0, nullptr,
                              1, &swapBarrier);
 
-        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+        VkClearColorValue clearBlack = { .float32 = {0.0, 0.0, 0.0, 1.0} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
 
@@ -320,14 +352,14 @@ public:
             int winW = window_width_;
             int winH = window_height_;
 
-            float scaleFactor = (winW > 0) ? static_cast<float>(render_width_) / static_cast<float>(winW) : 1.0f;
-            const char* mode = (scaleFactor < 0.98f) ? "SUBSAMPLING" :
-                               (scaleFactor > 1.02f) ? "SUPERSAMPLING" : "NATIVE";
+            double scaleFactor = (winW > 0) ? static_cast<double>(render_width_) / static_cast<double>(winW) : 1.0;
+            const char* mode = (scaleFactor < 0.98) ? "SUBSAMPLING" :
+                               (scaleFactor > 1.02) ? "SUPERSAMPLING" : "NATIVE";
 
-            float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f);
-            float gpuLoadPercent = (targetFrameMs > 0.001f)
-                                 ? static_cast<float>(smoothedGpuTimeMs_ / targetFrameMs) * 100.0f
-                                 : 0.0f;
+            double targetFrameMs = 1000.0 / (measuredRefreshRateHz_ * 1.18);
+            double gpuLoadPercent = (targetFrameMs > 0.001)
+                                  ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0
+                                  : 0.0;
 
             const char* stateEmoji = minimized_                       ? "🟥 minimized" :
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
@@ -399,7 +431,7 @@ public:
         createDescriptorPoolAndSet();
         updateDescriptorSet();
 
-        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+        VkClearColorValue clearBlack = { .float32 = {0.0, 0.0, 0.0, 1.0} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
@@ -418,47 +450,48 @@ public:
     bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
+    void toggleFullscreen() noexcept {
+        Uint32 flags = static_cast<Uint32>(SDL_GetWindowFlags(window_));
+        bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+
+        if (isFullscreen) {
+            SDL_SetWindowFullscreen(window_, false);
+            LOG_INFO_CAT("WINDOW", "Fullscreen disabled");
+        } else {
+            SDL_SetWindowFullscreen(window_, true);
+            LOG_INFO_CAT("WINDOW", "Fullscreen enabled");
+        }
+    }
+
     void adjustAdaptiveScale(double now) noexcept {
         double elapsed = now - lastAdaptiveAdjustTime_;
-        if (elapsed < 0.6) return;  // check more frequently under stress
+        if (elapsed < 0.6) return;
 
-        float targetFrameMs = 1000.0f / (measuredRefreshRateHz_ * 1.18f);  // ~85% of refresh
-        float gpuLoadPercent = (targetFrameMs > 0.001f)
-                             ? static_cast<float>(smoothedGpuTimeMs_ / targetFrameMs) * 100.0f
-                             : 0.0f;
+        double targetFrameMs = 1000.0 / (measuredRefreshRateHz_ * 1.18);
+        double gpuLoadPercent = (targetFrameMs > 0.001)
+                              ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0
+                              : 0.0;
 
-        float targetScale = adaptiveScale_;
+        double targetScale = adaptiveScale_;
 
-        // Very aggressive downscaling ladder
-        if (gpuLoadPercent > 220.0f) {
-            targetScale *= 0.50f;   // severe panic mode
-        } else if (gpuLoadPercent > 180.0f) {
-            targetScale *= 0.65f;
-        } else if (gpuLoadPercent > 140.0f) {
-            targetScale *= 0.78f;
-        } else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent + 8.0f) {
-            targetScale *= 0.88f;
-        } else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) {
-            targetScale *= 0.94f;
-        } else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.75f) {
-            targetScale *= 1.12f;   // gentle upscale
-        }
+        if (gpuLoadPercent > 220.0) targetScale *= 0.50;
+        else if (gpuLoadPercent > 180.0) targetScale *= 0.65;
+        else if (gpuLoadPercent > 140.0) targetScale *= 0.78;
+        else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent + 8.0) targetScale *= 0.88;
+        else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) targetScale *= 0.94;
+        else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.75) targetScale *= 1.12;
 
-        // Emergency floor — still try to stay playable
-        float absoluteMinScaleW = 320.0f / static_cast<float>(std::max(1, window_width_));
-        float absoluteMinScaleH = 200.0f / static_cast<float>(std::max(1, window_height_));
-        float absoluteMinScale  = std::max(absoluteMinScaleW, absoluteMinScaleH);
+        double absoluteMinScaleW = 320.0 / std::max(1, window_width_);
+        double absoluteMinScaleH = 200.0 / std::max(1, window_height_);
+        double absoluteMinScale  = std::max(absoluteMinScaleW, absoluteMinScaleH);
 
         targetScale = std::max(targetScale, absoluteMinScale);
-
-        // Hard safety floor
-        targetScale = std::max(targetScale, 0.08f);
-
+        targetScale = std::max(targetScale, 0.08);
         targetScale = std::clamp(targetScale,
-                                 Options::Rendering::MinResolutionScale,
-                                 Options::Rendering::MaxResolutionScale);
+                                 static_cast<double>(Options::Rendering::MinResolutionScale),
+                                 static_cast<double>(Options::Rendering::MaxResolutionScale));
 
-        float hysteresis = (targetScale > adaptiveScale_) ? 0.04f : 0.12f;
+        double hysteresis = (targetScale > adaptiveScale_) ? 0.04 : 0.12;
 
         if (std::abs(targetScale - adaptiveScale_) > hysteresis) {
             adaptiveScale_ = targetScale;
@@ -469,23 +502,20 @@ private:
     }
 
     void updateRenderResolution() noexcept {
-        float scale = Options::Rendering::EnableAdaptiveResolution ? adaptiveScale_ : 1.0f;
+        double scale = Options::Rendering::EnableAdaptiveResolution ? adaptiveScale_ : 1.0;
 
-        // Cap against any configured internal max (safety)
-        float maxW = static_cast<float>(Options::Rendering::INTERNAL_WIDTH)  / static_cast<float>(window_width_);
-        float maxH = static_cast<float>(Options::Rendering::INTERNAL_HEIGHT) / static_cast<float>(window_height_);
+        double maxW = static_cast<double>(Options::Rendering::INTERNAL_WIDTH)  / window_width_;
+        double maxH = static_cast<double>(Options::Rendering::INTERNAL_HEIGHT) / window_height_;
         scale = std::min(scale, std::min(maxW, maxH));
 
-        // Calculate minimum dimensions using floating-point math first
-        float minW_float = 320.0f * (static_cast<float>(window_width_)  / 1920.0f);
-        float minH_float = 200.0f * (static_cast<float>(window_height_) / 1080.0f);
+        double minW_float = 320.0 * (static_cast<double>(window_width_)  / 1920.0);
+        double minH_float = 200.0 * (static_cast<double>(window_height_) / 1080.0);
 
         int minW = std::max(256, static_cast<int>(std::ceil(minW_float)));
         int minH = std::max(144, static_cast<int>(std::ceil(minH_float)));
 
-        // Apply scale and enforce minimums
-        render_width_  = std::max(minW, static_cast<int>(std::round(static_cast<float>(window_width_)  * scale)));
-        render_height_ = std::max(minH, static_cast<int>(std::round(static_cast<float>(window_height_) * scale)));
+        render_width_  = std::max(minW, static_cast<int>(std::round(window_width_  * scale)));
+        render_height_ = std::max(minH, static_cast<int>(std::round(window_height_ * scale)));
     }
 
     void createTimestampQueryPool() noexcept {
@@ -750,7 +780,7 @@ private:
     }
 
     void clearHDRImages() noexcept {
-        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
+        VkClearColorValue clearBlack = { .float32 = {0.0, 0.0, 0.0, 1.0} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
@@ -761,19 +791,9 @@ private:
         }
     }
 
-    void buildMaterialLibrary() {
-        std::vector<Material> materials;
-        materials.reserve(MAT_COUNT);
-
-        for (size_t i = 0; i < MAT_COUNT; ++i) {
-            if (Materials::AllMaterials[i].layerCount > 0) {
-                materials.push_back(Materials::AllMaterials[i]);
-            }
-        }
-
-        LOG_DEBUG_CAT("MATERIALS", "Loading {} materials from constexpr array", materials.size());
-
-        VkDeviceSize size = materials.size() * sizeof(Material);
+    void buildMaterialLibrary() noexcept {
+        // Upload the full constexpr array to GPU storage buffer
+        VkDeviceSize size = sizeof(Materials::AllMaterials);
 
         materialsHandle_ = Memory::createBuffer(
             size,
@@ -785,14 +805,14 @@ private:
         );
 
         if (size > 0) {
-            auto [staging, mem] = Memory::uploadToBuffer(materialsHandle_, materials.data(), size);
+            auto [staging, mem] = Memory::uploadToBuffer(materialsHandle_, Materials::AllMaterials.data(), size);
             if (staging) {
                 vkDestroyBuffer(rtx().device, staging, nullptr);
                 vkFreeMemory(rtx().device, mem, nullptr);
             }
         }
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Material library built ({} materials loaded)", materials.size());
+        LOG_SUCCESS_CAT("RAYCANVAS", "Material library uploaded — {} materials", static_cast<int>(MAT_COUNT));
     }
 
 private:
@@ -819,10 +839,10 @@ private:
     VkDescriptorPool descriptorPool_          = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_           = VK_NULL_HANDLE;
 
-    float          adaptiveScale_             = 1.0f;
+    double         adaptiveScale_             = 1.0;
 
     double         lastPresentTime_s_         = 0.0;
-    float          measuredRefreshRateHz_     = 60.0f;
+    double         measuredRefreshRateHz_     = 60.0;
     double         lastFpsLog_                = 0.0;
     uint64_t       frameCount_                = 0;
     double         lastAdaptiveAdjustTime_    = 0.0;

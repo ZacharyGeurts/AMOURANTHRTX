@@ -106,7 +106,9 @@ public:
 
         double nowGenesis = TotalTime::get().seconds();
         double elapsed = nowGenesis - transitionStartGenesis_;
-        transitionProgress_ = std::min(1.0f, static_cast<float>(elapsed / transitionDurationSec_));
+        transitionProgress_ = std::min(1.0f,
+                              static_cast<float>(elapsed) /
+                              static_cast<float>(transitionDurationSec_));
 
         // Cubic ease-out
         float t = transitionProgress_;

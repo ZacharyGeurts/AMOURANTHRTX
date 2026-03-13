@@ -1,359 +1,440 @@
+// =============================================================================
+// Navigator/engine/SDL3.hpp
+// AMOURANTH RTX — SDL3 Core + Image + Mixer + TTF + Input (16-slot audio)
+// =============================================================================
+
 #pragma once
 
-// =============================================================================
-// AMOURANTH RTX Engine (C) 2025-2026 by Zachary Geurts <gzac5314@gmail.com>
-// Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
-// AMOURANTH FOREVER 💖
-// =============================================================================
-
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
+#include <SDL3/SDL_audio.h>
+#include <SDL3_image/SDL_image.h>
+#include <SDL3_mixer/SDL_mixer.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
-#include <atomic>
-#include <chrono>
+#include <glm/glm.hpp>
+
+#include <string>
 #include <unordered_map>
 #include <vector>
-#include <string>
+#include <array>
+#include <mutex>
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <algorithm>
+#include <utility>
+#include <cctype>
 
 #include "ELLIE.hpp"
-#include "AMOURANTHRTX.hpp"
-#include "OptionsMenu.hpp"
-#include "InputManager.hpp"
 
-// ────────────────────────────────────────────────
-// Globals — raw and eternal (no atomics where plain types suffice)
-// ────────────────────────────────────────────────
-inline SDL_Window*               g_window = nullptr;
+// =============================================================================
+// CONFIG
+// =============================================================================
+constexpr int   AUDIO_FREQ          = 48000;
+constexpr int   AUDIO_CHANNELS      = 2;
+constexpr int   MAX_SLOTS           = 16;
+constexpr float DEFAULT_VOLUME      = 1.0f;
 
-inline SDL_AudioDeviceID         g_audio_device = 0;
-inline SDL_AudioStream*          g_audio_stream = nullptr;
-
-struct SoundData {
-    Uint8* buffer = nullptr;
-    Uint32 length = 0;
-    SDL_AudioSpec spec{};
+// =============================================================================
+// TYPES
+// =============================================================================
+struct AudioSlot {
+    MIX_Audio*     audio      = nullptr;
+    std::string    filename;
+    bool           in_use     = false;
+    ~AudioSlot() { if (audio) MIX_DestroyAudio(audio); }
 };
-inline std::unordered_map<std::string, std::unique_ptr<SoundData>> g_sounds;
 
-inline std::unordered_map<SDL_JoystickID, SDL_Gamepad*> g_gamepads;
+struct FontEntry {
+    TTF_Font* font = nullptr;
+    ~FontEntry() { if (font) TTF_CloseFont(font); }
+};
 
-// ────────────────────────────────────────────────
-// Window — raw SDL3
-// ────────────────────────────────────────────────
-inline void sdl_window_create(int width, int height, const char* title) noexcept {
-    Uint32 flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+struct ControllerState {
+    std::unique_ptr<SDL_Gamepad, decltype(&SDL_CloseGamepad)> gamepad{nullptr, SDL_CloseGamepad};
+    SDL_JoystickID id = 0;
+    bool rumble = false;
+    bool gyro   = false;
+};
 
-    if (Options::Window::START_FULLSCREEN) {
-        flags |= SDL_WINDOW_FULLSCREEN;
+struct Subscription {
+    std::function<void(const SDL_Event&)> cb;
+    std::string name;
+    uint64_t gen = 0;
+};
+
+// =============================================================================
+// MAIN SYSTEM
+// =============================================================================
+class SDL3System {
+public:
+    static SDL3System& get() noexcept {
+        static SDL3System instance;
+        return instance;
     }
 
-    g_window = SDL_CreateWindow(title, width, height, flags);
-    if (g_window == nullptr) {
-        LOG_FATAL_CAT("SDL3_window", "Failed to create window: {}", SDL_GetError());
-        return;
-    }
+    SDL3System(const SDL3System&) = delete;
+    SDL3System& operator=(const SDL3System&) = delete;
 
-    LOG_SUCCESS_CAT("SDL3_window", "Window created — {}x{}", width, height);
-}
+    bool init(SDL_Window* window) noexcept {
+        if (initialized_) return true;
+        window_ = window;
 
-inline bool sdl_poll_events(int& out_w, int& out_h, bool& quit, bool& toggle_fs) noexcept {
-    SDL_Event ev;
-    quit = toggle_fs = false;
-    bool event_seen = false;
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
+            LOG_ERROR_CAT("SDL3", "SDL_Init failed: {}", SDL_GetError());
+            return false;
+        }
 
-    while (SDL_PollEvent(&ev)) {
-        event_seen = true;
+        // SDL3_image: no explicit IMG_Init needed anymore — auto-initializes on first IMG_Load
+        // (removed deprecated IMG_Init / IMG_INIT_* / IMG_Quit calls)
 
-        // Forward every event to InputManager first
-        INPUT.pumpEvents(ev);
+        // TTF — correct comparison (0 on success)
+        if (TTF_Init() == 0) {
+            LOG_ERROR_CAT("TTF", "TTF_Init failed: {}", SDL_GetError());
+        } else {
+            ttf_ready_ = true;
+        }
 
-        // Window-level handling only — no resize globals anymore
-        switch (ev.type) {
-            case SDL_EVENT_QUIT:
-            case SDL_EVENT_WINDOW_CLOSE_REQUESTED: {
-                LOG_INFO_CAT("SDL3_window", "Quit requested");
-                quit = true;
-                break;
-            }
+        // Mixer
+        if (!MIX_Init()) {
+            LOG_ERROR_CAT("MIXER", "MIX_Init failed: {}", SDL_GetError());
+        } else {
+            SDL_AudioSpec desired{};
+            desired.freq     = AUDIO_FREQ;
+            desired.format   = SDL_AUDIO_F32;
+            desired.channels = AUDIO_CHANNELS;
 
-            case SDL_EVENT_KEY_DOWN: {
-                if (ev.key.scancode == SDL_SCANCODE_F11) {
-                    LOG_INFO_CAT("INPUT", "F11 pressed — toggling fullscreen");
-                    toggle_fs = true;
+            mixer_ = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
+            if (!mixer_) {
+                LOG_ERROR_CAT("MIXER", "MIX_CreateMixerDevice failed: {}", SDL_GetError());
+            } else {
+                mixer_ready_ = true;
+                tracks_.resize(MAX_SLOTS);
+                for (int i = 0; i < MAX_SLOTS; ++i) {
+                    tracks_[i] = MIX_CreateTrack(mixer_);
+                    if (tracks_[i]) MIX_SetTrackGain(tracks_[i], DEFAULT_VOLUME);
                 }
-                break;
             }
+        }
 
-            case SDL_EVENT_WINDOW_RESIZED:
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
-                if (!Options::Window::ALLOW_RESIZE) {
-                    LOG_INFO_CAT("SDL3_window", "Resize event ignored (ALLOW_RESIZE=false)");
-                    break;
-                }
+        openAllControllers();
+        bindDefaultActions();
 
-                int ew = ev.window.data1;
-                int eh = ev.window.data2;
+        initialized_ = true;
+        LOG_SUCCESS_CAT("SDL3", "Initialized — 16 audio slots ready");
+        return true;
+    }
 
-                if (ew <= 0 || eh <= 0) {
-                    LOG_INFO_CAT("SDL3_window", "Window minimized (event size {}x{})", ew, eh);
-                } else {
-                    LOG_INFO_CAT("SDL3_window", "Resize event received — {}x{}", ew, eh);
-                    // No globals, no flags here — RayCanvas will detect & handle via SDL_GetWindowSizeInPixels
-                }
-                break;
+    void shutdown() noexcept {
+        if (!initialized_) return;
+
+        for (auto& c : controllers_) if (c.gamepad) c.gamepad.reset();
+
+        if (mixer_ready_) {
+            for (auto t : tracks_) if (t) MIX_DestroyTrack(t);
+            tracks_.clear();
+            MIX_DestroyMixer(mixer_);
+            MIX_Quit();
+        }
+
+        fonts_.clear();
+        if (ttf_ready_) TTF_Quit();
+        // No IMG_Quit needed (auto-managed in SDL3_image)
+        SDL_Quit();
+
+        initialized_ = false;
+        LOG_SUCCESS_CAT("SDL3", "Shutdown complete");
+    }
+
+    // ────────────────────────────────────────────────
+    // AUDIO — 16 slots, single call
+    // ────────────────────────────────────────────────
+    int playSound(const std::string& file, const std::string& cmd, int preferred_slot = -1) {
+        if (!mixer_ready_) {
+            LOG_ERROR_CAT("AUDIO", "Mixer not ready");
+            return -1;
+        }
+
+        std::string cmd_lower = cmd;
+        std::transform(cmd_lower.begin(), cmd_lower.end(), cmd_lower.begin(), ::tolower);
+
+        if (cmd_lower == "load" || cmd_lower == "play") {
+            int slot = findOrAllocateSlot(file, preferred_slot);
+            if (slot < 0) return -1;
+
+            if (cmd_lower == "play") {
+                MIX_SetTrackAudio(tracks_[slot], slots_[slot].audio);
+                MIX_PlayTrack(tracks_[slot], 0);
+                LOG_SUCCESS_CAT("AUDIO", "Playing '{}' slot {}", file.empty() ? slots_[slot].filename : file, slot);
+            } else {
+                LOG_SUCCESS_CAT("AUDIO", "Loaded '{}' slot {}", file, slot);
             }
+            return slot;
+        }
+        else if (cmd_lower == "stop") {
+            if (preferred_slot >= 0 && preferred_slot < MAX_SLOTS && slots_[preferred_slot].in_use) {
+                MIX_StopTrack(tracks_[preferred_slot], 0);
+                LOG_INFO_CAT("AUDIO", "Stopped slot {}", preferred_slot);
+            }
+            return preferred_slot;
+        }
+        else if (cmd_lower == "pause") {
+            if (preferred_slot >= 0 && preferred_slot < MAX_SLOTS && slots_[preferred_slot].in_use) {
+                MIX_PauseTrack(tracks_[preferred_slot]);
+                LOG_INFO_CAT("AUDIO", "Paused slot {}", preferred_slot);
+            }
+            return preferred_slot;
+        }
+        else if (cmd_lower == "remove") {
+            if (preferred_slot >= 0 && preferred_slot < MAX_SLOTS && slots_[preferred_slot].in_use) {
+                MIX_StopTrack(tracks_[preferred_slot], 0);
+                slots_[preferred_slot] = {};
+                LOG_INFO_CAT("AUDIO", "Removed slot {}", preferred_slot);
+            }
+            return preferred_slot;
+        }
 
-            default:
-                // Everything else (mouse, gamepad, focus, text, etc.) already pumped to INPUT
-                break;
+        LOG_ERROR_CAT("AUDIO", "Unknown cmd '{}'", cmd);
+        return -1;
+    }
+
+private:
+    int findOrAllocateSlot(const std::string& file, int preferred) {
+        if (preferred >= 0 && preferred < MAX_SLOTS && !slots_[preferred].in_use) {
+            loadIntoSlot(preferred, file);
+            return preferred;
+        }
+
+        for (int i = 0; i < MAX_SLOTS; ++i) {
+            if (!slots_[i].in_use) {
+                loadIntoSlot(i, file);
+                return i;
+            }
+        }
+
+        int victim = (preferred >= 0 && preferred < MAX_SLOTS) ? preferred : 0;
+        MIX_StopTrack(tracks_[victim], 0);
+        loadIntoSlot(victim, file);
+        LOG_WARNING_CAT("AUDIO", "Overwrote slot {} with '{}'", victim, file);
+        return victim;
+    }
+
+    void loadIntoSlot(int slot, const std::string& file) {
+        MIX_Audio* a = MIX_LoadAudio(mixer_, file.c_str(), false);
+        if (!a) {
+            LOG_ERROR_CAT("AUDIO", "Load failed '{}': {}", file, SDL_GetError());
+            return;
+        }
+        slots_[slot].audio = a;
+        slots_[slot].filename = file;
+        slots_[slot].in_use = true;
+    }
+
+public:
+    // ────────────────────────────────────────────────
+    // IMAGE & TEXT
+    // ────────────────────────────────────────────────
+    SDL_Texture* loadTexture(SDL_Renderer* r, const std::string& path) {
+        SDL_Surface* s = IMG_Load(path.c_str());
+        if (!s) {
+            LOG_ERROR_CAT("IMAGE", "IMG_Load '{}' failed: {}", path, SDL_GetError());  // IMG_GetError deprecated → use SDL_GetError
+            return nullptr;
+        }
+        SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
+        SDL_DestroySurface(s);
+        return t;
+    }
+
+    bool loadFont(const std::string& name, const std::string& path, int size) {
+        if (!ttf_ready_) return false;
+        TTF_Font* f = TTF_OpenFont(path.c_str(), static_cast<float>(size));
+        if (!f) {
+            LOG_ERROR_CAT("TTF", "TTF_OpenFont '{}' failed: {}", path, SDL_GetError());
+            return false;
+        }
+        fonts_[name].font = f;
+        return true;
+    }
+
+    SDL_Texture* renderText(SDL_Renderer* r, const std::string& fontname,
+                            const std::string& text, SDL_Color col, int wrap = 0) {
+        auto it = fonts_.find(fontname);
+        if (it == fonts_.end() || !it->second.font) return nullptr;
+
+        SDL_Surface* s = TTF_RenderText_Blended_Wrapped(it->second.font, text.c_str(), 0, col, wrap);
+        if (!s) {
+            LOG_ERROR_CAT("TTF", "Render failed: {}", SDL_GetError());
+            return nullptr;
+        }
+
+        SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
+        SDL_DestroySurface(s);
+        return t;
+    }
+
+    // ────────────────────────────────────────────────
+    // INPUT (full manager)
+    // ────────────────────────────────────────────────
+    using EventCallback = std::function<void(const SDL_Event&)>;
+
+    uint64_t subscribe(EventCallback cb, std::string_view name = "") {
+        uint64_t id = ++nextId_;
+        uint64_t handle = id ^ generation_.load();
+        std::lock_guard<std::mutex> lock(mtx_);
+        subscriptions_[handle] = {std::move(cb), std::string(name), generation_.load()};
+        return handle;
+    }
+
+    void unsubscribe(uint64_t handle) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        subscriptions_.erase(handle);
+    }
+
+    void pump(const SDL_Event& ev) {
+        uint64_t gen = generation_.load();
+        std::vector<EventCallback> active;
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            for (const auto& p : subscriptions_) {
+                if (p.second.gen == gen) active.push_back(p.second.cb);
+            }
+        }
+        for (const auto& cb : active) cb(ev);
+        processEvent(ev);
+    }
+
+    void invalidateAll() { generation_.fetch_add(1); }
+
+    void captureMouse(bool enable) {
+        if (window_) SDL_SetWindowRelativeMouseMode(window_, enable);
+    }
+
+    glm::vec2 mouseDelta() const {
+        float x = 0, y = 0;
+        SDL_GetRelativeMouseState(&x, &y);
+        return {x, y};
+    }
+
+    void bind(std::string_view action, SDL_Scancode code) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        bindings_[std::string(action)] = code;
+    }
+
+    bool down(std::string_view action) const {
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto it = bindings_.find(std::string(action));
+        if (it == bindings_.end()) return false;
+        const bool* ks = SDL_GetKeyboardState(nullptr);
+        return ks[static_cast<int>(it->second)];
+    }
+
+    glm::vec3 movement(float speed, float dt) const {
+        glm::vec3 v(0);
+        if (down("move_forward"))  v.z -= 1;
+        if (down("move_backward")) v.z += 1;
+        if (down("move_left"))     v.x -= 1;
+        if (down("move_right"))    v.x += 1;
+        if (glm::length(v) > 0.01f) v = glm::normalize(v);
+        if (down("sprint")) v *= 2.2f;
+        if (down("crouch")) v *= 0.5f;
+        return v * speed * dt;
+    }
+
+    bool controllerConnected(int slot = 0) const {
+        return slot >= 0 && slot < static_cast<int>(controllers_.size()) &&
+               controllers_[static_cast<size_t>(slot)].gamepad != nullptr;
+    }
+
+    float rightTrigger(int slot = 0) const {
+        if (!controllerConnected(slot)) return 0.0f;
+        return SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
+    }
+
+private:
+    void processEvent(const SDL_Event& ev) {
+        if (ev.type == SDL_EVENT_GAMEPAD_ADDED) openController(ev.gdevice.which);
+        if (ev.type == SDL_EVENT_GAMEPAD_REMOVED) closeController(ev.gdevice.which);
+    }
+
+    void openAllControllers() {
+        int n = 0;
+        auto* ids = SDL_GetGamepads(&n);
+        if (ids) {
+            for (int i = 0; i < n; ++i) openController(ids[i]);
+            SDL_free(ids);
         }
     }
 
-    // Always provide current real pixel size to caller
-    // (RayCanvas ignores out_w/out_h now, but we keep them for compatibility)
-    if (g_window != nullptr) {
-        int w = 0, h = 0;
-        SDL_GetWindowSizeInPixels(g_window, &w, &h);
+    void openController(SDL_JoystickID id) {
+        if (!SDL_IsGamepad(id)) return;
+        auto* gp = SDL_OpenGamepad(id);
+        if (!gp) return;
 
-        out_w = (w > 0) ? w : 1;
-        out_h = (h > 0) ? h : 1;
-    } else {
-        out_w = 1;
-        out_h = 1;
-    }
+        size_t slot = 0;
+        for (; slot < controllers_.size(); ++slot)
+            if (!controllers_[slot].gamepad) break;
 
-    return event_seen;
-}
-
-inline void sdl_toggle_fullscreen() noexcept {
-    if (g_window == nullptr) return;
-
-    Uint64 flags = SDL_GetWindowFlags(g_window);
-    bool is_fs = (flags & SDL_WINDOW_FULLSCREEN);
-
-    SDL_SetWindowFullscreen(g_window, !is_fs);
-    LOG_INFO_CAT("SDL3_window", is_fs ? "Exiting fullscreen" : "Entering fullscreen");
-}
-
-inline void sdl_window_destroy() noexcept {
-    if (g_window != nullptr) {
-        SDL_DestroyWindow(g_window);
-        g_window = nullptr;
-        LOG_SUCCESS_CAT("SDL3_window", "Window destroyed");
-    }
-}
-
-// ────────────────────────────────────────────────
-// Audio — raw SDL3 (devices, streams, headphone jacks)
-// ────────────────────────────────────────────────
-inline bool sdl_audio_init() noexcept {
-    if (g_audio_device != 0) return true;
-
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
-        LOG_FATAL_CAT("SDL3_audio", "SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}", SDL_GetError());
-        return false;
-    }
-
-    int num_devices = 0;
-    SDL_AudioDeviceID* devices = SDL_GetAudioPlaybackDevices(&num_devices);
-    if (devices != nullptr) {
-        LOG_INFO_CAT("SDL3_audio", "Found {} audio playback devices:", num_devices);
-        for (int i = 0; i < num_devices; ++i) {
-            const char* name = SDL_GetAudioDeviceName(devices[i]);
-            LOG_INFO_CAT("SDL3_audio", "  [{}] {}", i, name ? name : "Unknown");
-        }
-        SDL_free(devices);
-    } else {
-        LOG_WARNING_CAT("SDL3_audio", "No audio playback devices enumerated");
-    }
-
-    g_audio_device = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, nullptr);
-    if (g_audio_device == 0) {
-        LOG_FATAL_CAT("SDL3_audio", "Failed to open default playback device: {}", SDL_GetError());
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
-        return false;
-    }
-
-    SDL_AudioSpec desired{};
-    desired.freq     = Options::Audio::SAMPLE_RATE;
-    desired.format   = SDL_AUDIO_F32;
-    desired.channels = Options::Audio::CHANNELS;
-
-    g_audio_stream = SDL_CreateAudioStream(&desired, nullptr);
-    if (g_audio_stream == nullptr) {
-        LOG_FATAL_CAT("SDL3_audio", "Failed to create audio stream: {}", SDL_GetError());
-        SDL_CloseAudioDevice(g_audio_device);
-        g_audio_device = 0;
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
-        return false;
-    }
-
-    if (SDL_BindAudioStream(g_audio_device, g_audio_stream) == 0) {
-        LOG_FATAL_CAT("SDL3_audio", "Failed to bind audio stream to device: {}", SDL_GetError());
-        SDL_DestroyAudioStream(g_audio_stream);
-        SDL_CloseAudioDevice(g_audio_device);
-        g_audio_stream = nullptr;
-        g_audio_device = 0;
-        SDL_QuitSubSystem(SDL_INIT_AUDIO);
-        return false;
-    }
-
-    SDL_ResumeAudioDevice(g_audio_device);
-    LOG_SUCCESS_CAT("SDL3_audio", "Audio initialized — device ID {} | stream ready", g_audio_device);
-    return true;
-}
-
-inline bool sdl_audio_load_sound(const std::string& path, const std::string& name) noexcept {
-    SDL_AudioSpec spec{};
-    Uint8* buffer = nullptr;
-    Uint32 length = 0;
-
-    if (SDL_LoadWAV(path.c_str(), &spec, &buffer, &length) == false) {
-        LOG_ERROR_CAT("SDL3_audio", "Failed to load WAV {}: {}", path, SDL_GetError());
-        return false;
-    }
-
-    std::unique_ptr<SoundData> sound = std::make_unique<SoundData>();
-    sound->buffer = buffer;
-    sound->length = length;
-    sound->spec = spec;
-
-    g_sounds[name] = std::move(sound);
-    LOG_SUCCESS_CAT("SDL3_audio", "Sound loaded — name='{}' path='{}' ({} bytes, {} Hz, {} ch)", 
-                    name, path, length, spec.freq, spec.channels);
-    return true;
-}
-
-inline void sdl_audio_play_sound(const std::string& name) noexcept {
-    std::unordered_map<std::string, std::unique_ptr<SoundData>>::const_iterator it = g_sounds.find(name);
-    if (it == g_sounds.cend()) {
-        LOG_WARNING_CAT("SDL3_audio", "Attempted to play unknown sound '{}'", name);
-        return;
-    }
-
-    if (g_audio_device == 0 || g_audio_stream == nullptr) {
-        LOG_WARNING_CAT("SDL3_audio", "Audio not initialized — cannot play '{}'", name);
-        return;
-    }
-
-    const SoundData* sound = it->second.get();
-    if (sound == nullptr || sound->buffer == nullptr || sound->length == 0) {
-        LOG_WARNING_CAT("SDL3_audio", "Invalid sound data for '{}'", name);
-        return;
-    }
-
-    if (sound->length > INT32_MAX) {  // theoretically impossible for audio, but defensive
-        LOG_ERROR_CAT("SDL3_audio", "Absurdly large sound length for '{}' — {} bytes (skipping)", 
-                      name, sound->length);
-        return;
-    }
-
-    SDL_PutAudioStreamData(g_audio_stream, sound->buffer, static_cast<Sint32>(sound->length));
-    LOG_INFO_CAT("SDL3_audio", "Playing sound '{}' ({} bytes)", name, sound->length);
-}
-
-inline void sdl_audio_cleanup() noexcept {
-    LOG_INFO_CAT("SDL3_audio", "Cleaning up audio — {} sounds loaded", g_sounds.size());
-
-    g_sounds.clear();
-
-    if (g_audio_stream != nullptr) {
-        SDL_DestroyAudioStream(g_audio_stream);
-        g_audio_stream = nullptr;
-        LOG_SUCCESS_CAT("SDL3_audio", "Audio stream destroyed");
-    }
-
-    if (g_audio_device != 0) {
-        SDL_CloseAudioDevice(g_audio_device);
-        g_audio_device = 0;
-        LOG_SUCCESS_CAT("SDL3_audio", "Audio device closed");
-    }
-
-    SDL_QuitSubSystem(SDL_INIT_AUDIO);
-}
-
-// ────────────────────────────────────────────────
-// Gamepads — raw SDL3 (events pumped to InputManager)
-// ────────────────────────────────────────────────
-inline void sdl_gamepads_init() noexcept {
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
-
-    if (ids == nullptr) {
-        LOG_WARNING_CAT("SDL3_input", "SDL_GetGamepads returned null");
-        return;
-    }
-
-    LOG_INFO_CAT("SDL3_input", "Found {} gamepad(s)", count);
-
-    for (int i = 0; i < count; ++i) {
-        SDL_Gamepad* gp = SDL_OpenGamepad(ids[i]);
-        if (gp == nullptr) {
-            LOG_WARNING_CAT("SDL3_input", "Failed to open gamepad ID={}: {}", ids[i], SDL_GetError());
-            continue;
-        }
-
-        g_gamepads[ids[i]] = gp;
-
-        if (Options::Audio::ENABLE_HAPTICS_FEEDBACK) {
-            Uint16 intensity = 32768;
-            SDL_RumbleGamepad(gp, intensity, intensity, 500);
-        }
-
-        const char* name = SDL_GetGamepadName(gp);
-        LOG_SUCCESS_CAT("SDL3_input", "Gamepad connected — ID={} name='{}'", ids[i], name ? name : "Unknown");
-    }
-
-    SDL_free(ids);
-}
-
-inline void sdl_gamepads_cleanup() noexcept {
-    LOG_INFO_CAT("SDL3_input", "Cleaning up {} gamepad(s)", g_gamepads.size());
-
-    for (std::unordered_map<SDL_JoystickID, SDL_Gamepad*>::iterator it = g_gamepads.begin(); it != g_gamepads.end(); ++it) {
-        SDL_Gamepad* gp = it->second;
-        if (gp != nullptr) {
+        if (slot >= controllers_.size()) {
             SDL_CloseGamepad(gp);
-            LOG_INFO_CAT("SDL3_input", "Gamepad ID={} closed", it->first);
+            return;
+        }
+
+        controllers_[slot].gamepad.reset(gp);
+        controllers_[slot].id = id;
+
+        auto props = SDL_GetGamepadProperties(gp);
+        controllers_[slot].rumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+        controllers_[slot].gyro   = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO);
+
+        LOG_SUCCESS_CAT("INPUT", "Gamepad connected (slot {}) — {}", slot, SDL_GetGamepadName(gp));
+    }
+
+    void closeController(SDL_JoystickID id) {
+        for (auto& c : controllers_) {
+            if (c.id == id) {
+                c.gamepad.reset();
+                LOG_INFO_CAT("INPUT", "Gamepad disconnected (id {})", id);
+                break;
+            }
         }
     }
 
-    g_gamepads.clear();
-}
-
-// ────────────────────────────────────────────────
-// Full init / cleanup — one call
-// ────────────────────────────────────────────────
-inline void sdl_init_all(int w, int h, const char* title) noexcept {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD) == 0) {
-        LOG_FATAL_CAT("SDL3_init", "SDL_Init failed: {}", SDL_GetError());
-        return;
+    void bindDefaultActions() {
+        bind("jump",          SDL_SCANCODE_SPACE);
+        bind("shoot",         SDL_SCANCODE_LCTRL);
+        bind("move_forward",  SDL_SCANCODE_W);
+        bind("move_backward", SDL_SCANCODE_S);
+        bind("move_left",     SDL_SCANCODE_A);
+        bind("move_right",    SDL_SCANCODE_D);
+        bind("sprint",        SDL_SCANCODE_LSHIFT);
+        bind("crouch",        SDL_SCANCODE_LCTRL);
+        bind("interact",      SDL_SCANCODE_E);
     }
 
-    LOG_SUCCESS_CAT("SDL3_init", "SDL subsystems initialized (Video, Audio, Gamepad)");
+private:
+    SDL3System() = default;
 
-    sdl_window_create(w, h, title);
+    bool initialized_   = false;
+    bool mixer_ready_   = false;
+    bool ttf_ready_     = false;
 
-    // Very important: check that window actually exists before giving it to input manager
-    if (g_window == nullptr) {
-        LOG_FATAL_CAT("SDL3_init", "Cannot initialize input — window creation failed");
-        return;
-    }
+    SDL_Window* window_ = nullptr;
+    MIX_Mixer*  mixer_  = nullptr;
 
-    sdl_gamepads_init();
-    sdl_audio_init();
+    std::vector<MIX_Track*> tracks_;
+    std::array<AudioSlot, MAX_SLOTS> slots_;
 
-    // Now safe to init input
-    GlobalInputManager::get().init(g_window);
-}
+    std::unordered_map<std::string, FontEntry> fonts_;
+    std::array<ControllerState, 4> controllers_;
 
-inline void sdl_cleanup_all() noexcept {
-    LOG_INFO_CAT("SDL3_init", "Shutting down SDL subsystems");
+    mutable std::mutex mtx_;
+    std::unordered_map<uint64_t, Subscription> subscriptions_;
+    std::unordered_map<std::string, SDL_Scancode> bindings_;
 
-    sdl_audio_cleanup();
-    sdl_gamepads_cleanup();
-    sdl_window_destroy();
+    std::atomic<uint64_t> generation_{1};
+    std::atomic<uint64_t> nextId_{0};
+};
 
-    SDL_Quit();
-    LOG_SUCCESS_CAT("SDL3_init", "SDL fully shut down");
-}
+#define SDL3   SDL3System::get()
+#define INPUT  SDL3System::get()
+#define ON_EVENT(cb) SDL3.subscribe([](const SDL_Event& ev){ cb(ev); }, #cb)

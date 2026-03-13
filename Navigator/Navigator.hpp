@@ -5,7 +5,7 @@
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 //
-// Main entry point — called from developer's empty main.cpp
+// Main engine entry point — called from developer's empty main.cpp
 // Developers link against this header and call navigator_main(argc, argv)
 // =============================================================================
 
@@ -21,20 +21,15 @@
 #include <SDL3_image/SDL_image.h>
 
 #include <memory>
-#include <chrono>
 #include <format>
 
 // Global canvas — persistent compute-driven screen updater
 inline std::unique_ptr<RayCanvas> raycanvas;
 
-// Sacrificial Splash — skippable with any input, non-blocking
+// Sacrificial Splash — skippable with any input, plays audio sequence
 static inline void showSacrificialSplash() noexcept {
     constexpr int W = 1280, H = 720;
     constexpr const char* TITLE = "AMOURANTHRTX";
-
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
-        return;
-    }
 
     SDL_Window* splashWin = SDL_CreateWindow(
         TITLE,
@@ -42,7 +37,7 @@ static inline void showSacrificialSplash() noexcept {
         SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN
     );
     if (!splashWin) {
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        LOG_ERROR_CAT("SPLASH", "Create splash window failed: {}", SDL_GetError());
         return;
     }
 
@@ -54,11 +49,7 @@ static inline void showSacrificialSplash() noexcept {
     }
 
     // Try to set icon (silent fail OK)
-    const char* iconPaths[] = {
-        "assets/textures/ammo.ico",
-        "assets/textures/ammo.png",
-        nullptr
-    };
+    const char* iconPaths[] = {"assets/textures/ammo.ico", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
         if (SDL_Surface* surf = IMG_Load(iconPaths[i])) {
             SDL_SetWindowIcon(splashWin, surf);
@@ -69,19 +60,14 @@ static inline void showSacrificialSplash() noexcept {
 
     SDL_Renderer* splashRen = SDL_CreateRenderer(splashWin, nullptr);
     if (!splashRen) {
+        LOG_ERROR_CAT("SPLASH", "Renderer create failed: {}", SDL_GetError());
         SDL_DestroyWindow(splashWin);
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return;
     }
 
-    // Try to load splash texture (fallback hot pink)
+    // Load splash texture (fallback hot pink)
     SDL_Texture* tex = nullptr;
-    const char* texPaths[] = {
-        "assets/textures/amouranth.png",
-        "assets/textures/splash.png",
-        "assets/textures/ammo.png",
-        nullptr
-    };
+    const char* texPaths[] = {"assets/textures/ammo.png", nullptr};
     for (int i = 0; texPaths[i]; ++i) {
         if (SDL_Surface* surf = IMG_Load(texPaths[i])) {
             tex = SDL_CreateTextureFromSurface(splashRen, surf);
@@ -106,12 +92,21 @@ static inline void showSacrificialSplash() noexcept {
     SDL_ShowWindow(splashWin);
     SDL_RenderPresent(splashRen);
 
-    // Display ~3.4s or until input
-    auto start = std::chrono::steady_clock::now();
+    // ─────────────────────────────────────────────────────────────
+    // Audio sequence using new SDL3.playSound API
+    // ─────────────────────────────────────────────────────────────
+    SDL3.playSound("assets/audio/splash.wav", "play");
+    SDL3.playSound("assets/audio/splash.mp3", "play");
+    SDL3.playSound("assets/audio/splash.mp3", "play");
+
+    // Visual timeout + input skip (~3.4s max)
+    double start = TotalTime::get().seconds();
     bool skip = false;
-    while (std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count() < 3.4f && !skip) {
+
+    while (TotalTime::get().seconds() - start < 3.4 && !skip) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            SDL3.pump(e);  // forward to input system
             if (e.type == SDL_EVENT_QUIT ||
                 e.type == SDL_EVENT_KEY_DOWN ||
                 e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
@@ -123,14 +118,16 @@ static inline void showSacrificialSplash() noexcept {
         }
     }
 
+    // ── Cleanup ───────────────────────────────────────────────────
     if (tex) SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(splashRen);
     SDL_DestroyWindow(splashWin);
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+
+    LOG_SUCCESS_CAT("SPLASH", "Sacrificial splash completed (skipped={})", skip ? "yes" : "no");
 }
 
 // =============================================================================
-// Engine-private memory initialization — called AFTER device & swapchain exist
+// Engine-private memory initialization
 // =============================================================================
 static inline void EngineMemoryInit() noexcept {
     LOG_SUCCESS_CAT("MEMORY", "Engine memory ready (no global buffers needed for single-shader mode)");
@@ -138,7 +135,6 @@ static inline void EngineMemoryInit() noexcept {
 
 // =============================================================================
 // Main entry point — called from developer's empty main.cpp
-// Developers link against this header and call navigator_main(argc, argv)
 // =============================================================================
 inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
@@ -146,36 +142,43 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     Logging::Logger::get().startup();
     LOG_SUCCESS_CAT("MAIN", "Apocalypse handler installed — logger started");
 
-    // Step 1: Initialize SDL subsystems
-    sdl_init_all(Options::Window::DEFAULT_WIDTH,
-                 Options::Window::DEFAULT_HEIGHT,
-                 "AMOURANTHRTX");
-
-    if (!g_window)
-    {
-        LOG_FATAL_CAT("MAIN", "SDL window creation failed");
-        sdl_cleanup_all();
+    // Step 1: Create window (Vulkan-ready)
+    SDL_Window* window = SDL_CreateWindow(
+        "AMOURANTHRTX",
+        Options::Window::DEFAULT_WIDTH,
+        Options::Window::DEFAULT_HEIGHT,
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    );
+    if (!window) {
+        LOG_FATAL_CAT("SDL3", "Window creation failed: {}", SDL_GetError());
         return 1;
     }
 
-    // Step 2: Show splash
+    // Step 2: Initialize SDL3 system (audio, input, ttf, etc.)
+    if (!SDL3.init(window)) {
+        LOG_FATAL_CAT("SDL3", "SDL3.init failed");
+        SDL_DestroyWindow(window);
+        return 1;
+    }
+
+    // Step 3: Show sacrificial splash
     showSacrificialSplash();
 
-    // Step 3: Vulkan instance
+    // Step 4: Vulkan instance & surface
     VkInstance instance = createVulkanInstance();
-    if (instance == VK_NULL_HANDLE)
-    {
+    if (instance == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("VULKAN", "Instance creation failed");
-        sdl_cleanup_all();
+        SDL3.shutdown();
+        SDL_DestroyWindow(window);
         return 1;
     }
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (SDL_Vulkan_CreateSurface(g_window, instance, nullptr, &surface) == 0)
-    {
+    if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
         LOG_FATAL_CAT("VULKAN", "Failed to create Vulkan surface");
         vkDestroyInstance(instance, nullptr);
-        sdl_cleanup_all();
+        SDL3.shutdown();
+        SDL_DestroyWindow(window);
         return 1;
     }
 
@@ -185,11 +188,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     VkDevice device = createLogicalDeviceAndSelectGPU(instance, surface,
                                                       &graphics_family, &present_family,
                                                       &compute_family, &transfer_family);
-    if (device == VK_NULL_HANDLE)
-    {
+    if (device == VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
-        sdl_cleanup_all();
+        SDL3.shutdown();
+        SDL_DestroyWindow(window);
         return 1;
     }
 
@@ -214,122 +217,99 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     rtx().transfer_family  = transfer_family;
     rtx().compute_family   = compute_family;
 
-    // Global transient command pool
-    {
-        VkCommandPoolCreateInfo poolInfo{};
-        poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                    VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = rtx().graphics_family;
+    // Transient command pool
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = rtx().graphics_family;
 
-        VkResult res = vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
-        if (res != VK_SUCCESS)
-        {
-            LOG_FATAL_CAT("VULKAN", "Failed to create transient command pool: {}", vkh.result(res));
-            vkDestroyDevice(device, nullptr);
-            vkDestroySurfaceKHR(instance, surface, nullptr);
-            vkDestroyInstance(instance, nullptr);
-            sdl_cleanup_all();
-            return 1;
-        }
-
-        LOG_SUCCESS_CAT("VULKAN", "Transient command pool created");
+    VkResult res = vkCreateCommandPool(device, &poolInfo, nullptr, &rtx().transient_pool);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("VULKAN", "Transient pool failed: {}", vkh.result(res));
+        vkDestroyDevice(device, nullptr);
+        vkDestroySurfaceKHR(instance, surface, nullptr);
+        vkDestroyInstance(instance, nullptr);
+        SDL3.shutdown();
+        SDL_DestroyWindow(window);
+        return 1;
     }
 
-    // Step 4: Create swapchain
-    Swapchain::create(g_window,
+    LOG_SUCCESS_CAT("VULKAN", "Transient command pool created");
+
+    // Step 5: Create swapchain
+    Swapchain::create(window,
                       Options::Window::DEFAULT_WIDTH,
                       Options::Window::DEFAULT_HEIGHT);
 
-    if (!Swapchain::swapchain.valid())
-    {
+    if (!Swapchain::swapchain.valid()) {
         LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed");
         vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
         vkDestroyDevice(device, nullptr);
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
-        sdl_cleanup_all();
+        SDL3.shutdown();
+        SDL_DestroyWindow(window);
         return 1;
     }
 
     LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", 
                  Swapchain::getExtent().width, Swapchain::getExtent().height);
 
-    // Step 5: Engine memory init (minimal now)
+    // Step 6: Engine memory init
     EngineMemoryInit();
 
-    // Step 6: Pipeline setup — single compute shader only
-    Pipeline::initialize();               // creates descriptor layout
-    Pipeline::create_pipeline_layout();   // creates pipeline layout with push constants
-    Pipeline::create_raymarch_pipeline();   // creates the actual compute pipeline
+    // Step 7: Pipeline setup
+    Pipeline::initialize();
+    Pipeline::create_pipeline_layout();
+    Pipeline::create_raymarch_pipeline();
 
     LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
 
-    // Step 7: Create RayCanvas
+    // Step 8: Create RayCanvas
     raycanvas = std::make_unique<RayCanvas>(
         Options::Window::DEFAULT_WIDTH,
         Options::Window::DEFAULT_HEIGHT,
-        g_window
+        window
     );
 
-    // IMPORTANT: Force correct initial size handling + camera reset
-    int realWidth = 0, realHeight = 0;
-    SDL_GetWindowSize(g_window, &realWidth, &realHeight);
-
-    // Explicit camera reset — ensures valid position, orientation, and FOV before first frame
+    // Reset camera
     CAM.reset();
     LOG_INFO_CAT("CAMERA", "Reset complete — pos: {} {} {} | fov: {}",
                  CAM.position().x, CAM.position().y, CAM.position().z, CAM.fov());
 
-    // Optional: log initial camera state for debugging
-    LOG_INFO_CAT("CAMERA", "Initial quat: {} {} {} {}",
-                 CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
-
     LOG_AMOURANTH("Genesis sealed — eternal compute begins");
 
     // ────────────────────────────────────────────────
-    // Eternal loop — smooth frame timing, respects vsync
+    // Main loop — RayCanvas owns rendering, we pump events
     // ────────────────────────────────────────────────
-    double lastFrameTime = TotalTime::get().seconds();
+    // double lastFrameTime = TotalTime::get().seconds();  // unused — removed warning
 
-    while (true)
-    {
-        int w = 0, h = 0;
-        bool quit = false, fullscreen_toggle = false;
+    while (true) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            SDL3.pump(ev);  // forward to input & callbacks
 
-        sdl_poll_events(w, h, quit, fullscreen_toggle);
-
-        if (fullscreen_toggle)
-        {
-            sdl_toggle_fullscreen();
+            // App-level quit / resize handling (example)
+            if (ev.type == SDL_EVENT_QUIT) {
+                goto cleanup;
+            }
+            if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
+                // Trigger swapchain recreation if needed
+            }
         }
 
-        if (quit)
-        {
-            break;
-        }
-
-        // Render the frame
         raycanvas->maybeUpdateCanvas();
 
-        // Simple frame pacing (optional — remove if vsync is enough)
-        double currentTime = TotalTime::get().seconds();
-        double dt = currentTime - lastFrameTime;
-        lastFrameTime = currentTime;
-
-        // Optional FPS logging every 5 seconds
-        static double lastFpsLog = 0.0;
-        if (currentTime - lastFpsLog > 5.0)
-        {
-            LOG_INFO_CAT("MAIN", "Current FPS: ~{} (dt={} s)", 1.0 / dt, dt);
-            lastFpsLog = currentTime;
-        }
+        if (raycanvas->isDestroyed()) break;
     }
 
-    // Cleanup
+cleanup:
+    // Cleanup in reverse order
     raycanvas.reset();
     Pipeline::shutdown();
-    sdl_cleanup_all();
+    SDL3.shutdown();
+    SDL_DestroyWindow(window);
 
     return 0;
 }

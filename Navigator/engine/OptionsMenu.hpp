@@ -193,7 +193,7 @@ namespace Options::Rendering {
     inline constexpr bool    ENABLE_TONEMAP           = false;             // Apply HDR → LDR tonemapping
     inline constexpr int     DISPATCH_GROUP_SIZE      = 16;                // Compute workgroup size (must match shader)
 
-    inline constexpr float   MaxGPULoadPercent        = 95.0f;             // Target max GPU utilization before downscaling
+    inline constexpr double  MaxGPULoadPercent        = 95.0;             // Target max GPU utilization before downscaling
 
     // Dynamic resolution scaling (DRS)
     inline bool    EnableAdaptiveResolution   = true;
