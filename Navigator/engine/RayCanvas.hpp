@@ -357,17 +357,17 @@ public:
             double freePercent = (totalMB > 0) ? 100.0 * (1.0 - (usedMB / totalMB)) : 0.0;
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
-                          "              RayCanvas Status  •  t+{:.1f}s\n"
-                          "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
-                          "  Refresh Rate:   {:.1f} Hz\n"
+                          "              RayCanvas Status  •  t+{}s\n"
+                          "  FPS:            {}     (avg frame {} µs)\n"
+                          "  Refresh Rate:   {} Hz\n"
                           "  Window:         {} x {}\n"
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
-                          "  GPU load:       {:.1f}%   (smoothed {:.1f} ms)\n"
+                          "  GPU load:       {:.2f}%   (smoothed {:.2f} ms)\n"
                           "  Render Path:    Pure Raymarched 3D (CANVAS.spv)\n"
                           "  State:          {}\n"
                           "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
-                          "  VRAM:           {:.0f} MB used / {:.0f} MB total ({:.1f}% free)\n"
+                          "  VRAM:           {:.2f} MB used / {:.2f} MB total ({:.2f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
                           now * 0.1, avgFps, avgDt_us, measuredRefreshRateHz_,
@@ -437,9 +437,6 @@ private:
         updateDescriptorSet();
 
         clearHDRImages();
-
-        LOG_INFO_CAT("RAYCANVAS", "Resized to {}x{} (render: {}x{})", 
-                     window_width_, window_height_, render_width_, render_height_);
     }
 
     void adjustAdaptiveScale(double now) noexcept {
