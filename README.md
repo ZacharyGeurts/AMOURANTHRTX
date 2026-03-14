@@ -40,6 +40,7 @@ Untested
 ```
 
 Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software development.  
+It will have a final form but always be updatable for your projects.  
 X11, Wayland, Windows. Adaptable for Metal or Android with toolchains.  
 
 A real star is ELLIE.hpp. It is more than full featured when it comes to debugging and logging.  
