@@ -181,11 +181,11 @@ namespace Options::Camera {
 namespace Options::Rendering {
 
     // Core resolution & dispatch settings
-    inline int     INTERNAL_WIDTH           = 4915;                        // Max internal render width
-    inline int     INTERNAL_HEIGHT          = 4592;                        // Max internal render height
+    inline int     INTERNAL_WIDTH           = 5920;                        // Max internal render width
+    inline int     INTERNAL_HEIGHT          = 5920;                        // Max internal render height
 
     // Temporal & sampling quality
-    inline constexpr bool    ACCUMULATION             = true;             // Temporal reprojection/accumulation (denoising)
+    inline constexpr bool    ACCUMULATION             = false;             // Temporal reprojection/accumulation (denoising)
     inline constexpr bool    ADAPTIVE_SAMPLING        = true;              // Per-pixel quality scaling
     inline constexpr int     MAX_SAMPLES_PER_PIXEL    = 4;                 // Adaptive max samples (higher = cleaner)
     inline constexpr int     MAX_RAY_RECURSION        = 8;                 // Max ray bounces (only in raymarched mode)
@@ -198,8 +198,8 @@ namespace Options::Rendering {
     // Dynamic resolution scaling (DRS)
     inline bool    EnableAdaptiveResolution   = true;
     inline float   MinResolutionScale         = 0.10f;                     // Lowest allowed scale (heavy fallback)
-    inline float   MaxResolutionScale         = 1.2f;                      // Highest supersampling allowed
-    inline float   ResolutionStepSize         = 0.1f;
+    inline float   MaxResolutionScale         = 8.0f;                      // Highest supersampling allowed
+    inline float   ResolutionStepSize         = 0.3f;
 
     inline float   ResolutionAdjustHysteresis = 0.9f;                     // Anti-oscillation threshold do not move deadzone
     inline float   AggressiveDownscaleThreshold = 1.35f;                   // Frametime multiplier for strong downscale
@@ -219,56 +219,67 @@ namespace Options::Rendering {
     inline RenderMode CurrentRenderMode       = RenderMode::Pure2DCanvas;
 
     // Raymarching quality & performance tunables (only active in raymarched/hybrid modes)
-    inline float      RaymarchMaxDistance     = 25.0f;      // Max ray travel before termination
+    inline float      RaymarchMaxDistance     = 120.0f;      // Max ray travel before termination
     inline float      RaymarchEpsilon         = 0.004f;     // Hit detection threshold (smaller = sharper detail)
-    inline uint32_t   RaymarchMaxSteps        = 140u;       // Max marching iterations per ray
+    inline uint32_t   RaymarchMaxSteps        = 120u;       // Max marching iterations per ray
 
     // Fallback & safety
-    inline bool       EnableRaymarchFallback  = true;       // In hybrid mode, drop to 2D if GPU load too high
+    inline bool       EnableRaymarchFallback  = false;       // In hybrid mode, drop to 2D if GPU load too high
     inline float      RaymarchLoadThreshold   = 0.85f;      // GPU utilization % above which hybrid falls back
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Living World — Environment, Weather, Atmosphere
-// Controls day/night, lighting, fog, clouds, wind, temperature, etc.
-// Most GPU impact: High fog + dense clouds + precipitation + heavy grass sway
-// ─────────────────────────────────────────────────────────────────────────────
 namespace Options::LivingWorld {
 
-    inline bool              EnableDayNightCycle      = true;              // Continuous time progression?
-    inline float             DayLengthSeconds         = 60.0f;             // Real seconds per full day/night
-    inline float             CycleSpeedMultiplier     = 1.0f;              // Time acceleration (1.0 = real-time)
+    inline Uint32    DebugFlags              = 0;
 
-    inline float             CurrentTimeOfDay         = 24.0f;             // Current simulated hour (0–24)
+    // ────────────────────────────────────────────────
+    // Time & Cycle (maps to pc.time, pc.dayNightFactor)
+    // ────────────────────────────────────────────────
+    inline bool   EnableDayNightCycle     = true;                // Continuous cycle?
+    inline float  DayLengthSeconds        = 600.0f;              // Real seconds per 24h cycle (10 min default)
+    inline float  CycleSpeedMultiplier    = 1.0f;                // 1.0 = normal speed
 
-    inline bool              SunEnabled               = true;
-    inline glm::vec3         SunColor                 = glm::vec3(1.0f, 0.96f, 0.88f);
-    inline float             SunIntensityDay          = 12.0f;
-    inline float             SunIntensityNight        = 0.1f;
+    inline float  CurrentTimeOfDay        = 12.0f;               // Starting hour [0–24], noon
 
-    inline bool              MoonEnabled              = true;
-    inline glm::vec3         MoonColor                = glm::vec3(0.9f, 0.95f, 1.0f);
-    inline float             MoonIntensity            = 2.0f;
+    // ────────────────────────────────────────────────
+    // Sun & Moon (maps to pc.sunDir, pc.sunIntensity, pc.moonDir, pc.moonIntensity)
+    // ────────────────────────────────────────────────
+    inline bool   SunEnabled              = true;
+    inline glm::vec3 SunColor             = glm::vec3(1.00f, 0.96f, 0.88f);  // Warm daylight
+    inline float  SunIntensityDay         = 12.0f;
+    inline float  SunIntensityNight       = 0.05f;
 
-    inline float             FogDensity               = 0.0008f;           // Atmospheric fog thickness (km⁻¹)
-    inline float             CloudCoverage            = 0.4f;              // Sky cloud fraction (0–1)
-    inline float             CloudAnimationSpeed      = 0.08f;             // Cloud drift speed
+    inline bool   MoonEnabled             = true;
+    inline glm::vec3 MoonColor            = glm::vec3(0.90f, 0.95f, 1.00f);  // Cool moonlight
+    inline float  MoonIntensity           = 0.8f;
 
-    inline float             WindStrength             = 0.6f;
-    inline glm::vec3         WindDirection            = glm::normalize(glm::vec3(0.7f, 0.0f, 0.3f));
+    // ────────────────────────────────────────────────
+    // Wind & Environment (maps to pc.windDir, pc.windStrength, etc.)
+    // ────────────────────────────────────────────────
+    inline float  WindStrength            = 0.6f;                // 0 = calm, 1 = strong breeze
+    inline glm::vec3 WindDirection        = glm::normalize(glm::vec3(0.7f, 0.0f, 0.3f));
 
-    inline float             TemperatureC             = 22.0f;
-    inline float             Humidity                 = 0.65f;
-    inline float             PrecipitationFactor      = 0.0f;
-    inline float             AirPressureKPa           = 101.3f;
+    inline float  TemperatureC            = 22.0f;               // Ambient temperature (°C)
+    inline float  Humidity                = 0.65f;               // Relative humidity [0–1]
+    inline float  PrecipitationFactor     = 0.0f;                // Rain/snow intensity [0–1]
+    inline float  AirPressureKPa          = 101.3f;              // Sea-level pressure (kPa)
 
-    inline bool              EnableGrassSway          = true;
-    inline float             GrassSwayAmplitude       = 0.12f;
-    inline float             GrassWetShineBoost       = 1.8f;
-    inline float             TemperatureColorShift    = 0.4f;
+    // ────────────────────────────────────────────────
+    // Atmosphere & Sky (maps to pc.fogDensity, pc.cloudCoverage)
+    // ────────────────────────────────────────────────
+    inline float  FogDensity              = 0.0008f;             // km⁻¹ (~1.25 km visibility)
+    inline float  CloudCoverage           = 0.45f;               // 0 = clear, 1 = overcast
+    inline float  CloudAnimationSpeed     = 0.08f;               // Cloud drift speed
 
-    inline uint32_t          DebugFlags               = 0;                 // Shader debug visualization bitmask
-}
+    // ────────────────────────────────────────────────
+    // Vegetation Effects (maps to shader grass sway uniforms)
+    // ────────────────────────────────────────────────
+    inline bool   EnableGrassSway         = true;
+    inline float  GrassSwayAmplitude      = 0.12f;
+    inline float  GrassWetShineBoost      = 1.8f;
+    inline float  TemperatureColorShift   = 0.4f;                // Warm/cool tint shift
+
+} // namespace Options::LivingWorld
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio
@@ -278,7 +289,7 @@ namespace Options::Audio {
     inline constexpr bool    ENABLE_HAPTICS_FEEDBACK  = true;
     inline constexpr int     SAMPLE_RATE              = 48000;
     inline constexpr int     CHANNELS                 = 2;
-    inline constexpr int     BUFFER_SIZE              = 2048;
+    inline constexpr int     BUFFER_SIZE              = 16384;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -287,7 +298,7 @@ namespace Options::Audio {
 // Most GPU impact: Validation layers + wireframe
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Debug {
-    inline constexpr bool    ENABLE_VALIDATION_LAYERS = true;              // Vulkan API validation
+    inline constexpr bool    ENABLE_VALIDATION_LAYERS = false;              // Vulkan API validation
     inline constexpr bool    ENABLE_VERBOSE_LOGGING   = false;             // Detailed console output
     inline constexpr bool    DRAW_WIREFRAME           = false;             // Force wireframe mode
 }

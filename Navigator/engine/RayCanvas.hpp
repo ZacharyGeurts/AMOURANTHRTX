@@ -70,7 +70,7 @@ public:
         timestampPeriodNs_ = props.limits.timestampPeriod;
 
         createTimestampQueryPool();
-        buildMaterialLibrary();  // uploads full Materials::AllMaterials array
+        buildMaterialLibrary();
         updateRenderResolution();
         createPersistentHDR();
         createPreviousHDR();
@@ -78,7 +78,7 @@ public:
 
         Pipeline::initialize();
         Pipeline::create_pipeline_layout();
-        Pipeline::create_canvas_pipeline();  // Loads CANVAS.spv
+        Pipeline::create_canvas_pipeline();
 
         updateDescriptorSet();
         clearHDRImages();
@@ -107,7 +107,6 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Destroyed");
     }
 
-    // Main frame update — called every loop from navigator_main
     void maybeUpdateCanvas() noexcept {
         if (destroyed_) return;
 
@@ -115,7 +114,7 @@ public:
 
         double now = TotalTime::get().seconds();
 
-        // ── Poll SDL events (RayCanvas owns polling) ─────────────────────────────
+        // Poll SDL events
         int currentW = window_width_;
         int currentH = window_height_;
         bool quit = false;
@@ -123,32 +122,25 @@ public:
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            SDL3.pump(ev);  // forward to input system
+            SDL3.pump(ev);
 
-            // Quit detection
-            if (ev.type == SDL_EVENT_QUIT) {
-                quit = true;
-            }
+            if (ev.type == SDL_EVENT_QUIT) quit = true;
 
-            // Resize detection
             if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
                 currentW = ev.window.data1;
                 currentH = ev.window.data2;
             }
 
-            // Fullscreen toggle (F11 or Alt+Enter)
             if (ev.type == SDL_EVENT_KEY_DOWN) {
-                bool altPressed = (ev.key.mod & SDL_KMOD_ALT) != 0;
+                bool alt = (ev.key.mod & SDL_KMOD_ALT) != 0;
                 if (ev.key.scancode == SDL_SCANCODE_F11 ||
-                    (ev.key.scancode == SDL_SCANCODE_RETURN && altPressed)) {
+                    (ev.key.scancode == SDL_SCANCODE_RETURN && alt)) {
                     fullscreen_toggle = true;
                 }
             }
         }
 
-        if (fullscreen_toggle) {
-            toggleFullscreen();
-        }
+        if (fullscreen_toggle) toggleFullscreen();
 
         if (quit) {
             destroyed_ = true;
@@ -156,7 +148,6 @@ public:
             return;
         }
 
-        // ── Handle resize / minimize ─────────────────────────────────────────────
         bool nowMinimized = (currentW <= 0 || currentH <= 0);
         if (nowMinimized) {
             minimized_ = true;
@@ -166,10 +157,8 @@ public:
         bool sizeChanged = (currentW != window_width_) || (currentH != window_height_);
 
         if (minimized_ || sizeChanged || needsRecreate_) {
-            if (sizeChanged) vkDeviceWaitIdle(rtx().device);
             onResize(currentW, currentH, sizeChanged);
             minimized_ = false;
-            needsRecreate_ = false;
             return;
         }
 
@@ -258,11 +247,8 @@ public:
             smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
         }
 
-        if (Options::Rendering::EnableAdaptiveResolution) {
-            adjustAdaptiveScale(now);
-        } else {
-            adaptiveScale_ = 1.0;
-        }
+        if (Options::Rendering::EnableAdaptiveResolution) adjustAdaptiveScale(now);
+        else adaptiveScale_ = 1.0;
 
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
@@ -328,10 +314,10 @@ public:
         VkPresentInfoKHR pi{};
         pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.swapchainCount = 1;
-        pi.pSwapchains    = &Swapchain::swapchain.value;
-        pi.pImageIndices  = &imageIndex;
+        pi.pSwapchains = &Swapchain::swapchain.value;
+        pi.pImageIndices = &imageIndex;
 
-        VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
+        VkResult pres = ext().vkQueuePresentKHR(rtx().graphics_queue, &pi);
 
         if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
@@ -365,6 +351,11 @@ public:
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
                                      "✅ active";
 
+            VRAMReality vram = Memory::measureReality();
+            double usedMB = static_cast<double>(vram.driver_footprint) / (1024.0 * 1024.0);
+            double totalMB = static_cast<double>(vram.total) / (1024.0 * 1024.0);
+            double freePercent = (totalMB > 0) ? 100.0 * (1.0 - (usedMB / totalMB)) : 0.0;
+
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
                           "              RayCanvas Status  •  t+{:.1f}s\n"
                           "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
@@ -375,23 +366,39 @@ public:
                           "  GPU load:       {:.1f}%   (smoothed {:.1f} ms)\n"
                           "  Render Path:    Pure Raymarched 3D (CANVAS.spv)\n"
                           "  State:          {}\n"
-                          "  Adaptive qual:  {}\n"
-                          "  Accumulation:   {}\n"
+                          "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
+                          "  VRAM:           {:.0f} MB used / {:.0f} MB total ({:.1f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
                           now * 0.1, avgFps, avgDt_us, measuredRefreshRateHz_,
                           winW, winH, render_width_, render_height_, scaleFactor, mode,
                           adaptiveScale_, gpuLoadPercent, smoothedGpuTimeMs_,
                           stateEmoji,
-                          Options::Rendering::EnableAdaptiveResolution ? "enabled" : "disabled",
-                          Options::Rendering::ACCUMULATION ? "on" : "off",
+                          Options::Rendering::EnableAdaptiveResolution ? "✅" : "❌",
+                          Options::Rendering::ACCUMULATION ? "✅" : "❌",
+                          (scaleFactor > 1.0) ? "⚡" : "❌",
+                          usedMB, totalMB, freePercent,
                           frameCount_);
             lastFpsLog_  = now;
             frameCount_  = 0;
         }
     }
 
-    void onResize(int newWidth, int newHeight, bool fromUserResize = false) noexcept {
+    int  getWidth()  const noexcept { return window_width_; }
+    int  getHeight() const noexcept { return window_height_; }
+    bool isMinimized() const noexcept { return minimized_; }
+    bool isDestroyed() const noexcept { return destroyed_; }
+
+private:
+    void toggleFullscreen() noexcept {
+        Uint32 flags = static_cast<Uint32>(SDL_GetWindowFlags(window_));
+        bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+
+        SDL_SetWindowFullscreen(window_, !isFullscreen);
+        LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFullscreen ? "disabled" : "enabled");
+    }
+
+    void onResize(int newWidth, int newHeight, bool fromUserResize) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
             return;
@@ -399,23 +406,21 @@ public:
 
         if (newWidth == window_width_ && newHeight == window_height_ && !needsRecreate_) return;
 
-        if (fromUserResize) vkDeviceWaitIdle(rtx().device);
-
-        destroyHDRResources();
-
-        window_width_  = newWidth;
-        window_height_ = newHeight;
-        minimized_ = false;
-
-        Swapchain::recreate(window_width_, window_height_);
+        if (fromUserResize || needsRecreate_) vkDeviceWaitIdle(rtx().device);
 
         int actualW = 0, actualH = 0;
         SDL_GetWindowSizeInPixels(window_, &actualW, &actualH);
         window_width_  = actualW;
         window_height_ = actualH;
 
+        minimized_ = false;
+        needsRecreate_ = false;
+
+        Swapchain::recreate(window_width_, window_height_);
+
         updateRenderResolution();
 
+        destroyHDRResources();
         createPersistentHDR();
         createPreviousHDR();
 
@@ -431,36 +436,10 @@ public:
         createDescriptorPoolAndSet();
         updateDescriptorSet();
 
-        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
-        VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        clearHDRImages();
 
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (cmd) {
-            transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-            transitionImageLayout(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-            vkCmdClearColorImage(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
-            vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
-            endSubmitAndWait(cmd);
-        }
-    }
-
-    int  getWidth()  const noexcept { return window_width_; }
-    int  getHeight() const noexcept { return window_height_; }
-    bool isMinimized() const noexcept { return minimized_; }
-    bool isDestroyed() const noexcept { return destroyed_; }
-
-private:
-    void toggleFullscreen() noexcept {
-        Uint32 flags = static_cast<Uint32>(SDL_GetWindowFlags(window_));
-        bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN) != 0;
-
-        if (isFullscreen) {
-            SDL_SetWindowFullscreen(window_, false);
-            LOG_INFO_CAT("WINDOW", "Fullscreen disabled");
-        } else {
-            SDL_SetWindowFullscreen(window_, true);
-            LOG_INFO_CAT("WINDOW", "Fullscreen enabled");
-        }
+        LOG_INFO_CAT("RAYCANVAS", "Resized to {}x{} (render: {}x{})", 
+                     window_width_, window_height_, render_width_, render_height_);
     }
 
     void adjustAdaptiveScale(double now) noexcept {
@@ -481,11 +460,11 @@ private:
         else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) targetScale *= 0.94;
         else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.75) targetScale *= 1.12;
 
-        double absoluteMinScaleW = 320.0 / std::max(1, window_width_);
-        double absoluteMinScaleH = 200.0 / std::max(1, window_height_);
-        double absoluteMinScale  = std::max(absoluteMinScaleW, absoluteMinScaleH);
+        double minScaleW = 320.0 / std::max(1, window_width_);
+        double minScaleH = 200.0 / std::max(1, window_height_);
+        double minScale  = std::max(minScaleW, minScaleH);
 
-        targetScale = std::max(targetScale, absoluteMinScale);
+        targetScale = std::max(targetScale, minScale);
         targetScale = std::max(targetScale, 0.08);
         targetScale = std::clamp(targetScale,
                                  static_cast<double>(Options::Rendering::MinResolutionScale),
@@ -780,15 +759,19 @@ private:
     }
 
     void clearHDRImages() noexcept {
-        VkClearColorValue clearBlack = { .float32 = {0.0, 0.0, 0.0, 1.0} };
+        VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         VkCommandBuffer cmd = beginTransientCommandBuffer();
-        if (cmd) {
-            vkCmdClearColorImage(cmd, hdrOutputImage_,   VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
-            vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
-            endSubmitAndWait(cmd);
-        }
+        if (!cmd) return;
+
+        transitionImageLayout(cmd, hdrOutputImage_,   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        transitionImageLayout(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+        vkCmdClearColorImage(cmd, hdrOutputImage_,   VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+        vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+
+        endSubmitAndWait(cmd);
     }
 
     void buildMaterialLibrary() noexcept {

@@ -882,7 +882,7 @@ static LONG WINAPI apocalypse_handler(EXCEPTION_POINTERS* pExceptionInfo) noexce
         CloseHandle(hFile);
     }
 
-    const AdviceManualEntry* verdict = &THE_MANUAL.back();
+    [[maybe_unused]] const AdviceManualEntry* verdict = &THE_MANUAL.back();
     for (const AdviceManualEntry& e : THE_MANUAL) {
         if (e.code == pExceptionInfo->ExceptionRecord->ExceptionCode) {
             verdict = &e;
