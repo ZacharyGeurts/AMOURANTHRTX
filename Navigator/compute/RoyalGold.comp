@@ -167,7 +167,7 @@ void main() {
     }
 
     // Final color boosting for a vibrant glow
-    col *= sin(pc.totalTime * 0.5 + length(uv));
+    col *= 1.5 * sin(pc.totalTime * 0.5 + length(uv));
 
     imageStore(outputImage, pix, vec4(col, 1.0));
 }
