@@ -167,8 +167,7 @@ void main() {
     }
 
     // Final color boosting for a vibrant glow
-    col *= 1.2 + 0.3 * sin(pc.totalTime * 0.5 + length(uv) * 3.0);
+    col *= sin(pc.totalTime * 0.5 + length(uv));
 
-    // Showstopper finale!
-    imageStore(outputImage, pix, vec4(col, 1.0)); // IMPRESSIVE DISPLAY
+    imageStore(outputImage, pix, vec4(col, 1.0));
 }
