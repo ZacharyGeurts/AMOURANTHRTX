@@ -278,25 +278,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
         CAM.update(dt);
 
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {
-            SDL3.pump(ev);
-
-            if (ev.type == SDL_EVENT_QUIT) {
-                goto cleanup;
-            }
-
-            if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
-                // Swapchain recreation handled in RayCanvas if needed
-            }
-        }
-
         raycanvas->maybeUpdateCanvas();
 
         if (raycanvas->isDestroyed()) break;
     }
 
-cleanup:
     raycanvas.reset();
     Pipeline::shutdown();
     SDL3.shutdown();

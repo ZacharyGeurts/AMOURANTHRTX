@@ -32,33 +32,17 @@
 class RayCanvas {
 public:
     RayCanvas(int initialWidth, int initialHeight, SDL_Window* window)
-        : window_(window)
-        , window_width_(initialWidth)
-        , window_height_(initialHeight)
-        , render_width_(initialWidth)
-        , render_height_(initialHeight)
-        , minimized_(false)
-        , destroyed_(false)
-        , firstFrame_(true)
-        , materialsHandle_(0)
-        , hdrOutputImage_(VK_NULL_HANDLE)
-        , hdrOutputView_(VK_NULL_HANDLE)
-        , hdrOutputMemory_(VK_NULL_HANDLE)
-        , prevHdrOutputImage_(VK_NULL_HANDLE)
-        , prevHdrOutputView_(VK_NULL_HANDLE)
-        , prevHdrOutputMemory_(VK_NULL_HANDLE)
-        , descriptorPool_(VK_NULL_HANDLE)
-        , descriptorSet_(VK_NULL_HANDLE)
-        , adaptiveScale_(1.0)
-        , lastPresentTime_s_(0.0)
-        , measuredRefreshRateHz_(60.0)
-        , lastFpsLog_(0.0)
-        , frameCount_(0)
-        , lastAdaptiveAdjustTime_(0.0)
-        , needsRecreate_(false)
-        , timestampQueryPool_(VK_NULL_HANDLE)
-        , timestampPeriodNs_(1.0)
-        , smoothedGpuTimeMs_(16.67)
+        : window_(window), window_width_(initialWidth), window_height_(initialHeight),
+          render_width_(initialWidth), render_height_(initialHeight),
+          minimized_(false), destroyed_(false), firstFrame_(true),
+          materialsHandle_(0), hdrOutputImage_(VK_NULL_HANDLE), hdrOutputView_(VK_NULL_HANDLE),
+          hdrOutputMemory_(VK_NULL_HANDLE), prevHdrOutputImage_(VK_NULL_HANDLE),
+          prevHdrOutputView_(VK_NULL_HANDLE), prevHdrOutputMemory_(VK_NULL_HANDLE),
+          descriptorPool_(VK_NULL_HANDLE), descriptorSet_(VK_NULL_HANDLE),
+          adaptiveScale_(1.0), lastPresentTime_s_(0.0), measuredRefreshRateHz_(60.0),
+          lastFpsLog_(0.0), frameCount_(0), lastAdaptiveAdjustTime_(0.0),
+          needsRecreate_(false), timestampQueryPool_(VK_NULL_HANDLE),
+          timestampPeriodNs_(1.0), smoothedGpuTimeMs_(16.67)
     {
         if (!Swapchain::get()) {
             LOG_FATAL_CAT("RAYCANVAS", "No valid swapchain — navigator must create it first");
@@ -114,7 +98,7 @@ public:
 
         double now = TotalTime::get().seconds();
 
-        // Poll SDL events
+        // ── Poll SDL events (RayCanvas owns polling) ─────────────────────────────
         int currentW = window_width_;
         int currentH = window_height_;
         bool quit = false;
@@ -122,25 +106,32 @@ public:
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            SDL3.pump(ev);
+            SDL3.pump(ev);  // forward to input system
 
-            if (ev.type == SDL_EVENT_QUIT) quit = true;
+            // Quit detection
+            if (ev.type == SDL_EVENT_QUIT) {
+                quit = true;
+            }
 
+            // Resize detection
             if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
                 currentW = ev.window.data1;
                 currentH = ev.window.data2;
             }
 
+            // Fullscreen toggle (F11 or Alt+Enter)
             if (ev.type == SDL_EVENT_KEY_DOWN) {
-                bool alt = (ev.key.mod & SDL_KMOD_ALT) != 0;
+                bool altPressed = (ev.key.mod & SDL_KMOD_ALT) != 0;
                 if (ev.key.scancode == SDL_SCANCODE_F11 ||
-                    (ev.key.scancode == SDL_SCANCODE_RETURN && alt)) {
+                    (ev.key.scancode == SDL_SCANCODE_RETURN && altPressed)) {
                     fullscreen_toggle = true;
                 }
             }
         }
 
-        if (fullscreen_toggle) toggleFullscreen();
+        if (fullscreen_toggle) {
+            toggleFullscreen();
+        }
 
         if (quit) {
             destroyed_ = true;
@@ -148,6 +139,7 @@ public:
             return;
         }
 
+        // ── Handle resize / minimize ─────────────────────────────────────────────
         bool nowMinimized = (currentW <= 0 || currentH <= 0);
         if (nowMinimized) {
             minimized_ = true;
@@ -247,8 +239,11 @@ public:
             smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
         }
 
-        if (Options::Rendering::EnableAdaptiveResolution) adjustAdaptiveScale(now);
-        else adaptiveScale_ = 1.0;
+        if (Options::Rendering::EnableAdaptiveResolution) {
+            adjustAdaptiveScale(now);
+        } else {
+            adaptiveScale_ = 1.0;
+        }
 
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
@@ -317,7 +312,7 @@ public:
         pi.pSwapchains = &Swapchain::swapchain.value;
         pi.pImageIndices = &imageIndex;
 
-        VkResult pres = ext().vkQueuePresentKHR(rtx().graphics_queue, &pi);
+        VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
 
         if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
@@ -347,9 +342,8 @@ public:
                                   ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0
                                   : 0.0;
 
-            const char* stateEmoji = minimized_                       ? "🟥 minimized" :
-                                     (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" :
-                                     "✅ active";
+            const char* stateEmoji = minimized_ ? "🟥 minimized" :
+                                     (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" : "✅ active";
 
             VRAMReality vram = Memory::measureReality();
             double usedMB = static_cast<double>(vram.driver_footprint) / (1024.0 * 1024.0);
@@ -357,17 +351,17 @@ public:
             double freePercent = (totalMB > 0) ? 100.0 * (1.0 - (usedMB / totalMB)) : 0.0;
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
-                          "              RayCanvas Status  •  t+{}s\n"
-                          "  FPS:            {}     (avg frame {} µs)\n"
-                          "  Refresh Rate:   {} Hz\n"
+                          "              RayCanvas Status  •  t+{:.1f}s\n"
+                          "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
+                          "  Refresh Rate:   {:.1f} Hz\n"
                           "  Window:         {} x {}\n"
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
-                          "  GPU load:       {:.2f}%   (smoothed {:.2f} ms)\n"
+                          "  GPU load:       {:.1f}%   (smoothed {:.1f} ms)\n"
                           "  Render Path:    Pure Raymarched 3D (CANVAS.spv)\n"
                           "  State:          {}\n"
                           "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
-                          "  VRAM:           {:.2f} MB used / {:.2f} MB total ({:.2f}% free)\n"
+                          "  VRAM:           {:.0f} MB used / {:.0f} MB total ({:.1f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
                           now * 0.1, avgFps, avgDt_us, measuredRefreshRateHz_,
@@ -379,8 +373,8 @@ public:
                           (scaleFactor > 1.0) ? "⚡" : "❌",
                           usedMB, totalMB, freePercent,
                           frameCount_);
-            lastFpsLog_  = now;
-            frameCount_  = 0;
+            lastFpsLog_ = now;
+            frameCount_ = 0;
         }
     }
 
@@ -444,9 +438,7 @@ private:
         if (elapsed < 0.6) return;
 
         double targetFrameMs = 1000.0 / (measuredRefreshRateHz_ * 1.18);
-        double gpuLoadPercent = (targetFrameMs > 0.001)
-                              ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0
-                              : 0.0;
+        double gpuLoadPercent = (targetFrameMs > 0.001) ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 : 0.0;
 
         double targetScale = adaptiveScale_;
 

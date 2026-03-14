@@ -1,10 +1,9 @@
+#pragma once
+
 // =============================================================================
-// Navigator/engine/SDL3.hpp
 // AMOURANTH RTX — SDL3 Core + Image + Mixer + TTF + Full Input (16-slot audio)
 // Full 4-axis controller support + real track finished callbacks
 // =============================================================================
-
-#pragma once
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_audio.h>
@@ -28,6 +27,7 @@
 
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
+#include "AMOURANTHRTX.hpp"  // for Swapchain
 
 // =============================================================================
 // CONFIG
@@ -88,6 +88,9 @@ public:
             return false;
         }
 
+        // Apply runtime SDL3 options from menu
+        applyOptions();
+
         if (TTF_Init() == 0) {
             LOG_ERROR_CAT("TTF", "TTF_Init failed: {}", SDL_GetError());
             return false;
@@ -104,9 +107,10 @@ public:
         desired.format   = SDL_AUDIO_F32;
         desired.channels = AUDIO_CHANNELS;
 
-        mixer_ = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
+        mixer_ = MIX_CreateMixerDevice(-1, &desired);
         if (!mixer_) {
             LOG_ERROR_CAT("MIXER", "MIX_CreateMixerDevice failed: {}", SDL_GetError());
+            MIX_Quit();
             return false;
         }
         mixer_ready_ = true;
@@ -116,7 +120,6 @@ public:
             tracks_[i] = MIX_CreateTrack(mixer_);
             if (tracks_[i]) {
                 MIX_SetTrackGain(tracks_[i], DEFAULT_VOLUME);
-                // Set up stopped callback for each track
                 MIX_SetTrackStoppedCallback(tracks_[i], track_stopped_callback, this);
             }
         }
@@ -125,7 +128,7 @@ public:
         bindDefaultActions();
 
         initialized_ = true;
-        LOG_SUCCESS_CAT("SDL3", "Initialized — 16 audio slots + full 4-axis controller support");
+        LOG_SUCCESS_CAT("SDL3", "Initialized — 16 audio slots + full controller support");
         return true;
     }
 
@@ -135,16 +138,16 @@ public:
         for (auto& c : controllers_) if (c.gamepad) c.gamepad.reset();
 
         if (mixer_ready_) {
-            // Clear callbacks first to avoid dangling pointers
             for (auto t : tracks_) {
                 if (t) {
                     MIX_SetTrackStoppedCallback(t, nullptr, nullptr);
+                    MIX_DestroyTrack(t);
                 }
             }
-            for (auto t : tracks_) if (t) MIX_DestroyTrack(t);
             tracks_.clear();
-            MIX_DestroyMixer(mixer_);
-            MIX_Quit();
+
+            MIX_DestroyMixer(mixer_);   // Destroy the mixer
+            MIX_Quit();                 // Quit mixer subsystem
         }
 
         fonts_.clear();
@@ -158,13 +161,49 @@ public:
     }
 
     // ────────────────────────────────────────────────
+    // RESIZE HANDLING — SDL3 owns it, uses pixel size
+    // ────────────────────────────────────────────────
+    void onResize() noexcept {
+        if (!window_) return;
+
+        int pixelW = 0, pixelH = 0;
+        SDL_GetWindowSizeInPixels(window_, &pixelW, &pixelH);
+
+        if (pixelW <= 0 || pixelH <= 0) {
+            LOG_WARNING_CAT("SDL3", "Window minimized/invalid size");
+            return;
+        }
+
+        Swapchain::recreate(pixelW, pixelH);
+
+        LOG_INFO_CAT("SDL3", "Resize handled — pixel size {}x{}", pixelW, pixelH);
+    }
+
+    // Apply runtime SDL3 options (VSync, fullscreen, etc.)
+    void applyOptions() noexcept {
+
+        // Fullscreen / borderless
+        Uint64 flags = SDL_GetWindowFlags(window_);
+        bool currentFullscreen = (flags & SDL_WINDOW_FULLSCREEN) == 0;
+        if (Options::SDL3::EnableFullscreen != currentFullscreen) {
+            SDL_SetWindowFullscreen(window_, Options::SDL3::EnableFullscreen);
+        }
+        SDL_SetWindowBordered(window_, !Options::SDL3::BorderlessWindow);
+
+        // Allow resize
+        SDL_SetWindowResizable(window_, Options::SDL3::AllowWindowResize);
+
+        // Input capture
+        if (Options::SDL3::EnableInputCapture) {
+            SDL_SetWindowRelativeMouseMode(window_, true);
+        }
+    }
+
+    // ────────────────────────────────────────────────
     // AUDIO
     // ────────────────────────────────────────────────
     int playSound(const std::string& file, const std::string& cmd, int preferred_slot = -1) {
-        if (!mixer_ready_) {
-            LOG_ERROR_CAT("AUDIO", "Mixer not ready");
-            return -1;
-        }
+        if (!mixer_ready_) return -1;
 
         std::string cmd_lower = cmd;
         std::transform(cmd_lower.begin(), cmd_lower.end(), cmd_lower.begin(), ::tolower);
@@ -229,7 +268,6 @@ private:
         std::lock_guard<std::mutex> lock(self->callback_mtx_);
         auto it = self->stopped_callbacks_.find(track);
         if (it != self->stopped_callbacks_.end()) {
-            // Find slot for callback
             int slot = -1;
             for (int i = 0; i < MAX_SLOTS; ++i) {
                 if (self->tracks_[i] == track) {
@@ -237,9 +275,7 @@ private:
                     break;
                 }
             }
-            if (slot >= 0) {
-                it->second(slot);
-            }
+            if (slot >= 0) it->second(slot);
             self->stopped_callbacks_.erase(it);
         }
     }
@@ -281,10 +317,7 @@ public:
     // ────────────────────────────────────────────────
     SDL_Texture* loadTexture(SDL_Renderer* r, const std::string& path) {
         SDL_Surface* s = IMG_Load(path.c_str());
-        if (!s) {
-            LOG_ERROR_CAT("IMAGE", "IMG_Load '{}' failed: {}", path, SDL_GetError());
-            return nullptr;
-        }
+        if (!s) return nullptr;
         SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
         SDL_DestroySurface(s);
         return t;
@@ -293,10 +326,7 @@ public:
     bool loadFont(const std::string& name, const std::string& path, int size) {
         if (!ttf_ready_) return false;
         TTF_Font* f = TTF_OpenFont(path.c_str(), static_cast<float>(size));
-        if (!f) {
-            LOG_ERROR_CAT("TTF", "TTF_OpenFont '{}' failed: {}", path, SDL_GetError());
-            return false;
-        }
+        if (!f) return false;
         fonts_[name].font = f;
         return true;
     }
@@ -307,10 +337,7 @@ public:
         if (it == fonts_.end() || !it->second.font) return nullptr;
 
         SDL_Surface* s = TTF_RenderText_Blended_Wrapped(it->second.font, text.c_str(), 0, col, wrap);
-        if (!s) {
-            LOG_ERROR_CAT("TTF", "Render failed: {}", SDL_GetError());
-            return nullptr;
-        }
+        if (!s) return nullptr;
 
         SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
         SDL_DestroySurface(s);
@@ -318,7 +345,7 @@ public:
     }
 
     // ────────────────────────────────────────────────
-    // INPUT — full manager + 4-axis controller support
+    // INPUT
     // ────────────────────────────────────────────────
     using EventCallback = std::function<void(const SDL_Event&)>;
 
@@ -401,29 +428,28 @@ public:
         return SDL_GetGamepadName(controllers_[slot].gamepad.get());
     }
 
-    // ─── Full Analog Inputs (all 4 axes + triggers) ───────────────────────
     float leftStickX(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
-        return (std::abs(val) > CONTROLLER_DEADZONE) ? val : 0.0f;
+        return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float leftStickY(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
-        return (std::abs(val) > CONTROLLER_DEADZONE) ? val : 0.0f;
+        return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float rightStickX(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
-        return (std::abs(val) > CONTROLLER_DEADZONE) ? val : 0.0f;
+        return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float rightStickY(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
-        return (std::abs(val) > CONTROLLER_DEADZONE) ? val : 0.0f;
+        return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float leftTrigger(int slot = 0) const {
@@ -436,7 +462,6 @@ public:
         return SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
     }
 
-    // ─── Button & other helpers ────────────────────────────────────────────
     bool buttonDown(int slot, SDL_GamepadButton button) const {
         if (!controllerConnected(slot)) return false;
         return SDL_GetGamepadButton(controllers_[slot].gamepad.get(), button);
@@ -460,10 +485,7 @@ private:
     void openController(SDL_JoystickID id) {
         if (!SDL_IsGamepad(id)) return;
         auto* gp = SDL_OpenGamepad(id);
-        if (!gp) {
-            LOG_ERROR_CAT("INPUT", "SDL_OpenGamepad failed: {}", SDL_GetError());
-            return;
-        }
+        if (!gp) return;
 
         size_t slot = 0;
         for (; slot < controllers_.size(); ++slot)
@@ -478,8 +500,8 @@ private:
         controllers_[slot].id = id;
 
         auto props = SDL_GetGamepadProperties(gp);
-        controllers_[slot].rumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
-        controllers_[slot].gyro   = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO);
+        controllers_[slot].rumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) && Options::SDL3::EnableRumble;
+        controllers_[slot].gyro   = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO) && Options::SDL3::EnableGyro;
 
         LOG_SUCCESS_CAT("INPUT", "Gamepad connected (slot {}) — {}", slot, SDL_GetGamepadName(gp));
     }
@@ -526,7 +548,6 @@ private:
     std::unordered_map<uint64_t, Subscription> subscriptions_;
     std::unordered_map<std::string, SDL_Scancode> bindings_;
 
-    // Track finished callbacks
     std::mutex callback_mtx_;
     std::unordered_map<MIX_Track*, std::function<void(int)>> stopped_callbacks_;
 
