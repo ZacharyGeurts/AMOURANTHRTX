@@ -188,7 +188,7 @@ namespace Options::Rendering {
 
     inline bool    EnableAdaptiveResolution   = true;
     inline float   MinResolutionScale         = 0.10f;                     // Lowest allowed scale (heavy fallback)
-    inline float   MaxResolutionScale         = 20.0f;                      // Highest supersampling allowed
+    inline float   MaxResolutionScale         = 2.0f;                      // Highest supersampling allowed
     inline float   ResolutionStepSize         = 1.2f;
 
     inline float   ResolutionAdjustHysteresis = 0.9f;                     // Anti-oscillation threshold

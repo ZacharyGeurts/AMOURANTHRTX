@@ -52,7 +52,7 @@
 
 #define GLOBAL_SCALE                1.32
 #define JUMP_FREQ                   1.8
-#define JUMP_AMP                    0.26
+#define JUMP_AMP                    0.16
 #define GRAVITY_DAMP                0.92
 #define BREATH_SPEED                0.75
 #define BREATH_AMP                  0.116
@@ -69,7 +69,7 @@
 // ── Sizes & Positions ───────────────────────────────────────────────────────
 #define BOOB_BASE_Y                 0.98
 #define BOOB_BASE_Z                 0.24
-#define BOOB_SEPARATION             0.12
+#define BOOB_SEPARATION             0.26
 #define BOOB_RADIUS_LEFT            0.2
 #define BOOB_RADIUS_RIGHT           0.2
 
