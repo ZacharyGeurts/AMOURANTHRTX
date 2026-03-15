@@ -6,10 +6,10 @@
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
 //
-// Pure 3D raymarching — owns HDR pair, descriptors, materials, adaptive dispatch,
+// Pure 3D raymarching canvas — owns HDR pair, descriptors, materials, adaptive dispatch,
 // timing, resize, SDL event polling, quit detection, fullscreen toggle
+// Fully integrated with current SDL3.hpp, Pipeline.hpp, Materials.hpp, OptionsMenu.hpp
 // Uses CANVAS.spv (compiled from CANVAS.comp) via Pipeline
-// Fully integrated with current SDL3.hpp and Materials library
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
@@ -18,7 +18,7 @@
 #include "OptionsMenu.hpp"
 #include "Pipeline.hpp"
 #include "Materials.hpp"
-#include "SDL3.hpp"
+#include "SDL3.hpp"  // SDL3 macro defined here as SDL3System::get()
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/rotate_vector.hpp>
@@ -28,7 +28,11 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <thread>
 
+// =============================================================================
+// RayCanvas — main raymarching renderer class
+// =============================================================================
 class RayCanvas {
 public:
     RayCanvas(int initialWidth, int initialHeight, SDL_Window* window)
@@ -65,9 +69,14 @@ public:
             std::abort();
         }
 
+        // Get timestamp period for GPU timing
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(rtx().physical, &props);
         timestampPeriodNs_ = props.limits.timestampPeriod;
+
+        // Pipeline setup first — ensures descriptor layout exists before we allocate sets
+        Pipeline::create_pipeline_layout();
+        Pipeline::create_canvas_pipeline();  // Loads CANVAS.spv
 
         createTimestampQueryPool();
         buildMaterialLibrary();
@@ -75,11 +84,6 @@ public:
         createPersistentHDR();
         createPreviousHDR();
         createDescriptorPoolAndSet();
-
-        Pipeline::initialize();
-        Pipeline::create_pipeline_layout();
-        Pipeline::create_canvas_pipeline();
-
         updateDescriptorSet();
         clearHDRImages();
 
@@ -107,6 +111,7 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Destroyed");
     }
 
+    // Main per-frame update — polls events, handles resize/fullscreen, dispatches compute, presents
     void maybeUpdateCanvas() noexcept {
         if (destroyed_) return;
 
@@ -114,7 +119,7 @@ public:
 
         double now = TotalTime::get().seconds();
 
-        // Poll SDL events (RayCanvas owns polling)
+        // Poll SDL events (RayCanvas owns polling for responsiveness)
         int currentW = window_width_;
         int currentH = window_height_;
         bool quit = false;
@@ -122,7 +127,7 @@ public:
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            SDL3.pump(ev);
+            SDL3System::get().pump(ev);
 
             if (ev.type == SDL_EVENT_QUIT) {
                 quit = true;
@@ -142,9 +147,7 @@ public:
             }
         }
 
-        if (fullscreen_toggle) {
-            toggleFullscreen();
-        }
+        if (fullscreen_toggle) toggleFullscreen();
 
         if (quit) {
             destroyed_ = true;
@@ -152,7 +155,6 @@ public:
             return;
         }
 
-        // Handle resize / minimize
         bool nowMinimized = (currentW <= 0 || currentH <= 0);
         if (nowMinimized) {
             minimized_ = true;
@@ -180,8 +182,8 @@ public:
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
 
+        // Acquire next image
         uint32_t imageIndex = 0;
-
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -203,6 +205,7 @@ public:
             return;
         }
 
+        // Render pass
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
@@ -243,6 +246,7 @@ public:
 
         endSubmitAndWait(cmd);
 
+        // GPU timing
         uint64_t timestamps[2]{};
         if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
                                   sizeof(timestamps), timestamps, sizeof(uint64_t),
@@ -258,6 +262,7 @@ public:
             adaptiveScale_ = 1.0;
         }
 
+        // Blit to swapchain
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return;
 
@@ -319,6 +324,7 @@ public:
 
         endSubmitAndWait(blitCmd);
 
+        // Present
         VkPresentInfoKHR pi{};
         pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.swapchainCount = 1;
@@ -350,7 +356,7 @@ public:
             const char* mode = scaleFactor < 0.98 ? "SUBSAMPLING" :
                                scaleFactor > 1.02 ? "SUPERSAMPLING" : "NATIVE";
 
-            double targetFrameMs = 1000.0 / (measuredRefreshRateHz_ * 1.18);
+            double targetFrameMs = 1000.0 / measuredRefreshRateHz_;
             double gpuLoadPercent = targetFrameMs > 0.001 ?
                                     (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 : 0.0;
 
@@ -363,25 +369,25 @@ public:
             double freePercent = totalMB > 0 ? 100.0 * (1.0 - usedMB / totalMB) : 0.0;
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
-                          "              RayCanvas Status  •  t+{}s\n"
+                          "              RayCanvas Status  •  t+{:.4}s\n"
                           "  FPS:            {}     (avg frame {} µs)\n"
                           "  Refresh Rate:   {} Hz\n"
                           "  Window:         {} x {}\n"
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
-                          "  GPU load:       {:.2f}%   (smoothed {:.2f} ms)\n"
+                          "  GPU load:       {:.3f}%   (smoothed {:.3f} ms)\n"
                           "  Render Path:    Pure Raymarched 3D (CANVAS.spv)\n"
                           "  State:          {}\n"
                           "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
-                          "  VRAM:           {:.2f} MB used / {:.2f} MB total ({:.2f}% free)\n"
+                          "  VRAM:           {:.3f} MB used / {:.3f} MB total ({:.3f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
-                          now * 0.1, avgFps, avgDt_us, measuredRefreshRateHz_,
+                          now, avgFps, avgDt_us, measuredRefreshRateHz_,
                           winW, winH, render_width_, render_height_, scaleFactor, mode,
                           adaptiveScale_, gpuLoadPercent, smoothedGpuTimeMs_,
                           stateEmoji,
                           Options::Rendering::EnableAdaptiveResolution ? "✅" : "❌",
-                          Options::Rendering::ACCUMULATION ? "✅" : "❌",
+                          Options::Rendering::EnableAccumulation ? "✅" : "❌",
                           scaleFactor > 1.0 ? "⚡" : "❌",
                           usedMB, totalMB, freePercent,
                           frameCount_);
@@ -390,20 +396,22 @@ public:
         }
     }
 
-    int  getWidth()  const noexcept { return window_width_; }
-    int  getHeight() const noexcept { return window_height_; }
-    bool isMinimized() const noexcept { return minimized_; }
-    bool isDestroyed() const noexcept { return destroyed_; }
+    [[nodiscard]] int  getWidth()  const noexcept { return window_width_; }
+    [[nodiscard]] int  getHeight() const noexcept { return window_height_; }
+    [[nodiscard]] bool isMinimized() const noexcept { return minimized_; }
+    [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
+    // Toggle fullscreen mode
     void toggleFullscreen() noexcept {
-        Uint64 flags = SDL_GetWindowFlags(window_);
+        auto flags = SDL_GetWindowFlags(window_);
         bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN) != 0;
 
         SDL_SetWindowFullscreen(window_, !isFullscreen);
         LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFullscreen ? "disabled" : "enabled");
     }
 
+    // Handle window resize / minimize
     void onResize(int newWidth, int newHeight, bool fromUserResize) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
@@ -445,11 +453,12 @@ private:
         clearHDRImages();
     }
 
+    // Adjust adaptive render scale based on GPU load
     void adjustAdaptiveScale(double now) noexcept {
         double elapsed = now - lastAdaptiveAdjustTime_;
         if (elapsed < 0.6) return;
 
-        double targetFrameMs = 1000.0 / (measuredRefreshRateHz_ * 1.18);
+        double targetFrameMs = 1000.0 / measuredRefreshRateHz_;
         double gpuTimeMs = smoothedGpuTimeMs_;
         double gpuLoadPercent = targetFrameMs > 0.001 ? (gpuTimeMs / targetFrameMs) * 100.0 : 0.0;
 
@@ -458,10 +467,10 @@ private:
         if (gpuLoadPercent > 220.0)      targetScale *= 0.50;
         else if (gpuLoadPercent > 180.0) targetScale *= 0.65;
         else if (gpuLoadPercent > 140.0) targetScale *= 0.78;
-        else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent + 8.0) targetScale *= 0.88;
-        else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent)       targetScale *= 0.94;
-        else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.70) targetScale *= 1.20;
-        else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.85) targetScale *= 1.10;
+        else if (gpuLoadPercent > 93.0)  targetScale *= 0.88;
+        else if (gpuLoadPercent > 85.0)  targetScale *= 0.94;
+        else if (gpuLoadPercent < 60.0)  targetScale *= 1.20;
+        else if (gpuLoadPercent < 72.0)  targetScale *= 1.10;
 
         targetScale = std::clamp(targetScale,
                                  static_cast<double>(Options::Rendering::MinResolutionScale),
@@ -477,10 +486,9 @@ private:
         lastAdaptiveAdjustTime_ = now;
     }
 
-    void updateRenderResolution() noexcept
-    {
-        if (!Options::Rendering::EnableAdaptiveResolution)
-        {
+    // Update internal render resolution based on adaptive scale
+    void updateRenderResolution() noexcept {
+        if (!Options::Rendering::EnableAdaptiveResolution) {
             render_width_  = window_width_;
             render_height_ = window_height_;
             return;
@@ -488,14 +496,11 @@ private:
 
         double scale = adaptiveScale_;
 
-        int64_t w = static_cast<int64_t>(window_width_  * scale);
-        int64_t h = static_cast<int64_t>(window_height_ * scale);
+        int64_t w = static_cast<int64_t>(std::round(static_cast<double>(window_width_) * scale));
+        int64_t h = static_cast<int64_t>(std::round(static_cast<double>(window_height_) * scale));
 
-        // Hard Vulkan/driver limit only — fail fast if exceeded
         if (w > 32768) w = 32768;
         if (h > 32768) h = 32768;
-
-        // Negative / zero protection — fail fast later if invalid
         if (w < 1) w = 1;
         if (h < 1) h = 1;
 
@@ -503,16 +508,17 @@ private:
         render_height_ = static_cast<int>(h);
     }
 
+    // Create timestamp query pool for GPU timing
     void createTimestampQueryPool() noexcept {
         VkQueryPoolCreateInfo qci{};
         qci.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
         qci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
         qci.queryCount = 2;
 
-        vkh.checker(vkCreateQueryPool(rtx().device, &qci, nullptr, &timestampQueryPool_),
-                    "QUERY", "Timestamp Pool");
+        vkCreateQueryPool(rtx().device, &qci, nullptr, &timestampQueryPool_);
     }
 
+    // Create main HDR storage image
     void createPersistentHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
         destroyHDRResources();
@@ -529,7 +535,7 @@ private:
         ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_), "MEMORY", "HDR Image");
+        vkCreateImage(rtx().device, &ci, nullptr, &hdrOutputImage_);
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(rtx().device, hdrOutputImage_, &req);
@@ -541,8 +547,7 @@ private:
         mai.allocationSize  = req.size;
         mai.memoryTypeIndex = memType;
 
-        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_), "MEMORY", "HDR Memory");
-
+        vkAllocateMemory(rtx().device, &mai, nullptr, &hdrOutputMemory_);
         vkBindImageMemory(rtx().device, hdrOutputImage_, hdrOutputMemory_, 0);
 
         VkImageViewCreateInfo vi{};
@@ -552,9 +557,10 @@ private:
         vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_), "MEMORY", "HDR View");
+        vkCreateImageView(rtx().device, &vi, nullptr, &hdrOutputView_);
     }
 
+    // Create previous frame HDR for accumulation/TAA
     void createPreviousHDR() noexcept {
         vkDeviceWaitIdle(rtx().device);
 
@@ -578,7 +584,7 @@ private:
         ci.usage       = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        vkh.checker(vkCreateImage(rtx().device, &ci, nullptr, &prevHdrOutputImage_), "MEMORY", "Prev HDR");
+        vkCreateImage(rtx().device, &ci, nullptr, &prevHdrOutputImage_);
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(rtx().device, prevHdrOutputImage_, &req);
@@ -590,8 +596,7 @@ private:
         mai.allocationSize  = req.size;
         mai.memoryTypeIndex = memType;
 
-        vkh.checker(vkAllocateMemory(rtx().device, &mai, nullptr, &prevHdrOutputMemory_), "MEMORY", "Prev HDR Memory");
-
+        vkAllocateMemory(rtx().device, &mai, nullptr, &prevHdrOutputMemory_);
         vkBindImageMemory(rtx().device, prevHdrOutputImage_, prevHdrOutputMemory_, 0);
 
         VkImageViewCreateInfo vi{};
@@ -601,9 +606,10 @@ private:
         vi.format           = VK_FORMAT_R32G32B32A32_SFLOAT;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        vkh.checker(vkCreateImageView(rtx().device, &vi, nullptr, &prevHdrOutputView_), "MEMORY", "Prev HDR View");
+        vkCreateImageView(rtx().device, &vi, nullptr, &prevHdrOutputView_);
     }
 
+    // Destroy HDR images and views
     void destroyHDRResources() noexcept {
         if (hdrOutputView_)   vkDestroyImageView (rtx().device, hdrOutputView_,   nullptr);
         if (hdrOutputImage_)  vkDestroyImage     (rtx().device, hdrOutputImage_,  nullptr);
@@ -622,6 +628,7 @@ private:
         prevHdrOutputMemory_ = VK_NULL_HANDLE;
     }
 
+    // Create descriptor pool and allocate set
     void createDescriptorPoolAndSet() noexcept {
         VkDescriptorPoolSize poolSizes[] = {
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   2},
@@ -632,11 +639,10 @@ private:
         pci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         pci.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
         pci.maxSets       = 1;
-        pci.poolSizeCount = std::size(poolSizes);
+        pci.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
         pci.pPoolSizes    = poolSizes;
 
-        vkh.checker(vkCreateDescriptorPool(rtx().device, &pci, nullptr, &descriptorPool_),
-                    "DESCRIPTOR", "RayCanvas");
+        vkCreateDescriptorPool(rtx().device, &pci, nullptr, &descriptorPool_);
 
         VkDescriptorSetAllocateInfo ai{};
         ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -644,10 +650,10 @@ private:
         ai.descriptorSetCount = 1;
         ai.pSetLayouts        = &Pipeline::main_descriptor_layout;
 
-        vkh.checker(vkAllocateDescriptorSets(rtx().device, &ai, &descriptorSet_),
-                    "DESCRIPTOR", "RayCanvas");
+        vkAllocateDescriptorSets(rtx().device, &ai, &descriptorSet_);
     }
 
+    // Update descriptor set with current HDR views and material buffer
     void updateDescriptorSet() noexcept {
         if (!hdrOutputView_ || !prevHdrOutputView_) return;
 
@@ -687,9 +693,10 @@ private:
         writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[2].pBufferInfo      = &matInfo;
 
-        vkUpdateDescriptorSets(rtx().device, writes.size(), writes.data(), 0, nullptr);
+        vkUpdateDescriptorSets(rtx().device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
+    // Begin one-time submit transient command buffer
     VkCommandBuffer beginTransientCommandBuffer() noexcept {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkCommandBufferAllocateInfo alloc{};
@@ -698,32 +705,26 @@ private:
         alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc.commandBufferCount = 1;
 
-        VkResult res = vkAllocateCommandBuffers(rtx().device, &alloc, &cmd);
-        if (res != VK_SUCCESS) return VK_NULL_HANDLE;
+        vkAllocateCommandBuffers(rtx().device, &alloc, &cmd);
 
         VkCommandBufferBeginInfo begin{};
         begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        res = vkBeginCommandBuffer(cmd, &begin);
-        if (res != VK_SUCCESS) {
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-            return VK_NULL_HANDLE;
-        }
+        vkBeginCommandBuffer(cmd, &begin);
 
         return cmd;
     }
 
+    // End, submit, wait, and free transient command buffer
     void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
-        if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-            return;
-        }
+        if (!cmd) return;
+
+        vkEndCommandBuffer(cmd);
 
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
         vkCreateFence(rtx().device, &fci, nullptr, &fence);
 
         VkSubmitInfo submit{};
@@ -737,6 +738,7 @@ private:
         vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
     }
 
+    // Transition image layout
     void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                                VkImageLayout oldLayout, VkImageLayout newLayout) noexcept {
         VkImageMemoryBarrier barrier{};
@@ -748,22 +750,22 @@ private:
         barrier.image = image;
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
+        VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
             barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            dstStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         } else if (oldLayout == VK_IMAGE_LAYOUT_GENERAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
             barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
             barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         }
 
-        vkCmdPipelineBarrier(cmd,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0,
-                             0, nullptr,
-                             0, nullptr,
-                             1, &barrier);
+        vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0,
+                             0, nullptr, 0, nullptr, 1, &barrier);
     }
 
+    // Clear HDR images to black
     void clearHDRImages() noexcept {
         VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -780,6 +782,7 @@ private:
         endSubmitAndWait(cmd);
     }
 
+    // Build and upload material library buffer
     void buildMaterialLibrary() noexcept {
         VkDeviceSize size = sizeof(Materials::AllMaterials);
 

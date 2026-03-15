@@ -87,21 +87,17 @@ static inline void showSacrificialSplash() noexcept {
     SDL_ShowWindow(splashWin);
     SDL_RenderPresent(splashRen);
 
-    // ─────────────────────────────────────────────────────────────
-    // Audio — single WAV file, no chaining needed
-    // ─────────────────────────────────────────────────────────────
-    SDL3.playSound("assets/audio/splash.wav", "play");
+    // Audio — single WAV file
+    SDL3System::get().playSound("assets/audio/splash.wav", "play");
 
-    // ─────────────────────────────────────────────────────────────
     // Visual timeout + input skip (~3.4s max)
-    // ─────────────────────────────────────────────────────────────
     double start = TotalTime::get().seconds();
     bool skip = false;
 
     while (TotalTime::get().seconds() - start < 3.4 && !skip) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            SDL3.pump(e);
+            SDL3System::get().pump(e);
 
             if (e.type == SDL_EVENT_QUIT ||
                 e.type == SDL_EVENT_KEY_DOWN ||
@@ -116,10 +112,10 @@ static inline void showSacrificialSplash() noexcept {
         SDL_Delay(1);
     }
 
-    // Stop any lingering audio
-    for (int s = 0; s < MAX_SLOTS; ++s) {
-        if (SDL3.isTrackPlaying(s)) {
-            SDL3.playSound("", "stop", s);
+    // Stop any lingering audio using centralized max slots
+    for (int s = 0; s < Options::SDL3::MaxAudioSlots; ++s) {
+        if (SDL3System::get().isTrackPlaying(s)) {
+            SDL3System::get().playSound("", "stop", s);
         }
     }
 
@@ -131,22 +127,17 @@ static inline void showSacrificialSplash() noexcept {
     LOG_SUCCESS_CAT("SPLASH", "Sacrificial splash completed (skipped={})", skip ? "yes" : "no");
 }
 
-// Engine memory init
-static inline void EngineMemoryInit() noexcept {
-    LOG_SUCCESS_CAT("MEMORY", "Engine memory ready");
-}
-
 // Main entry point
 inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     install_apocalypse_handler();
     Logging::Logger::get().startup();
     LOG_SUCCESS_CAT("MAIN", "Apocalypse handler & logger ready");
 
-    // Window
+    // Window — uses Options::SDL3 defaults
     SDL_Window* window = SDL_CreateWindow(
         "AMOURANTHRTX",
-        Options::Window::DEFAULT_WIDTH,
-        Options::Window::DEFAULT_HEIGHT,
+        Options::SDL3::DefaultWidth,
+        Options::SDL3::DefaultHeight,
         SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
     );
     if (!window) {
@@ -155,7 +146,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     }
 
     // SDL3 init
-    if (!SDL3.init(window)) {
+    if (!SDL3System::get().init(window)) {
         LOG_FATAL_CAT("SDL3", "SDL3.init failed");
         SDL_DestroyWindow(window);
         return 1;
@@ -167,7 +158,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     VkInstance instance = createVulkanInstance();
     if (instance == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("VULKAN", "Instance creation failed");
-        SDL3.shutdown();
+        SDL3System::get().shutdown();
         SDL_DestroyWindow(window);
         return 1;
     }
@@ -176,7 +167,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
         LOG_FATAL_CAT("VULKAN", "Failed to create Vulkan surface");
         vkDestroyInstance(instance, nullptr);
-        SDL3.shutdown();
+        SDL3System::get().shutdown();
         SDL_DestroyWindow(window);
         return 1;
     }
@@ -190,7 +181,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     if (device == VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
-        SDL3.shutdown();
+        SDL3System::get().shutdown();
         SDL_DestroyWindow(window);
         return 1;
     }
@@ -218,74 +209,34 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolInfo.queueFamilyIndex = rtx().graphics_family;
 
-    if (vkCreateCommandPool(device, &poolInfo, nullptr, &rtx().transient_pool) != VK_SUCCESS) {
-        LOG_FATAL_CAT("VULKAN", "Transient pool creation failed");
-        vkDestroyDevice(device, nullptr);
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL3.shutdown();
-        SDL_DestroyWindow(window);
-        return 1;
-    }
-
+    vkCreateCommandPool(device, &poolInfo, nullptr, &rtx().transient_pool);
     LOG_SUCCESS_CAT("VULKAN", "Transient command pool created");
 
-    Swapchain::create(window, Options::Window::DEFAULT_WIDTH, Options::Window::DEFAULT_HEIGHT);
-    if (!Swapchain::swapchain.valid()) {
-        LOG_FATAL_CAT("SWAPCHAIN", "Swapchain creation failed");
-        vkDestroyCommandPool(device, rtx().transient_pool, nullptr);
-        vkDestroyDevice(device, nullptr);
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-        vkDestroyInstance(instance, nullptr);
-        SDL3.shutdown();
-        SDL_DestroyWindow(window);
-        return 1;
-    }
+    Swapchain::create(window, Options::SDL3::DefaultWidth, Options::SDL3::DefaultHeight);
 
     LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", 
                  Swapchain::getExtent().width, Swapchain::getExtent().height);
 
-    EngineMemoryInit();
-
-    Pipeline::initialize();
-    Pipeline::create_pipeline_layout();
-    Pipeline::create_canvas_pipeline();  // Loads CANVAS.spv
-
-    LOG_AMOURANTH("AMOURANTHRTX v0.91 — SINGLE SHADER SEAL FORGED — CANVAS ACTIVE 💖");
-
     raycanvas = std::make_unique<RayCanvas>(
-        Options::Window::DEFAULT_WIDTH,
-        Options::Window::DEFAULT_HEIGHT,
+        Options::SDL3::DefaultWidth,
+        Options::SDL3::DefaultHeight,
         window
     );
 
-    CAM.reset();
-    CAM.setMode(CameraMode::FreeLook3D);
-    LOG_INFO_CAT("CAMERA", "Reset complete — mode: {}, pos: {} {} {} | fov: {} | zoom: {}",
-                 static_cast<int>(CAM.mode()),
-                 CAM.position().x, CAM.position().y, CAM.position().z,
-                 CAM.fov(), CAM.zoom());
-
-    LOG_AMOURANTH("Genesis sealed — eternal compute begins");
-
-    // Main loop
-    auto prevTime = std::chrono::steady_clock::now();
-
+    // Main loop — everything flows from the sealed eternal clock
     while (true) {
-        auto now = std::chrono::steady_clock::now();
-        float dt = std::chrono::duration<float>(now - prevTime).count();
-        prevTime = now;
-
-        CAM.update(dt);
 
         raycanvas->maybeUpdateCanvas();
 
-        if (raycanvas->isDestroyed()) break;
+        if (raycanvas->isDestroyed()) {
+            LOG_INFO_CAT("MAIN", "Canvas destroyed — exiting main loop");
+            break;
+        }
     }
 
     raycanvas.reset();
     Pipeline::shutdown();
-    SDL3.shutdown();
+    SDL3System::get().shutdown();
     SDL_DestroyWindow(window);
 
     LOG_SUCCESS_CAT("MAIN", "Engine shutdown complete");

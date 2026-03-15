@@ -69,7 +69,7 @@
 // ── Sizes & Positions ───────────────────────────────────────────────────────
 #define BOOB_BASE_Y                 0.98
 #define BOOB_BASE_Z                 0.24
-#define BOOB_SEPARATION             0.26
+#define BOOB_SEPARATION             0.16
 #define BOOB_RADIUS_LEFT            0.2
 #define BOOB_RADIUS_RIGHT           0.2
 

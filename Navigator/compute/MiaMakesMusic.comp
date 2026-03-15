@@ -23,7 +23,7 @@ layout(push_constant) uniform Push {
 #define ASPECT_ZOOM               1.45
 
 #define BIRTHSTONE_COUNT          12
-#define ORBIT_RADIUS_BASE         1.8  * GLOBAL_SCALE
+#define ORBIT_RADIUS_BASE         GLOBAL_SCALE
 #define ORBIT_SPEED_BASE          0.015
 #define ORBIT_HEIGHT_AMP          0.6  * GLOBAL_SCALE
 #define BIRTHSTONE_BASE_SIZE      0.12 * GLOBAL_SCALE
@@ -35,11 +35,11 @@ layout(push_constant) uniform Push {
 #define NOTE_RADIUS_Y             0.3  * GLOBAL_SCALE
 #define NOTE_RADIUS_Z             0.25 * GLOBAL_SCALE
 
-#define ROT_Y_SPEED               0.009
-#define ROT_X_SPEED               0.006
-#define TILT_X_AMP                0.18
-#define TILT_Y_AMP                0.10
-#define PULSE_SPEED               2.8
+#define ROT_Y_SPEED               1.009
+#define ROT_X_SPEED               1.006
+#define TILT_X_AMP                1.18
+#define TILT_Y_AMP                1.10
+#define PULSE_SPEED               0.8
 #define PULSE_OFFSET              3.14
 
 #define KEYS_VISIBLE_COUNT        7.5

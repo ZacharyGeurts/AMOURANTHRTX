@@ -322,7 +322,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.cameraQuat   = glm::vec4(CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
     pc.cameraFovDeg = CAM.fov();
     pc.aspectRatio  = static_cast<float>(width) / static_cast<float>(height);
-    pc.exposure     = Options::Rendering::EXPOSURE;
+    pc.exposure     = Options::Rendering::Exposure;
 
     // Environment / Living World
     float tod = Options::LivingWorld::CurrentTimeOfDay;
@@ -344,7 +344,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.fogDensity          = Options::LivingWorld::FogDensity;
     pc.dayNightFactor      = tod / 24.0f;
     pc.cloudCoverage       = Options::LivingWorld::CloudCoverage;
-    pc.debugFlags          = Options::LivingWorld::DebugFlags;
+    pc.debugFlags          = Options::Rendering::DebugFlags;
 
     // Raymarching quality controls
     pc.raymarchMaxDist     = Options::Rendering::RaymarchMaxDistance;

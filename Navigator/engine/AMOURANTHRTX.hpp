@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine — Header-Only Hybrid 2026 Edition (FIXED v2)
+// AMOURANTH RTX Engine — Header-Only Hybrid 2026 Edition
 // Pure raymarching + hardware ray tracing + procedural geometry
 // (C) 2025-2026 Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
@@ -122,6 +122,7 @@ struct RTX {
     VkStridedDeviceAddressRegionKHR raygen_sbt_region{};
     VkStridedDeviceAddressRegionKHR miss_sbt_region{};
     VkStridedDeviceAddressRegionKHR hit_sbt_region{};
+    VkStridedDeviceAddressRegionKHR callable_sbt_region{};
 
     struct BufferInfo {
         VkBuffer            buffer          = VK_NULL_HANDLE;
@@ -244,9 +245,9 @@ inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    appInfo.pEngineName        = "AMOURANTH";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 0, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 6, 0);
+    appInfo.pEngineName        = "AMOURANTHRTX";
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 6, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlCount = 0;
@@ -705,7 +706,7 @@ inline void recreate(int w, int h) noexcept {
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
     vkGetPhysicalDeviceSurfaceFormatsKHR(rtx().physical, rtx().surface, &formatCount, formats.data());
 
-    format = formats[0].format;
+    format = VK_FORMAT_B8G8R8A8_SRGB;
     for (const auto& f : formats) {
         if (f.format == VK_FORMAT_B8G8R8A8_SRGB && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             format = f.format;
@@ -719,12 +720,6 @@ inline void recreate(int w, int h) noexcept {
     vkGetPhysicalDeviceSurfacePresentModesKHR(rtx().physical, rtx().surface, &modeCount, modes.data());
 
     presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    for (auto m : modes) {
-        if (m == VK_PRESENT_MODE_MAILBOX_KHR) {
-            presentMode = m;
-            break;
-        }
-    }
 
     VkSwapchainCreateInfoKHR ci{};
     ci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -797,7 +792,7 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     rtx().instance = createVulkanInstance();
     if (!rtx().instance) return false;
 
-    if (SDL_Vulkan_CreateSurface(window, rtx().instance, nullptr, &rtx().surface) != 0) {
+    if (SDL_Vulkan_CreateSurface(window, rtx().instance, nullptr, &rtx().surface) == 0) {
         return false;
     }
 

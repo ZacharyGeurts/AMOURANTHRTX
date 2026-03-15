@@ -3,6 +3,7 @@
 // =============================================================================
 // AMOURANTH RTX — SDL3 Core + Image + Mixer + TTF + Full Input (16-slot audio)
 // Full 4-axis controller support + real track finished callbacks
+// Updated to use OptionsMenu.hpp for all configuration
 // =============================================================================
 
 #include <SDL3/SDL.h>
@@ -30,13 +31,12 @@
 #include "AMOURANTHRTX.hpp"  // for Swapchain
 
 // =============================================================================
-// CONFIG
+// CONSTANTS — centralized from Options::SDL3
 // =============================================================================
-constexpr int   AUDIO_FREQ          = 48000;
-constexpr int   AUDIO_CHANNELS      = 2;
-constexpr int   MAX_SLOTS           = 16;
-constexpr float DEFAULT_VOLUME      = 1.0f;
-constexpr float CONTROLLER_DEADZONE = 0.15f;
+constexpr int     MAX_SLOTS         = Options::SDL3::MaxAudioSlots;     // Number of audio tracks/slots
+constexpr int     AUDIO_FREQ        = Options::SDL3::AudioFrequency;    // Sample rate (Hz)
+constexpr int     AUDIO_CHANNELS    = Options::SDL3::AudioChannels;     // Mono=1, Stereo=2
+constexpr float   DEFAULT_VOLUME    = Options::SDL3::DefaultVolume;     // Default track gain
 
 // =============================================================================
 // TYPES
@@ -116,6 +116,7 @@ public:
         mixer_ready_ = true;
 
         tracks_.resize(MAX_SLOTS);
+        slots_.resize(MAX_SLOTS);
         for (int i = 0; i < MAX_SLOTS; ++i) {
             tracks_[i] = MIX_CreateTrack(mixer_);
             if (tracks_[i]) {
@@ -124,11 +125,10 @@ public:
             }
         }
 
-        openAllControllers();
         bindDefaultActions();
 
         initialized_ = true;
-        LOG_SUCCESS_CAT("SDL3", "Initialized — 16 audio slots + full controller support");
+        LOG_SUCCESS_CAT("SDL3", "Initialized — {} audio slots + full controller support", MAX_SLOTS);
         return true;
     }
 
@@ -175,28 +175,16 @@ public:
         }
 
         Swapchain::recreate(pixelW, pixelH);
-
-        LOG_INFO_CAT("SDL3", "Resize handled — pixel size {}x{}", pixelW, pixelH);
     }
 
-    // Apply runtime SDL3 options (VSync, fullscreen, etc.)
+    // Apply runtime SDL3 options from Options::SDL3
     void applyOptions() noexcept {
+        if (!window_) return;
 
-        // Fullscreen / borderless
-        Uint64 flags = SDL_GetWindowFlags(window_);
-        bool currentFullscreen = (flags & SDL_WINDOW_FULLSCREEN) == 0;
-        if (Options::SDL3::EnableFullscreen != currentFullscreen) {
-            SDL_SetWindowFullscreen(window_, Options::SDL3::EnableFullscreen);
-        }
+        SDL_SetWindowFullscreen(window_, Options::SDL3::StartFullscreen);
         SDL_SetWindowBordered(window_, !Options::SDL3::BorderlessWindow);
-
-        // Allow resize
         SDL_SetWindowResizable(window_, Options::SDL3::AllowWindowResize);
-
-        // Input capture
-        if (Options::SDL3::EnableInputCapture) {
-            SDL_SetWindowRelativeMouseMode(window_, true);
-        }
+        SDL_SetWindowRelativeMouseMode(window_, Options::SDL3::EnableInputCapture);
     }
 
     // ────────────────────────────────────────────────
@@ -317,16 +305,25 @@ public:
     // ────────────────────────────────────────────────
     SDL_Texture* loadTexture(SDL_Renderer* r, const std::string& path) {
         SDL_Surface* s = IMG_Load(path.c_str());
-        if (!s) return nullptr;
+        if (!s) {
+            LOG_ERROR_CAT("IMG", "IMG_Load failed for '{}': {}", path, SDL_GetError());
+            return nullptr;
+        }
         SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
         SDL_DestroySurface(s);
+        if (!t) {
+            LOG_ERROR_CAT("SDL", "SDL_CreateTextureFromSurface failed: {}", SDL_GetError());
+        }
         return t;
     }
 
     bool loadFont(const std::string& name, const std::string& path, int size) {
         if (!ttf_ready_) return false;
         TTF_Font* f = TTF_OpenFont(path.c_str(), static_cast<float>(size));
-        if (!f) return false;
+        if (!f) {
+            LOG_ERROR_CAT("TTF", "TTF_OpenFont failed for '{}': {}", path, SDL_GetError());
+            return false;
+        }
         fonts_[name].font = f;
         return true;
     }
@@ -334,13 +331,22 @@ public:
     SDL_Texture* renderText(SDL_Renderer* r, const std::string& fontname,
                             const std::string& text, SDL_Color col, int wrap = 0) {
         auto it = fonts_.find(fontname);
-        if (it == fonts_.end() || !it->second.font) return nullptr;
+        if (it == fonts_.end() || !it->second.font) {
+            LOG_ERROR_CAT("TTF", "Font '{}' not found", fontname);
+            return nullptr;
+        }
 
         SDL_Surface* s = TTF_RenderText_Blended_Wrapped(it->second.font, text.c_str(), 0, col, wrap);
-        if (!s) return nullptr;
+        if (!s) {
+            LOG_ERROR_CAT("TTF", "TTF_RenderText_Blended_Wrapped failed: {}", SDL_GetError());
+            return nullptr;
+        }
 
         SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
         SDL_DestroySurface(s);
+        if (!t) {
+            LOG_ERROR_CAT("SDL", "SDL_CreateTextureFromSurface failed: {}", SDL_GetError());
+        }
         return t;
     }
 
@@ -483,27 +489,31 @@ private:
     }
 
     void openController(SDL_JoystickID id) {
-        if (!SDL_IsGamepad(id)) return;
+        if (SDL_IsGamepad(id) == 0) return;
         auto* gp = SDL_OpenGamepad(id);
-        if (!gp) return;
-
-        size_t slot = 0;
-        for (; slot < controllers_.size(); ++slot)
-            if (!controllers_[slot].gamepad) break;
-
-        if (slot >= controllers_.size()) {
-            SDL_CloseGamepad(gp);
+        if (!gp) {
+            LOG_WARNING_CAT("INPUT", "SDL_OpenGamepad failed for id {}: {}", id, SDL_GetError());
             return;
         }
 
-        controllers_[slot].gamepad.reset(gp);
-        controllers_[slot].id = id;
+        size_t inputport = 0;
+        for (; inputport < controllers_.size(); ++inputport)
+            if (!controllers_[inputport].gamepad) break;
+
+        if (inputport >= controllers_.size()) {
+            SDL_CloseGamepad(gp);
+            LOG_WARNING_CAT("INPUT", "No free controller input port for id {}", id);
+            return;
+        }
+
+        controllers_[inputport].gamepad.reset(gp);
+        controllers_[inputport].id = id;
 
         auto props = SDL_GetGamepadProperties(gp);
-        controllers_[slot].rumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) && Options::SDL3::EnableRumble;
-        controllers_[slot].gyro   = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO) && Options::SDL3::EnableGyro;
+        controllers_[inputport].rumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) && Options::SDL3::EnableRumble;
+        controllers_[inputport].gyro   = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO) && Options::SDL3::EnableGyro;
 
-        LOG_SUCCESS_CAT("INPUT", "Gamepad connected (slot {}) — {}", slot, SDL_GetGamepadName(gp));
+        LOG_SUCCESS_CAT("INPUT", "Gamepad connected (Player {} Input Port {}) — {}", inputport+1, inputport, SDL_GetGamepadName(gp));
     }
 
     void closeController(SDL_JoystickID id) {
@@ -539,7 +549,7 @@ private:
     MIX_Mixer*  mixer_  = nullptr;
 
     std::vector<MIX_Track*> tracks_;
-    std::array<AudioSlot, MAX_SLOTS> slots_;
+    std::vector<AudioSlot> slots_;  // Dynamic size from Options::SDL3::MaxAudioSlots
 
     std::unordered_map<std::string, FontEntry> fonts_;
     std::array<ControllerState, 4> controllers_;
@@ -555,6 +565,5 @@ private:
     std::atomic<uint64_t> nextId_{0};
 };
 
-#define SDL3   SDL3System::get()
 #define INPUT  SDL3System::get()
 #define ON_EVENT(cb) SDL3.subscribe([](const SDL_Event& ev){ cb(ev); }, #cb)
