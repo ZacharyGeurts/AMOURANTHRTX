@@ -32,17 +32,33 @@
 class RayCanvas {
 public:
     RayCanvas(int initialWidth, int initialHeight, SDL_Window* window)
-        : window_(window), window_width_(initialWidth), window_height_(initialHeight),
-          render_width_(initialWidth), render_height_(initialHeight),
-          minimized_(false), destroyed_(false), firstFrame_(true),
-          materialsHandle_(0), hdrOutputImage_(VK_NULL_HANDLE), hdrOutputView_(VK_NULL_HANDLE),
-          hdrOutputMemory_(VK_NULL_HANDLE), prevHdrOutputImage_(VK_NULL_HANDLE),
-          prevHdrOutputView_(VK_NULL_HANDLE), prevHdrOutputMemory_(VK_NULL_HANDLE),
-          descriptorPool_(VK_NULL_HANDLE), descriptorSet_(VK_NULL_HANDLE),
-          adaptiveScale_(1.0), lastPresentTime_s_(0.0), measuredRefreshRateHz_(60.0),
-          lastFpsLog_(0.0), frameCount_(0), lastAdaptiveAdjustTime_(0.0),
-          needsRecreate_(false), timestampQueryPool_(VK_NULL_HANDLE),
-          timestampPeriodNs_(1.0), smoothedGpuTimeMs_(16.67)
+        : window_(window),
+          window_width_(initialWidth),
+          window_height_(initialHeight),
+          render_width_(initialWidth),
+          render_height_(initialHeight),
+          minimized_(false),
+          destroyed_(false),
+          firstFrame_(true),
+          materialsHandle_(0),
+          hdrOutputImage_(VK_NULL_HANDLE),
+          hdrOutputView_(VK_NULL_HANDLE),
+          hdrOutputMemory_(VK_NULL_HANDLE),
+          prevHdrOutputImage_(VK_NULL_HANDLE),
+          prevHdrOutputView_(VK_NULL_HANDLE),
+          prevHdrOutputMemory_(VK_NULL_HANDLE),
+          descriptorPool_(VK_NULL_HANDLE),
+          descriptorSet_(VK_NULL_HANDLE),
+          adaptiveScale_(1.0),
+          lastPresentTime_s_(0.0),
+          measuredRefreshRateHz_(60.0),
+          lastFpsLog_(0.0),
+          frameCount_(0),
+          lastAdaptiveAdjustTime_(0.0),
+          needsRecreate_(false),
+          timestampQueryPool_(VK_NULL_HANDLE),
+          timestampPeriodNs_(1.0),
+          smoothedGpuTimeMs_(16.67)
     {
         if (!Swapchain::get()) {
             LOG_FATAL_CAT("RAYCANVAS", "No valid swapchain — navigator must create it first");
@@ -98,7 +114,7 @@ public:
 
         double now = TotalTime::get().seconds();
 
-        // ── Poll SDL events (RayCanvas owns polling) ─────────────────────────────
+        // Poll SDL events (RayCanvas owns polling)
         int currentW = window_width_;
         int currentH = window_height_;
         bool quit = false;
@@ -106,20 +122,17 @@ public:
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            SDL3.pump(ev);  // forward to input system
+            SDL3.pump(ev);
 
-            // Quit detection
             if (ev.type == SDL_EVENT_QUIT) {
                 quit = true;
             }
 
-            // Resize detection
             if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
                 currentW = ev.window.data1;
                 currentH = ev.window.data2;
             }
 
-            // Fullscreen toggle (F11 or Alt+Enter)
             if (ev.type == SDL_EVENT_KEY_DOWN) {
                 bool altPressed = (ev.key.mod & SDL_KMOD_ALT) != 0;
                 if (ev.key.scancode == SDL_SCANCODE_F11 ||
@@ -139,7 +152,7 @@ public:
             return;
         }
 
-        // ── Handle resize / minimize ─────────────────────────────────────────────
+        // Handle resize / minimize
         bool nowMinimized = (currentW <= 0 || currentH <= 0);
         if (nowMinimized) {
             minimized_ = true;
@@ -234,7 +247,7 @@ public:
         if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
                                   sizeof(timestamps), timestamps, sizeof(uint64_t),
                                   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
-            double gpuTimeMs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs_ / 1'000'000.0;
+            double gpuTimeMs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs_ / 1000000.0;
             double alpha = (gpuTimeMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
             smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
         }
@@ -316,7 +329,7 @@ public:
 
         if (pres == VK_SUCCESS) {
             Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
-            measuredRefreshRateHz_ = static_cast<float>(1.0 / Swapchain::getSmoothedRefresh());
+            measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
         } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
             needsRecreate_ = true;
         } else if (pres != VK_SUCCESS) {
@@ -327,20 +340,19 @@ public:
         // Periodic status log (every 5 seconds)
         if (now - lastFpsLog_ >= 5.0) {
             double elapsed = now - lastFpsLog_;
-            double avgFps = (frameCount_ > 0) ? static_cast<double>(frameCount_) / elapsed : 0.0;
-            double avgDt_us = (frameCount_ > 0) ? (elapsed * 1000000.0) / static_cast<double>(frameCount_) : 0.0;
+            double avgFps = frameCount_ > 0 ? static_cast<double>(frameCount_) / elapsed : 0.0;
+            double avgDt_us = frameCount_ > 0 ? (elapsed * 1000000.0) / static_cast<double>(frameCount_) : 0.0;
 
             int winW = window_width_;
             int winH = window_height_;
 
-            double scaleFactor = (winW > 0) ? static_cast<double>(render_width_) / static_cast<double>(winW) : 1.0;
-            const char* mode = (scaleFactor < 0.98) ? "SUBSAMPLING" :
-                               (scaleFactor > 1.02) ? "SUPERSAMPLING" : "NATIVE";
+            double scaleFactor = winW > 0 ? static_cast<double>(render_width_) / winW : 1.0;
+            const char* mode = scaleFactor < 0.98 ? "SUBSAMPLING" :
+                               scaleFactor > 1.02 ? "SUPERSAMPLING" : "NATIVE";
 
             double targetFrameMs = 1000.0 / (measuredRefreshRateHz_ * 1.18);
-            double gpuLoadPercent = (targetFrameMs > 0.001)
-                                  ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0
-                                  : 0.0;
+            double gpuLoadPercent = targetFrameMs > 0.001 ?
+                                    (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 : 0.0;
 
             const char* stateEmoji = minimized_ ? "🟥 minimized" :
                                      (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" : "✅ active";
@@ -348,7 +360,7 @@ public:
             VRAMReality vram = Memory::measureReality();
             double usedMB = static_cast<double>(vram.driver_footprint) / (1024.0 * 1024.0);
             double totalMB = static_cast<double>(vram.total) / (1024.0 * 1024.0);
-            double freePercent = (totalMB > 0) ? 100.0 * (1.0 - (usedMB / totalMB)) : 0.0;
+            double freePercent = totalMB > 0 ? 100.0 * (1.0 - usedMB / totalMB) : 0.0;
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
                           "              RayCanvas Status  •  t+{}s\n"
@@ -370,7 +382,7 @@ public:
                           stateEmoji,
                           Options::Rendering::EnableAdaptiveResolution ? "✅" : "❌",
                           Options::Rendering::ACCUMULATION ? "✅" : "❌",
-                          (scaleFactor > 1.0) ? "⚡" : "❌",
+                          scaleFactor > 1.0 ? "⚡" : "❌",
                           usedMB, totalMB, freePercent,
                           frameCount_);
             lastFpsLog_ = now;
@@ -385,7 +397,7 @@ public:
 
 private:
     void toggleFullscreen() noexcept {
-        Uint32 flags = static_cast<Uint32>(SDL_GetWindowFlags(window_));
+        Uint64 flags = SDL_GetWindowFlags(window_);
         bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN) != 0;
 
         SDL_SetWindowFullscreen(window_, !isFullscreen);
@@ -438,28 +450,24 @@ private:
         if (elapsed < 0.6) return;
 
         double targetFrameMs = 1000.0 / (measuredRefreshRateHz_ * 1.18);
-        double gpuLoadPercent = (targetFrameMs > 0.001) ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 : 0.0;
+        double gpuTimeMs = smoothedGpuTimeMs_;
+        double gpuLoadPercent = targetFrameMs > 0.001 ? (gpuTimeMs / targetFrameMs) * 100.0 : 0.0;
 
         double targetScale = adaptiveScale_;
 
-        if (gpuLoadPercent > 220.0) targetScale *= 0.50;
+        if (gpuLoadPercent > 220.0)      targetScale *= 0.50;
         else if (gpuLoadPercent > 180.0) targetScale *= 0.65;
         else if (gpuLoadPercent > 140.0) targetScale *= 0.78;
         else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent + 8.0) targetScale *= 0.88;
-        else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent) targetScale *= 0.94;
-        else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.75) targetScale *= 1.12;
+        else if (gpuLoadPercent > Options::Rendering::MaxGPULoadPercent)       targetScale *= 0.94;
+        else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.70) targetScale *= 1.20;
+        else if (gpuLoadPercent < Options::Rendering::MaxGPULoadPercent * 0.85) targetScale *= 1.10;
 
-        double minScaleW = 320.0 / std::max(1, window_width_);
-        double minScaleH = 200.0 / std::max(1, window_height_);
-        double minScale  = std::max(minScaleW, minScaleH);
-
-        targetScale = std::max(targetScale, minScale);
-        targetScale = std::max(targetScale, 0.08);
         targetScale = std::clamp(targetScale,
                                  static_cast<double>(Options::Rendering::MinResolutionScale),
                                  static_cast<double>(Options::Rendering::MaxResolutionScale));
 
-        double hysteresis = (targetScale > adaptiveScale_) ? 0.04 : 0.12;
+        double hysteresis = targetScale > adaptiveScale_ ? 0.03 : 0.10;
 
         if (std::abs(targetScale - adaptiveScale_) > hysteresis) {
             adaptiveScale_ = targetScale;
@@ -469,21 +477,30 @@ private:
         lastAdaptiveAdjustTime_ = now;
     }
 
-    void updateRenderResolution() noexcept {
-        double scale = Options::Rendering::EnableAdaptiveResolution ? adaptiveScale_ : 1.0;
+    void updateRenderResolution() noexcept
+    {
+        if (!Options::Rendering::EnableAdaptiveResolution)
+        {
+            render_width_  = window_width_;
+            render_height_ = window_height_;
+            return;
+        }
 
-        double maxW = static_cast<double>(Options::Rendering::INTERNAL_WIDTH)  / window_width_;
-        double maxH = static_cast<double>(Options::Rendering::INTERNAL_HEIGHT) / window_height_;
-        scale = std::min(scale, std::min(maxW, maxH));
+        double scale = adaptiveScale_;
 
-        double minW_float = 320.0 * (static_cast<double>(window_width_)  / 1920.0);
-        double minH_float = 200.0 * (static_cast<double>(window_height_) / 1080.0);
+        int64_t w = static_cast<int64_t>(window_width_  * scale);
+        int64_t h = static_cast<int64_t>(window_height_ * scale);
 
-        int minW = std::max(256, static_cast<int>(std::ceil(minW_float)));
-        int minH = std::max(144, static_cast<int>(std::ceil(minH_float)));
+        // Hard Vulkan/driver limit only — fail fast if exceeded
+        if (w > 32768) w = 32768;
+        if (h > 32768) h = 32768;
 
-        render_width_  = std::max(minW, static_cast<int>(std::round(window_width_  * scale)));
-        render_height_ = std::max(minH, static_cast<int>(std::round(window_height_ * scale)));
+        // Negative / zero protection — fail fast later if invalid
+        if (w < 1) w = 1;
+        if (h < 1) h = 1;
+
+        render_width_  = static_cast<int>(w);
+        render_height_ = static_cast<int>(h);
     }
 
     void createTimestampQueryPool() noexcept {
@@ -670,7 +687,7 @@ private:
         writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[2].pBufferInfo      = &matInfo;
 
-        vkUpdateDescriptorSets(rtx().device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        vkUpdateDescriptorSets(rtx().device, writes.size(), writes.data(), 0, nullptr);
     }
 
     VkCommandBuffer beginTransientCommandBuffer() noexcept {

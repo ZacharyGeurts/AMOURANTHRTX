@@ -173,8 +173,8 @@ namespace Options::Camera {
 // Low impact: Pure2DCanvas + low samples + no temporal
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Rendering {
-    inline int     INTERNAL_WIDTH           = 5920;                        // Max internal render width
-    inline int     INTERNAL_HEIGHT          = 5920;                        // Max internal render height
+    inline int64_t     INTERNAL_WIDTH           = 6000;                        // Max internal render width
+    inline int64_t     INTERNAL_HEIGHT          = 6000;                        // Max internal render height
 
     inline constexpr bool    ACCUMULATION             = false;             // Temporal reprojection/accumulation (denoising)
     inline constexpr bool    ADAPTIVE_SAMPLING        = true;              // Per-pixel quality scaling
@@ -188,8 +188,8 @@ namespace Options::Rendering {
 
     inline bool    EnableAdaptiveResolution   = true;
     inline float   MinResolutionScale         = 0.10f;                     // Lowest allowed scale (heavy fallback)
-    inline float   MaxResolutionScale         = 8.0f;                      // Highest supersampling allowed
-    inline float   ResolutionStepSize         = 0.3f;
+    inline float   MaxResolutionScale         = 20.0f;                      // Highest supersampling allowed
+    inline float   ResolutionStepSize         = 1.2f;
 
     inline float   ResolutionAdjustHysteresis = 0.9f;                     // Anti-oscillation threshold
     inline float   AggressiveDownscaleThreshold = 1.35f;                   // Frametime multiplier for strong downscale
