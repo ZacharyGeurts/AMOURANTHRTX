@@ -86,7 +86,7 @@ endif()
 # =============================================================================
 # ASSETS
 # =============================================================================
-set(DEVELOPER_DIRS assets/fonts assets/textures assets/models assets/materials assets/scenes assets/audio assets/scripts Navigator/compute)
+set(DEVELOPER_DIRS assets/fonts assets/textures assets/models assets/materials assets/scenes assets/audio assets/scripts)
 foreach(D ${DEVELOPER_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
 endforeach()
@@ -297,7 +297,6 @@ endif()
 # =============================================================================
 if(GLSLC AND SPIRV_VAL)
     set(SHADER_INCLUDE_FLAGS
-        -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders"
         -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing"
         -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute"
     )
