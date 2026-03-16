@@ -6,7 +6,7 @@ https://x.com/ZacharyGeurts/status/2031298561900446079
 
 Help yourself to the demos folder.  
 
-Navigator/compute/CANVAS.comp is to be the one file to update.  
+Navigator/shaders/compute/CANVAS.comp is to be the one file to update.  
 
 Overwrite the CANVAS.comp and rebuild.  
 Have Grok write a new fun comp with rainbows or whatever.  
