@@ -30,6 +30,38 @@ set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE)
 
 # =============================================================================
+# Auto-download latest Vulkan SDK to project folder (like original)
+# =============================================================================
+set(VULKAN_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/VulkanSDK")
+
+if(NOT EXISTS "${VULKAN_SDK_DIR}/x86_64/include/vulkan/vulkan.h")
+    message(STATUS "Downloading latest Vulkan SDK to project folder...")
+    FetchContent_Declare(vulkan_sdk
+        URL https://sdk.lunarg.com/sdk/download/latest/linux/vulkan-sdk.tar.gz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_DIR "${VULKAN_SDK_DIR}"
+    )
+    FetchContent_MakeAvailable(vulkan_sdk)
+endif()
+
+set(VULKAN_SDK_ROOT "${VULKAN_SDK_DIR}/x86_64")
+if(NOT EXISTS "${VULKAN_SDK_ROOT}/include/vulkan/vulkan.h")
+    message(FATAL_ERROR "Vulkan SDK extraction failed — x86_64/include/vulkan.h not found")
+endif()
+
+set(Vulkan_INCLUDE_DIRS "${VULKAN_SDK_ROOT}/include")
+set(Vulkan_LIBRARY      "${VULKAN_SDK_ROOT}/lib/libvulkan.so")
+
+find_program(GLSLC glslc REQUIRED HINTS "${VULKAN_SDK_ROOT}/bin")
+find_program(SPIRV_VAL spirv-val REQUIRED HINTS "${VULKAN_SDK_ROOT}/bin")
+
+message(STATUS "Vulkan SDK: ${VULKAN_SDK_ROOT}")
+message(STATUS "  Headers: ${Vulkan_INCLUDE_DIRS}")
+message(STATUS "  Library: ${Vulkan_LIBRARY}")
+message(STATUS "  glslc:   ${GLSLC}")
+message(STATUS "  spirv-val: ${SPIRV_VAL}")
+
+# =============================================================================
 # TOOLCHAIN + PLATFORM
 # =============================================================================
 if(CMAKE_CROSSCOMPILING)
@@ -84,13 +116,18 @@ if(DISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
 # =============================================================================
-# ASSETS
+# ASSETS + SHADER OUTPUT DIRECTORIES
 # =============================================================================
-set(DEVELOPER_DIRS assets/fonts assets/textures assets/models assets/materials assets/scenes assets/audio assets/scripts Navigator/compute)
+set(DEVELOPER_DIRS assets/fonts assets/textures assets/models assets/materials assets/scenes assets/audio assets/scripts)
 foreach(D ${DEVELOPER_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
 endforeach()
-file(MAKE_DIRECTORY "${BIN_DIR}/compute")
+
+file(MAKE_DIRECTORY
+    "${BIN_DIR}/assets"
+    "${BIN_DIR}/assets/shaders/raytracing"
+    "${BIN_DIR}/assets/shaders/compute"
+)
 
 set(ASSETS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set(ASSETS_DST "${BIN_DIR}/assets")
@@ -108,16 +145,9 @@ endif()
 # DEPENDENCIES
 # =============================================================================
 find_package(PkgConfig REQUIRED)
-find_package(Vulkan REQUIRED)
-if(Vulkan_VERSION VERSION_LESS "1.3.250")
-    message(FATAL_ERROR "Vulkan SDK >= 1.3.250 required")
-endif()
-
-find_program(GLSLC glslc REQUIRED)
-find_program(SPIRV_VAL spirv-val REQUIRED)
 find_package(OpenMP REQUIRED)
 
-# FreeType - 100% static on Windows (embedded in exe, no libfreetype.dll ever)
+# FreeType - 100% static on Windows
 if(TARGET_PLATFORM STREQUAL "Windows")
     message(STATUS "FreeType: Vendoring static build - 100% embedded in .exe (no DLL)")
     FetchContent_Declare(freetype
@@ -140,7 +170,7 @@ endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-# SDL3 core
+# SDL3 family
 if(FETCH_SDL3)
     if(TARGET_PLATFORM STREQUAL "Windows")
         set(SDL_HIDAPI_LIBUSB_SHARED OFF CACHE INTERNAL "" FORCE)
@@ -150,7 +180,6 @@ if(FETCH_SDL3)
     FetchContent_MakeAvailable(SDL3)
 endif()
 
-# SDL3_image
 if(FETCH_SDL3_IMAGE)
     if(TARGET_PLATFORM STREQUAL "Windows")
         set(CMAKE_DISABLE_FIND_PACKAGE_ZLIB ON CACHE INTERNAL "" FORCE)
@@ -168,7 +197,6 @@ if(FETCH_SDL3_IMAGE)
     FetchContent_MakeAvailable(SDL3_image)
 endif()
 
-# SDL3_mixer
 if(FETCH_SDL3_MIXER)
     if(TARGET_PLATFORM STREQUAL "Windows")
         set(SDLMIXER_MP3_MPG123 OFF CACHE INTERNAL "" FORCE)
@@ -179,7 +207,6 @@ if(FETCH_SDL3_MIXER)
     FetchContent_MakeAvailable(SDL3_mixer)
 endif()
 
-# SDL3_ttf
 if(FETCH_SDL3_TTF)
     if(TARGET_PLATFORM STREQUAL "Windows")
         set(SDLTTF_HARFBUZZ OFF CACHE INTERNAL "" FORCE)
@@ -250,7 +277,7 @@ if(DISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
 # =============================================================================
-# LINKING - FORCE STATIC EVERYTHING (especially FreeType)
+# LINKING
 # =============================================================================
 if(TARGET_PLATFORM STREQUAL "Windows")
     target_link_libraries(amouranth_engine PRIVATE
@@ -266,7 +293,7 @@ else()
 endif()
 
 target_link_libraries(amouranth_engine PRIVATE
-    Vulkan::Vulkan
+    ${Vulkan_LIBRARY}
     OpenMP::OpenMP_CXX
 )
 
@@ -293,16 +320,98 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
 endif()
 
 # =============================================================================
-# SHADERS
+# SHADERS — raytracing + CANVAS.comp
 # =============================================================================
-set(SHADER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/compute/CANVAS.comp")
-set(SHADER_OUT "${BIN_DIR}/compute/CANVAS.spv")
-add_custom_command(OUTPUT "${SHADER_OUT}"
-    COMMAND ${GLSLC} -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders" -O --target-spv=spv1.6 --target-env=vulkan1.4 -fshader-stage=comp "${SHADER_SRC}" -o "${SHADER_OUT}"
-    DEPENDS "${SHADER_SRC}"
-    COMMENT "Compiling compute shader"
+set(SHADER_INCLUDE_FLAGS
+    -I"${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+    -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders"
+    -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing"
+    -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute"
 )
-add_custom_target(shaders ALL DEPENDS "${SHADER_OUT}")
+
+# Debug → unoptimized + debug info, otherwise optimized
+if(CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
+    set(SHADER_OPT_FLAGS -g -O0)
+else()
+    set(SHADER_OPT_FLAGS -O)
+endif()
+
+set(SPV_OUTPUTS "")
+
+# Ray tracing shaders
+set(RAY_SHADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing/raygen.rgen"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing/miss.rmiss"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing/closesthit.rchit"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing/anyhit.rahit"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing/callable.rcall"
+)
+
+foreach(SRC ${RAY_SHADERS})
+    if(NOT EXISTS "${SRC}")
+        message(WARNING "Missing ray tracing shader: ${SRC}")
+        continue()
+    endif()
+
+    get_filename_component(BASE ${SRC} NAME_WE)
+    set(OUT_DIR "${BIN_DIR}/assets/shaders/raytracing")
+    set(STAGE "")
+
+    if(BASE STREQUAL "raygen")
+        set(STAGE rgen)
+    elseif(BASE STREQUAL "miss")
+        set(STAGE rmiss)
+    elseif(BASE STREQUAL "closesthit")
+        set(STAGE rchit)
+    elseif(BASE STREQUAL "anyhit")
+        set(STAGE rahit)
+    elseif(BASE STREQUAL "callable")
+        set(STAGE rcall)
+    endif()
+
+    if(NOT STAGE)
+        message(WARNING "Unknown stage for ${SRC}")
+        continue()
+    endif()
+
+    set(SPV "${OUT_DIR}/${BASE}.spv")
+
+    add_custom_command(
+        OUTPUT "${SPV}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${OUT_DIR}"
+        COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${SHADER_OPT_FLAGS}
+                --target-spv=spv1.6 --target-env=vulkan1.4
+                -fshader-stage=${STAGE} "${SRC}" -o "${SPV}"
+        COMMAND ${SPIRV_VAL} --target-env vulkan1.3 "${SPV}"
+        DEPENDS "${SRC}"
+        COMMENT "Compiling raytracing/${BASE} → assets/shaders/raytracing/${BASE}.spv"
+        VERBATIM
+    )
+    list(APPEND SPV_OUTPUTS "${SPV}")
+endforeach()
+
+# Compute shader: CANVAS.comp
+set(CANVAS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute/CANVAS.comp")
+if(EXISTS "${CANVAS_SRC}")
+    set(CANVAS_OUT "${BIN_DIR}/assets/shaders/compute/CANVAS.spv")
+
+    add_custom_command(
+        OUTPUT "${CANVAS_OUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/assets/shaders/compute"
+        COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${SHADER_OPT_FLAGS}
+                --target-spv=spv1.6 --target-env=vulkan1.4
+                -fshader-stage=comp "${CANVAS_SRC}" -o "${CANVAS_OUT}"
+        COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${CANVAS_OUT}"
+        DEPENDS "${CANVAS_SRC}"
+        COMMENT "Compiling CANVAS.comp → assets/shaders/compute/CANVAS.spv"
+        VERBATIM
+    )
+    list(APPEND SPV_OUTPUTS "${CANVAS_OUT}")
+else()
+    message(WARNING "CANVAS.comp not found at ${CANVAS_SRC} — compute shader skipped")
+endif()
+
+add_custom_target(shaders ALL DEPENDS ${SPV_OUTPUTS})
 
 # =============================================================================
 # FINAL TARGET DEPENDENCIES + REPORT
@@ -318,12 +427,13 @@ message(STATUS " AMOURANTHRTX")
 message(STATUS " Target:       ${BIN_DIR}/Navigator${EXE_SUFFIX}")
 if(TARGET_PLATFORM STREQUAL "Windows")
     message(STATUS " Run:          wine ${BIN_DIR}/Navigator.exe")
-    message(STATUS " FreeType:     100% embedded (no libfreetype.dll - forced with --whole-archive)")
+    message(STATUS " Vulkan DLL:   Copy vulkan-1.dll from VulkanSDK/x86_64/bin/ to bin/Windows/")
+    message(STATUS " FreeType:     100% embedded")
 else()
     message(STATUS " Run:          ${BIN_DIR}/Navigator")
 endif()
-message(STATUS " Static:       YES (SDL + FreeType + all deps)")
+message(STATUS " Shaders:      ${BIN_DIR}/assets/shaders/raytracing/*.spv")
+message(STATUS "               ${BIN_DIR}/assets/shaders/compute/CANVAS.spv")
+message(STATUS " Static:       YES (SDL + FreeType + most deps)")
 message(STATUS " SDL3_image:   PNG:${SDL3IMAGE_PNG} JPG:${SDL3IMAGE_JPG}")
-message(STATUS " MP3:          dr_mp3 only")
-message(STATUS " TTF:          basic (HarfBuzz OFF on Windows)")
 message(STATUS "==================================================================")

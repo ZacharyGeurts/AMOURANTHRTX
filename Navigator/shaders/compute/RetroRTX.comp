@@ -1,0 +1,332 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
+
+layout(push_constant) uniform Push {
+    float totalTime;
+} pc;
+
+// ───────────────────────────────────────────────
+// Helpers + Materials colors (pulled directly from your sealed library)
+// ───────────────────────────────────────────────
+#define PI     3.14159265358979323846
+#define TAU    6.28318530717958647692
+#define EPS    0.0006
+#define MAX_STEPS 120
+#define MAX_DIST  120.0
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p); f = f*f*(3.0-2.0*f);
+    float a = hash12(i + vec2(0,0));
+    float b = hash12(i + vec2(1,0));
+    float c = hash12(i + vec2(0,1));
+    float d = hash12(i + vec2(1,1));
+    return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+
+float fbm(vec2 p, int oct) {
+    float f = 0.0, a = 0.5;
+    for (int i = 0; i < oct; ++i) {
+        f += a * noise(p);
+        p *= 2.03;
+        a *= 0.49;
+    }
+    return f;
+}
+
+// Material colors from your library (BaseOceanWater, BaseClearGlass, BaseRedDiamond, BaseHoloOrb, etc.)
+const vec3 MAT_OCEAN       = vec3(0.02, 0.08, 0.18);   // BaseOceanWater
+const vec3 MAT_HOLO_ORB    = vec3(0.92, 0.96, 1.00);   // BaseHoloOrb
+const vec3 MAT_RED_DIAMOND = vec3(0.98, 0.12, 0.14);   // BaseRedDiamond
+const vec3 MAT_CLEAR_GLASS = vec3(0.96, 0.97, 0.99);   // BaseClearGlass
+const vec3 MAT_IRIDESCENT  = vec3(0.98, 0.98, 0.99);   // BaseIridescentGlass
+
+vec2 retro_pixelate(vec2 uv, float res) {
+    return floor(uv * res + 0.5) / res;
+}
+
+vec3 crt_scanlines(vec3 col, vec2 uv, float t) {
+    float scan = sin(uv.y * 900.0 + t * 80.0) * 0.06 + 0.94;
+    col *= scan;
+    col += col * 0.12 * (sin(t * 30.0) * 0.5 + 0.5);
+    return col;
+}
+
+// ───────────────────────────────────────────────
+// Scene cycling (8 scenes)
+// ───────────────────────────────────────────────
+#define SCENE_COUNT 8
+#define SCENE_DURATION 12.0
+#define CROSSFADE_TIME 0.8
+
+int currentScene(float t) { return int(floor(t / SCENE_DURATION)) % SCENE_COUNT; }
+float sceneMix(float t) {
+    float phase = mod(t, SCENE_DURATION);
+    return smoothstep(SCENE_DURATION - CROSSFADE_TIME, SCENE_DURATION, phase);
+}
+
+// ───────────────────────────────────────────────
+// 0. Classic God (320×200 hypercube lattice)
+// ───────────────────────────────────────────────
+vec3 fx0_classic_god(vec2 uv, float t) {
+    uv = retro_pixelate(uv, 320.0);
+    float collapse = sin(t * 2.0 + length(uv) * 8.0) * 0.5 + 0.5;
+    float osc = cos(t * 3.0 + uv.x * 48.0);
+    vec3 col = mix(vec3(0.3,0.4,0.8), vec3(1.0,0.9,0.7), collapse * osc);
+    return crt_scanlines(col * 1.4, uv, t);
+}
+
+// ───────────────────────────────────────────────
+// 1. RTX God (hypercube + dark energy holy glow)
+// ───────────────────────────────────────────────
+vec3 fx1_rtx_god(vec2 uv, float t) {
+    float collapse = fbm(uv * 3.5 + vec2(t*0.9, t*1.3), 7) * 0.75;
+    float osc = cos(t * 4.5 + uv.x * 22.0 + uv.y * 14.0);
+    float dark = exp(-length(uv) * 1.8) * 1.6;
+    vec3 col = mix(vec3(0.4,0.6,1.0), vec3(1.0,0.95,0.8), collapse * osc * dark);
+    col += vec3(1.0) * pow(collapse, 4.0) * dark * 2.0;
+    return col * 1.55;
+}
+
+// ───────────────────────────────────────────────
+// 2. Classic Burning Logs (short 320×200 bottom)
+// ───────────────────────────────────────────────
+vec3 fx2_classic_logs(vec2 uv, float t) {
+    uv = retro_pixelate(uv, 320.0);
+    uv.y = 1.0 - uv.y;
+    float base = smoothstep(0.0, 0.25, uv.y);
+    float flicker = sin(t * 28.0 + uv.x * 40.0) * 0.12 + 0.88;
+    vec2 p = uv * vec2(1.0, 2.5) + vec2(0.0, t * 1.6);
+    float f = noise(p * 5.0) * 0.6 + noise(p * 11.0 + t * 3.5) * 0.4;
+    f = smoothstep(0.25, 0.75, f);
+    vec3 col = mix(vec3(1.0,0.4,0.05), vec3(1.0,0.85,0.3), f);
+    col *= flicker * 1.6 * base;
+    return crt_scanlines(col, uv, t);
+}
+
+// ───────────────────────────────────────────────
+// 3. RTX AABB Burning Logs (short volumetric bottom)
+// ───────────────────────────────────────────────
+vec3 fx3_rtx_logs(vec2 uv, float t) {
+    uv.y = 1.0 - uv.y;
+    float base = smoothstep(0.0, 0.28, uv.y);
+    float tt = t * 2.2;
+    vec2 p = (uv - vec2(0.0, 0.75)) * vec2(1.0, 4.0) + vec2(sin(tt*0.5)*0.15, tt * 1.7);
+    float f = fbm(p * 3.8 + vec2(tt*0.7,0), 5) * 0.65 + fbm(p * 8.0 + vec2(0,tt*1.4), 4) * 0.35;
+    f = smoothstep(0.12, 0.88, f);
+    vec3 col = mix(vec3(0.5,0.1,0.0), mix(vec3(1.0,0.4,0.05), vec3(1.0,0.9,0.35), f), f);
+    float embers = step(0.94, hash12(p*700.0 + tt*45.0)) * 1.4;
+    col += vec3(1.0,0.85,0.4) * embers * 3.0;
+    col *= base;
+    return col * 2.0;
+}
+
+// ───────────────────────────────────────────────
+// 4. Classic Waterfall + Ocean (320×200 pixel)
+// ───────────────────────────────────────────────
+vec3 fx4_classic_water(vec2 uv, float t) {
+    uv = retro_pixelate(uv, 320.0);
+    float fall = sin(uv.x * 25.0 + t * 6.0) * 0.12;
+    float ocean = sin(uv.y * 18.0 + t * 2.8) * 0.08;
+    vec3 col = vec3(0.05,0.4,0.85) + vec3(0.15,0.6,1.0) * (fall + ocean);
+    return crt_scanlines(col, uv, t);
+}
+
+// ───────────────────────────────────────────────
+// 5. RTX EPIC WATERFALL + OCEAN (full raymarch SDF like inspiration)
+//    Gerstner waves, floating glass orbs + diamond planes, caustics,
+//    volumetric rainbow, rainbow rain, god rays, BaseOceanWater + library colors
+// ───────────────────────────────────────────────
+float gerstnerHeight(vec2 pos, float t) {
+    float h = 0.0;
+    // 6 Gerstner waves (slowed exactly like inspiration)
+    h += 0.40 * cos(6.283185 / 25.0 * dot(vec2(0.6,0.8), pos) + t * 1.2 * 0.30);
+    h += 0.25 * cos(6.283185 / 15.0 * dot(vec2(-0.4,0.9), pos) + t * 1.8 * 0.30);
+    h += 0.18 * cos(6.283185 / 40.0 * dot(vec2(0.9,-0.3), pos) + t * 1.0 * 0.30);
+    h += 0.12 * cos(6.283185 / 8.0  * dot(vec2(-0.7,-0.6), pos) + t * 2.4 * 0.30);
+    h += 0.08 * cos(6.283185 / 60.0 * dot(vec2(0.2,1.0), pos) + t * 0.75 * 0.30);
+    h += 0.06 * cos(6.283185 / 20.0 * dot(vec2(-0.9,0.4), pos) + t * 1.7 * 0.30);
+    return h * 0.5;
+}
+
+float sdfOcean(vec3 p, float t, out uint mat) {
+    mat = 0u;
+    float water = p.y - (-15.0 + gerstnerHeight(p.xz * 0.8, t));
+    float d = water;
+
+    // Floating glass orbs (using BaseHoloOrb + BaseClearGlass colors)
+    for (int i = 0; i < 5; ++i) {
+        float fi = float(i);
+        vec3 orbPos = vec3(sin(fi*1.618 + t*0.8)*12.0, -8.0 + sin(fi*2.718 + t*1.1)*3.0, cos(fi*3.141 + t*0.9)*12.0);
+        float orb = length(p - orbPos) - 1.4;
+        if (orb < d) { d = orb; mat = 3u; }  // MAT_RAINBOW_HOLO_ORB_BASE
+    }
+
+    // Diamond planes (using BaseRedDiamond color)
+    vec3 planePos = vec3(0.0, -12.0, -8.0);
+    float plane = length(p - planePos - vec3(0.0,0.0, sin(t*0.6)*2.0)) - 4.0;
+    if (plane < d) { d = plane; mat = 88u; }  // MAT_DIAMOND_RED
+
+    return d;
+}
+
+vec3 getNormal(vec3 p, float t) {
+    const float e = 0.001;
+    uint dummy;
+    float hx = sdfOcean(p + vec3(e,0,0), t, dummy) - sdfOcean(p - vec3(e,0,0), t, dummy);
+    float hy = sdfOcean(p + vec3(0,e,0), t, dummy) - sdfOcean(p - vec3(0,e,0), t, dummy);
+    float hz = sdfOcean(p + vec3(0,0,e), t, dummy) - sdfOcean(p - vec3(0,0,e), t, dummy);
+    return normalize(vec3(hx, hy, hz));
+}
+
+vec3 roygbiv(float t) {
+    t = fract(t);
+    vec3 c[7] = vec3[7](vec3(1,0,0), vec3(1,0.5,0), vec3(1,1,0), vec3(0,1,0), vec3(0,0,1), vec3(0.29,0,0.51), vec3(0.58,0,0.83));
+    float i = t*6.0; int idx = int(i);
+    return mix(c[idx], c[min(idx+1,6)], fract(i)) * 1.4;
+}
+
+vec3 volumetricRainbow(vec3 ro, vec3 rd, float tMax) {
+    vec3 col = vec3(0);
+    float step = tMax / 18.0;
+    vec3 p = ro;
+    for (int i = 0; i < 18; ++i) {
+        p += rd * step;
+        float phase = max(0.0, dot(rd, normalize(vec3(0.7,0.9,0.4))));
+        col += roygbiv(length(p.xz)*0.07 + pc.totalTime*0.3) * phase * 0.012 * step;
+    }
+    return col * 2.8;
+}
+
+vec3 rainbowRain(vec3 col, vec2 uv, float t) {
+    vec2 r = uv * vec2(1.0, 14.0);
+    r.y += t * 32.0 + sin(t*1.8 + uv.x*50.0)*2.5;
+    float streak = fract(r.y * 90.0 + sin(r.x*70.0)*1.3);
+    streak = smoothstep(0.0, 0.002, streak) - smoothstep(0.002, 0.012, streak);
+    vec3 sheen = roygbiv(t*4.0 + uv.x*15.0 + r.y*0.6) * 2.5;
+    return mix(col, col*0.35 + sheen, streak * (0.8 - uv.y*0.6));
+}
+
+vec3 fx5_rtx_water(vec2 uv, float t) {
+    vec3 ro = vec3(0.0, 5.0, -45.0);
+    vec3 rd = normalize(vec3(uv.x, uv.y * 0.9, 1.0));
+
+    float tt = 0.0;
+    uint mat = 0u;
+    for (int i = 0; i < MAX_STEPS; ++i) {
+        vec3 p = ro + rd * tt;
+        float d = sdfOcean(p, t, mat);
+        tt += d;
+        if (d < EPS || tt > MAX_DIST) break;
+    }
+
+    vec3 col = vec3(0.02, 0.08, 0.18);
+
+    if (tt < MAX_DIST) {
+        vec3 p = ro + rd * tt;
+        vec3 n = getNormal(p, t);
+
+        float diff = max(0.0, dot(n, normalize(vec3(0.7,0.9,0.4))));
+        if (mat == 3u) col = vec3(0.92, 0.96, 1.00);
+        if (mat == 88u) col = vec3(0.98, 0.12, 0.14);
+
+        float fres = pow(1.0 - max(0.0, dot(n, -rd)), 5.0);
+        col = mix(col * (diff*2.0 + 0.3), vec3(0.96,0.97,0.99) * 1.3, fres * 0.85);
+
+        float caustic = pow(0.5 + 0.5 * sin(fbm(p.xz*8.0 + t*1.2, 4) * 35.0), 4.0) * 2.5;
+        col += vec3(0.9,1.0,1.15) * caustic * 1.4;
+    } else {
+        col = mix(vec3(0.05,0.15,0.9), vec3(0.02,0.08,0.7), max(rd.y,0.0));
+    }
+
+    col += volumetricRainbow(ro, rd, tt);
+
+    // 20× BRIGHT CEILING LIGHT BOOST (god rays + specular from above)
+    float ceilingLight = pow(max(rd.y, 0.0), 1.2) * 20.0;
+    col += vec3(1.3, 1.1, 0.95) * ceilingLight * 2.5;
+
+    col = rainbowRain(col, uv, t);
+
+    return col;
+}
+
+// ───────────────────────────────────────────────
+// 6. Classic Earth (320×200)
+// ───────────────────────────────────────────────
+vec3 fx6_classic_earth(vec2 uv, float t) {
+    uv = retro_pixelate(uv, 320.0);
+    float cracks = sin(uv.x * 40.0 + t * 2.0) * 0.5 + 0.5;
+    vec3 col = mix(vec3(0.4,0.25,0.1), vec3(0.7,0.5,0.3), cracks);
+    return crt_scanlines(col, uv, t);
+}
+
+// ───────────────────────────────────────────────
+// 7. RTX Earth (planetary crust + magma)
+// ───────────────────────────────────────────────
+vec3 fx7_rtx_earth(vec2 uv, float t) {
+    uv *= 4.0;
+    float tt = t * 0.4;
+    float n = fbm(uv + vec2(tt*0.3, sin(tt*0.7)*0.2), 6) * 0.7;
+    n += fbm(uv * 4.0 + vec2(0, tt*1.0), 4) * 0.3;
+    vec3 crust = vec3(0.3,0.2,0.15) + vec3(0.5,0.4,0.3) * n * 0.8;
+    float magma = pow(0.5 + 0.5 * sin(n * 25.0 + tt * 6.0), 4.0) * 2.5;
+    crust += vec3(1.0,0.5,0.1) * magma * 1.4;
+    return crust;
+}
+
+// ───────────────────────────────────────────────
+// Main
+// ───────────────────────────────────────────────
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 res = imageSize(hdrImage);
+    if (any(greaterThanEqual(pix, res))) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
+    uv.x *= float(res.x) / float(res.y);
+
+    float globalTime = pc.totalTime;
+    float sceneTime  = mod(globalTime, 12.0 * float(SCENE_COUNT));
+    int   sceneIdx   = int(floor(sceneTime / 12.0));
+    float fade       = smoothstep(11.2, 12.0, mod(sceneTime, 12.0));
+
+    vec3 a = vec3(0), b = vec3(0);
+
+    if      (sceneIdx == 0) a = fx0_classic_god(uv, sceneTime);
+    else if (sceneIdx == 1) a = fx1_rtx_god(uv, sceneTime);
+    else if (sceneIdx == 2) a = fx2_classic_logs(uv, sceneTime);
+    else if (sceneIdx == 3) a = fx3_rtx_logs(uv, sceneTime);
+    else if (sceneIdx == 4) a = fx4_classic_water(uv, sceneTime);
+    else if (sceneIdx == 5) a = fx5_rtx_water(uv, sceneTime);   // THE BIG BOI
+    else if (sceneIdx == 6) a = fx6_classic_earth(uv, sceneTime);
+    else                    a = fx7_rtx_earth(uv, sceneTime);
+
+    int next = (sceneIdx + 1) % SCENE_COUNT;
+    float nextTime = sceneTime - float(sceneIdx) * 12.0;
+    if      (next == 0) b = fx0_classic_god(uv, nextTime);
+    else if (next == 1) b = fx1_rtx_god(uv, nextTime);
+    else if (next == 2) b = fx2_classic_logs(uv, nextTime);
+    else if (next == 3) b = fx3_rtx_logs(uv, nextTime);
+    else if (next == 4) b = fx4_classic_water(uv, nextTime);
+    else if (next == 5) b = fx5_rtx_water(uv, nextTime);
+    else if (next == 6) b = fx6_classic_earth(uv, nextTime);
+    else                b = fx7_rtx_earth(uv, nextTime);
+
+    vec3 finalColor = mix(a, b, fade);
+
+    finalColor += pow(finalColor, vec3(1.8)) * 0.5;
+    float vig = 1.0 - dot(uv, uv) * 0.25;
+    finalColor *= vig * 1.12;
+
+    imageStore(hdrImage, pix, vec4(finalColor, 1.0));
+}

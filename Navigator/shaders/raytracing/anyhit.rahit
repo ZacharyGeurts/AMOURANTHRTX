@@ -1,0 +1,9 @@
+// Filename:     anyhit.rahit
+// Path:         Navigator/raytracing/anyhit.rahit
+// Purpose:      Primitive placeholder — empty function to allow compilation
+
+#version 460
+
+void main() {
+    // Empty — compiles cleanly
+}

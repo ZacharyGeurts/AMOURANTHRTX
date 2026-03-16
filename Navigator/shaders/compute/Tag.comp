@@ -1,0 +1,425 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// Rainbow + Realistic Ocean Water Compute Shader
+// - Slowed down wave motion significantly
+// - Added manual camera XYZ position controls via defines
+// =============================================================================
+
+// ───────────────────────────────────────────────
+// === MATERIAL STRUCTS ===
+struct MaterialLayer {
+    vec4  baseColor;
+    vec4  emissiveColor;
+    float metallic;
+    float roughness;
+    float specular;
+    float specularTint;
+    float ior;
+    float transmission;
+    float transmissionRoughness;
+    float thinFilm;
+    float thinFilmThickness_nm;
+    float subsurface;
+    vec3  subsurfaceColor;
+    float subsurfaceRadiusScale;
+    float coat;
+    float coatRoughness;
+    float coatIOR;
+    float fuzz;
+    vec3  fuzzTint;
+    float fuzzRoughness;
+    float anisotropy;
+    float anisoRotation;
+    float specularHaze;
+    float hazeSpread;
+    float retroReflection;
+    float emissionWeight;
+    uint  procType;
+    float procScale;
+    float procStrength;
+    float procOffsetSeed;
+    uint  flags;
+    uint  padding[2];
+};
+
+struct Material {
+    MaterialLayer layers[5];
+    uint          layerCount;
+    float         layerBlendFactors[5];
+    uint          padding[2];
+};
+
+// ───────────────────────────────────────────────
+// === QUALITY & PERF DEFINES ===
+#define LOCAL_SIZE_X                16
+#define LOCAL_SIZE_Y                16
+#define MAX_MARCH_STEPS             80
+#define HIT_THRESHOLD               0.0006
+#define MAX_DISTANCE                80.0
+#define ACCUMULATION_BLEND          1.0
+#define VOL_STEPS                   16
+#define VOL_DENSITY                 0.008
+#define VOL_BOOST                   2.2
+
+// ───────────────────────────────────────────────
+// === CAMERA CONTROLS ===
+// Manual XYZ offset / position override (additive to pc.cameraPos)
+// Set to 0,0,0 to use the engine's camera position unchanged
+#define CAMERA_OFFSET_X             -15.0
+#define CAMERA_OFFSET_Y             0.0
+#define CAMERA_OFFSET_Z             -50.0
+
+// Additional camera height tweak (added on top of offset)
+#define CAMERA_HEIGHT_ADD           3.0
+
+// ───────────────────────────────────────────────
+// === RAINBOW CONTROLS ===
+#define ENABLE_RAINBOW_COLORS       1
+#define RAINBOW_STRENGTH            1.4
+#define RAINBOW_PULSE               0.06
+
+// ───────────────────────────────────────────────
+// === WATER / WAVE CONTROLS ===
+#define WATER_LEVEL                 -15.0
+#define WAVE_AMP_BASE               0.5
+#define FRESNEL_POWER               5.0
+#define REFLECT_BASE                0.8
+#define FOAM_STRENGTH               1.8
+#define FOAM_THRESHOLD              0.65
+#define FOAM_FADE                   0.15
+#define BREAK_EMISSIVE_BOOST        0.6
+
+#define NUM_GERSTNER_WAVES          6
+
+// Slow down overall wave motion (lower = slower waves)
+// Original ~1.0 felt too fast → now 0.25–0.35 range recommended
+#define GLOBAL_WAVE_SPEED_SCALE     0.30
+
+// ───────────────────────────────────────────────
+// === RAIN STREAKS ===
+#define RAIN_STREAK_SPEED           32.0
+#define RAIN_DENSITY                80.0
+#define RAIN_THICKNESS              0.0019
+
+// ───────────────────────────────────────────────
+// === LAYOUT ===
+layout(local_size_x = LOCAL_SIZE_X, local_size_y = LOCAL_SIZE_Y, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
+
+layout(set = 0, binding = 4) readonly buffer MaterialLibrary {
+    Material materials[];
+} matLib;
+
+layout(push_constant) uniform Push {
+    float time;
+    uint  frameSeed;
+    vec3  cameraPos;
+    float _pad0;
+    vec4  cameraQuat;
+    float cameraFov;
+    float _pad1[3];
+} pc;
+
+// ─── FORWARD DECLARATIONS ──────────────────────────────────────────
+uint   hash(uint x);
+float  rand(vec2 co);
+float  hash12(vec2 p);
+float  fbm(vec2 p);
+vec3   roygbiv(float t);
+void   gerstnerWaves(vec2 pos, out float height, out float steepnessOut, out vec3 normalOffset);
+vec3   getSky(vec3 dir);
+float  sdf(vec3 p, out uint outMatIndex);
+vec3   getNormal(vec3 p);
+vec3   volumetricRainbow(vec3 ro, vec3 rd, float tMax);
+vec3   addRainbowRain(vec3 col, vec2 uv);
+
+// ─── RNG / Noise ───────────────────────────────────────────────────
+uint hash(uint x) {
+    x ^= x >> 16;
+    x *= 0x85ebca6bU;
+    x ^= x >> 13;
+    x *= 0xc2b2ae35U;
+    x ^= x >> 16;
+    return x;
+}
+
+float rand(vec2 co) {
+    uint h = hash(pc.frameSeed ^ floatBitsToUint(co.x) ^ (floatBitsToUint(co.y) << 16u));
+    return float(h) / 4294967295.0;
+}
+
+float hash12(vec2 p) {
+    vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float fbm(vec2 p) {
+    float amp = 0.5;
+    float freq = 1.0;
+    float n = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        n += amp * hash12(p * freq);
+        amp *= 0.5;
+        freq *= 2.2;
+        p = p.yx + vec2(13.7, 7.3);
+    }
+    return n;
+}
+
+// ─── ROYGBIV rainbow with toggle ───────────────────────────────────
+vec3 roygbiv(float t) {
+#if ENABLE_RAINBOW_COLORS
+    t = fract(t + pc.time * RAINBOW_PULSE);
+    vec3 colors[7] = vec3[7](
+        vec3(1.00, 0.00, 0.00),
+        vec3(1.00, 0.50, 0.00),
+        vec3(1.00, 1.00, 0.00),
+        vec3(0.00, 0.80, 0.00),
+        vec3(0.00, 0.00, 1.00),
+        vec3(0.29, 0.00, 0.51),
+        vec3(0.58, 0.00, 0.83)
+    );
+    float idx  = t * 6.0;
+    int   band = int(floor(idx));
+    float frac = fract(idx);
+    vec3 c1 = colors[band];
+    vec3 c2 = colors[min(band + 1, 6)];
+    return mix(c1, c2, smoothstep(0.0, 1.0, frac)) * RAINBOW_STRENGTH;
+#else
+    return vec3(1.0);
+#endif
+}
+
+// ─── Gerstner Waves ────────────────────────────────────────────────
+void gerstnerWaves(vec2 pos, out float height, out float steepnessOut, out vec3 normalOffset) {
+    height = 0.0;
+    steepnessOut = 0.0;
+    normalOffset = vec3(0.0);
+
+    struct Wave {
+        vec2 dir;
+        float amp;
+        float len;
+        float speed;
+        float steep;
+    };
+
+    Wave waves[NUM_GERSTNER_WAVES] = Wave[NUM_GERSTNER_WAVES](
+        Wave(vec2( 0.6,  0.8), 0.40, 25.0, 1.2, 0.45),   // slowed speed
+        Wave(vec2(-0.4,  0.9), 0.25, 15.0, 1.8, 0.60),
+        Wave(vec2( 0.9, -0.3), 0.18, 40.0, 1.0, 0.35),
+        Wave(vec2(-0.7, -0.6), 0.12,  8.0, 2.4, 0.70),
+        Wave(vec2( 0.2,  1.0), 0.08, 60.0, 0.75, 0.25),
+        Wave(vec2(-0.9,  0.4), 0.06, 20.0, 1.7, 0.55)
+    );
+
+    for (int i = 0; i < NUM_GERSTNER_WAVES; ++i) {
+        Wave w = waves[i];
+        float wa = 6.283185 / w.len;
+        float phase = wa * dot(w.dir, pos) + pc.time * w.speed * GLOBAL_WAVE_SPEED_SCALE;
+        float s = sin(phase);
+        float c = cos(phase);
+
+        height += w.amp * c;
+        vec2 dispXZ = w.dir * (w.amp * w.steep * s);
+
+        normalOffset.xz -= w.dir * (wa * w.amp * c);
+        normalOffset.y  -= w.steep * wa * s * w.amp;
+
+        steepnessOut += w.steep * (0.5 + 0.5 * c);
+    }
+
+    height *= WAVE_AMP_BASE;
+    normalOffset *= WAVE_AMP_BASE;
+    steepnessOut /= float(NUM_GERSTNER_WAVES);
+}
+
+// ─── Water surface ─────────────────────────────────────────────────
+void waterSurface(vec2 pos, out float height, out float foamMask, out vec3 normalMod) {
+    float steep;
+    vec3 nmod;
+    gerstnerWaves(pos, height, steep, nmod);
+    normalMod = nmod;
+
+    foamMask = smoothstep(FOAM_THRESHOLD, FOAM_THRESHOLD + FOAM_FADE, steep);
+    foamMask *= (0.6 + 0.4 * fbm(pos * 0.4 + pc.time * 0.15 * GLOBAL_WAVE_SPEED_SCALE));
+}
+
+// ─── Sky ───────────────────────────────────────────────────────────
+vec3 getSky(vec3 dir) {
+    float up = max(dir.y, 0.0);
+    vec3 sky = mix(vec3(0.05, 0.15, 0.9), vec3(0.02, 0.08, 0.7), up);
+    sky += roygbiv(dir.x * 3.0 + dir.z * 2.0) * 0.5;
+    float sun = pow(max(0.0, dot(dir, normalize(vec3(0.7, 0.9, 0.4)))), 120.0);
+    sky += vec3(1.2, 1.0, 0.9) * sun * 3.0;
+    return sky;
+}
+
+// ─── SDF ───────────────────────────────────────────────────────────
+float sdf(vec3 p, out uint outMatIndex) {
+    outMatIndex = 0u;
+    float d = MAX_DISTANCE;
+
+    float height, foam;
+    vec3 dummyNormalMod;
+    waterSurface(p.xz, height, foam, dummyNormalMod);
+    float water = p.y - WATER_LEVEL - height;
+    if (water < d) {
+        d = water;
+        outMatIndex = 4u;
+    }
+
+    for (int i = 0; i < 5; ++i) {
+        float fi = float(i);
+        vec3 orbPos = vec3(
+            sin(fi * 1.618 + pc.time * 0.8) * 10.0,
+            3.0 + sin(fi * 2.718 + pc.time * 1.1) * 2.0,
+            cos(fi * 3.141 + pc.time * 0.9) * 10.0
+        );
+        float orb = length(p - orbPos) - 1.2;
+        if (orb < d) {
+            d = orb;
+            outMatIndex = 5u + uint(i);
+        }
+    }
+
+    return d;
+}
+
+// ─── Normal ────────────────────────────────────────────────────────
+vec3 getNormal(vec3 p) {
+    const float h = 0.001;
+    uint dummy;
+    float dummyFoam;
+    vec3 dummyNMod;
+
+    float hx_plus, hx_minus, hz_plus, hz_minus;
+    waterSurface((p + vec3( h,0,0)).xz, hx_plus,   dummyFoam, dummyNMod);
+    waterSurface((p - vec3( h,0,0)).xz, hx_minus,  dummyFoam, dummyNMod);
+    waterSurface((p + vec3(0,0, h)).xz, hz_plus,   dummyFoam, dummyNMod);
+    waterSurface((p - vec3(0,0, h)).xz, hz_minus,  dummyFoam, dummyNMod);
+
+    vec3 n = vec3(
+        (hx_plus - hx_minus),
+        2.0 * h,
+        (hz_plus - hz_minus)
+    );
+    return normalize(n);
+}
+
+// ─── Volumetric rainbow ────────────────────────────────────────────
+vec3 volumetricRainbow(vec3 ro, vec3 rd, float tMax) {
+    vec3 accum = vec3(0.0);
+    float stepSize = tMax / float(VOL_STEPS);
+    vec3 pos = ro;
+    for (int i = 0; i < VOL_STEPS; ++i) {
+        pos += rd * stepSize;
+        float phase = max(0.0, dot(rd, normalize(vec3(0.7, 0.9, 0.4))));
+        accum += roygbiv(length(pos.xz) * 0.08) * phase * VOL_DENSITY * stepSize;
+    }
+    return accum * VOL_BOOST;
+}
+
+// ─── Rainbow rain ──────────────────────────────────────────────────
+vec3 addRainbowRain(vec3 col, vec2 uv) {
+    vec2 ruv = uv * vec2(1.0, 12.0);
+    ruv.y += pc.time * RAIN_STREAK_SPEED + sin(pc.time * 1.8 + uv.x * 50.0) * 2.5;
+    ruv.x += sin(ruv.y * 35.0 + pc.time * 5.0) * 0.3;
+
+    float rain = fract(ruv.y * RAIN_DENSITY + sin(ruv.x * 70.0) * 1.3);
+    rain = smoothstep(0.0, RAIN_THICKNESS, rain) - smoothstep(RAIN_THICKNESS, RAIN_THICKNESS * 5.0, rain);
+
+    float mask = smoothstep(0.05, 0.95, 1.0 - uv.y);
+    vec3 sheen = roygbiv(pc.time * 4.0 + uv.x * 15.0 + ruv.y * 0.6) * 1.5;
+
+    return mix(col, col * 0.4 + sheen * 2.5, rain * mask * 1.0);
+}
+
+// ─── MAIN ──────────────────────────────────────────────────────────
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(hdrImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 jitter = vec2(rand(vec2(pix) + pc.time), rand(vec2(pix.yx) + pc.time)) - 0.5;
+    vec2 uv = (vec2(pix) + 0.5 + jitter) / vec2(dim);
+    uv = uv * 2.0 - 1.0;
+
+    vec3 forward = vec3(0,0,1);
+    vec3 right   = vec3(1,0,0);
+    vec3 up      = vec3(0,1,0);
+    vec3 rd = normalize(uv.x * right + uv.y * up + forward);
+
+    // Camera position with manual XYZ offset
+    vec3 ro = pc.cameraPos + vec3(CAMERA_OFFSET_X, CAMERA_OFFSET_Y, CAMERA_OFFSET_Z);
+    ro.y += CAMERA_HEIGHT_ADD;
+
+    // Optional absolute override (uncomment if needed)
+    // vec3 ro = CAMERA_OVERRIDE_POS;
+
+    float t = 0.0;
+    uint matIndex = 0u;
+    for (int i = 0; i < MAX_MARCH_STEPS; ++i) {
+        vec3 p = ro + t * rd;
+        float d = sdf(p, matIndex);
+        t += d;
+        if (d < HIT_THRESHOLD || t > MAX_DISTANCE) break;
+    }
+
+    vec3 col = vec3(0.0);
+
+    if (t < MAX_DISTANCE) {
+        vec3 p = ro + t * rd;
+        vec3 n = getNormal(p);
+
+        vec3 lightDir = normalize(vec3(0.7, 0.9, 0.4));
+        float diff = max(0.0, dot(n, lightDir));
+
+        vec3 albedo = vec3(0.02, 0.05, 0.15);
+        float metallic = 0.0;
+        float roughness = 0.1;
+
+        if (matIndex > 0u && matIndex < matLib.materials.length()) {
+            Material m = matLib.materials[matIndex];
+            if (m.layerCount > 0u) {
+                MaterialLayer l = m.layers[0];
+                albedo    = l.baseColor.rgb;
+                metallic  = l.metallic;
+                roughness = l.roughness;
+            }
+        }
+
+        col = albedo * (diff * 2.0 + 0.3);
+
+        float fresnel = pow(1.0 - max(0.0, dot(n, -rd)), FRESNEL_POWER);
+        vec3 refl = getSky(reflect(rd, n));
+        col = mix(col, refl * REFLECT_BASE, fresnel * (1.0 - metallic));
+
+        float height, foamMask;
+        vec3 dummyNormalMod;
+        waterSurface(p.xz, height, foamMask, dummyNormalMod);
+        vec3 foamColor = vec3(0.95, 0.96, 0.98) * (1.0 + BREAK_EMISSIVE_BOOST * foamMask * foamMask);
+        col = mix(col, foamColor, foamMask * FOAM_STRENGTH);
+
+        col += roygbiv(dot(n, rd) * 8.0) * fresnel * 1.5;
+    } else {
+        col = getSky(rd);
+    }
+
+    col += volumetricRainbow(ro, rd, t);
+    col = addRainbowRain(col, uv);
+
+    float vig = 1.0 - length(uv * 0.6);
+    col *= vig * 0.92 + 0.08;
+
+    col = col / (1.0 + col);
+
+    vec4 prev = imageLoad(hdrImage, pix);
+    vec4 accum = mix(prev, vec4(col, 1.0), ACCUMULATION_BLEND);
+
+    imageStore(hdrImage, pix, accum);
+}

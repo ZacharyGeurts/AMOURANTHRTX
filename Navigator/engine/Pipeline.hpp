@@ -110,7 +110,7 @@ struct alignas(16) PushConstants {
 // ────────────────────────────────────────────────
 inline VkDescriptorSetLayout main_descriptor_layout = VK_NULL_HANDLE;
 inline VkPipelineLayout      pipeline_layout        = VK_NULL_HANDLE;
-inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;  // renamed for consistency
+inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;
 
 // ────────────────────────────────────────────────
 // Sun/moon helpers
@@ -135,75 +135,113 @@ inline VkPipeline            canvas_pipeline        = VK_NULL_HANDLE;  // rename
     const std::string& override_path = "") noexcept
 {
     constexpr std::string_view default_name = "CANVAS.spv";
+    constexpr std::string_view default_rel_path = "assets/shaders/compute/CANVAS.spv";
 
     namespace fs = std::filesystem;
     std::vector<fs::path> candidates;
 
+    // 1. Explicit user override (highest priority)
     if (!override_path.empty()) {
         fs::path op(override_path);
-        if (fs::exists(op)) candidates.push_back(std::move(op));
+        if (fs::exists(op) && fs::is_regular_file(op)) {
+            candidates.push_back(std::move(op));
+        } else {
+            LOG_WARNING_CAT("PIPELINE", "Override path does not exist: {}", override_path);
+        }
     }
 
+    // 2. Get executable directory reliably
     fs::path exe_dir;
-    try { exe_dir = fs::canonical("/proc/self/exe").parent_path(); } catch (...) {}
+    try {
+        exe_dir = fs::canonical("/proc/self/exe").parent_path();
+    } catch (const fs::filesystem_error&) {
+        // Fallback: try argv[0] or current path if /proc/self/exe fails
+        LOG_WARNING_CAT("PIPELINE", "Failed to get exe path via /proc/self/exe");
+    }
+
     if (!exe_dir.empty()) {
+        // Modern expected location (what CMake now produces)
+        candidates.emplace_back(exe_dir / default_rel_path);
+
+        // Common alternatives during dev/build
+        candidates.emplace_back(exe_dir / "assets" / "shaders" / "compute" / default_name);
         candidates.emplace_back(exe_dir / "compute" / default_name);
         candidates.emplace_back(exe_dir / default_name);
     }
 
+    // 3. Current working directory fallbacks
     fs::path cwd = fs::current_path();
+    candidates.emplace_back(cwd / default_rel_path);
+    candidates.emplace_back(cwd / "assets" / "shaders" / "compute" / default_name);
     candidates.emplace_back(cwd / "compute" / default_name);
-    candidates.emplace_back(cwd / "bin" / "Linux" / "compute" / default_name);
 
+    // 4. Project root heuristic (last resort)
     fs::path root = cwd;
-    for (int i = 0; i < 8; ++i) {
-        if (fs::exists(root / "CMakeLists.txt") || fs::exists(root / "Navigator")) break;
+    for (int i = 0; i < 10; ++i) {  // increased slightly
+        if (fs::exists(root / "CMakeLists.txt") || fs::exists(root / "Navigator")) {
+            break;
+        }
         if (root == root.parent_path()) break;
         root = root.parent_path();
     }
-    candidates.emplace_back(root / "compute" / default_name);
-    candidates.emplace_back(root / "bin" / "Linux" / "compute" / default_name);
+    if (fs::exists(root / "CMakeLists.txt")) {
+        candidates.emplace_back(root / "build" / "bin" / "Linux" / default_rel_path);
+        candidates.emplace_back(root / "assets" / "shaders" / "compute" / default_name);
+    }
 
+    // ── Try loading from candidates ─────────────────────────────────────
     std::vector<uint32_t> code;
 
     for (const auto& path : candidates) {
-        if (!fs::exists(path)) continue;
+        if (!fs::exists(path) || !fs::is_regular_file(path)) {
+            continue;
+        }
 
         std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file) continue;
+        if (!file.is_open()) {
+            LOG_WARNING_CAT("PIPELINE", "Cannot open: {}", path.string());
+            continue;
+        }
 
-        auto sz = file.tellg();
-        if (sz <= 0 || sz % 4 != 0) continue;
+        auto size = file.tellg();
 
         file.seekg(0);
-        code.resize(static_cast<size_t>(sz / 4));
-        file.read(reinterpret_cast<char*>(code.data()), sz);
+        code.resize(static_cast<size_t>(size) / 4);
+        file.read(reinterpret_cast<char*>(code.data()), size);
 
         if (file.good()) {
             LOG_SUCCESS_CAT("PIPELINE", "Loaded CANVAS.spv from: {}", path.string());
             break;
         }
+
+        LOG_WARNING_CAT("PIPELINE", "Failed to read fully: {}", path.string());
         code.clear();
     }
 
     if (code.empty()) {
-        LOG_ERROR_CAT("PIPELINE", "CANVAS.spv not found — checked {} paths", candidates.size());
-        return std::unexpected("CANVAS.spv not found");
+        LOG_ERROR_CAT("PIPELINE", "Failed to find/load CANVAS.spv");
+        LOG_ERROR_CAT("PIPELINE", "Checked {} locations:", candidates.size());
+        for (const auto& p : candidates) {
+            LOG_ERROR_CAT("PIPELINE", "  - {}", p.string());
+        }
+        return std::unexpected("CANVAS.spv not found in any expected location");
     }
 
+    // ── Create shader module ────────────────────────────────────────────
     VkShaderModuleCreateInfo ci{};
     ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     ci.codeSize = code.size() * sizeof(uint32_t);
     ci.pCode    = code.data();
 
-    VkShaderModule mod = VK_NULL_HANDLE;
-    VkResult res = vkCreateShaderModule(rtx().device, &ci, nullptr, &mod);
+    VkShaderModule module = VK_NULL_HANDLE;
+    VkResult res = vkCreateShaderModule(rtx().device, &ci, nullptr, &module);
+
     if (res != VK_SUCCESS) {
         LOG_ERROR_CAT("PIPELINE", "vkCreateShaderModule failed: {}", static_cast<int>(res));
         return std::unexpected(std::format("vkCreateShaderModule failed: {}", static_cast<int>(res)));
     }
 
-    return mod;
+    return module;
 }
 
 // ────────────────────────────────────────────────
@@ -411,7 +449,7 @@ inline void shutdown() noexcept {
 // ────────────────────────────────────────────────
 // Hot-reload shader
 // ────────────────────────────────────────────────
-inline void hot_reload_shader(const std::string& path = "compute/CANVAS.spv") noexcept {
+inline void hot_reload_shader(const std::string& path = "assets/shaders/compute/CANVAS.spv") noexcept {
     LOG_INFO_CAT("PIPELINE", "Hot-reloading CANVAS shader: {}", path);
     create_canvas_pipeline(path);
 }

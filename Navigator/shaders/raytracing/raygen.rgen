@@ -1,0 +1,10 @@
+// Filename:     raygen.rgen
+// Path:         Navigator/raytracing/raygen.rgen
+// Purpose:      Primitive placeholder — outputs fixed color pattern to test compilation & loading
+
+#version 460
+
+void main() {
+    // No layout(local_size), no gl_GlobalInvocationID, no imageStore — just dummy
+    // This will compile but do nothing useful until replaced with real code
+}
