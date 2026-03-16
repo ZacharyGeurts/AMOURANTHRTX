@@ -206,10 +206,23 @@ namespace Options::Rendering
 namespace Options::SDL3
 {
     // Audio constants (used in SDL3.hpp for desired spec, mixer setup, track gain, slot count)
-    inline constexpr int     MaxAudioSlots      = 16;               // Number of simultaneous audio tracks/slots (MAX_SLOTS)
+    inline constexpr int     MyAudioSlots       = 16;               // Suggested / soft maximum number of simultaneous playing tracks
+                                                                    // (used for warnings, UI, default pool sizing — not a hard limit)
     inline constexpr int     AudioFrequency     = 48000;            // Default audio sample rate in Hz (AUDIO_FREQ)
     inline constexpr int     AudioChannels      = 8;                // Default channels (1=mono, 2=stereo) (AUDIO_CHANNELS)
     inline constexpr float   DefaultVolume      = 0.8f;             // Default track gain (0.0 = silent, 1.0 = full) (DEFAULT_VOLUME)
+
+    // Preloaded audio files — loaded at engine startup into the audio pool
+    // Add/remove paths freely — no fixed limit (only memory constrained)
+    // Use relative paths from assets root or full paths
+    // Recommended: keep under ~50–100 for startup time & memory on typical games
+    inline const std::vector<std::string> PreloadedAudioFiles = {
+        "assets/audio/splash.wav",
+        // Add as many as you want here...
+        // "assets/audio/foley/footstep_concrete_01.wav",
+        // "assets/audio/foley/door_open_metal.wav",
+        // ...
+    };
 
     // Window & Presentation
     inline int     DefaultWidth                 = 1920;             // Logical startup width in pixels
@@ -220,7 +233,7 @@ namespace Options::SDL3
     inline bool    HighDPIAware                 = true;             // Use high-DPI pixel backing size (SDL_GetWindowSizeInPixels)
     inline float   UIScale                      = 1.0f;             // Global UI scaling factor (for 4K/Retina)
 
-    // Audio
+    // Audio toggles
     inline bool    EnableAudio                  = true;             // Master audio toggle
     inline bool    EnableSpatialAudio           = true;             // Enable 3D positional audio (if supported)
     inline bool    EnableHRTF                   = false;            // Enable head-related transfer function (headphone spatialization)

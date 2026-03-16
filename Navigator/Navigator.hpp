@@ -87,14 +87,14 @@ static inline void showSacrificialSplash() noexcept {
     SDL_ShowWindow(splashWin);
     SDL_RenderPresent(splashRen);
 
-    // Audio — single WAV file
+    // Play splash sound (will use whatever free slot the dynamic system assigns)
     SDL3System::get().playSound("assets/audio/splash.wav", "play");
 
     // Visual timeout + input skip (~3.4s max)
     double start = TotalTime::get().seconds();
     bool skip = false;
 
-    while (TotalTime::get().seconds() - start < 3.4 && !skip) {
+    while (TotalTime::get().seconds() - start < 3.0 && !skip) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             SDL3System::get().pump(e);
@@ -112,10 +112,15 @@ static inline void showSacrificialSplash() noexcept {
         SDL_Delay(1);
     }
 
-    // Stop any lingering audio using centralized max slots
-    for (int s = 0; s < Options::SDL3::MaxAudioSlots; ++s) {
-        if (SDL3System::get().isTrackPlaying(s)) {
-            SDL3System::get().playSound("", "stop", s);
+    // Stop ALL currently playing tracks (dynamic system — no fixed slot count)
+    size_t playing_count = SDL3System::get().getPlayingCount();
+    if (playing_count > 0) {
+        LOG_INFO_CAT("SPLASH", "Stopping {} lingering audio track(s)", playing_count);
+        // Since we don't track which slot the splash used, safest is to stop everything
+        for (size_t i = 0; i < SDL3System::get().getActiveSlotCount(); ++i) {
+            if (SDL3System::get().isTrackPlaying(static_cast<int>(i))) {
+                SDL3System::get().playSound("", "stop", static_cast<int>(i));
+            }
         }
     }
 
@@ -145,7 +150,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         return 1;
     }
 
-    // SDL3 init
+    // SDL3 init (this also preloads all files from Options::SDL3::PreloadedAudioFiles)
     if (!SDL3System::get().init(window)) {
         LOG_FATAL_CAT("SDL3", "SDL3.init failed");
         SDL_DestroyWindow(window);

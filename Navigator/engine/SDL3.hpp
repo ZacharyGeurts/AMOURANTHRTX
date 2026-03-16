@@ -1,9 +1,11 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX — SDL3 Core + Image + Mixer + TTF + Full Input (16-slot audio)
+// AMOURANTH RTX — SDL3 Core + Image + Mixer + TTF + Full Input
 // Full 4-axis controller support + real track finished callbacks
 // Updated to use OptionsMenu.hpp for all configuration
+// Dynamic audio slots — preload as many files as desired via Options::SDL3::PreloadedAudioFiles
+// No hard slot limit (MyAudioSlots is soft/recommended concurrent max)
 // =============================================================================
 
 #include <SDL3/SDL.h>
@@ -17,7 +19,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <array>
 #include <mutex>
 #include <atomic>
 #include <functional>
@@ -33,19 +34,42 @@
 // =============================================================================
 // CONSTANTS — centralized from Options::SDL3
 // =============================================================================
-constexpr int     MAX_SLOTS         = Options::SDL3::MaxAudioSlots;     // Number of audio tracks/slots
-constexpr int     AUDIO_FREQ        = Options::SDL3::AudioFrequency;    // Sample rate (Hz)
-constexpr int     AUDIO_CHANNELS    = Options::SDL3::AudioChannels;     // Mono=1, Stereo=2
-constexpr float   DEFAULT_VOLUME    = Options::SDL3::DefaultVolume;     // Default track gain
+constexpr int     AUDIO_FREQ           = Options::SDL3::AudioFrequency;
+constexpr int     AUDIO_CHANNELS       = Options::SDL3::AudioChannels;
+constexpr float   DEFAULT_VOLUME       = Options::SDL3::DefaultVolume;
+
+// Soft / recommended maximum concurrent playing tracks
+constexpr int     SOFT_MAX_SLOTS       = Options::SDL3::MyAudioSlots;
 
 // =============================================================================
 // TYPES
 // =============================================================================
+enum class AudioSlotState : uint8_t {
+    Free       = 0,
+    Loaded     = 1,
+    Playing    = 2,
+    Paused     = 3
+};
+
 struct AudioSlot {
-    MIX_Audio*     audio      = nullptr;
-    std::string    filename;
-    bool           in_use     = false;
+    MIX_Audio*      audio       = nullptr;
+    std::string     filename;
+    AudioSlotState  state       = AudioSlotState::Free;
+    float           gain        = DEFAULT_VOLUME;
+
     ~AudioSlot() { if (audio) MIX_DestroyAudio(audio); }
+
+    void reset() noexcept {
+        if (audio) {
+            MIX_DestroyAudio(audio);
+            audio = nullptr;
+        }
+        filename.clear();
+        state = AudioSlotState::Free;
+        gain  = DEFAULT_VOLUME;
+    }
+
+    bool isActive() const noexcept { return state == AudioSlotState::Playing || state == AudioSlotState::Paused; }
 };
 
 struct FontEntry {
@@ -88,7 +112,6 @@ public:
             return false;
         }
 
-        // Apply runtime SDL3 options from menu
         applyOptions();
 
         if (TTF_Init() == 0) {
@@ -115,20 +138,13 @@ public:
         }
         mixer_ready_ = true;
 
-        tracks_.resize(MAX_SLOTS);
-        slots_.resize(MAX_SLOTS);
-        for (int i = 0; i < MAX_SLOTS; ++i) {
-            tracks_[i] = MIX_CreateTrack(mixer_);
-            if (tracks_[i]) {
-                MIX_SetTrackGain(tracks_[i], DEFAULT_VOLUME);
-                MIX_SetTrackStoppedCallback(tracks_[i], track_stopped_callback, this);
-            }
-        }
+        preloadAudioFiles();
 
         bindDefaultActions();
 
         initialized_ = true;
-        LOG_SUCCESS_CAT("SDL3", "Initialized — {} audio slots + full controller support", MAX_SLOTS);
+        LOG_SUCCESS_CAT("SDL3", "Initialized — dynamic audio slots (preloaded: {}, soft max: {}) + full controller support",
+                        slots_.size(), SOFT_MAX_SLOTS);
         return true;
     }
 
@@ -146,8 +162,13 @@ public:
             }
             tracks_.clear();
 
-            MIX_DestroyMixer(mixer_);   // Destroy the mixer
-            MIX_Quit();                 // Quit mixer subsystem
+            for (auto& s : slots_) s.reset();
+            slots_.clear();
+
+            MIX_DestroyMixer(mixer_);
+            mixer_ = nullptr;
+            MIX_Quit();
+            mixer_ready_ = false;
         }
 
         fonts_.clear();
@@ -160,27 +181,19 @@ public:
         LOG_SUCCESS_CAT("SDL3", "Shutdown complete");
     }
 
-    // ────────────────────────────────────────────────
-    // RESIZE HANDLING — SDL3 owns it, uses pixel size
-    // ────────────────────────────────────────────────
     void onResize() noexcept {
         if (!window_) return;
-
         int pixelW = 0, pixelH = 0;
         SDL_GetWindowSizeInPixels(window_, &pixelW, &pixelH);
-
         if (pixelW <= 0 || pixelH <= 0) {
             LOG_WARNING_CAT("SDL3", "Window minimized/invalid size");
             return;
         }
-
         Swapchain::recreate(pixelW, pixelH);
     }
 
-    // Apply runtime SDL3 options from Options::SDL3
     void applyOptions() noexcept {
         if (!window_) return;
-
         SDL_SetWindowFullscreen(window_, Options::SDL3::StartFullscreen);
         SDL_SetWindowBordered(window_, !Options::SDL3::BorderlessWindow);
         SDL_SetWindowResizable(window_, Options::SDL3::AllowWindowResize);
@@ -200,33 +213,50 @@ public:
             int slot = findOrAllocateSlot(file, preferred_slot);
             if (slot < 0) return -1;
 
+            auto& s = slots_[static_cast<size_t>(slot)];
+
             if (cmd_lower == "play") {
-                MIX_SetTrackAudio(tracks_[slot], slots_[slot].audio);
-                MIX_PlayTrack(tracks_[slot], 0);
-                LOG_SUCCESS_CAT("AUDIO", "Playing '{}' on slot {}", slots_[slot].filename, slot);
+                if (!s.audio) return -1;
+
+                MIX_Track* track = tracks_[static_cast<size_t>(slot)];
+                MIX_SetTrackAudio(track, s.audio);
+                MIX_SetTrackGain(track, s.gain);
+                MIX_PlayTrack(track, 0);
+                s.state = AudioSlotState::Playing;
+
+                if (getPlayingCount() > static_cast<size_t>(SOFT_MAX_SLOTS)) {
+                    LOG_WARNING_CAT("AUDIO", "Active playing count ({}) exceeds soft max ({})", getPlayingCount(), SOFT_MAX_SLOTS);
+                }
+
+                LOG_SUCCESS_CAT("AUDIO", "Playing '{}' on slot {}", s.filename, slot);
             } else {
                 LOG_SUCCESS_CAT("AUDIO", "Loaded '{}' into slot {}", file, slot);
             }
             return slot;
         }
         else if (cmd_lower == "stop") {
-            if (preferred_slot >= 0 && preferred_slot < MAX_SLOTS && slots_[preferred_slot].in_use) {
-                MIX_StopTrack(tracks_[preferred_slot], 0);
+            size_t s = static_cast<size_t>(preferred_slot);
+            if (preferred_slot >= 0 && s < slots_.size() && slots_[s].isActive()) {
+                MIX_StopTrack(tracks_[s], 0);
+                slots_[s].state = AudioSlotState::Loaded;
                 LOG_INFO_CAT("AUDIO", "Stopped slot {}", preferred_slot);
             }
             return preferred_slot;
         }
         else if (cmd_lower == "pause") {
-            if (preferred_slot >= 0 && preferred_slot < MAX_SLOTS && slots_[preferred_slot].in_use) {
-                MIX_PauseTrack(tracks_[preferred_slot]);
+            size_t s = static_cast<size_t>(preferred_slot);
+            if (preferred_slot >= 0 && s < slots_.size() && slots_[s].state == AudioSlotState::Playing) {
+                MIX_PauseTrack(tracks_[s]);
+                slots_[s].state = AudioSlotState::Paused;
                 LOG_INFO_CAT("AUDIO", "Paused slot {}", preferred_slot);
             }
             return preferred_slot;
         }
         else if (cmd_lower == "remove") {
-            if (preferred_slot >= 0 && preferred_slot < MAX_SLOTS && slots_[preferred_slot].in_use) {
-                MIX_StopTrack(tracks_[preferred_slot], 0);
-                slots_[preferred_slot] = {};
+            size_t s = static_cast<size_t>(preferred_slot);
+            if (preferred_slot >= 0 && s < slots_.size() && slots_[s].audio) {
+                MIX_StopTrack(tracks_[s], 0);
+                slots_[s].reset();
                 LOG_INFO_CAT("AUDIO", "Removed slot {}", preferred_slot);
             }
             return preferred_slot;
@@ -237,66 +267,156 @@ public:
     }
 
     void onTrackFinished(int slot, std::function<void(int)> cb) {
-        if (!mixer_ready_ || slot < 0 || slot >= MAX_SLOTS || !tracks_[slot]) return;
+        if (!mixer_ready_ || slot < 0 || static_cast<size_t>(slot) >= slots_.size() || !tracks_[static_cast<size_t>(slot)]) return;
 
         std::lock_guard<std::mutex> lock(callback_mtx_);
-        stopped_callbacks_[tracks_[slot]] = std::move(cb);
+        stopped_callbacks_[tracks_[static_cast<size_t>(slot)]] = std::move(cb);
     }
 
     bool isTrackPlaying(int slot) const {
-        if (slot < 0 || slot >= MAX_SLOTS || !tracks_[slot]) return false;
-        return MIX_TrackPlaying(tracks_[slot]);
+        if (slot < 0 || static_cast<size_t>(slot) >= slots_.size() || !tracks_[static_cast<size_t>(slot)]) return false;
+        return MIX_TrackPlaying(tracks_[static_cast<size_t>(slot)]);
+    }
+
+    size_t getActiveSlotCount() const { return slots_.size(); }
+
+    size_t getPlayingCount() const {
+        size_t count = 0;
+        for (const auto& s : slots_)
+            if (s.state == AudioSlotState::Playing) ++count;
+        return count;
     }
 
 private:
+    void preloadAudioFiles() {
+        const auto& files = Options::SDL3::PreloadedAudioFiles;
+        if (files.empty()) return;
+
+        slots_.reserve(files.size() + 16);
+        tracks_.reserve(files.size() + 16);
+
+        size_t loaded = 0;
+        for (const auto& path : files) {
+            MIX_Audio* a = MIX_LoadAudio(mixer_, path.c_str(), false);
+            if (!a) {
+                LOG_ERROR_CAT("AUDIO", "Preload failed: {}", path);
+                continue;
+            }
+
+            size_t idx = slots_.size();
+            slots_.emplace_back();
+            auto& slot = slots_.back();
+            slot.audio    = a;
+            slot.filename = path;
+            slot.state    = AudioSlotState::Loaded;
+
+            MIX_Track* t = MIX_CreateTrack(mixer_);
+            if (!t) {
+                LOG_ERROR_CAT("AUDIO", "Failed to create track for '{}'", path);
+                slot.reset();
+                continue;
+            }
+
+            MIX_SetTrackGain(t, DEFAULT_VOLUME);
+            MIX_SetTrackStoppedCallback(t, track_stopped_callback, this);
+            tracks_.push_back(t);
+
+            LOG_INFO_CAT("AUDIO", "Preloaded '{}' → slot {}", path, idx);
+            ++loaded;
+        }
+
+        LOG_SUCCESS_CAT("AUDIO", "Preloaded {}/{} requested files", loaded, files.size());
+    }
+
+    int findOrAllocateSlot(const std::string& file, int preferred = -1) {
+        // Reuse if already loaded
+        for (size_t i = 0; i < slots_.size(); ++i) {
+            if (slots_[i].filename == file && slots_[i].audio) {
+                return static_cast<int>(i);
+            }
+        }
+
+        // Try preferred slot if valid & free
+        size_t pref = static_cast<size_t>(preferred);
+        if (preferred >= 0 && pref < slots_.size() && slots_[pref].state == AudioSlotState::Free) {
+            loadIntoSlot(pref, file);
+            return preferred;
+        }
+
+        // First free slot
+        for (size_t i = 0; i < slots_.size(); ++i) {
+            if (slots_[i].state == AudioSlotState::Free) {
+                loadIntoSlot(i, file);
+                return static_cast<int>(i);
+            }
+        }
+
+        // Create new
+        return loadIntoNewSlot(file);
+    }
+
+    int loadIntoNewSlot(const std::string& file) {
+        MIX_Audio* a = MIX_LoadAudio(mixer_, file.c_str(), false);
+        if (!a) {
+            LOG_ERROR_CAT("AUDIO", "Dynamic load failed '{}': {}", file, SDL_GetError());
+            return -1;
+        }
+
+        size_t idx = slots_.size();
+        slots_.emplace_back();
+        auto& slot = slots_.back();
+        slot.audio    = a;
+        slot.filename = file;
+        slot.state    = AudioSlotState::Loaded;
+
+        MIX_Track* t = MIX_CreateTrack(mixer_);
+        if (!t) {
+            LOG_ERROR_CAT("AUDIO", "Failed to create track for '{}'", file);
+            slot.reset();
+            return -1;
+        }
+
+        MIX_SetTrackGain(t, DEFAULT_VOLUME);
+        MIX_SetTrackStoppedCallback(t, track_stopped_callback, this);
+        tracks_.push_back(t);
+
+        LOG_INFO_CAT("AUDIO", "Allocated new slot {} for '{}'", idx, file);
+        return static_cast<int>(idx);
+    }
+
+    void loadIntoSlot(size_t idx, const std::string& file) {
+        MIX_Audio* a = MIX_LoadAudio(mixer_, file.c_str(), false);
+        if (!a) {
+            LOG_ERROR_CAT("AUDIO", "Load failed '{}': {}", file, SDL_GetError());
+            return;
+        }
+
+        auto& s = slots_[idx];
+        if (s.audio) MIX_DestroyAudio(s.audio);
+        s.audio    = a;
+        s.filename = file;
+        s.state    = AudioSlotState::Loaded;
+    }
+
     static void track_stopped_callback(void* userdata, MIX_Track* track) {
         auto* self = static_cast<SDL3System*>(userdata);
         if (!self) return;
 
         std::lock_guard<std::mutex> lock(self->callback_mtx_);
         auto it = self->stopped_callbacks_.find(track);
-        if (it != self->stopped_callbacks_.end()) {
-            int slot = -1;
-            for (int i = 0; i < MAX_SLOTS; ++i) {
-                if (self->tracks_[i] == track) {
-                    slot = i;
-                    break;
-                }
-            }
-            if (slot >= 0) it->second(slot);
-            self->stopped_callbacks_.erase(it);
-        }
-    }
+        if (it == self->stopped_callbacks_.end()) return;
 
-    int findOrAllocateSlot(const std::string& file, int preferred) {
-        if (preferred >= 0 && preferred < MAX_SLOTS && !slots_[preferred].in_use) {
-            loadIntoSlot(preferred, file);
-            return preferred;
-        }
-
-        for (int i = 0; i < MAX_SLOTS; ++i) {
-            if (!slots_[i].in_use) {
-                loadIntoSlot(i, file);
-                return i;
+        int slot_idx = -1;
+        for (size_t i = 0; i < self->tracks_.size(); ++i) {
+            if (self->tracks_[i] == track) {
+                slot_idx = static_cast<int>(i);
+                self->slots_[i].state = AudioSlotState::Loaded;
+                break;
             }
         }
 
-        int victim = (preferred >= 0 && preferred < MAX_SLOTS) ? preferred : 0;
-        MIX_StopTrack(tracks_[victim], 0);
-        loadIntoSlot(victim, file);
-        LOG_WARNING_CAT("AUDIO", "Overwrote slot {} with '{}'", victim, file);
-        return victim;
-    }
-
-    void loadIntoSlot(int slot, const std::string& file) {
-        MIX_Audio* a = MIX_LoadAudio(mixer_, file.c_str(), false);
-        if (!a) {
-            LOG_ERROR_CAT("AUDIO", "Load failed '{}': {}", file, SDL_GetError());
-            return;
-        }
-        slots_[slot].audio = a;
-        slots_[slot].filename = file;
-        slots_[slot].in_use = true;
+        if (slot_idx >= 0) it->second(slot_idx);
+        self->stopped_callbacks_.erase(it);
     }
 
 public:
@@ -311,15 +431,13 @@ public:
         }
         SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
         SDL_DestroySurface(s);
-        if (!t) {
-            LOG_ERROR_CAT("SDL", "SDL_CreateTextureFromSurface failed: {}", SDL_GetError());
-        }
+        if (!t) LOG_ERROR_CAT("SDL", "CreateTextureFromSurface failed: {}", SDL_GetError());
         return t;
     }
 
     bool loadFont(const std::string& name, const std::string& path, int size) {
         if (!ttf_ready_) return false;
-        TTF_Font* f = TTF_OpenFont(path.c_str(), static_cast<float>(size));
+        TTF_Font* f = TTF_OpenFont(path.c_str(), size);
         if (!f) {
             LOG_ERROR_CAT("TTF", "TTF_OpenFont failed for '{}': {}", path, SDL_GetError());
             return false;
@@ -338,15 +456,13 @@ public:
 
         SDL_Surface* s = TTF_RenderText_Blended_Wrapped(it->second.font, text.c_str(), 0, col, wrap);
         if (!s) {
-            LOG_ERROR_CAT("TTF", "TTF_RenderText_Blended_Wrapped failed: {}", SDL_GetError());
+            LOG_ERROR_CAT("TTF", "RenderText failed: {}", SDL_GetError());
             return nullptr;
         }
 
         SDL_Texture* t = SDL_CreateTextureFromSurface(r, s);
         SDL_DestroySurface(s);
-        if (!t) {
-            LOG_ERROR_CAT("SDL", "SDL_CreateTextureFromSurface failed: {}", SDL_GetError());
-        }
+        if (!t) LOG_ERROR_CAT("SDL", "CreateTextureFromSurface failed: {}", SDL_GetError());
         return t;
     }
 
@@ -425,52 +541,52 @@ public:
     }
 
     bool controllerConnected(int slot = 0) const {
-        return slot >= 0 && slot < static_cast<int>(controllers_.size()) &&
+        return slot >= 0 && static_cast<size_t>(slot) < controllers_.size() &&
                controllers_[static_cast<size_t>(slot)].gamepad != nullptr;
     }
 
     const char* controllerName(int slot = 0) const {
         if (!controllerConnected(slot)) return "None";
-        return SDL_GetGamepadName(controllers_[slot].gamepad.get());
+        return SDL_GetGamepadName(controllers_[static_cast<size_t>(slot)].gamepad.get());
     }
 
     float leftStickX(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
-        float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+        float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float leftStickY(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
-        float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+        float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float rightStickX(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
-        float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
+        float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float rightStickY(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
-        float val = SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+        float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float leftTrigger(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
-        return SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
+        return SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
     }
 
     float rightTrigger(int slot = 0) const {
         if (!controllerConnected(slot)) return 0.0f;
-        return SDL_GetGamepadAxis(controllers_[slot].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
+        return SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
     }
 
     bool buttonDown(int slot, SDL_GamepadButton button) const {
         if (!controllerConnected(slot)) return false;
-        return SDL_GetGamepadButton(controllers_[slot].gamepad.get(), button);
+        return SDL_GetGamepadButton(controllers_[static_cast<size_t>(slot)].gamepad.get(), button);
     }
 
 private:
@@ -489,31 +605,31 @@ private:
     }
 
     void openController(SDL_JoystickID id) {
-        if (SDL_IsGamepad(id) == 0) return;
+        if (!SDL_IsGamepad(id)) return;
         auto* gp = SDL_OpenGamepad(id);
         if (!gp) {
             LOG_WARNING_CAT("INPUT", "SDL_OpenGamepad failed for id {}: {}", id, SDL_GetError());
             return;
         }
 
-        size_t inputport = 0;
-        for (; inputport < controllers_.size(); ++inputport)
-            if (!controllers_[inputport].gamepad) break;
+        size_t port = 0;
+        for (; port < controllers_.size(); ++port)
+            if (!controllers_[port].gamepad) break;
 
-        if (inputport >= controllers_.size()) {
+        if (port >= controllers_.size()) {
             SDL_CloseGamepad(gp);
-            LOG_WARNING_CAT("INPUT", "No free controller input port for id {}", id);
+            LOG_WARNING_CAT("INPUT", "No free controller port for id {}", id);
             return;
         }
 
-        controllers_[inputport].gamepad.reset(gp);
-        controllers_[inputport].id = id;
+        controllers_[port].gamepad.reset(gp);
+        controllers_[port].id = id;
 
         auto props = SDL_GetGamepadProperties(gp);
-        controllers_[inputport].rumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) && Options::SDL3::EnableRumble;
-        controllers_[inputport].gyro   = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO) && Options::SDL3::EnableGyro;
+        controllers_[port].rumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) && Options::SDL3::EnableRumble;
+        controllers_[port].gyro   = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO) && Options::SDL3::EnableGyro;
 
-        LOG_SUCCESS_CAT("INPUT", "Gamepad connected (Player {} Input Port {}) — {}", inputport+1, inputport, SDL_GetGamepadName(gp));
+        LOG_SUCCESS_CAT("INPUT", "Gamepad connected (Player {} Port {}) — {}", port+1, port, SDL_GetGamepadName(gp));
     }
 
     void closeController(SDL_JoystickID id) {
@@ -548,8 +664,8 @@ private:
     SDL_Window* window_ = nullptr;
     MIX_Mixer*  mixer_  = nullptr;
 
-    std::vector<MIX_Track*> tracks_;
-    std::vector<AudioSlot> slots_;  // Dynamic size from Options::SDL3::MaxAudioSlots
+    std::vector<MIX_Track*>     tracks_;
+    std::vector<AudioSlot>      slots_;
 
     std::unordered_map<std::string, FontEntry> fonts_;
     std::array<ControllerState, 4> controllers_;
@@ -566,4 +682,4 @@ private:
 };
 
 #define INPUT  SDL3System::get()
-#define ON_EVENT(cb) SDL3.subscribe([](const SDL_Event& ev){ cb(ev); }, #cb)
+#define ON_EVENT(cb) INPUT.subscribe([](const SDL_Event& ev){ cb(ev); }, #cb)
