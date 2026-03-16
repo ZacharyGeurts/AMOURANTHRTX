@@ -222,7 +222,6 @@ namespace Options::SDL3
 
     // Audio
     inline bool    EnableAudio                  = true;             // Master audio toggle
-    inline float   MasterVolume                 = 1.0f;             // Global volume (0.0 = mute, 1.0 = full)
     inline bool    EnableSpatialAudio           = true;             // Enable 3D positional audio (if supported)
     inline bool    EnableHRTF                   = false;            // Enable head-related transfer function (headphone spatialization)
 
