@@ -293,16 +293,65 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
 endif()
 
 # =============================================================================
-# SHADERS
+# SHADERS - only if tools found
 # =============================================================================
-set(SHADER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/compute/CANVAS.comp")
-set(SHADER_OUT "${BIN_DIR}/compute/CANVAS.spv")
-add_custom_command(OUTPUT "${SHADER_OUT}"
-    COMMAND ${GLSLC} -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders" -O --target-spv=spv1.6 --target-env=vulkan1.4 -fshader-stage=comp "${SHADER_SRC}" -o "${SHADER_OUT}"
-    DEPENDS "${SHADER_SRC}"
-    COMMENT "Compiling compute shader"
-)
-add_custom_target(shaders ALL DEPENDS "${SHADER_OUT}")
+if(GLSLC AND SPIRV_VAL)
+    set(SHADER_INCLUDE_FLAGS
+        -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders"
+        -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing"
+        -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute"
+    )
+
+    if(CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
+        set(SHADER_OPT_FLAGS -g -O0)
+    else()
+        set(SHADER_OPT_FLAGS -O)
+    endif()
+
+    set(SPV_OUTPUTS "")
+
+    file(GLOB RAY_SHADERS "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing/*")
+    foreach(src ${RAY_SHADERS})
+        get_filename_component(fullname "${src}" NAME)
+        get_filename_component(base "${src}" NAME_WE)
+        set(out "${BIN_DIR}/assets/shaders/raytracing/${base}.spv")
+
+        add_custom_command(
+            OUTPUT "${out}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/assets/shaders/raytracing"
+            COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${SHADER_OPT_FLAGS}
+                    --target-spv=spv1.6 --target-env=vulkan1.4
+                    "${src}" -o "${out}"
+            COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${out}"
+            DEPENDS "${src}"
+            COMMENT "Compiling ${fullname}"
+            VERBATIM
+        )
+        list(APPEND SPV_OUTPUTS "${out}")
+    endforeach()
+
+    set(canvas_src "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute/CANVAS.comp")
+    set(canvas_out "${BIN_DIR}/assets/shaders/compute/CANVAS.spv")
+
+    if(EXISTS "${canvas_src}")
+        add_custom_command(
+            OUTPUT "${canvas_out}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/assets/shaders/compute"
+            COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${SHADER_OPT_FLAGS}
+                    --target-spv=spv1.6 --target-env=vulkan1.4
+                    -fshader-stage=comp "${canvas_src}" -o "${canvas_out}"
+            COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${canvas_out}"
+            DEPENDS "${canvas_src}"
+            COMMENT "Compiling CANVAS.comp"
+            VERBATIM
+        )
+        list(APPEND SPV_OUTPUTS "${canvas_out}")
+    endif()
+
+    add_custom_target(shaders ALL DEPENDS ${SPV_OUTPUTS})
+else()
+    message(WARNING "Skipping shader compilation - missing glslc or spirv-val")
+endif()
 
 # =============================================================================
 # FINAL TARGET DEPENDENCIES + REPORT
