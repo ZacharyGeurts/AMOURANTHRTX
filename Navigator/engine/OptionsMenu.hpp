@@ -166,18 +166,12 @@ namespace Options::Rendering
     // Post-processing & quality
     inline float   Exposure                     = 0.0f;             // HDR exposure compensation (EV stops)
     inline bool    EnableTonemapping            = false;             // Apply HDR → LDR tonemapping
-    inline bool    EnableBloom                  = false;             // Enable bloom / emissive glow
-    inline float   BloomThreshold               = 1.2f;             // Brightness threshold for bloom
-    inline float   BloomIntensity               = 0.45f;            // Strength of bloom effect
+    inline float   BloomThreshold               = 0.0f;             // Brightness threshold for bloom
+    inline float   BloomIntensity               = 0.0f;            // Strength of bloom effect
 
-    inline bool    EnableVignette               = false;             // Apply screen vignette (dark edges)
-    inline float   VignetteStrength             = 0.35f;            // Vignette darkness amount
-
-    inline bool    EnableChromaticAberration    = false;            // Lens chromatic aberration effect
-    inline float   ChromaticAberrationStrength  = 0.6f;             // Strength of color fringing
-
-    inline bool    EnableMotionBlur             = false;            // Per-pixel motion blur
-    inline float   MotionBlurStrength           = 0.4f;             // Blur intensity
+    inline float   VignetteStrength             = 0.0f;            // Vignette darkness amount
+    inline float   ChromaticAberrationStrength  = 0.0f;             // Strength of color fringing
+    inline float   MotionBlurStrength           = 0.0f;             // Blur intensity
 
     inline bool    EnableAdaptiveResolution     = true;             // Dynamically scale render resolution
     inline float   MinResolutionScale           = 0.02f;             // Lowest allowed render scale
