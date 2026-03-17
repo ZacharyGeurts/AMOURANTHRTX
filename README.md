@@ -7,6 +7,8 @@ https://x.com/ZacharyGeurts/status/2031298561900446079
 Help yourself to the demos folder.  
 
 Navigator/shaders/compute/CANVAS.comp is to be the one file to update.  
+Using push constants this one file can manage visuals, input, and audio.  
+We permit hot swapping shaders in, so now you have a full engine of whatever you want.  
 
 Overwrite the CANVAS.comp and rebuild.  
 Have Grok write a new fun comp with rainbows or whatever.  
