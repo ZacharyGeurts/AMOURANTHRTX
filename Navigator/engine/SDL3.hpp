@@ -437,7 +437,7 @@ public:
 
     bool loadFont(const std::string& name, const std::string& path, int size) {
         if (!ttf_ready_) return false;
-        TTF_Font* f = TTF_OpenFont(path.c_str(), size);
+        TTF_Font* f = TTF_OpenFont(path.c_str(), static_cast<float>(size));
         if (!f) {
             LOG_ERROR_CAT("TTF", "TTF_OpenFont failed for '{}': {}", path, SDL_GetError());
             return false;

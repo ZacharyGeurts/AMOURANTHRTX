@@ -485,10 +485,8 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     // Mouse delta & normalized position
     glm::vec2 delta = INPUT.mouseDelta();
     pc.mouseDelta       = delta;
-    pc.mouseNormalized  = glm::vec2(
-        (delta.x + width * 0.5f)  / static_cast<f32>(width),
-        (delta.y + height * 0.5f) / static_cast<f32>(height)
-    );
+    pc.mouseNormalized.x = (delta.x + 0.5f * static_cast<float>(width))  / static_cast<float>(width);
+    pc.mouseNormalized.y = (delta.y + 0.5f * static_cast<float>(height)) / static_cast<float>(height);
 
     // Bind & push
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
