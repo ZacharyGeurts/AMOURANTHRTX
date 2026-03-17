@@ -10,108 +10,71 @@ layout(push_constant) uniform Push {
 } pc;
 
 // ────────────────────────────────────────────────
-// CONTROLS — tune for speed, depth, vibrance
+// Controls
 // ────────────────────────────────────────────────
 
-#define CENTER_X            -0.745429f
-#define CENTER_Y             0.113010f
-#define ZOOM_SPEED           0.65f               // 0.5–0.8 = fast dive, 0.3–0.4 = longer life
-#define MAX_ITER_BASE       16384u               // high base for quality
-#define ITER_RAMP           24000.0f             // iterations explode with time
-#define BAILOUT              1e10f               // very large — delay bailout
-#define RENORM_MAG           1e7f                // rescale only when needed
+#define CYCLE_TIME          6000.0f              // zoom 60 s → hop
+#define ZOOM_POWER          1200.0f              // ~10¹²× per cycle
+#define MAX_ITER            4096u
+#define ESCAPE              16.0f
+#define PERIOD_CHECK_DEPTH  32u                // how many iterations to check for cycle
+
+// Starting spots
+const vec2 spots[6] = vec2[6](
+    vec2(-0.745429,  0.113010),
+    vec2(-1.769383,  0.004237),
+    vec2(-0.72689,   0.188887),
+    vec2( 0.33800,  -0.57500),
+    vec2(-0.16200,   1.03200),
+    vec2(-0.10110,   0.95630)
+);
 
 // ────────────────────────────────────────────────
-// Double-float helpers — correct & fast
+// Detect low period (simple cycle check)
 // ────────────────────────────────────────────────
 
-struct dfloat {
-    float hi, lo;
-};
-
-dfloat ds(float v) { return dfloat(v, 0.0); }
-
-dfloat add(dfloat a, dfloat b) {
-    float hi = a.hi + b.hi;
-    float lo = a.lo + b.lo + (hi - a.hi - b.hi);
-    return dfloat(hi, lo);
-}
-
-dfloat sub(dfloat a, dfloat b) {
-    return add(a, ds(-b.hi));
-}
-
-dfloat mul(dfloat a, dfloat b) {
-    float p = a.hi * b.hi;
-    float e = p - a.hi * b.hi;
-    float f = a.hi * b.lo + a.lo * b.hi;
-    float hi = p + f + e;
-    float lo = f + e - (hi - p);
-    return dfloat(hi, lo);
-}
-
-float tof(dfloat d) { return d.hi + d.lo; }
-
-// ────────────────────────────────────────────────
-// Vivid escape-time coloring — colorful, no post
-// ────────────────────────────────────────────────
-
-vec3 escapeColor(float mu, float maxIter) {
-    float t = mu / maxIter;
-    t = fract(t * 0.25 + pc.totalTime * 0.05);  // gentle cycle
-
-    vec3 col = 0.5 + 0.5 * cos(6.28318 * (vec3(0.0, 0.33, 0.67) * t + vec3(0.0, 0.2, 0.4)));
-    col *= 1.8 + 0.6 * sin(t * 15.0 + pc.totalTime * 0.4);  // vibrance pulse
-
-    col = pow(col, vec3(0.9));  // slight contrast boost
-    col = clamp(col, 0.0, 4.0); // HDR-friendly for supersampling
-
-    return col;
-}
-
-// ────────────────────────────────────────────────
-// Core Mandelbrot — fast, deep, colorful, starts at blackness edge
-// ────────────────────────────────────────────────
-
-vec3 mandelPlow(vec2 c_float) {
-    dfloat zx = ds(0.0);
-    dfloat zy = ds(0.0);
-
-    float mu = -1.0;
-
-    uint maxIter = MAX_ITER_BASE + uint(pc.totalTime * ITER_RAMP);
-
-    for (uint i = 0u; i < maxIter; ++i) {
-        dfloat xt = mul(zx, zx);
-        dfloat yt = mul(zy, zy);
-        dfloat x2my2 = sub(xt, yt);
-
-        dfloat xy2 = mul(zx, zy);
-        dfloat y2 = add(xy2, xy2);
-
-        zx = add(x2my2, ds(c_float.x));
-        zy = add(y2, ds(c_float.y));
-
-        float len2 = tof(mul(zx, zx)) + tof(mul(zy, zy));
-
-        float mag = sqrt(len2);
-        if (mag > RENORM_MAG) {
-            float inv = 1.0 / mag;
-            zx.hi *= inv; zx.lo *= inv;
-            zy.hi *= inv; zy.lo *= inv;
+int detectPeriod(vec2 z0) {
+    vec2 z = z0;
+    vec2 seen[PERIOD_CHECK_DEPTH];
+    for (uint i = 0u; i < PERIOD_CHECK_DEPTH; ++i) {
+        seen[i] = z;
+        z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + z0;
+        for (uint j = 0u; j < i; ++j) {
+            if (distance(z, seen[j]) < 1e-6) {
+                return int(i - j); // period length
+            }
         }
+    }
+    return 0; // no short period detected
+}
 
-        if (len2 > BAILOUT) {
-            mu = float(i) + 1.0 - log(log(len2)/log(2.0));
+vec3 mandelbrotPattern(vec2 c) {
+    vec2 z = vec2(0.0);
+    int period = detectPeriod(c);
+
+    if (period > 0 && period <= 5) {
+        // Inside low-period bulb → fast analytic color (no full iteration)
+        float angle = atan(c.y, c.x) + pc.totalTime * 0.1;
+        return 0.5 + 0.5 * cos(3.0 + float(period) * 2.0 + vec3(0.0, 0.6, 1.2) * angle);
+    }
+
+    // Normal full iteration
+    float mu = -1.0;
+    for (uint i = 0u; i < MAX_ITER; ++i) {
+        z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
+        if (dot(z, z) > ESCAPE) {
+            mu = float(i) + 1.0 - log(log(dot(z,z)))/log(2.0);
             break;
         }
     }
 
-    if (mu < 0.0) {
-        return vec3(0.0);
-    }
+    if (mu < 0.0) return vec3(0.0);
 
-    return escapeColor(mu, float(maxIter));
+    float t = mu / float(MAX_ITER);
+    vec3 col = 0.5 + 0.5 * cos(3.0 + t*8.0*vec3(1.0, 1.2, 1.4));
+    col = pow(col, vec3(0.98));
+
+    return col;
 }
 
 void main() {
@@ -123,12 +86,22 @@ void main() {
     vec2 uv = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
     uv.x *= float(res.x) / float(res.y);
 
-    // Continuous forward zoom from blackness edge
-    float zoom = exp2(-pc.totalTime * ZOOM_SPEED);
+    // 60-second zoom lock + hop
+    float t = pc.totalTime;
+    float phase = mod(t, CYCLE_TIME);
+    float cycle = floor(t / CYCLE_TIME);
 
-    vec2 c = vec2(CENTER_X, CENTER_Y) + uv * zoom * 300.0;
+    int spotIdx = int(cycle) % 6;
+    vec2 center = spots[spotIdx];
 
-    vec3 color = mandelPlow(c);
+    float zoom = exp2(-phase * (ZOOM_POWER / CYCLE_TIME));
+
+    vec2 c = center + uv * zoom * 500.0;
+
+    vec3 color = mandelbrotPattern(c);
+
+    float vig = 1.0 - dot(uv, uv) * 0.12;
+    color *= vig;
 
     imageStore(hdrImage, pix, vec4(color, 1.0));
 }
