@@ -10,98 +10,136 @@ layout(push_constant) uniform Push {
 } pc;
 
 // ────────────────────────────────────────────────
-// Controls
+//   TIMING & ANIMATION
 // ────────────────────────────────────────────────
+#define CYCLE_DURATION       20.0
+#define PAN_FRACTION         0.20         // first 20% = smooth travel to target
+#define ZOOM_FRACTION        (1.0 - PAN_FRACTION)
+#define START_ZOOM           3.2
+#define MAX_ZOOM_EXP         20.0
+#define PRECISION_SAFETY     1.8e-6       // reset before float precision dies
+#define MAX_ITER             4608u
+#define ESCAPE               400.0        // high value = cleaner distance estimate
 
-#define CYCLE_TIME          6000.0f              // zoom 60 s → hop
-#define ZOOM_POWER          1200.0f              // ~10¹²× per cycle
-#define MAX_ITER            4096u
-#define ESCAPE              16.0f
-#define PERIOD_CHECK_DEPTH  32u                // how many iterations to check for cycle
-
-// Starting spots
-const vec2 spots[6] = vec2[6](
-    vec2(-0.745429,  0.113010),
-    vec2(-1.769383,  0.004237),
-    vec2(-0.72689,   0.188887),
-    vec2( 0.33800,  -0.57500),
-    vec2(-0.16200,   1.03200),
-    vec2(-0.10110,   0.95630)
+// ────────────────────────────────────────────────
+//   Classic & deep Mandelbrot locations
+// ────────────────────────────────────────────────
+const vec2 locations[] = vec2[](
+    vec2(-0.745429,     0.113010),        // Seahorse valley – most famous
+    vec2(-0.7463,       0.1102),
+    vec2(-0.7746806106269039, 0.12486676606681),
+    vec2(-0.72689,      0.188887),        // Triple spiral / propeller
+    vec2(-1.769383,     0.004237),        // Mini Mandelbrot on the antenna
+    vec2(-1.7685,       0.005),
+    vec2(-1.62917,     -0.0203968),
+    vec2(-1.47711,      0.003322),
+    vec2(-1.4011,       0.0),
+    vec2( 0.33800,     -0.57500),
+    vec2( 0.37500012,  -0.21663939),
+    vec2( 0.42884,     -0.231345),
+    vec2(-0.1568447,    1.032293),
+    vec2(-0.170337,    -1.06506),
+    vec2(-0.122561,     0.744862),
+    vec2(-0.803858445641739763560, 0.178068463458909115289), // deep embedded spiral
+    vec2(-2.0,          0.0),             // far left stem
+    vec2(-1.754878,     0.0),
+    vec2(-1.0,          0.0),
+    vec2(-0.75,         0.0)
+    // feel free to append more deep locations here
 );
 
-// ────────────────────────────────────────────────
-// Detect low period (simple cycle check)
-// ────────────────────────────────────────────────
+const uint NUM_LOCATIONS = locations.length();
 
-int detectPeriod(vec2 z0) {
-    vec2 z = z0;
-    vec2 seen[PERIOD_CHECK_DEPTH];
-    for (uint i = 0u; i < PERIOD_CHECK_DEPTH; ++i) {
-        seen[i] = z;
-        z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + z0;
-        for (uint j = 0u; j < i; ++j) {
-            if (distance(z, seen[j]) < 1e-6) {
-                return int(i - j); // period length
-            }
-        }
-    }
-    return 0; // no short period detected
+// ────────────────────────────────────────────────
+//   Simple hue rotation per location
+// ────────────────────────────────────────────────
+vec3 getLocationTint(uint idx) {
+    float h = fract(float(idx) * 0.137 + 0.6180339887);
+    return 0.6 + 0.4 * cos(6.283185 * vec3(h, h+0.33, h+0.67));
 }
 
-vec3 mandelbrotPattern(vec2 c) {
+vec3 computeColor(vec2 c) {
     vec2 z = vec2(0.0);
-    int period = detectPeriod(c);
+    uint iter = 0u;
+	float xx = 0.0;
+	float yy = 0.0;
 
-    if (period > 0 && period <= 5) {
-        // Inside low-period bulb → fast analytic color (no full iteration)
-        float angle = atan(c.y, c.x) + pc.totalTime * 0.1;
-        return 0.5 + 0.5 * cos(3.0 + float(period) * 2.0 + vec3(0.0, 0.6, 1.2) * angle);
-    }
+    for (; iter < MAX_ITER; ++iter) {
+        xx = z.x * z.x;
+        yy = z.y * z.y;
 
-    // Normal full iteration
-    float mu = -1.0;
-    for (uint i = 0u; i < MAX_ITER; ++i) {
-        z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
-        if (dot(z, z) > ESCAPE) {
-            mu = float(i) + 1.0 - log(log(dot(z,z)))/log(2.0);
+        if (xx + yy > ESCAPE) {
             break;
         }
+
+        z = vec2(xx - yy, 2.0 * z.x * z.y) + c;
     }
 
-    if (mu < 0.0) return vec3(0.0);
+    if (iter == MAX_ITER) {
+        return vec3(0.004, 0.007, 0.014); // inside the set – very dark
+    }
 
-    float t = mu / float(MAX_ITER);
-    vec3 col = 0.5 + 0.5 * cos(3.0 + t*8.0*vec3(1.0, 1.2, 1.4));
-    col = pow(col, vec3(0.98));
+    // smooth coloring using the last squared magnitude
+    float len2 = xx + yy;
+    float mu   = float(iter) + 1.0 - log(log(len2 + 1e-6)) / log(2.0); // +1e-6 avoids log(0)
+    float t    = mu * 0.021;
+
+    vec3 col = 0.5 + 0.5 * cos(vec3(3.0) + t * vec3(8.4, 7.3, 9.6));
+    col = pow(col, vec3(1.12)) * 1.38;
 
     return col;
 }
 
 void main() {
-    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 res = imageSize(hdrImage);
+    ivec2 px    = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size  = imageSize(hdrImage);
+    if (any(greaterThanEqual(px, size))) return;
 
-    if (any(greaterThanEqual(pix, res))) return;
+    vec2 uv = (vec2(px) + 0.5) / vec2(size) * 2.0 - 1.0;
+    uv.x *= float(size.x) / float(size.y);
 
-    vec2 uv = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
-    uv.x *= float(res.x) / float(res.y);
+    float now       = pc.totalTime;
+    float cyclePos  = mod(now, CYCLE_DURATION);
+    uint  location  = uint(floor(now / CYCLE_DURATION)) % NUM_LOCATIONS;
 
-    // 60-second zoom lock + hop
-    float t = pc.totalTime;
-    float phase = mod(t, CYCLE_TIME);
-    float cycle = floor(t / CYCLE_TIME);
+    vec2  target    = locations[location];
+    vec3  tint      = getLocationTint(location);
 
-    int spotIdx = int(cycle) % 6;
-    vec2 center = spots[spotIdx];
+    float phase     = cyclePos / CYCLE_DURATION;  // 0..1 per location
 
-    float zoom = exp2(-phase * (ZOOM_POWER / CYCLE_TIME));
+    vec2  from      = vec2(0.0);                  // always start from full view
+    vec2  center;
+    float zoom;
 
-    vec2 c = center + uv * zoom * 500.0;
+    if (phase < PAN_FRACTION) {
+        // ── Smooth travel to hotspot ───────────────────────────
+        float pt = smoothstep(0.0, 1.0, phase / PAN_FRACTION);
+        center = mix(from, target, pt);
+        zoom   = START_ZOOM;
+    } else {
+        // ── Zoom-in phase ──────────────────────────────────────
+        float zt = (phase - PAN_FRACTION) / ZOOM_FRACTION;
+        float exp = zt * MAX_ZOOM_EXP;
+        zoom = START_ZOOM * exp2(-exp);
 
-    vec3 color = mandelbrotPattern(c);
+        // Reset to next location before precision is lost
+        if (zoom < PRECISION_SAFETY) {
+            location = (location + 1u) % NUM_LOCATIONS;
+            center   = locations[location];
+            zoom     = START_ZOOM * 1.5;  // gentle overshoot
+        } else {
+            center = target;
+        }
+    }
 
-    float vig = 1.0 - dot(uv, uv) * 0.12;
-    color *= vig;
+    vec2 coord = center + uv * zoom;
 
-    imageStore(hdrImage, pix, vec4(color, 1.0));
+    vec3 color = computeColor(coord);
+
+    // Per-location tint + slight vignette + breathing
+    color *= mix(vec3(1.0), tint * 1.25, 0.65);
+    color *= 1.0 - 0.20 * dot(uv, uv);
+    color += 0.035 * sin(now * 0.6 + float(location) * 2.718) * tint;
+
+    imageStore(hdrImage, px, vec4(color, 1.0));
 }
