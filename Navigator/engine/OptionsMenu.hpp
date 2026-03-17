@@ -180,7 +180,7 @@ namespace Options::Rendering
     inline float   MotionBlurStrength           = 0.4f;             // Blur intensity
 
     inline bool    EnableAdaptiveResolution     = true;             // Dynamically scale render resolution
-    inline float   MinResolutionScale           = 0.2f;             // Lowest allowed render scale
+    inline float   MinResolutionScale           = 0.02f;             // Lowest allowed render scale
     inline float   MaxResolutionScale           = 1.2f;             // Highest supersampling scale
 
     // Debug visualization modes
