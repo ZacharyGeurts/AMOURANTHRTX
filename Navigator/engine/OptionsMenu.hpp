@@ -142,7 +142,7 @@ namespace Options::Rendering
     };
 
     inline RenderTechnique CurrentTechnique     = RenderTechnique::PureRaymarching;
-    inline bool            AutoFallbackOnLowFPS = false;             // Automatically drop to lower technique if FPS too low
+    inline bool            AutoFallbackOnLowFPS = false;            // Automatically drop to lower technique if FPS too low
 
     // Raymarching quality controls (used in modes 1 & 2)
     inline float   RaymarchMaxDistance          = 120.0f;           // Maximum ray travel distance before termination
@@ -158,23 +158,25 @@ namespace Options::Rendering
 
     // Hardware ray tracing toggles (mode 4)
     inline bool    PreferHardwareRT             = true;             // Attempt hardware RT when extensions available
-    inline bool    EnableRTXReflections         = false;             // Ray-traced reflections - will need the shaders
-    inline bool    EnableRTXShadows             = false;             // Ray-traced shadows - hit miss chit
+    inline bool    EnableRTXReflections         = false;            // Ray-traced reflections - will need the shaders
+    inline bool    EnableRTXShadows             = false;            // Ray-traced shadows - hit miss chit
     inline bool    EnableRTXGI                  = false;            // Ray-traced global illumination — very expensive
     inline uint32_t MaxRayRecursion             = 6u;               // Maximum ray bounces in hardware RT
 
     // Post-processing & quality
     inline float   Exposure                     = 0.0f;             // HDR exposure compensation (EV stops)
-    inline bool    EnableTonemapping            = false;             // Apply HDR → LDR tonemapping
+    inline bool    EnableTonemapping            = false;            // Apply HDR → LDR tonemapping
     inline float   BloomThreshold               = 0.0f;             // Brightness threshold for bloom
-    inline float   BloomIntensity               = 0.0f;            // Strength of bloom effect
+    inline float   BloomIntensity               = 0.0f;             // Strength of bloom effect
+	inline float   Contrast                     = 1.0f;             // Strength of Contrast
+	inline float   Saturation                   = 1.0f;             // Strength of Saturation
 
-    inline float   VignetteStrength             = 0.0f;            // Vignette darkness amount
+    inline float   VignetteStrength             = 0.0f;             // Vignette darkness amount
     inline float   ChromaticAberrationStrength  = 0.0f;             // Strength of color fringing
     inline float   MotionBlurStrength           = 0.0f;             // Blur intensity
 
     inline bool    EnableAdaptiveResolution     = true;             // Dynamically scale render resolution
-    inline float   MinResolutionScale           = 0.02f;             // Lowest allowed render scale
+    inline float   MinResolutionScale           = 0.02f;            // Lowest allowed render scale
     inline float   MaxResolutionScale           = 1.2f;             // Highest supersampling scale
 
     // Debug visualization modes

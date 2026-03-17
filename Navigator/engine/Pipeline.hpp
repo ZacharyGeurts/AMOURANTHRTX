@@ -226,30 +226,30 @@ inline void*                    audio_cmd_mapped        = nullptr;
 }
 
 // ────────────────────────────────────────────────
-// Initialize descriptor layout
+// Initialize descriptor layout (only once)
 // ────────────────────────────────────────────────
 inline void initialize_descriptors() noexcept {
-    if (main_descriptor_layout) return;
+    if (main_descriptor_layout != VK_NULL_HANDLE) return;
 
     VkDescriptorSetLayoutCreateInfo ci{};
     ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    ci.bindingCount = std::size(CanvasBindings::bindings);
+    ci.bindingCount = static_cast<uint32_t>(std::size(CanvasBindings::bindings));
     ci.pBindings    = CanvasBindings::bindings;
 
     VkResult res = vkCreateDescriptorSetLayout(rtx().device, &ci, nullptr, &main_descriptor_layout);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("DESCRIPTOR", "Failed to create descriptor layout: {}", static_cast<int>(res));
-        return;
+        std::abort();
     }
 
     LOG_SUCCESS_CAT("DESCRIPTOR", "Descriptor layout created (7 bindings incl. audio commands)");
 }
 
 // ────────────────────────────────────────────────
-// Create pipeline layout
+// Create pipeline layout (only once)
 // ────────────────────────────────────────────────
 inline void create_pipeline_layout() noexcept {
-    if (pipeline_layout) return;
+    if (pipeline_layout != VK_NULL_HANDLE) return;
 
     initialize_descriptors();
 
@@ -268,17 +268,17 @@ inline void create_pipeline_layout() noexcept {
     VkResult res = vkCreatePipelineLayout(rtx().device, &ci, nullptr, &pipeline_layout);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("PIPELINE", "vkCreatePipelineLayout failed: {}", static_cast<int>(res));
-        return;
+        std::abort();
     }
 
     LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout ready with push constants");
 }
 
 // ────────────────────────────────────────────────
-// Create persistent host-visible audio command buffer
+// Create persistent host-visible audio command buffer (only once)
 // ────────────────────────────────────────────────
 inline void create_audio_command_buffer() noexcept {
-    if (audio_cmd_buffer) return;
+    if (audio_cmd_buffer != VK_NULL_HANDLE) return;
 
     VkBufferCreateInfo bufInfo{};
     bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -289,7 +289,7 @@ inline void create_audio_command_buffer() noexcept {
     VkResult res = vkCreateBuffer(rtx().device, &bufInfo, nullptr, &audio_cmd_buffer);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("AUDIO", "vkCreateBuffer failed: {}", static_cast<int>(res));
-        return;
+        std::abort();
     }
 
     VkMemoryRequirements req{};
@@ -304,7 +304,7 @@ inline void create_audio_command_buffer() noexcept {
     res = vkAllocateMemory(rtx().device, &alloc, nullptr, &audio_cmd_memory);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("AUDIO", "vkAllocateMemory failed: {}", static_cast<int>(res));
-        return;
+        std::abort();
     }
 
     vkBindBufferMemory(rtx().device, audio_cmd_buffer, audio_cmd_memory, 0);
@@ -312,7 +312,7 @@ inline void create_audio_command_buffer() noexcept {
     res = vkMapMemory(rtx().device, audio_cmd_memory, 0, sizeof(AudioCommandBlock), 0, &audio_cmd_mapped);
     if (res != VK_SUCCESS) {
         LOG_FATAL_CAT("AUDIO", "vkMapMemory failed: {}", static_cast<int>(res));
-        return;
+        std::abort();
     }
 
     std::memset(audio_cmd_mapped, 0, sizeof(AudioCommandBlock));
@@ -323,7 +323,7 @@ inline void create_audio_command_buffer() noexcept {
 // Create or recreate compute pipeline
 // ────────────────────────────────────────────────
 inline void create_canvas_pipeline(const std::string& override_path = "") noexcept {
-    if (canvas_pipeline) {
+    if (canvas_pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
         canvas_pipeline = VK_NULL_HANDLE;
     }
@@ -354,8 +354,8 @@ inline void create_canvas_pipeline(const std::string& override_path = "") noexce
     vkDestroyShaderModule(rtx().device, module, nullptr);
 
     if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "vkCreateComputePipelines failed: {}", static_cast<int>(res));
-        return;
+        LOG_FATAL_CAT("PIPELINE", "vkCreateComputePipelines failed: {}", static_cast<int>(res));
+        std::abort();
     }
 
     LOG_SUCCESS_CAT("PIPELINE", "Compute pipeline created (CANVAS.spv loaded)");
@@ -374,27 +374,25 @@ inline void process_shader_audio_commands() noexcept {
         f32 value   = cmd->slotValue[slot];
 
         if (command > 0.51f) {
-            // Trigger play — you can map slot → specific file here
-            // Example: simple naming convention or lookup table
+            // Trigger play
             std::string file = "assets/audio/sfx_slot_" + std::to_string(slot) + ".wav";
-            INPUT.playSound(file, "play", slot);
+            SDL3System::get().playSound(file, "play", slot);
             LOG_INFO_CAT("AUDIO_SHADER", "Play triggered on slot {} (value={})", slot, value);
         }
         else if (command >= 0.20f && command <= 0.50f) {
-            // Continuous volume modulation
-            f32 normalized_vol = glm::clamp(value, 0.0f, 1.2f);
-            // TODO: expose or add helper INPUT.setTrackVolume(slot, normalized_vol);
-            // For now: log only — implement actual volume set in SDL3System if needed
-            LOG_INFO_CAT("AUDIO_SHADER", "Volume set on slot {} → {:.3f}", slot, normalized_vol);
+            // Continuous volume
+            f32 vol = glm::clamp(value, 0.0f, 1.2f);
+            // TODO: SDL3System::get().setTrackVolume(slot, vol);  // implement if needed
+            LOG_INFO_CAT("AUDIO_SHADER", "Volume set on slot {} → {:.3f}", slot, vol);
         }
         else if (command < -0.1f) {
             // Stop / pause
-            INPUT.playSound("", "stop", slot);  // or "pause"
+            SDL3System::get().playSound("", "stop", slot);
             LOG_INFO_CAT("AUDIO_SHADER", "Stop requested on slot {}", slot);
         }
     }
 
-    // Clear for next frame (optional — shader can also clear)
+    // Clear for next frame
     std::memset(cmd, 0, sizeof(AudioCommandBlock));
 }
 
@@ -428,14 +426,14 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.nearPlane        = Options::Camera::NearPlane;
     pc.farPlane         = Options::Camera::FarPlane;
 
-    // Post-process from options (shader will apply)
+    // Post-process from options
     pc.exposure         = Options::Rendering::Exposure;
     pc.vignetteStrength = Options::Rendering::VignetteStrength;
     pc.bloomThreshold   = Options::Rendering::BloomThreshold;
     pc.bloomIntensity   = Options::Rendering::BloomIntensity;
-    pc.tonemapMode      = Options::Rendering::EnableTonemapping;
-    pc.contrast         = 1.0f;                    // placeholder — expose later
-    pc.saturation       = 1.0f;                    // placeholder
+    pc.tonemapMode      = Options::Rendering::EnableTonemapping ? 2u : 0u;
+    pc.contrast         = Options::Rendering::Contrast;
+    pc.saturation       = Options::Rendering::Saturation;
 
     // Environment
     f32 tod = Options::LivingWorld::CurrentTimeOfDay;
@@ -454,52 +452,52 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.raymarchEpsilon  = Options::Rendering::RaymarchEpsilon;
     pc.raymarchMaxSteps = Options::Rendering::RaymarchMaxSteps;
 
-    // Full input state — keyboard, controller, mouse
+    // Full input state
     int ctrl_slot = 0; // primary controller
 
     pc.controllerInput = 0;
-    if (INPUT.down("move_forward"))  pc.controllerInput |= INPUT_FORWARD;
-    if (INPUT.down("move_backward")) pc.controllerInput |= INPUT_BACKWARD;
-    if (INPUT.down("move_left"))     pc.controllerInput |= INPUT_LEFT;
-    if (INPUT.down("move_right"))    pc.controllerInput |= INPUT_RIGHT;
-    if (INPUT.down("sprint"))        pc.controllerInput |= INPUT_SPRINT;
-    if (INPUT.down("crouch"))        pc.controllerInput |= INPUT_CROUCH;
-    if (INPUT.down("jump"))          pc.controllerInput |= INPUT_JUMP;
-    if (INPUT.down("interact"))      pc.controllerInput |= INPUT_INTERACT;
-    if (INPUT.down("shoot"))         pc.controllerInput |= INPUT_SHOOT;
+    if (SDL3System::get().down("move_forward"))  pc.controllerInput |= INPUT_FORWARD;
+    if (SDL3System::get().down("move_backward")) pc.controllerInput |= INPUT_BACKWARD;
+    if (SDL3System::get().down("move_left"))     pc.controllerInput |= INPUT_LEFT;
+    if (SDL3System::get().down("move_right"))    pc.controllerInput |= INPUT_RIGHT;
+    if (SDL3System::get().down("sprint"))        pc.controllerInput |= INPUT_SPRINT;
+    if (SDL3System::get().down("crouch"))        pc.controllerInput |= INPUT_CROUCH;
+    if (SDL3System::get().down("jump"))          pc.controllerInput |= INPUT_JUMP;
+    if (SDL3System::get().down("interact"))      pc.controllerInput |= INPUT_INTERACT;
+    if (SDL3System::get().down("shoot"))         pc.controllerInput |= INPUT_SHOOT;
 
-    // Mouse buttons as bitflags
+    // Mouse buttons
     Uint32 mouse_state = SDL_GetMouseState(nullptr, nullptr);
     if (mouse_state & SDL_BUTTON_LMASK) pc.controllerInput |= INPUT_MOUSE_LEFT;
     if (mouse_state & SDL_BUTTON_RMASK) pc.controllerInput |= INPUT_MOUSE_RIGHT;
     if (mouse_state & SDL_BUTTON_MMASK) pc.controllerInput |= INPUT_MOUSE_MIDDLE;
 
-    // Analog sticks & triggers
-    pc.leftStickX   = INPUT.leftStickX(ctrl_slot);
-    pc.leftStickY   = INPUT.leftStickY(ctrl_slot);
-    pc.rightStickX  = INPUT.rightStickX(ctrl_slot);
-    pc.rightStickY  = INPUT.rightStickY(ctrl_slot);
-    pc.leftTrigger  = INPUT.leftTrigger(ctrl_slot);
-    pc.rightTrigger = INPUT.rightTrigger(ctrl_slot);
+    // Analog & triggers
+    pc.leftStickX   = SDL3System::get().leftStickX(ctrl_slot);
+    pc.leftStickY   = SDL3System::get().leftStickY(ctrl_slot);
+    pc.rightStickX  = SDL3System::get().rightStickX(ctrl_slot);
+    pc.rightStickY  = SDL3System::get().rightStickY(ctrl_slot);
+    pc.leftTrigger  = SDL3System::get().leftTrigger(ctrl_slot);
+    pc.rightTrigger = SDL3System::get().rightTrigger(ctrl_slot);
 
-    // Mouse delta & normalized position
-    glm::vec2 delta = INPUT.mouseDelta();
+    // Mouse delta & normalized
+    glm::vec2 delta = SDL3System::get().mouseDelta();
     pc.mouseDelta       = delta;
-    pc.mouseNormalized.x = (delta.x + 0.5f * static_cast<float>(width))  / static_cast<float>(width);
-    pc.mouseNormalized.y = (delta.y + 0.5f * static_cast<float>(height)) / static_cast<float>(height);
+    pc.mouseNormalized.x = (delta.x + 0.5f * static_cast<f32>(width))  / static_cast<f32>(width);
+    pc.mouseNormalized.y = (delta.y + 0.5f * static_cast<f32>(height)) / static_cast<f32>(height);
 
     // Bind & push
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
     vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(PushConstants), &pc);
 
-    // Assume descriptor set is already bound with all 7 bindings
+    // Assume descriptor set is bound by caller (RayCanvas)
 
     u32 dx = (static_cast<u32>(width)  + 15u) / 16u;
     u32 dy = (static_cast<u32>(height) + 15u) / 16u;
     vkCmdDispatch(cmd, dx, dy, 1u);
 
-    // Process audio feedback after dispatch (in real code: after submit + fence)
+    // Audio feedback — process after dispatch (caller should fence/wait if needed)
     process_shader_audio_commands();
 }
 
@@ -507,7 +505,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
 // Cleanup everything
 // ────────────────────────────────────────────────
 inline void shutdown() noexcept {
-    process_shader_audio_commands(); // flush any last commands
+    process_shader_audio_commands(); // flush last commands
 
     if (audio_cmd_mapped) {
         vkUnmapMemory(rtx().device, audio_cmd_memory);
