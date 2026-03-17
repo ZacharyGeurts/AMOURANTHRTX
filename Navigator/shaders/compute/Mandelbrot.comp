@@ -1,0 +1,134 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
+
+layout(push_constant) uniform Push {
+    float totalTime;
+} pc;
+
+// ────────────────────────────────────────────────
+// CONTROLS — tune for speed, depth, vibrance
+// ────────────────────────────────────────────────
+
+#define CENTER_X            -0.745429f
+#define CENTER_Y             0.113010f
+#define ZOOM_SPEED           0.65f               // 0.5–0.8 = fast dive, 0.3–0.4 = longer life
+#define MAX_ITER_BASE       16384u               // high base for quality
+#define ITER_RAMP           24000.0f             // iterations explode with time
+#define BAILOUT              1e10f               // very large — delay bailout
+#define RENORM_MAG           1e7f                // rescale only when needed
+
+// ────────────────────────────────────────────────
+// Double-float helpers — correct & fast
+// ────────────────────────────────────────────────
+
+struct dfloat {
+    float hi, lo;
+};
+
+dfloat ds(float v) { return dfloat(v, 0.0); }
+
+dfloat add(dfloat a, dfloat b) {
+    float hi = a.hi + b.hi;
+    float lo = a.lo + b.lo + (hi - a.hi - b.hi);
+    return dfloat(hi, lo);
+}
+
+dfloat sub(dfloat a, dfloat b) {
+    return add(a, ds(-b.hi));
+}
+
+dfloat mul(dfloat a, dfloat b) {
+    float p = a.hi * b.hi;
+    float e = p - a.hi * b.hi;
+    float f = a.hi * b.lo + a.lo * b.hi;
+    float hi = p + f + e;
+    float lo = f + e - (hi - p);
+    return dfloat(hi, lo);
+}
+
+float tof(dfloat d) { return d.hi + d.lo; }
+
+// ────────────────────────────────────────────────
+// Vivid escape-time coloring — colorful, no post
+// ────────────────────────────────────────────────
+
+vec3 escapeColor(float mu, float maxIter) {
+    float t = mu / maxIter;
+    t = fract(t * 0.25 + pc.totalTime * 0.05);  // gentle cycle
+
+    vec3 col = 0.5 + 0.5 * cos(6.28318 * (vec3(0.0, 0.33, 0.67) * t + vec3(0.0, 0.2, 0.4)));
+    col *= 1.8 + 0.6 * sin(t * 15.0 + pc.totalTime * 0.4);  // vibrance pulse
+
+    col = pow(col, vec3(0.9));  // slight contrast boost
+    col = clamp(col, 0.0, 4.0); // HDR-friendly for supersampling
+
+    return col;
+}
+
+// ────────────────────────────────────────────────
+// Core Mandelbrot — fast, deep, colorful, starts at blackness edge
+// ────────────────────────────────────────────────
+
+vec3 mandelPlow(vec2 c_float) {
+    dfloat zx = ds(0.0);
+    dfloat zy = ds(0.0);
+
+    float mu = -1.0;
+
+    uint maxIter = MAX_ITER_BASE + uint(pc.totalTime * ITER_RAMP);
+
+    for (uint i = 0u; i < maxIter; ++i) {
+        dfloat xt = mul(zx, zx);
+        dfloat yt = mul(zy, zy);
+        dfloat x2my2 = sub(xt, yt);
+
+        dfloat xy2 = mul(zx, zy);
+        dfloat y2 = add(xy2, xy2);
+
+        zx = add(x2my2, ds(c_float.x));
+        zy = add(y2, ds(c_float.y));
+
+        float len2 = tof(mul(zx, zx)) + tof(mul(zy, zy));
+
+        float mag = sqrt(len2);
+        if (mag > RENORM_MAG) {
+            float inv = 1.0 / mag;
+            zx.hi *= inv; zx.lo *= inv;
+            zy.hi *= inv; zy.lo *= inv;
+        }
+
+        if (len2 > BAILOUT) {
+            mu = float(i) + 1.0 - log(log(len2)/log(2.0));
+            break;
+        }
+    }
+
+    if (mu < 0.0) {
+        return vec3(0.0);
+    }
+
+    return escapeColor(mu, float(maxIter));
+}
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 res = imageSize(hdrImage);
+
+    if (any(greaterThanEqual(pix, res))) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
+    uv.x *= float(res.x) / float(res.y);
+
+    // Continuous forward zoom from blackness edge
+    float zoom = exp2(-pc.totalTime * ZOOM_SPEED);
+
+    vec2 c = vec2(CENTER_X, CENTER_Y) + uv * zoom * 300.0;
+
+    vec3 color = mandelPlow(c);
+
+    imageStore(hdrImage, pix, vec4(color, 1.0));
+}
