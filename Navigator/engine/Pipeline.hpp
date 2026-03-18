@@ -27,6 +27,7 @@
 #include <expected>
 #include <cstring>
 #include <algorithm>
+#include <atomic>
 
 namespace Pipeline {
 
@@ -152,8 +153,14 @@ inline uint32_t                 shader_group_handle_size      = 0;
 inline uint32_t                 shader_group_handle_alignment = 0;
 inline uint32_t                 shader_group_base_alignment   = 0;
 
+// One-shot flags to prevent repeated attempts
+inline std::atomic<bool>        raymarching_tried{false};
+inline std::atomic<bool>        raymarching_success{false};
+inline std::atomic<bool>        raytracing_tried{false};
+inline std::atomic<bool>        raytracing_success{false};
+
 // ────────────────────────────────────────────────
-// Helpers
+// Helpers — robust shader loading
 // ────────────────────────────────────────────────
 [[nodiscard]] inline uint32_t alignedSize(uint32_t size, uint32_t alignment) noexcept {
     return (size + alignment - 1u) & ~(alignment - 1u);
@@ -174,18 +181,14 @@ inline uint32_t                 shader_group_base_alignment   = 0;
     namespace fs = std::filesystem;
     std::vector<fs::path> candidates;
 
-    // Add override first
     if (!override_path.empty()) {
         fs::path op(override_path);
-        if (fs::exists(op) && fs::is_regular_file(op)) {
-            candidates.push_back(op);
-        }
+        if (fs::exists(op) && fs::is_regular_file(op)) candidates.push_back(op);
     }
 
-    // Try common locations
     fs::path exe_dir;
     try { exe_dir = fs::canonical("/proc/self/exe").parent_path(); }
-    catch (...) { /* fallback */ }
+    catch (...) { }
 
     if (!exe_dir.empty()) {
         candidates.emplace_back(exe_dir / "assets/shaders/compute/CANVAS.spv");
@@ -197,6 +200,8 @@ inline uint32_t                 shader_group_base_alignment   = 0;
     candidates.emplace_back(cwd / "CANVAS.spv");
 
     std::vector<uint32_t> code;
+    std::string loaded_from;
+
     for (const auto& p : candidates) {
         if (!fs::exists(p)) continue;
         std::ifstream file(p, std::ios::binary | std::ios::ate);
@@ -206,16 +211,19 @@ inline uint32_t                 shader_group_base_alignment   = 0;
         code.resize(size / 4);
         file.read(reinterpret_cast<char*>(code.data()), size);
         if (file.good()) {
-            LOG_SUCCESS_CAT("SHADER", "Loaded CANVAS.spv from {}", p.string());
+            loaded_from = p.string();
             break;
         }
         code.clear();
     }
 
     if (code.empty()) {
-        LOG_ERROR_CAT("SHADER", "Failed to load CANVAS.spv from any candidate path");
-        return std::unexpected("Failed to load CANVAS.spv");
+        LOG_ERROR_CAT("SHADER", "Failed to load shader — no file found. Tried:");
+        for (const auto& p : candidates) LOG_ERROR_CAT("SHADER", "  - {}", p.string());
+        return std::unexpected("Shader file not found");
     }
+
+    LOG_INFO_CAT("SHADER", "Loaded shader from: {}", loaded_from);
 
     VkShaderModuleCreateInfo ci{};
     ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -225,7 +233,7 @@ inline uint32_t                 shader_group_base_alignment   = 0;
     VkShaderModule mod = VK_NULL_HANDLE;
     VkResult res = vkCreateShaderModule(rtx().device, &ci, nullptr, &mod);
     if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("SHADER", "vkCreateShaderModule failed: {}", static_cast<int>(res));
+        LOG_ERROR_CAT("SHADER", "vkCreateShaderModule failed for {}: error {}", loaded_from, static_cast<int>(res));
         return std::unexpected("vkCreateShaderModule failed");
     }
 
@@ -272,7 +280,7 @@ inline void initialize_descriptors_and_layout() noexcept {
         return;
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Descriptor layout and pipeline layout created");
+    LOG_SUCCESS_CAT("PIPELINE", "Descriptor & pipeline layout ready");
 }
 
 // ────────────────────────────────────────────────
@@ -321,19 +329,26 @@ inline void create_audio_command_buffer() noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Compute (raymarching) pipeline
+// Compute (raymarching) pipeline — loads ONCE
 // ────────────────────────────────────────────────
 inline void create_canvas_pipeline(const std::string& override_path = "") noexcept {
-    if (canvas_pipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
-        canvas_pipeline = VK_NULL_HANDLE;
+    if (raymarching_tried.load()) {
+        if (raymarching_success.load()) return;
+        LOG_INFO_CAT("PIPELINE", "Raymarching pipeline previously failed — skipping retry");
+        return;
     }
+
+    raymarching_tried.store(true);
 
     initialize_descriptors_and_layout();
     create_audio_command_buffer();
 
     auto shader_res = load_spirv(override_path);
-    if (!shader_res) return;
+    if (!shader_res) {
+        raymarching_success.store(false);
+        LOG_ERROR_CAT("PIPELINE", "Raymarching shader load failed");
+        return;
+    }
 
     VkShaderModule module = *shader_res;
 
@@ -352,21 +367,33 @@ inline void create_canvas_pipeline(const std::string& override_path = "") noexce
     vkDestroyShaderModule(rtx().device, module, nullptr);
 
     if (res != VK_SUCCESS) {
+        raymarching_success.store(false);
         LOG_ERROR_CAT("PIPELINE", "vkCreateComputePipelines failed: {}", static_cast<int>(res));
         return;
     }
 
-    LOG_SUCCESS_CAT("PIPELINE", "Raymarching compute pipeline created");
+    raymarching_success.store(true);
+    LOG_SUCCESS_CAT("PIPELINE", "Raymarching pipeline created");
 }
 
 // ────────────────────────────────────────────────
-// Ray Tracing pipeline
+// Ray Tracing pipeline — detailed diagnostics
 // ────────────────────────────────────────────────
-inline bool create_ray_tracing_pipeline() {
-    if (rt_pipeline != VK_NULL_HANDLE) return true;
+inline bool create_ray_tracing_pipeline() noexcept {
+    if (raytracing_tried.load()) {
+        return raytracing_success.load();
+    }
+
+    raytracing_tried.store(true);
 
     initialize_descriptors_and_layout();
     create_audio_command_buffer();
+
+    if (!ext().vkCreateRayTracingPipelinesKHR) {
+        LOG_ERROR_CAT("PIPELINE", "RT extension vkCreateRayTracingPipelinesKHR is NULL — extension not loaded");
+        raytracing_success.store(false);
+        return false;
+    }
 
     auto rgen   = load_spirv("assets/shaders/raytracing/raygen.rgen");
     auto rmiss  = load_spirv("assets/shaders/raytracing/miss.rmiss");
@@ -375,9 +402,12 @@ inline bool create_ray_tracing_pipeline() {
     auto rcall  = load_spirv("assets/shaders/raytracing/callable.rcall");
 
     if (!rgen || !rmiss || !rchit || !rahit || !rcall) {
-        LOG_ERROR_CAT("PIPELINE", "Failed to load one or more RT shaders");
+        LOG_ERROR_CAT("PIPELINE", "RT pipeline aborted — missing shader(s)");
+        raytracing_success.store(false);
         return false;
     }
+
+    LOG_INFO_CAT("PIPELINE", "RT shaders loaded successfully");
 
     std::vector<VkPipelineShaderStageCreateInfo> stages = {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_RAYGEN_BIT_KHR,   *rgen,  "main", nullptr},
@@ -407,6 +437,9 @@ inline bool create_ray_tracing_pipeline() {
         shader_group_handle_size      = props.shaderGroupHandleSize;
         shader_group_handle_alignment = props.shaderGroupHandleAlignment;
         shader_group_base_alignment   = props.shaderGroupBaseAlignment;
+
+        LOG_INFO_CAT("PIPELINE", "RT props: handleSize={}, alignHandle={}, alignBase={}",
+                     shader_group_handle_size, shader_group_handle_alignment, shader_group_base_alignment);
     }
 
     VkRayTracingPipelineCreateInfoKHR pipeCI{};
@@ -415,8 +448,11 @@ inline bool create_ray_tracing_pipeline() {
     pipeCI.pStages                      = stages.data();
     pipeCI.groupCount                   = static_cast<uint32_t>(groups.size());
     pipeCI.pGroups                      = groups.data();
-    pipeCI.maxPipelineRayRecursionDepth = Options::Rendering::MaxRayRecursion;
+    pipeCI.maxPipelineRayRecursionDepth = 1u;  // Start low to avoid validation errors — increase once working
     pipeCI.layout                       = pipeline_layout;
+
+    LOG_INFO_CAT("PIPELINE", "Creating RT pipeline: stages={}, groups={}, recursion={}",
+                 pipeCI.stageCount, pipeCI.groupCount, pipeCI.maxPipelineRayRecursionDepth);
 
     VkResult res = ext().vkCreateRayTracingPipelinesKHR(rtx().device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &rt_pipeline);
 
@@ -427,19 +463,26 @@ inline bool create_ray_tracing_pipeline() {
     vkDestroyShaderModule(rtx().device, *rcall, nullptr);
 
     if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR failed: {}", static_cast<int>(res));
+        LOG_ERROR_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR failed: error {} (common causes: shader validation, recursion depth, missing capabilities, or extension mismatch)", static_cast<int>(res));
+        raytracing_success.store(false);
         return false;
     }
 
     LOG_SUCCESS_CAT("PIPELINE", "Hardware RT pipeline created successfully");
+    raytracing_success.store(true);
     return true;
 }
 
 // ────────────────────────────────────────────────
-// Build SBT
+// Build SBT — only if pipeline exists
 // ────────────────────────────────────────────────
 inline bool build_shader_binding_table() {
     if (sbt_buffer != VK_NULL_HANDLE) return true;
+
+    if (rt_pipeline == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("SBT", "Cannot build SBT — RT pipeline is null");
+        return false;
+    }
 
     uint32_t groupCount = 4;
 
@@ -540,7 +583,7 @@ inline bool build_shader_binding_table() {
 }
 
 // ────────────────────────────────────────────────
-// Unified dispatch
+// Unified dispatch — respects EnableHardwareRayTracing
 // ────────────────────────────────────────────────
 inline void dispatch(VkCommandBuffer cmd, int width, int height, float totalTime) noexcept {
     if (width <= 0 || height <= 0) return;
@@ -613,69 +656,72 @@ inline void dispatch(VkCommandBuffer cmd, int width, int height, float totalTime
     pc.mouseWheelDelta  = 0.0f; // fill if tracked
 
     // ────────────────────────────────────────────────
-    // Choose path
+    // Choose path — respects EnableHardwareRayTracing
     // ────────────────────────────────────────────────
-    bool use_rt = Options::Rendering::EnableHardwareRayTracing &&
-                  (Options::Rendering::CurrentTechnique == Options::Rendering::RenderTechnique::HardwareRayTracing) &&
-                  rtx().rayTracingSupported &&
-                  create_ray_tracing_pipeline() &&
-                  build_shader_binding_table();
+    bool rt_enabled   = Options::Rendering::EnableHardwareRayTracing;
+    bool rt_supported = rtx().rayTracingSupported;
+    bool pipeline_ok  = false;
+    bool sbt_ok       = false;
+
+    if (rt_enabled && rt_supported) {
+        pipeline_ok = create_ray_tracing_pipeline();
+        if (pipeline_ok) {
+            sbt_ok = build_shader_binding_table();
+        }
+    }
+
+    static bool logged_decision = false;
+    if (!logged_decision) {
+        LOG_INFO_CAT("PIPELINE", "RT decision: enabled={}, supported={}, pipeline_ok={}, sbt_ok={}",
+                     rt_enabled ? "YES" : "NO",
+                     rt_supported ? "YES" : "NO",
+                     pipeline_ok ? "YES" : "NO",
+                     sbt_ok ? "YES" : "NO");
+        logged_decision = true;
+    }
+
+    bool use_rt = rt_enabled && rt_supported && pipeline_ok && sbt_ok;
 
     if (use_rt) {
-        LOG_INFO_CAT("PIPELINE", "Dispatching hardware ray tracing ({}x{})", width, height);
+        if (rt_pipeline == VK_NULL_HANDLE) {
+            LOG_ERROR_CAT("PIPELINE", "RT pipeline is null despite creation success — falling back");
+            use_rt = false;
+        } else {
+            LOG_INFO_CAT("PIPELINE", "Dispatching HARDWARE RAY TRACING ({}x{})", width, height);
 
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rt_pipeline);
-        vkCmdPushConstants(cmd, pipeline_layout,
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                           VK_SHADER_STAGE_CALLABLE_BIT_KHR,
-                           0, sizeof(PushConstants), &pc);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rt_pipeline);
+            vkCmdPushConstants(cmd, pipeline_layout,
+                               VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                               VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                               VK_SHADER_STAGE_CALLABLE_BIT_KHR,
+                               0, sizeof(PushConstants), &pc);
 
-        ext().vkCmdTraceRaysKHR(cmd, &rgen_region, &miss_region, &hit_region, &call_region,
-                                static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u);
+            ext().vkCmdTraceRaysKHR(cmd, &rgen_region, &miss_region, &hit_region, &call_region,
+                                    static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u);
+            return; // success
+        }
     }
-    else {
+
+    // Fallback to raymarching
+    if (!canvas_pipeline) {
+        create_canvas_pipeline();
         if (!canvas_pipeline) {
-            create_canvas_pipeline();  // uses default path
-            if (!canvas_pipeline) {
-                LOG_ERROR_CAT("PIPELINE", "Raymarching pipeline creation failed — cannot dispatch");
-                return;
-            }
+            LOG_ERROR_CAT("PIPELINE", "Raymarching pipeline creation failed — cannot dispatch");
+            return;
         }
-		
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
-        vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, sizeof(PushConstants), &pc);
-
-        u32 dx = (static_cast<u32>(width)  + 15u) / 16u;
-        u32 dy = (static_cast<u32>(height) + 15u) / 16u;
-        vkCmdDispatch(cmd, dx, dy, 1u);
     }
+	
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
+    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+                       0, sizeof(PushConstants), &pc);
 
-    // Process audio commands
-    if (audio_cmd_mapped) {
-        auto* cmds = static_cast<AudioCommandBlock*>(audio_cmd_mapped);
-        for (int slot = 0; slot < 16; ++slot) {
-            f32 command = cmds->slotCommand[slot];
-            // f32 value   = cmds->slotValue[slot]; // commented — avoid unused warning
-
-            if (command > 0.51f) {
-                std::string file = "assets/audio/sfx_slot_" + std::to_string(slot) + ".wav";
-                SDL3System::get().playSound(file, "play", slot);
-            }
-            else if (command >= 0.20f && command <= 0.50f) {
-                // Volume set — implement when needed
-            }
-            else if (command < -0.1f) {
-                SDL3System::get().playSound("", "stop", slot);
-            }
-        }
-        std::memset(cmds, 0, sizeof(AudioCommandBlock));
-    }
+    u32 dx = (static_cast<u32>(width) + 15u) / 16u;
+    u32 dy = (static_cast<u32>(height) + 15u) / 16u;
+    vkCmdDispatch(cmd, dx, dy, 1u);
 }
 
 // ────────────────────────────────────────────────
-// Cleanup — separate assignments to avoid type errors
+// Cleanup
 // ────────────────────────────────────────────────
 inline void shutdown() noexcept {
     if (audio_cmd_mapped) {

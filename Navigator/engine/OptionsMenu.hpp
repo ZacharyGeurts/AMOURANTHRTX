@@ -145,9 +145,9 @@ namespace Options::Rendering
     inline bool            AutoFallbackOnLowFPS = false;            // Automatically drop to lower technique if FPS too low
 
     // Raymarching quality controls (used in modes 1 & 2)
-    inline float   RaymarchMaxDistance          = 120.0f;           // Maximum ray travel distance before termination
+    inline float   RaymarchMaxDistance          = 80.0f;           // Maximum ray travel distance before termination
     inline float   RaymarchEpsilon              = 0.0015f;          // Hit detection threshold — smaller = sharper detail
-    inline uint32_t RaymarchMaxSteps            = 120u;             // Maximum marching steps per ray — primary cost driver
+    inline uint32_t RaymarchMaxSteps            = 80u;             // Maximum marching steps per ray — primary cost driver
     inline float   RaymarchStepMultiplier       = 1.0f;             // Global step scale — lower = chunkier / retro feel
 
     // Path tracing & temporal accumulation
@@ -158,10 +158,10 @@ namespace Options::Rendering
 
     // Hardware ray tracing toggles (mode 4)
     inline bool    PreferHardwareRT             = true;             // Attempt hardware RT when extensions available
-    inline bool    EnableHardwareRayTracing     = false;            // Master toggle: enable hardware ray tracing pipeline (default off — starts with raymarching)
-    inline bool    EnableRTXReflections         = false;            // Ray-traced reflections - will need the shaders
-    inline bool    EnableRTXShadows             = false;            // Ray-traced shadows - hit miss chit
-    inline bool    EnableRTXGI                  = false;            // Ray-traced global illumination — very expensive
+    inline bool    EnableHardwareRayTracing     = true;            // Master toggle: enable hardware ray tracing pipeline (default off — starts with raymarching)
+    inline bool    EnableRTXReflections         = true;            // Ray-traced reflections - will need the shaders
+    inline bool    EnableRTXShadows             = true;            // Ray-traced shadows - hit miss chit
+    inline bool    EnableRTXGI                  = true;            // Ray-traced global illumination — very expensive
     inline uint32_t MaxRayRecursion             = 6u;               // Maximum ray bounces in hardware RT
 
     // Post-processing & quality
