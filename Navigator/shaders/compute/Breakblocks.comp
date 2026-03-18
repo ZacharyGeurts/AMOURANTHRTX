@@ -1,0 +1,262 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+layout(push_constant) uniform Push {
+    float time;
+    uint  frame;
+    vec2  mousePos;           // normalized [0,1]
+    float resetTrigger;       // >0.5 → reset game
+    float leftStickX;
+    float leftStickY;
+    float rightStickX;
+    float rightStickY;
+    float leftTrigger;
+    float rightTrigger;
+    uint  controllerInput;    // bitfield
+    float pad[2];
+} pc;
+
+// ────────────────────────────────────────────────
+// Config
+// ────────────────────────────────────────────────
+#define PADDLE_WIDTH_REL    0.18
+#define PADDLE_HEIGHT_REL   0.018
+#define PADDLE_Y_REL        0.08
+
+#define BALL_RADIUS_REL     0.008
+#define BALL_BASE_SPEED     0.0075
+
+#define BRICK_ROWS          8
+#define BRICK_COLS          14
+#define BRICK_HEIGHT_REL    0.028
+#define BRICK_GAP_REL       0.004
+#define BRICK_TOP_MARGIN_REL 0.12
+
+#define ACCUM_BLEND         0.84
+
+#define INPUT_LEFT          (1u << 2)
+#define INPUT_RIGHT         (1u << 3)
+#define INPUT_SHOOT         (1u << 8)
+
+// ────────────────────────────────────────────────
+#define STATE_ROW(high) ((high) - 1)
+
+vec4 loadState(ivec2 coord) {
+    return imageLoad(outputImage, coord);
+}
+
+vec2 getBallPosNorm(ivec2 dim) {
+    return loadState(ivec2(0, STATE_ROW(dim.y))).xy;
+}
+
+vec2 getBallVel() {
+    return loadState(ivec2(1, STATE_ROW(imageSize(outputImage).y))).xy;
+}
+
+float getPaddleXNorm() {
+    return loadState(ivec2(2, STATE_ROW(imageSize(outputImage).y))).x;
+}
+
+uint getBrickMask(int row) {
+    return floatBitsToUint(loadState(ivec2(3 + row, STATE_ROW(imageSize(outputImage).y))).x);
+}
+
+float hash11(float p) {
+    p = fract(p * .1031);
+    p *= p + 33.33;
+    return fract(2.*p*p);
+}
+
+vec3 brickColor(int row) {
+    float t = float(row) / float(BRICK_ROWS - 1);
+    if (row < 2) return vec3(1.0, 0.3, 0.4);
+    if (row < 4) return mix(vec3(1.0, 0.3, 0.4), vec3(1.0, 0.9, 0.3), t * 3.0);
+    if (row < 6) return vec3(1.0, 0.9, 0.3);
+    return vec3(0.2, 0.8, 1.0);
+}
+
+bool hitRect(vec2 p, vec2 center, vec2 halfsplit) {
+    vec2 d = abs(p - center) - halfsplit;
+    return max(d.x, d.y) < 0.0;
+}
+
+bool hitPaddle(vec2 pNorm, float paddleXNorm) {
+    vec2 center = vec2(paddleXNorm, PADDLE_Y_REL);
+    vec2 halfsplit   = vec2(PADDLE_WIDTH_REL * 0.5, PADDLE_HEIGHT_REL * 0.5);
+    return hitRect(pNorm, center, halfsplit);
+}
+
+bool hitBrick(vec2 pNorm, out int row, out int col) {
+    float brickFullH = BRICK_HEIGHT_REL + BRICK_GAP_REL;
+    float topY       = 1.0 - BRICK_TOP_MARGIN_REL;
+
+    if (pNorm.y <= topY && pNorm.y > topY - float(BRICK_ROWS) * brickFullH) {
+        row = int(floor((topY - pNorm.y) / brickFullH));
+
+        float brickW     = 1.0 / float(BRICK_COLS + 1);
+        float left       = (1.0 - float(BRICK_COLS) * brickW) * 0.5;
+        float brickFullW = brickW + BRICK_GAP_REL;
+
+        col = int(floor((pNorm.x - left) / brickFullW));
+
+        if (row >= 0 && row < BRICK_ROWS && col >= 0 && col < BRICK_COLS) {
+            uint mask = getBrickMask(row);
+            return (mask & (1u << uint(col))) != 0u;
+        }
+    }
+    return false;
+}
+
+#define BRICK_WIDTH_REL (1.0 / float(BRICK_COLS + 1))
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 fragCoordNorm = vec2(pix) / vec2(dim);
+
+    int stateRow = STATE_ROW(dim.y);
+    bool isStatePixel = (pix.y == stateRow);
+
+    bool reset = pc.resetTrigger > 0.5f || pc.frame < 5u;
+
+    vec2 ballPosNorm = getBallPosNorm(dim);
+    vec2 ballVel     = getBallVel();
+    float paddleXNorm = getPaddleXNorm();
+
+    // ── Reset / Init ───────────────────────────────────────
+    if (reset || length(ballPosNorm) < 0.001f) {
+        ballPosNorm   = vec2(0.5f, 0.35f);
+        ballVel       = normalize(vec2(0.4f + hash11(pc.time)*0.2f - 0.1f, 1.0f)) * BALL_BASE_SPEED;
+        paddleXNorm   = 0.5f;
+
+        for (int r = 0; r < BRICK_ROWS; ++r) {
+            uint mask = (1u << BRICK_COLS) - 1u;
+            imageStore(outputImage, ivec2(3 + r, stateRow), vec4(uintBitsToFloat(mask), 0.0f, 0.0f, 0.0f));
+        }
+    }
+
+    // ── Paddle movement ────────────────────────────────────
+    float paddleMove = 0.0f;
+
+    paddleMove += pc.leftStickX * 1.8f;
+
+    if ((pc.controllerInput & INPUT_LEFT) != 0u)  paddleMove -= 1.2f;
+    if ((pc.controllerInput & INPUT_RIGHT) != 0u) paddleMove += 1.2f;
+
+    if (abs(paddleMove) < 0.01f) {
+        paddleMove = (pc.mousePos.x - 0.5f) * 3.0f;
+    }
+
+    paddleXNorm += paddleMove * 0.016f;
+    paddleXNorm = clamp(paddleXNorm, PADDLE_WIDTH_REL * 0.5f, 1.0f - PADDLE_WIDTH_REL * 0.5f);
+
+    // ── Ball launch / nudge ────────────────────────────────
+    bool launch = (pc.controllerInput & INPUT_SHOOT) != 0u || pc.leftTrigger > 0.4f || pc.rightTrigger > 0.4f;
+
+    // ── Physics update ─────────────────────────────────────
+    if (pix.x < 4 || isStatePixel) {
+        vec2 nextPos = ballPosNorm + ballVel;
+
+        if (nextPos.x <= BALL_RADIUS_REL || nextPos.x >= 1.0f - BALL_RADIUS_REL) {
+            ballVel.x = -ballVel.x * 1.01f;
+        }
+        if (nextPos.y >= 1.0f - BALL_RADIUS_REL) {
+            ballVel.y = -ballVel.y * 1.01f;
+        }
+
+        if (hitPaddle(nextPos, paddleXNorm)) {
+            ballVel.y = abs(ballVel.y) * 1.03f;
+
+            float hitFrac = (nextPos.x - paddleXNorm) / (PADDLE_WIDTH_REL * 0.5f);
+            hitFrac = clamp(hitFrac, -1.0f, 1.0f);
+
+            ballVel.x += hitFrac * 0.9f;
+            ballVel.x += pc.rightStickX * 0.6f;
+
+            ballVel = normalize(ballVel) * BALL_BASE_SPEED * 1.03f;
+        }
+
+        int hitR = -1, hitC = -1;
+        if (hitBrick(nextPos, hitR, hitC)) {
+            uint mask = getBrickMask(hitR);
+            uint bit = 1u << uint(hitC);
+            mask &= ~bit;
+            imageStore(outputImage, ivec2(3 + hitR, stateRow), vec4(uintBitsToFloat(mask), 0.0f, 0.0f, 0.0f));
+
+            vec2 brickCenter = vec2(
+                (float(hitC) + 0.5f) * BRICK_WIDTH_REL + BRICK_GAP_REL * 0.5f,
+                1.0f - BRICK_TOP_MARGIN_REL - (float(hitR) + 0.5f) * (BRICK_HEIGHT_REL + BRICK_GAP_REL)
+            );
+
+            vec2 delta = nextPos - brickCenter;
+            if (abs(delta.y) > abs(delta.x)) ballVel.y = -ballVel.y * 1.02f;
+            else                             ballVel.x = -ballVel.x * 1.02f;
+        }
+
+        ballPosNorm += ballVel;
+
+        if (ballPosNorm.y < -0.1f) reset = true;
+
+        if (launch && abs(ballVel.y) < 0.001f && ballPosNorm.y < 0.45f) {
+            ballVel = normalize(vec2(pc.rightStickX * 0.6f + 0.2f, 1.0f)) * BALL_BASE_SPEED;
+        }
+    }
+
+    // ── Save state ─────────────────────────────────────────
+    if (isStatePixel) {
+        if (pix.x == 0) imageStore(outputImage, pix, vec4(ballPosNorm, 0.0f, 0.0f));
+        if (pix.x == 1) imageStore(outputImage, pix, vec4(ballVel,     0.0f, 0.0f));
+        if (pix.x == 2) imageStore(outputImage, pix, vec4(paddleXNorm, 0.0f, 0.0f, 0.0f));
+        return;
+    }
+
+    // ── Render ─────────────────────────────────────────────
+    vec3 color = vec3(0.006f, 0.012f, 0.04f);
+
+    for (int r = 0; r < BRICK_ROWS; ++r) {
+        uint mask = getBrickMask(r);
+        for (int c = 0; c < BRICK_COLS; ++c) {
+            if ((mask & (1u << uint(c))) == 0u) continue;
+
+            float bx = (float(c) + 0.5f) * BRICK_WIDTH_REL + BRICK_GAP_REL * 0.5f;
+            float by = 1.0f - BRICK_TOP_MARGIN_REL - (float(r) + 0.5f) * (BRICK_HEIGHT_REL + BRICK_GAP_REL);
+
+            vec2 center = vec2(bx, by);
+            vec2 halfsplit   = vec2(BRICK_WIDTH_REL * 0.5f, BRICK_HEIGHT_REL * 0.5f);
+
+            if (hitRect(fragCoordNorm, center, halfsplit)) {
+                vec3 bc = brickColor(r);
+                color = bc * 0.9f;
+                vec2 local = (fragCoordNorm - center) / halfsplit;
+                color += bc * 0.35f * (1.0f - smoothstep(0.0f, 1.0f, length(local)));
+            }
+        }
+    }
+
+    vec2 padCenter = vec2(paddleXNorm, PADDLE_Y_REL);
+    vec2 padHalfsplit   = vec2(PADDLE_WIDTH_REL * 0.5f, PADDLE_HEIGHT_REL * 0.5f);
+    if (hitRect(fragCoordNorm, padCenter, padHalfsplit)) {
+        color = vec3(0.88f, 0.94f, 1.0f) * 0.95f;
+    }
+
+    float d = length(fragCoordNorm - ballPosNorm) - BALL_RADIUS_REL;
+    float shape = smoothstep(0.0f, -0.003f, d);
+    vec3 ballCol = vec3(1.0f, 0.96f, 0.65f);
+    color = mix(color, ballCol, shape);
+
+    float glow = smoothstep(0.04f, 0.0f, length(fragCoordNorm - ballPosNorm));
+    color += ballCol * glow * 0.7f;
+
+    color *= 0.92f + 0.08f * sin(fragCoordNorm.y * float(dim.y) * 0.08f);
+
+    vec4 prev = imageLoad(outputImage, pix);
+    vec4 final = mix(prev, vec4(color, 1.0f), ACCUM_BLEND);
+
+    imageStore(outputImage, pix, final);
+}
