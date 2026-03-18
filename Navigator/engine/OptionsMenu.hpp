@@ -158,6 +158,7 @@ namespace Options::Rendering
 
     // Hardware ray tracing toggles (mode 4)
     inline bool    PreferHardwareRT             = true;             // Attempt hardware RT when extensions available
+    inline bool    EnableHardwareRayTracing     = false;            // Master toggle: enable hardware ray tracing pipeline (default off — starts with raymarching)
     inline bool    EnableRTXReflections         = false;            // Ray-traced reflections - will need the shaders
     inline bool    EnableRTXShadows             = false;            // Ray-traced shadows - hit miss chit
     inline bool    EnableRTXGI                  = false;            // Ray-traced global illumination — very expensive
@@ -168,8 +169,8 @@ namespace Options::Rendering
     inline bool    EnableTonemapping            = false;            // Apply HDR → LDR tonemapping
     inline float   BloomThreshold               = 0.0f;             // Brightness threshold for bloom
     inline float   BloomIntensity               = 0.0f;             // Strength of bloom effect
-	inline float   Contrast                     = 1.0f;             // Strength of Contrast
-	inline float   Saturation                   = 1.0f;             // Strength of Saturation
+    inline float   Contrast                     = 1.0f;             // Strength of Contrast
+    inline float   Saturation                   = 1.0f;             // Strength of Saturation
 
     inline float   VignetteStrength             = 0.0f;             // Vignette darkness amount
     inline float   ChromaticAberrationStrength  = 0.0f;             // Strength of color fringing

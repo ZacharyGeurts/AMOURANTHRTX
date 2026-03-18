@@ -104,6 +104,7 @@ struct RTX {
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props{};
     bool                            rt_props_cached     = false;
+	bool                            rayTracingSupported = false;
 
     VkPipeline                      compute_pipeline    = VK_NULL_HANDLE;
     VkPipeline                      rt_pipeline         = VK_NULL_HANDLE;
@@ -245,9 +246,9 @@ inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 6, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 7, 0);
     appInfo.pEngineName        = "AMOURANTHRTX";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 6, 0);
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 7, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlCount = 0;

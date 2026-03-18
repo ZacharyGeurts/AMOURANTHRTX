@@ -64,7 +64,10 @@ public:
         vkGetPhysicalDeviceProperties(rtx().physical, &props);
         timestampPeriodNs_ = props.limits.timestampPeriod;
 
-        Pipeline::create_pipeline_layout();
+        // Initialize shared pipeline resources (descriptors + layout)
+        Pipeline::initialize_descriptors_and_layout();
+
+        // Create raymarching compute pipeline (fallback)
         Pipeline::create_canvas_pipeline();
 
         createTimestampQueryPool();
@@ -169,7 +172,7 @@ public:
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
 
-        // Acquire
+        // Acquire next swapchain image
         uint32_t imageIndex = 0;
         vkResetFences(rtx().device, 1, &acquireFence_);
 
@@ -187,7 +190,7 @@ public:
             return;
         }
 
-        // Single cmd buffer: compute + flip transfer
+        // Record single command buffer: dispatch → copy/flip → present prep
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
@@ -197,14 +200,23 @@ public:
         transitionImageLayout(cmd, mainHDR_.image,
                               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-        VkDescriptorSet set = descriptorSet_;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
-                                0, 1, &set, 0, nullptr);
-
         lastPresentTime_s_ = now;
         updateRenderResolution();
 
-        Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
+        // Determine which pipeline will run
+        bool isRt = Options::Rendering::EnableHardwareRayTracing &&
+                    (Options::Rendering::CurrentTechnique == Options::Rendering::RenderTechnique::HardwareRayTracing) &&
+                    rtx().rayTracingSupported;
+
+        // Bind descriptor set for the active pipeline type
+        VkDescriptorSet set = descriptorSet_;
+        vkCmdBindDescriptorSets(cmd,
+                                isRt ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR : VK_PIPELINE_BIND_POINT_COMPUTE,
+                                Pipeline::pipeline_layout,
+                                0, 1, &set, 0, nullptr);
+
+        // Unified dispatch — chooses RT or compute
+        Pipeline::dispatch(cmd, render_width_, render_height_, static_cast<float>(now));
 
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
 
@@ -239,10 +251,10 @@ public:
 
         VkExtent2D swapExtent = Swapchain::getExtent();
 
-        // Always flip vertically (Y=0 bottom in raymarch output → Y=0 top in swapchain)
+        // Flip vertically during copy/blit (raymarch Y=0 bottom → swapchain Y=0 top)
         if (render_width_ == static_cast<int>(swapExtent.width) &&
             render_height_ == static_cast<int>(swapExtent.height)) {
-            // Fast path: direct copy with flip
+            // 1:1 copy with vertical flip
             VkImageCopy copy{};
             copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
             copy.srcOffset      = {0, 0, 0};
@@ -256,7 +268,7 @@ public:
                            swapImg,        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                            1, &copy);
         } else {
-            // Adaptive scaling → flipped blit
+            // Blit with flip & scale
             VkImageBlit flipBlit{};
             flipBlit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
             flipBlit.srcOffsets[0]  = {0, 0, 0};
@@ -286,7 +298,7 @@ public:
 
         endSubmitAndWait(cmd);
 
-        // GPU timing
+        // Read back GPU timestamps
         uint64_t ts[2]{};
         if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
                                   sizeof(ts), ts, sizeof(uint64_t),
@@ -321,7 +333,7 @@ public:
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
 
-        // Periodic status log (every 5 seconds)
+        // Periodic logging (every ~5 seconds)
         if (now - lastFpsLog_ >= 5.0) {
             double elapsed = now - lastFpsLog_;
             double fps = frameCount_ ? double(frameCount_) / elapsed : 0.0;
@@ -351,7 +363,7 @@ public:
                 "  Render:         {}x{}     ({:.2f}x — {})\n"
                 "  Adaptive scale: {:.2f}x\n"
                 "  GPU load:       {:.1f}%   (smoothed {:.2f} ms)\n"
-                "  Path:           Pure Raymarched 3D (CANVAS.spv)\n"
+                "  Path:           {}\n"
                 "  State:          {}\n"
                 "  Features:       Adaptive {}  Accum {}  Supersample {}\n"
                 "  VRAM:           {:.1f}/{:.1f} MB ({:.1f}% free)\n"
@@ -360,6 +372,7 @@ public:
                 now, fps, dt_us, measuredRefreshRateHz_,
                 ww, wh, render_width_, render_height_, sf, mode,
                 adaptiveScale_, loadPct, smoothedGpuTimeMs_,
+                isRt ? "Hardware Ray Tracing" : "Pure Raymarched 3D (CANVAS.spv)",
                 state,
                 Options::Rendering::EnableAdaptiveResolution ? "✅" : "❌",
                 Options::Rendering::EnableAccumulation ? "✅" : "❌",
