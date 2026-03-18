@@ -90,7 +90,6 @@ set(DEVELOPER_DIRS assets/fonts assets/textures assets/models assets/materials a
 foreach(D ${DEVELOPER_DIRS})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${D}")
 endforeach()
-file(MAKE_DIRECTORY "${BIN_DIR}/compute")
 
 set(ASSETS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set(ASSETS_DST "${BIN_DIR}/assets")
