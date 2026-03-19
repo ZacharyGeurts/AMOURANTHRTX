@@ -20,14 +20,12 @@
 #include <cstdint>
 #include <format>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
-#include <set>
 #include <algorithm>
 #include <cstring>
+#include <set>
 
 // Required device extensions
 inline constexpr std::array<const char*, 9> requiredDeviceExtensions = {{
@@ -79,7 +77,7 @@ struct VRAMReality {
 };
 
 // ────────────────────────────────────────────────
-// Core context
+// Core context (dense vector + free list for buffers)
 // ────────────────────────────────────────────────
 
 struct RTX {
@@ -115,6 +113,7 @@ struct RTX {
     VkAccelerationStructureKHR      las_as              = VK_NULL_HANDLE;
     uint64_t                        las_as_storage      = 0;
     std::vector<UniversalPrimitive> las_procedural_primitives;
+
     bool                            las_initialized     = false;
     bool                            las_dirty           = true;
 
@@ -135,9 +134,10 @@ struct RTX {
         std::string         tag;
     };
 
-    std::unordered_map<uint64_t, BufferInfo> buffers;
-    uint64_t                        next_buffer_handle  = 1ULL;
-    std::mutex                      buffer_mutex;
+    std::vector<BufferInfo>         buffers_;
+    std::vector<uint64_t>           free_handles_;
+    uint64_t                        next_buffer_handle_ = 1ULL;
+    std::mutex                      buffer_mutex_;
 };
 
 inline RTX& rtx() noexcept {
@@ -146,7 +146,7 @@ inline RTX& rtx() noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Extension loader
+// Extension loader (cached once)
 // ────────────────────────────────────────────────
 
 struct VulkanExtensions {
@@ -225,12 +225,18 @@ inline VulkanExtensions& ext() noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Queue family helper
+// Queue family helper (sentinel values)
 // ────────────────────────────────────────────────
 
 struct QueueFamilyIndices {
-    std::optional<uint32_t> graphics, present, compute, transfer;
-    bool complete() const noexcept { return graphics && present && compute; }
+    uint32_t graphics = ~0u;
+    uint32_t present  = ~0u;
+    uint32_t compute  = ~0u;
+    uint32_t transfer = ~0u;
+
+    bool complete() const noexcept {
+        return graphics != ~0u && present != ~0u && compute != ~0u;
+    }
 };
 
 inline QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR surf) noexcept {
@@ -253,8 +259,8 @@ inline QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
             indices.transfer = i;
     }
 
-    if (!indices.compute.has_value()) indices.compute = indices.graphics;
-    if (!indices.transfer.has_value()) indices.transfer = indices.graphics;
+    if (indices.compute == ~0u) indices.compute = indices.graphics;
+    if (indices.transfer == ~0u) indices.transfer = indices.graphics;
 
     return indices;
 }
@@ -346,9 +352,9 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
     rtx().physical = selected;
 
     std::set<uint32_t> families = {
-        best.graphics.value(),
-        best.present.value(),
-        best.compute.value_or(best.graphics.value())
+        best.graphics,
+        best.present,
+        best.compute != ~0u ? best.compute : best.graphics
     };
 
     float priority = 1.0f;
@@ -395,10 +401,10 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 
     rtx().device = dev;
 
-    rtx().graphics_family = best.graphics.value();
-    rtx().present_family  = best.present.value();
-    rtx().compute_family  = best.compute.value_or(best.graphics.value());
-    rtx().transfer_family = best.transfer.value_or(best.graphics.value());
+    rtx().graphics_family = best.graphics;
+    rtx().present_family  = best.present;
+    rtx().compute_family  = best.compute != ~0u ? best.compute : best.graphics;
+    rtx().transfer_family = best.transfer != ~0u ? best.transfer : best.graphics;
 
     vkGetDeviceQueue(dev, rtx().graphics_family, 0, &rtx().graphics_queue);
     vkGetDeviceQueue(dev, rtx().present_family,  0, &rtx().present_queue);
@@ -414,7 +420,7 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 }
 
 // ────────────────────────────────────────────────
-// Command buffer helpers (used by Memory::uploadToBuffer)
+// Command buffer helpers
 // ────────────────────────────────────────────────
 
 inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
@@ -464,7 +470,7 @@ inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Memory implementation
+// Memory implementation (dense vector + free list)
 // ────────────────────────────────────────────────
 
 namespace Memory {
@@ -481,6 +487,18 @@ inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags requir
         }
     }
     return ~0u;
+}
+
+inline uint64_t allocHandle() noexcept {
+    std::lock_guard<std::mutex> lock(rtx().buffer_mutex_);
+    if (!rtx().free_handles_.empty()) {
+        uint64_t h = rtx().free_handles_.back();
+        rtx().free_handles_.pop_back();
+        return h;
+    }
+    uint64_t h = rtx().next_buffer_handle_++;
+    if (h >= rtx().buffers_.size()) rtx().buffers_.resize(h + 128);
+    return h;
 }
 
 inline uint64_t createBuffer(
@@ -544,27 +562,28 @@ inline uint64_t createBuffer(
         vkMapMemory(rtx().device, mem, 0, size, 0, &mapped);
     }
 
-    uint64_t handle = rtx().next_buffer_handle++;
-    rtx().buffers.emplace(handle, RTX::BufferInfo{buf, mem, size, addr, mapped, usage, std::string(tag)});
+    uint64_t handle = allocHandle();
+    rtx().buffers_[handle] = {buf, mem, size, addr, mapped, usage, std::string(tag)};
 
     return handle;
 }
 
 inline void destroy(uint64_t handle) noexcept {
-    std::lock_guard<std::mutex> lock(rtx().buffer_mutex);
-    auto it = rtx().buffers.find(handle);
-    if (it == rtx().buffers.end()) return;
+    std::lock_guard<std::mutex> lock(rtx().buffer_mutex_);
+    if (handle == 0 || handle >= rtx().buffers_.size()) return;
 
-    auto& b = it->second;
+    auto& b = rtx().buffers_[handle];
     if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
     vkDestroyBuffer(rtx().device, b.buffer, nullptr);
     vkFreeMemory(rtx().device, b.memory, nullptr);
-    rtx().buffers.erase(it);
+
+    b = {}; // clear
+    rtx().free_handles_.push_back(handle);
 }
 
 inline RTX::BufferInfo* get(uint64_t handle) noexcept {
-    auto it = rtx().buffers.find(handle);
-    return (it != rtx().buffers.end()) ? &it->second : nullptr;
+    if (handle == 0 || handle >= rtx().buffers_.size()) return nullptr;
+    return &rtx().buffers_[handle];
 }
 
 inline VkBuffer getBuffer(uint64_t handle) noexcept {
@@ -655,7 +674,7 @@ inline VRAMReality measureReality() noexcept {
 } // namespace Memory
 
 // ────────────────────────────────────────────────
-// Swapchain — functions in dependency order: cleanup → recreate → create
+// Swapchain
 // ────────────────────────────────────────────────
 
 namespace Swapchain {
@@ -679,7 +698,7 @@ inline double               lastPresentTime_s   = 0.0;
 inline double               smoothedRefresh_s   = 1.0 / 60.0;
 
 // ────────────────────────────────────────────────
-// Forward declarations inside namespace
+// Forward declarations
 // ────────────────────────────────────────────────
 
 inline VkSwapchainKHR get() noexcept;
@@ -688,7 +707,7 @@ inline void           updateRefreshEstimate(double t) noexcept;
 inline double         getSmoothedRefresh() noexcept;
 
 // ────────────────────────────────────────────────
-// Cleanup (first — used by recreate)
+// Cleanup
 // ────────────────────────────────────────────────
 
 inline void cleanup() noexcept {
@@ -823,7 +842,7 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     if (!rtx().device) return false;
 
     // Load extensions after device creation
-    ext();  // This triggers loadDeviceExtensions()
+    ext();  // Triggers loadDeviceExtensions()
 
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -831,6 +850,10 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     poolInfo.queueFamilyIndex = rtx().graphics_family;
 
     vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
+
+    // Pre-reserve buffers and primitives
+    rtx().buffers_.reserve(512);
+    rtx().las_procedural_primitives.reserve(256);
 
     Swapchain::create(window, width, height);
 
@@ -842,12 +865,13 @@ inline void cleanupRTX() noexcept {
 
     Swapchain::cleanup();
 
-    for (auto& [h, b] : rtx().buffers) {
+    for (auto& b : rtx().buffers_) {
         if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
         vkDestroyBuffer(rtx().device, b.buffer, nullptr);
         vkFreeMemory(rtx().device, b.memory, nullptr);
     }
-    rtx().buffers.clear();
+    rtx().buffers_.clear();
+    rtx().free_handles_.clear();
 
     if (rtx().transient_pool) vkDestroyCommandPool(rtx().device, rtx().transient_pool, nullptr);
 
