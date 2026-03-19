@@ -1,17 +1,5 @@
 #pragma once
 
-// =============================================================================
-// AMOURANTH RTX Engine — RayCanvas (pure raymarched 3D renderer)
-// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
-// Dual licensed: GPL v3 or commercial
-// AMOURANTH FOREVER 💖
-//
-// Pure 3D raymarching canvas — owns HDR pair, descriptors, materials, adaptive dispatch,
-// timing, resize, SDL event polling, quit detection, fullscreen toggle
-// Fully integrated with current SDL3.hpp, Pipeline.hpp, Materials.hpp, OptionsMenu.hpp
-// Uses CANVAS.spv (compiled from CANVAS.comp) via Pipeline
-// =============================================================================
-
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "Camera.hpp"
@@ -30,9 +18,6 @@
 #include <cmath>
 #include <string>
 
-// =============================================================================
-// RayCanvas — main raymarching renderer class
-// =============================================================================
 class RayCanvas {
 public:
     RayCanvas(int initialWidth, int initialHeight, SDL_Window* window)
@@ -52,9 +37,13 @@ public:
           frameCount_(0),
           lastAdaptiveAdjustTime_(0.0),
           needsRecreate_(false),
-          timestampQueryPool_(VK_NULL_HANDLE),
           timestampPeriodNs_(1.0),
-          smoothedGpuTimeMs_(16.67)
+          smoothedGpuTimeMs_(16.67),
+          commandBuffer_(VK_NULL_HANDLE),
+          timestampQueryPool_(VK_NULL_HANDLE),
+          acquireFence_(VK_NULL_HANDLE),
+          descriptorPool_(VK_NULL_HANDLE),
+          descriptorSet_(VK_NULL_HANDLE)
     {
         if (!Swapchain::get()) {
             LOG_FATAL_CAT("RAYCANVAS", "No valid swapchain — navigator must create it first");
@@ -63,17 +52,15 @@ public:
 
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(rtx().physical, &props);
-        timestampPeriodNs_ = props.limits.timestampPeriod;
+        timestampPeriodNs_ = props.limits.timestampPeriod ? static_cast<double>(props.limits.timestampPeriod) : 1.0;
 
-        // Initialize shared pipeline resources (descriptors + layout)
         Pipeline::initialize_descriptors_and_layout();
-
-        // Create raymarching compute pipeline (fallback)
         Pipeline::create_canvas_pipeline();
 
         createTimestampQueryPool();
         buildMaterialLibrary();
         createAcquireFence();
+        createCommandBuffer();
         updateRenderResolution();
         createHDRResources();
         createDescriptorPoolAndSet();
@@ -87,8 +74,6 @@ public:
         if (destroyed_) return;
         destroyed_ = true;
 
-        vkDeviceWaitIdle(rtx().device);
-
         if (acquireFence_ != VK_NULL_HANDLE)
             vkDestroyFence(rtx().device, acquireFence_, nullptr);
 
@@ -101,6 +86,9 @@ public:
         if (descriptorPool_ != VK_NULL_HANDLE)
             vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
 
+        if (commandBuffer_ != VK_NULL_HANDLE)
+            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &commandBuffer_);
+
         destroyHDRResources();
         Memory::destroy(materialsHandle_);
 
@@ -112,50 +100,32 @@ public:
 
         frameCount_++;
 
-        double now = TotalTime::get().seconds();
+        double now = TotalTime::get().seconds() * static_cast<double>(Options::Debug::TimeScale);
 
-        // Poll events
-        int currentW = window_width_;
-        int currentH = window_height_;
-        bool quit = false;
-        bool fullscreen_toggle = false;
+        Pipeline::processInput(window_, window_width_, window_height_);
 
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {
-            SDL3System::get().pump(ev);
-
-            if (ev.type == SDL_EVENT_QUIT) quit = true;
-            if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
-                currentW = ev.window.data1;
-                currentH = ev.window.data2;
-            }
-            if (ev.type == SDL_EVENT_KEY_DOWN) {
-                bool alt = (ev.key.mod & SDL_KMOD_ALT) != 0;
-                if (ev.key.scancode == SDL_SCANCODE_F11 ||
-                    (ev.key.scancode == SDL_SCANCODE_RETURN && alt)) {
-                    fullscreen_toggle = true;
-                }
-            }
-        }
+        bool quit = Pipeline::should_quit;
+        bool fullscreen_toggle = Pipeline::wants_fullscreen_toggle;
+        int newWidth = Pipeline::requested_width;
+        int newHeight = Pipeline::requested_height;
+        bool sizeChanged = (newWidth != window_width_) || (newHeight != window_height_);
 
         if (fullscreen_toggle) toggleFullscreen();
 
         if (quit) {
             destroyed_ = true;
-            LOG_INFO_CAT("RAYCANVAS", "Quit signal received");
+            LOG_INFO_CAT("RAYCANVAS", "Quit signal received from Pipeline");
             return;
         }
 
-        bool nowMinimized = (currentW <= 0 || currentH <= 0);
+        bool nowMinimized = (newWidth <= 0 || newHeight <= 0);
         if (nowMinimized) {
             minimized_ = true;
             return;
         }
 
-        bool sizeChanged = (currentW != window_width_) || (currentH != window_height_);
-
         if (minimized_ || sizeChanged || needsRecreate_) {
-            onResize(currentW, currentH);
+            onResize(newWidth, newHeight);
             minimized_ = false;
             return;
         }
@@ -173,7 +143,6 @@ public:
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
 
-        // Acquire next swapchain image
         uint32_t imageIndex = 0;
         vkResetFences(rtx().device, 1, &acquireFence_);
 
@@ -191,8 +160,7 @@ public:
             return;
         }
 
-        // Record single command buffer: dispatch → copy/flip → present prep
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        VkCommandBuffer cmd = beginCommandBuffer();
         if (!cmd) return;
 
         vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
@@ -204,19 +172,16 @@ public:
         lastPresentTime_s_ = now;
         updateRenderResolution();
 
-        // Determine which pipeline will run
         bool isRt = Options::Rendering::EnableHardwareRayTracing &&
                     (Options::Rendering::CurrentTechnique == Options::Rendering::RenderTechnique::HardwareRayTracing) &&
                     rtx().rayTracingSupported;
 
-        // Bind descriptor set for the active pipeline type
         VkDescriptorSet set = descriptorSet_;
         vkCmdBindDescriptorSets(cmd,
                                 isRt ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR : VK_PIPELINE_BIND_POINT_COMPUTE,
                                 Pipeline::pipeline_layout,
                                 0, 1, &set, 0, nullptr);
 
-        // Unified dispatch — chooses RT or compute
         Pipeline::dispatch(cmd, render_width_, render_height_, static_cast<float>(now));
 
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
@@ -246,16 +211,10 @@ public:
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
-        VkClearColorValue clearBlack{{0.0f, 0.0f, 0.0f, 1.0f}};
-        VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
-
         VkExtent2D swapExtent = Swapchain::getExtent();
 
-        // Flip vertically during copy/blit (raymarch Y=0 bottom → swapchain Y=0 top)
         if (render_width_ == static_cast<int>(swapExtent.width) &&
             render_height_ == static_cast<int>(swapExtent.height)) {
-            // 1:1 copy with vertical flip
             VkImageCopy copy{};
             copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
             copy.srcOffset      = {0, 0, 0};
@@ -269,7 +228,6 @@ public:
                            swapImg,        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                            1, &copy);
         } else {
-            // Blit with flip & scale
             VkImageBlit flipBlit{};
             flipBlit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
             flipBlit.srcOffsets[0]  = {0, 0, 0};
@@ -299,23 +257,22 @@ public:
 
         endSubmitAndWait(cmd);
 
-        // Read back GPU timestamps
-        uint64_t ts[2]{};
-        if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
-                                  sizeof(ts), ts, sizeof(uint64_t),
-                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
-            double gpuMs = double(ts[1] - ts[0]) * timestampPeriodNs_ / 1'000'000.0;
-            double alpha = (gpuMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
-            smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuMs;
+        if (frameCount_ % 30 == 0) {
+            uint64_t ts[2]{};
+            VkResult res = vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
+                                                 sizeof(ts), ts, sizeof(uint64_t),
+                                                 VK_QUERY_RESULT_64_BIT);
+            if (res == VK_SUCCESS) {
+                double gpuMs = double(ts[1] - ts[0]) * timestampPeriodNs_ / 1'000'000.0;
+                double alpha = (gpuMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
+                smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuMs;
+            }
         }
 
-        if (Options::Rendering::EnableAdaptiveResolution) {
+        if (frameCount_ % 30 == 0 && Options::Rendering::EnableAdaptiveResolution) {
             adjustAdaptiveScale(now);
-        } else {
-            adaptiveScale_ = 1.0;
         }
 
-        // Present
         VkPresentInfoKHR pi{};
         pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.swapchainCount = 1;
@@ -334,7 +291,6 @@ public:
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
 
-        // Periodic logging (every ~5 seconds)
         if (now - lastFpsLog_ >= 5.0) {
             double elapsed = now - lastFpsLog_;
             double fps = frameCount_ ? double(frameCount_) / elapsed : 0.0;
@@ -355,10 +311,16 @@ public:
             double totalMB = double(vram.total) / (1024.0 * 1024.0);
             double freePct = totalMB ? 100.0 * (1.0 - usedMB / totalMB) : 0.0;
 
-            // Dynamic path string — no hardcoding
-            std::string pathStr = isRt ? "Hardware Ray Tracing" : "Pure Raymarched 3D (CANVAS.spv)";
+            std::string pathStr;
+            switch (Options::Rendering::CurrentTechnique) {
+                case Options::Rendering::RenderTechnique::Pure2DCanvas: pathStr = "Pure 2D Canvas"; break;
+                case Options::Rendering::RenderTechnique::PureRaymarching: pathStr = "Pure Raymarching"; break;
+                case Options::Rendering::RenderTechnique::HybridRasterMarch: pathStr = "Hybrid Raster + March"; break;
+                case Options::Rendering::RenderTechnique::SoftwareRayTracing: pathStr = "Software Ray Tracing"; break;
+                case Options::Rendering::RenderTechnique::HardwareRayTracing: pathStr = "Hardware Ray Tracing"; break;
+                case Options::Rendering::RenderTechnique::ProgressivePathTracing: pathStr = "Progressive Path Tracing"; break;
+            }
 
-            // Dynamic feature indicators
             std::string adaptiveStr = Options::Rendering::EnableAdaptiveResolution ? "✅" : "❌";
             std::string accumStr    = Options::Rendering::EnableAccumulation ? "✅" : "❌";
             std::string supersampleStr = (sf > 1.0) ? "⚡" : "❌";
@@ -366,16 +328,16 @@ public:
             LOG_AMOURANTH(
                 "───────────────────────────────────────────────────────────────\n"
                 "              RayCanvas Status  •  t+{:.4}s\n"
-                "  FPS:            {}     (avg {} µs)\n"
-                "  Refresh:        {} Hz\n"
+                "  FPS:            {:.1f}     (avg {:.0f} µs)\n"
+                "  Refresh:        {:.1f} Hz\n"
                 "  Window:         {}x{}\n"
                 "  Render:         {}x{}     ({:.2f}x — {})\n"
                 "  Adaptive scale: {:.2f}x\n"
-                "  GPU load:       {:.4f}%   (smoothed {:.4f} ms)\n"
+                "  GPU load:       {:.1f}%   (smoothed {:.2f} ms)\n"
                 "  Path:           {}\n"
                 "  State:          {}\n"
                 "  Features:       Adaptive {}  Accum {}  Supersample {}\n"
-                "  VRAM:           {:.4f}/{:.4f} MB ({:.4f}% free)\n"
+                "  VRAM:           {:.1f}/{:.1f} MB ({:.1f}% free)\n"
                 "  Frames logged:  {}\n"
                 "───────────────────────────────────────────────────────────────",
                 now, fps, dt_us, measuredRefreshRateHz_,
@@ -402,7 +364,7 @@ public:
 private:
     void toggleFullscreen() noexcept {
         bool isFS = (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
-        SDL_SetWindowFullscreen(window_, !isFS);
+        SDL_SetWindowFullscreen(window_, !isFS ? SDL_WINDOW_FULLSCREEN : 0);
         LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFS ? "off" : "on");
     }
 
@@ -414,12 +376,10 @@ private:
 
         if (newWidth == window_width_ && newHeight == window_height_ && !needsRecreate_) return;
 
-        if (needsRecreate_) vkDeviceWaitIdle(rtx().device);
+        vkDeviceWaitIdle(rtx().device);
 
-        int actualW = 0, actualH = 0;
-        SDL_GetWindowSizeInPixels(window_, &actualW, &actualH);
-        window_width_  = actualW;
-        window_height_ = actualH;
+        window_width_  = newWidth;
+        window_height_ = newHeight;
 
         minimized_ = false;
         needsRecreate_ = false;
@@ -435,15 +395,51 @@ private:
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
             descriptorSet_ = VK_NULL_HANDLE;
         }
-        if (descriptorPool_ != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
-            descriptorPool_ = VK_NULL_HANDLE;
-        }
 
         createDescriptorPoolAndSet();
         updateDescriptorSet();
 
         clearHDRImages();
+    }
+
+    void applyGameStyleDefaults() noexcept {
+        switch (Options::GameStyle::CurrentDimension) {
+            case Options::GameStyle::DimensionMode::TextOnly:
+                Options::Camera::CurrentFOV = 90.0f;
+                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::Pure2DCanvas;
+                break;
+            case Options::GameStyle::DimensionMode::Pure2D:
+                Options::Camera::CurrentFOV = 90.0f;
+                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::Pure2DCanvas;
+                break;
+            case Options::GameStyle::DimensionMode::TwoPointFiveD:
+                Options::Camera::CurrentFOV = 75.0f;
+                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::HybridRasterMarch;
+                break;
+            case Options::GameStyle::DimensionMode::Full3D:
+                Options::Camera::CurrentFOV = 75.0f;
+                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::PureRaymarching;
+                break;
+        }
+
+        switch (Options::GameStyle::CurrentPerspective) {
+            case Options::GameStyle::CameraPerspective::FirstPerson:
+                Options::Camera::CurrentFOV = 85.0f;
+                break;
+            case Options::GameStyle::CameraPerspective::ThirdPerson:
+                Options::Camera::CurrentFOV = 70.0f;
+                break;
+            case Options::GameStyle::CameraPerspective::TopDown:
+            case Options::GameStyle::CameraPerspective::Isometric:
+            case Options::GameStyle::CameraPerspective::SideScroller:
+            case Options::GameStyle::CameraPerspective::Orthographic2D:
+            case Options::GameStyle::CameraPerspective::TextAdventure:
+                // No special FOV override for these cases
+                break;
+        }
+    }
+
+    void applyCameraDefaults() noexcept {
     }
 
     void adjustAdaptiveScale(double now) noexcept {
@@ -455,19 +451,18 @@ private:
 
         double tgtScale = adaptiveScale_;
 
-        if      (load > 220) tgtScale *= 0.50;
-        else if (load > 180) tgtScale *= 0.65;
-        else if (load > 140) tgtScale *= 0.78;
-        else if (load >  93) tgtScale *= 0.88;
-        else if (load >  85) tgtScale *= 0.94;
-        else if (load <  60) tgtScale *= 1.20;
-        else if (load <  72) tgtScale *= 1.10;
+        if      (load > 220) tgtScale *= 0.60;
+        else if (load > 180) tgtScale *= 0.75;
+        else if (load > 140) tgtScale *= 0.85;
+        else if (load >  95) tgtScale *= 0.92;
+        else if (load <  55) tgtScale *= 1.15;
+        else if (load <  70) tgtScale *= 1.08;
 
         tgtScale = std::clamp(tgtScale,
                               double(Options::Rendering::MinResolutionScale),
                               double(Options::Rendering::MaxResolutionScale));
 
-        double hyst = (tgtScale > adaptiveScale_) ? 0.03 : 0.10;
+        double hyst = (tgtScale > adaptiveScale_) ? 0.025 : 0.08;
         if (std::abs(tgtScale - adaptiveScale_) > hyst) {
             adaptiveScale_ = tgtScale;
             needsRecreate_ = true;
@@ -572,6 +567,26 @@ private:
         vkCreateFence(rtx().device, &f, nullptr, &acquireFence_);
     }
 
+    void createCommandBuffer() noexcept {
+        VkCommandBufferAllocateInfo a{};
+        a.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        a.commandPool        = rtx().transient_pool;
+        a.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        a.commandBufferCount = 1;
+        vkAllocateCommandBuffers(rtx().device, &a, &commandBuffer_);
+    }
+
+    VkCommandBuffer beginCommandBuffer() noexcept {
+        vkResetCommandBuffer(commandBuffer_, 0);
+
+        VkCommandBufferBeginInfo b{};
+        b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(commandBuffer_, &b);
+        return commandBuffer_;
+    }
+
     void createDescriptorPoolAndSet() noexcept {
         VkDescriptorPoolSize sizes[] = {
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   2},
@@ -640,46 +655,6 @@ private:
         vkUpdateDescriptorSets(rtx().device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
-    VkCommandBuffer beginTransientCommandBuffer() noexcept {
-        VkCommandBuffer cmd = VK_NULL_HANDLE;
-
-        VkCommandBufferAllocateInfo a{};
-        a.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        a.commandPool        = rtx().transient_pool;
-        a.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        a.commandBufferCount = 1;
-
-        vkAllocateCommandBuffers(rtx().device, &a, &cmd);
-
-        VkCommandBufferBeginInfo b{};
-        b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        vkBeginCommandBuffer(cmd, &b);
-
-        return cmd;
-    }
-
-    void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
-        if (!cmd) return;
-        vkEndCommandBuffer(cmd);
-
-        VkFence f = VK_NULL_HANDLE;
-        VkFenceCreateInfo fc{};
-        fc.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        vkCreateFence(rtx().device, &fc, nullptr, &f);
-
-        VkSubmitInfo s{};
-        s.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        s.commandBufferCount = 1;
-        s.pCommandBuffers    = &cmd;
-
-        vkQueueSubmit(rtx().graphics_queue, 1, &s, f);
-        vkWaitForFences(rtx().device, 1, &f, VK_TRUE, UINT64_MAX);
-        vkDestroyFence(rtx().device, f, nullptr);
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
-    }
-
     void transitionImageLayout(VkCommandBuffer cmd, VkImage img,
                                VkImageLayout oldL, VkImageLayout newL) noexcept {
         VkImageMemoryBarrier b{};
@@ -707,7 +682,7 @@ private:
         VkClearColorValue black{{0.0f, 0.0f, 0.0f, 1.0f}};
         VkImageSubresourceRange rng{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        VkCommandBuffer cmd = beginCommandBuffer();
         if (!cmd) return;
 
         transitionImageLayout(cmd, mainHDR_.image,  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
@@ -758,6 +733,7 @@ private:
     VkDescriptorPool descriptorPool_          = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_           = VK_NULL_HANDLE;
     VkFence        acquireFence_              = VK_NULL_HANDLE;
+    VkCommandBuffer commandBuffer_            = VK_NULL_HANDLE;
 
     double         adaptiveScale_             = 1.0;
     double         lastPresentTime_s_         = 0.0;
