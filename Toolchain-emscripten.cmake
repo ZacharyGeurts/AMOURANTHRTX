@@ -36,9 +36,9 @@ add_link_options(
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
     "SHELL:-s USE_WEBGPU=1"
     "SHELL:-s USE_SDL=3"
-    "SHELL:-s USE_SDL_IMAGE=2"
-    "SHELL:-s USE_SDL_MIXER=2"
-    "SHELL:-s USE_SDL_TTF=2"
+    "SHELL:-s USE_SDL_IMAGE=3"
+    "SHELL:-s USE_SDL_MIXER=3"
+    "SHELL:-s USE_SDL_TTF=3"
     "SHELL:-s MIN_WEBGL_VERSION=2"
     "SHELL:-s MAX_WEBGL_VERSION=2"
 )
