@@ -57,7 +57,7 @@ We run zero overhead compute. The bottle sealed.
 
 The security is simple. 4 slot const expr. We store each piece of RTX behind it.  
 If a bit of memory changes, and your program is not the one making changes, we exit.  
-This is trvial math and has "no cost" post compiling.  
+This is triviality and has "no cost" post compiling.  
 We do the same with time by locking our epoch startup time and working off that.  
 We secure the input and "camera" as well.  
 We gather up the whole of RTX and secure and grant access with simply, rtx() singleton.  
