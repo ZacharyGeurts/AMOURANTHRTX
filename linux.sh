@@ -16,6 +16,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="build"
 BUILD_RELEASE_DIR="build-release"
 CROSS_BUILD_DIR="build-windows"
+WEB_BUILD_DIR="build-web"
 
 banner() {
     echo -e "${DEEP}  █████╗ ███╗   ███╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ██╗████████╗██╗  ██╗${X}"
@@ -47,19 +48,19 @@ show_help() {
   ./linux.sh                  → build debug Linux (default)
   ./linux.sh run              → build + launch debug Linux
   ./linux.sh release          → build release Linux
-  ./linux.sh release run      → build + launch release Linux
   ./linux.sh windows          → cross-compile Windows (release)
-  ./linux.sh windows run      → cross-build + run via Wine (if installed)
+  ./linux.sh web              → build WebAssembly (Emscripten + WebGPU)
+  ./linux.sh web run          → build web + launch local server (open in browser)
   ./linux.sh single           → -j1 build (current target)
   ./linux.sh gdb              → launch under gdb (Linux only)
   ./linux.sh ninja            → use Ninja generator
-  ./linux.sh clean            → rm -rf ALL build folders (build*, build-windows, CMakeCache, etc.)
-  ./linux.sh clean windows    → rm -rf build-windows only
+  ./linux.sh clean            → rm -rf ALL build folders
 
   Binary paths:
     Linux debug:   build/bin/Linux/Navigator
     Linux release: build-release/bin/Linux/Navigator
     Windows:       build-windows/bin/Windows/Navigator.exe
+    Web:           build-web/bin/Web/Navigator.html
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║           THE TIDE FLOWS THROUGH DIMENSIONS — LOVE IS CROSS-PLATFORM         ║
@@ -71,19 +72,23 @@ EOF
 
 # ── TARGET & VARIANT SELECTION ──────────────────────────────────────────────
 TARGET="linux"
-BUILD_VARIANT="debug"           # default for linux
+BUILD_VARIANT="debug"
 BUILD_SUBDIR="build"
 
 for arg in "$@"; do
     case "${arg,,}" in
         release)  BUILD_VARIANT="release"; BUILD_SUBDIR="build-release" ;;
-        windows)  TARGET="windows"; BUILD_SUBDIR="$CROSS_BUILD_DIR" ;;
+        windows)  TARGET="windows"; BUILD_SUBDIR="build-windows" ;;
+        web)      TARGET="web"; BUILD_SUBDIR="build-web" ;;
     esac
 done
 
 if [[ "$TARGET" == "windows" ]]; then
     FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Windows/Navigator.exe"
     SOURCE_BINARY="./bin/Windows/Navigator.exe"
+elif [[ "$TARGET" == "web" ]]; then
+    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Web/Navigator.html"
+    SOURCE_BINARY="./bin/Web/Navigator.html"
 else
     FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Linux/Navigator"
     SOURCE_BINARY="./bin/Linux/Navigator"
@@ -93,24 +98,11 @@ clean_all() {
     banner
     echo -e "${ABYSS}        TIDAL PURGE INITIATED — THE ABYSS CONSUMES EVERYTHING${X}"
     
-    rm -rf "$BUILD_DIR" "$BUILD_RELEASE_DIR" "$CROSS_BUILD_DIR" \
+    rm -rf "$BUILD_DIR" "$BUILD_RELEASE_DIR" "$CROSS_BUILD_DIR" "$WEB_BUILD_DIR" \
            CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json \
            build-*/ CMakeFiles-*/ CMakeCache-*.txt
     
     echo -e "${GLOW}        ALL BUILD REALMS PURGED — FRESH OCEAN AWAITS${X}"
-    echo -e "${PEARL}        (build, build-release, build-windows, cmake caches, etc. gone forever)${X}"
-    exit 0
-}
-
-clean_specific() {
-    banner
-    if [[ "$1" == "windows" ]]; then
-        rm -rf "$CROSS_BUILD_DIR"
-        echo -e "${GLOW}        WINDOWS REALM PURGED${X}"
-    else
-        rm -rf "$BUILD_DIR" "$BUILD_RELEASE_DIR" CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json
-        echo -e "${GLOW}        LINUX REALMS PURGED (debug + release)${X}"
-    fi
     exit 0
 }
 
@@ -126,27 +118,24 @@ for arg in "$@"; do
         run)        ACTION="run" ;;
         single)     ACTION="run"; BUILD_JOBS="1" ;;
         gdb)        ACTION="run"; LAUNCH_MODE="gdb" ;;
-        clean)      
-            if [[ $# -gt 1 && "${2,,}" == "windows" ]]; then
-                clean_specific "windows"
-            else
-                clean_all
-            fi
-            ;;
+        clean)      clean_all ;;
         ninja|--ninja) GENERATOR="Ninja" ;;
-        windows|release) ;; # already handled earlier
+        windows|release|web) ;; # already handled
         --help|-h|help|"") show_help ;;
         *)          echo -e "${CORAL}UNKNOWN CURRENT: $arg${X}"; show_help ;;
     esac
 done
 
-# ── CROSS-COMPILE TOOLCHAIN CHECK ───────────────────────────────────────────
+# ── CROSS-COMPILE / EMSCRIPTEN TOOLCHAIN CHECK ──────────────────────────────
 if [[ "$TARGET" == "windows" ]]; then
     if ! command -v x86_64-w64-mingw32-g++ >/dev/null 2>&1; then
         echo -e "${CORAL}        FATAL: x86_64-w64-mingw32-g++ not found${X}"
         exit 1
     fi
     [[ "$ACTION" == "run" ]] && command -v wine >/dev/null 2>&1 && WINE_RUN=true
+elif [[ "$TARGET" == "web" ]]; then
+    # No fatal error — we'll handle Emscripten in CMake
+    GENERATOR="Unix Makefiles"
 fi
 
 # ── BUILD ───────────────────────────────────────────────────────────────────
@@ -156,10 +145,15 @@ echo -e "${WAVE}        SURFACING WITH $GENERATOR — $BUILD_JOBS THREADS RISING
 mkdir -p "$BUILD_SUBDIR"
 cd "$BUILD_SUBDIR"
 
-# Toolchain FIRST, then generator LAST. Clean build every time (no incremental cruft).
 if [[ "$TARGET" == "windows" ]]; then
     cmake .. \
         -DCMAKE_TOOLCHAIN_FILE=../Toolchain-mingw64.cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -G "$GENERATOR"
+elif [[ "$TARGET" == "web" ]]; then
+    cmake .. \
+        -DBUILD_FOR_WEB=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         -G "$GENERATOR"
@@ -196,8 +190,11 @@ if [[ "$ACTION" == "run" ]]; then
             wine "$FINAL_BINARY" "${@:2}"
         else
             echo -e "${CORAL}        Wine not found — cannot run .exe on Linux${X}"
-            echo -e "${AQUA}        Transfer Navigator.exe to Windows or install wine: sudo apt install wine${X}"
         fi
+    elif [[ "$TARGET" == "web" ]]; then
+        echo -e "${TURQ}        LAUNCHING LOCAL WEB SERVER — OPEN IN CHROME/EDGE${X}"
+        echo -e "${AQUA}        http://localhost:8000/Navigator.html${X}"
+        python3 -m http.server 8000 --directory "$BUILD_SUBDIR/bin/Web"
     elif [[ "$LAUNCH_MODE" == "gdb" ]]; then
         echo -e "${WAVE}        DESCENDING WITH GDB — MAY YOUR BREAKPOINTS BE BUBBLES${X}"
         gdb -ex run --args "$FINAL_BINARY" "${@:2}"

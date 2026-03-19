@@ -20,8 +20,10 @@ option(SDL3IMAGE_JXL    "Enable JPEG-XL"      OFF)
 option(SDL3IMAGE_WEBP   "Enable WebP"         OFF)
 option(SDL3IMAGE_TIFF   "Enable TIFF"         OFF)
 
+option(BUILD_FOR_WEB    "Build for Emscripten/WebAssembly + WebGPU" OFF)
+
 # =============================================================================
-# FETCHCONTENT SETUP
+# FETCHCONTENT SETUP - EARLY INCLUDE
 # =============================================================================
 include(FetchContent)
 find_package(Git REQUIRED)
@@ -30,9 +32,114 @@ set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE)
 
 # =============================================================================
-# TOOLCHAIN + PLATFORM
+# PLATFORM / TOOLCHAIN DETECTION
 # =============================================================================
-if(CMAKE_CROSSCOMPILING)
+if(BUILD_FOR_WEB)
+    set(TARGET_PLATFORM "Web")
+    set(EXE_SUFFIX ".html")
+    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Web")
+    message(STATUS "=== WEB BUILD MODE — Output locked to build-web/bin/Web/Navigator.html ===")
+    add_definitions(-DUSE_WEBGPU)
+
+    # Force Emscripten-only backends (no X11/Wayland)
+    set(SDL_UNIX_CONSOLE_BUILD ON CACHE INTERNAL "" FORCE)
+    set(SDL_VIDEO_DRIVER_EMSCRIPTEN ON CACHE INTERNAL "" FORCE)
+    set(SDL_VIDEO ON CACHE INTERNAL "" FORCE)
+    set(SDL_X11 OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XFIXES OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XCURSOR OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XINPUT OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XRANDR OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XRENDER OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XSHAPE OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XSYNC OFF CACHE INTERNAL "" FORCE)
+    set(SDL_X11_XTEST OFF CACHE INTERNAL "" FORCE)
+    set(SDL_WAYLAND OFF CACHE INTERNAL "" FORCE)
+    set(SDL_KMSDRM OFF CACHE INTERNAL "" FORCE)
+    set(SDL_IBUS OFF CACHE INTERNAL "" FORCE)
+    set(SDL_DIRECTX OFF CACHE INTERNAL "" FORCE)
+    set(SDL_WASAPI OFF CACHE INTERNAL "" FORCE)
+    set(SDL_PULSEAUDIO OFF CACHE INTERNAL "" FORCE)
+    set(SDL_ALSA OFF CACHE INTERNAL "" FORCE)
+    set(SDL_JACK OFF CACHE INTERNAL "" FORCE)
+    set(SDL_SNDIO OFF CACHE INTERNAL "" FORCE)
+    set(SDL_PIPEWIRE OFF CACHE INTERNAL "" FORCE)
+    set(SDL_HIDAPI OFF CACHE INTERNAL "" FORCE)
+    set(SDL_VIRTUAL_JOYSTICK ON CACHE INTERNAL "" FORCE)
+    set(SDL_EMSCRIPTEN ON CACHE INTERNAL "" FORCE)
+    set(SDL_OFFSCREEN ON CACHE INTERNAL "" FORCE)
+    set(SDL_DUMMYAUDIO ON CACHE INTERNAL "" FORCE)
+    set(SDL_DUMMYVIDEO ON CACHE INTERNAL "" FORCE)
+    set(SDL_DUMMYCAMERA ON CACHE INTERNAL "" FORCE)
+
+    # Auto-setup emsdk if emcc not found
+    find_program(EMCC_BIN emcc)
+    if(NOT EMCC_BIN)
+        message(STATUS "emcc not found — auto-installing Emscripten")
+        set(EMSDK_DIR "${CMAKE_BINARY_DIR}/emsdk")
+        if(NOT EXISTS "${EMSDK_DIR}")
+            message(STATUS "Cloning emsdk from https://github.com/emscripten-core/emsdk...")
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} clone https://github.com/emscripten-core/emsdk.git "${EMSDK_DIR}"
+                WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+                RESULT_VARIABLE GIT_CLONE_RESULT
+            )
+            if(NOT GIT_CLONE_RESULT EQUAL 0)
+                message(FATAL_ERROR "Failed to clone emsdk — check git & internet")
+            endif()
+        endif()
+
+        message(STATUS "Installing latest Emscripten...")
+        execute_process(
+            COMMAND "${EMSDK_DIR}/emsdk" install latest
+            WORKING_DIRECTORY "${EMSDK_DIR}"
+            RESULT_VARIABLE EMSDK_INSTALL_RESULT
+        )
+        if(NOT EMSDK_INSTALL_RESULT EQUAL 0)
+            message(FATAL_ERROR "emsdk install latest failed — check ${EMSDK_DIR}/emsdk.log")
+        endif()
+
+        message(STATUS "Activating latest Emscripten...")
+        execute_process(
+            COMMAND "${EMSDK_DIR}/emsdk" activate latest
+            WORKING_DIRECTORY "${EMSDK_DIR}"
+            RESULT_VARIABLE EMSDK_ACTIVATE_RESULT
+        )
+        if(NOT EMSDK_ACTIVATE_RESULT EQUAL 0)
+            message(FATAL_ERROR "emsdk activate latest failed")
+        endif()
+
+        message(STATUS "Sourcing emsdk environment...")
+        execute_process(
+            COMMAND bash -c "source ${EMSDK_DIR}/emsdk_env.sh && env"
+            WORKING_DIRECTORY "${EMSDK_DIR}"
+            OUTPUT_VARIABLE EMSDK_ENV
+            RESULT_VARIABLE EMSDK_ENV_RESULT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT EMSDK_ENV_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to source emsdk_env.sh")
+        endif()
+
+        string(REGEX REPLACE "\n" ";" ENV_LINES "${EMSDK_ENV}")
+        foreach(line ${ENV_LINES})
+            if(line MATCHES "^([^=]+)=(.*)$")
+                set(ENV_VAR "${CMAKE_MATCH_1}")
+                string(STRIP "${CMAKE_MATCH_2}" ENV_VAL)
+                set(ENV{"${ENV_VAR}"} "${ENV_VAL}")
+            endif()
+        endforeach()
+
+        set(CMAKE_C_COMPILER "${EMSDK_DIR}/upstream/emscripten/emcc" CACHE PATH "" FORCE)
+        set(CMAKE_CXX_COMPILER "${EMSDK_DIR}/upstream/emscripten/em++" CACHE PATH "" FORCE)
+        set(CMAKE_AR "${EMSDK_DIR}/upstream/emscripten/emar" CACHE PATH "" FORCE)
+        set(CMAKE_RANLIB "${EMSDK_DIR}/upstream/emscripten/emranlib" CACHE PATH "" FORCE)
+
+        message(STATUS "Emscripten auto-setup complete — using emcc/em++")
+    else()
+        message(STATUS "Emscripten already available — using existing emcc")
+    endif()
+elseif(CMAKE_CROSSCOMPILING)
     find_program(GCC14_BIN x86_64-w64-mingw32-g++)
     if(NOT GCC14_BIN)
         message(FATAL_ERROR "MinGW-w64 GCC required for cross-compile")
@@ -67,11 +174,13 @@ if(ENABLE_EXTRA_WARNINGS)
     list(APPEND OUR_WARNING_FLAGS -Wdouble-promotion -Wformat=2 -Wnull-dereference)
 endif()
 
-set(COMMON_OPT_FLAGS -O3 -ffast-math -march=native -mtune=native -g)
+set(COMMON_OPT_FLAGS -O3 -ffast-math -g)
 
-find_program(MOLD_EXECUTABLE mold)
-if(MOLD_EXECUTABLE)
-    add_link_options(-fuse-ld=mold)
+if(TARGET_PLATFORM STREQUAL "Linux" AND NOT EMSCRIPTEN)
+    find_program(MOLD_EXECUTABLE mold)
+    if(MOLD_EXECUTABLE)
+        add_link_options(-fuse-ld=mold)
+    endif()
 endif()
 
 if(TARGET_PLATFORM STREQUAL "Windows")
@@ -107,14 +216,19 @@ endif()
 # DEPENDENCIES
 # =============================================================================
 find_package(PkgConfig REQUIRED)
-find_package(Vulkan REQUIRED)
-if(Vulkan_VERSION VERSION_LESS "1.3.250")
-    message(FATAL_ERROR "Vulkan SDK >= 1.3.250 required")
-endif()
 
-find_program(GLSLC glslc REQUIRED)
-find_program(SPIRV_VAL spirv-val REQUIRED)
-find_package(OpenMP REQUIRED)
+if(NOT EMSCRIPTEN)
+    find_package(Vulkan REQUIRED)
+    if(Vulkan_VERSION VERSION_LESS "1.3.250")
+        message(FATAL_ERROR "Vulkan SDK >= 1.3.250 required")
+    endif()
+    find_package(OpenMP REQUIRED)
+    find_program(GLSLC glslc REQUIRED)
+    find_program(SPIRV_VAL spirv-val REQUIRED)
+else()
+    message(STATUS "Web build: Using WebGPU instead of Vulkan")
+    add_definitions(-DUSE_WEBGPU)
+endif()
 
 # FreeType - 100% static on Windows (embedded in exe, no libfreetype.dll ever)
 if(TARGET_PLATFORM STREQUAL "Windows")
@@ -216,6 +330,20 @@ if(TARGET_PLATFORM STREQUAL "Windows")
     target_link_options(amouranth_engine PRIVATE -mconsole)
 endif()
 
+if(TARGET_PLATFORM STREQUAL "Web")
+    target_link_options(amouranth_engine PRIVATE
+        "SHELL:-s EXPORTED_FUNCTIONS=['_main']"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
+        "SHELL:-s USE_WEBGPU=1"
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        "SHELL:-s ENVIRONMENT=web"
+        "SHELL:-s WASM=1"
+        "SHELL:-s NO_EXIT_RUNTIME=1"
+        "SHELL:-s MIN_WEBGL_VERSION=2"
+        "SHELL:-s MAX_WEBGL_VERSION=2"
+    )
+endif()
+
 foreach(SRC ${OUR_SOURCES})
     set_source_files_properties(${SRC} PROPERTIES COMPILE_OPTIONS "${OUR_WARNING_FLAGS};${COMMON_OPT_FLAGS}")
 endforeach()
@@ -292,7 +420,7 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
 endif()
 
 # =============================================================================
-# SHADERS - only if tools found
+# SHADERS - only if tools found (native only)
 # =============================================================================
 if(GLSLC AND SPIRV_VAL)
     set(SHADER_INCLUDE_FLAGS
@@ -366,6 +494,9 @@ message(STATUS " Target:       ${BIN_DIR}/Navigator${EXE_SUFFIX}")
 if(TARGET_PLATFORM STREQUAL "Windows")
     message(STATUS " Run:          wine ${BIN_DIR}/Navigator.exe")
     message(STATUS " FreeType:     100% embedded (no libfreetype.dll - forced with --whole-archive)")
+elseif(TARGET_PLATFORM STREQUAL "Web")
+    message(STATUS " Run:          ./linux.sh web run  (opens http://localhost:8000/Navigator.html)")
+    message(STATUS " Note: SDL3_image/mixer/ttf disabled on web — core SDL3 only")
 else()
     message(STATUS " Run:          ${BIN_DIR}/Navigator")
 endif()
