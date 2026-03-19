@@ -29,7 +29,6 @@
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
 #include "AMOURANTHRTX.hpp"
-#include "Camera.hpp"
 
 // =============================================================================
 // CONSTANTS — from Options::SDL3
