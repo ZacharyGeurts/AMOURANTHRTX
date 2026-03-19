@@ -1,5 +1,12 @@
 #pragma once
 
+// =============================================================================
+// AMOURANTH RTX Engine — (Raymarching + Hardware Ray Tracing)
+// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial
+// AMOURANTH FOREVER 💖
+// =============================================================================
+
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"

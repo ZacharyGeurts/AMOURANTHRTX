@@ -1,5 +1,12 @@
 #pragma once
 
+// =============================================================================
+// AMOURANTH RTX Engine — (Raymarching + Hardware Ray Tracing)
+// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial
+// AMOURANTH FOREVER 💖
+// =============================================================================
+
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "Camera.hpp"
@@ -328,16 +335,16 @@ public:
             LOG_AMOURANTH(
                 "───────────────────────────────────────────────────────────────\n"
                 "              RayCanvas Status  •  t+{:.4}s\n"
-                "  FPS:            {:.1f}     (avg {:.0f} µs)\n"
-                "  Refresh:        {:.1f} Hz\n"
+                "  FPS:            {}     (avg {} µs)\n"
+                "  Refresh:        {} Hz\n"
                 "  Window:         {}x{}\n"
-                "  Render:         {}x{}     ({:.2f}x — {})\n"
-                "  Adaptive scale: {:.2f}x\n"
-                "  GPU load:       {:.1f}%   (smoothed {:.2f} ms)\n"
+                "  Render:         {}x{}     ({:.4f}x — {})\n"
+                "  Adaptive scale: {:.4f}x\n"
+                "  GPU load:       {:.4f}%   (smoothed {:.4f} ms)\n"
                 "  Path:           {}\n"
                 "  State:          {}\n"
                 "  Features:       Adaptive {}  Accum {}  Supersample {}\n"
-                "  VRAM:           {:.1f}/{:.1f} MB ({:.1f}% free)\n"
+                "  VRAM:           {:.4f}/{:.4f} MB ({:.4f}% free)\n"
                 "  Frames logged:  {}\n"
                 "───────────────────────────────────────────────────────────────",
                 now, fps, dt_us, measuredRefreshRateHz_,
