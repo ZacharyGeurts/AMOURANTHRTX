@@ -1,10 +1,11 @@
 No demons permitted.  
 [Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
   
-Demonstration showcase  
-https://x.com/ZacharyGeurts/status/2031298561900446079  
+[Demonstration showcase on X](https://x.com/ZacharyGeurts/status/2031298561900446079)  
 
-Help yourself to the demos folder.  
+[Visuals Collection on X](https://x.com/ZacharyGeurts/status/2026807886580417013)  
+
+Help yourself to the demos folder above for Windows and Linux builds.  
 
 Navigator/shaders/compute/CANVAS.comp is to be the one file to update.  
 Using push constants this one file can manage visuals, input, and audio.  
@@ -12,10 +13,9 @@ We permit hot swapping shaders in, so now you have a full engine of whatever you
 
 Overwrite the CANVAS.comp and rebuild.  
 Have Grok write a new fun comp with rainbows or whatever.  
-  
-[Collection](https://x.com/ZacharyGeurts/status/2026807886580417013)  
+
 We are not minimalist. We added every feature from every forum, efficently.  
-Disney and many reserchers contributed to the materials library. We have a wiki page.    
+Disney and many researchers contributed to the materials library.  
 How efficently? Secure zero cost computing.  
 gcc-14 C++23 Vulkan 1.4+ and SDL3 with inclusion of GLM.  
 Requires the VulkanSDK and the cmake works to download and install the rest.  
