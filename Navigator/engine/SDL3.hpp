@@ -28,7 +28,8 @@
 
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "AMOURANTHRTX.hpp"  // for Swapchain
+#include "AMOURANTHRTX.hpp"
+#include "Camera.hpp"
 
 // =============================================================================
 // CONSTANTS — from Options::SDL3

@@ -469,165 +469,223 @@ bool build_shader_binding_table() noexcept {
     return true;
 }
 
-// ────────────────────────────────────────────────
-// Input Processing — FULL production implementation
-// ────────────────────────────────────────────────
-void processInput(SDL_Window* /*window*/, int window_width, int window_height) noexcept {
-    // Reset high-level flags
-    should_quit = false;
-    wants_fullscreen_toggle = false;
-    requested_width = window_width;
-    requested_height = window_height;
+void processInput(SDL_Window* /*window*/, int window_width, int window_height) noexcept
+{
+    should_quit              = false;
+    wants_fullscreen_toggle  = false;
+    requested_width          = window_width;
+    requested_height         = window_height;
 
-    // Poll all events
+    // Poll events
     SDL_Event ev;
-    while (SDL_PollEvent(&ev)) {
-        SDL3System::get().pump(ev);
+    while (SDL_PollEvent(&ev))
+    {
+        INPUT.pump(ev);
 
-        if (ev.type == SDL_EVENT_QUIT) {
-            should_quit = true;
-        }
+        switch (ev.type)
+        {
+            case SDL_EVENT_QUIT:
+                should_quit = true;
+                break;
 
-        if (ev.type == SDL_EVENT_WINDOW_RESIZED) {
-            requested_width = ev.window.data1;
-            requested_height = ev.window.data2;
-        }
+            case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                requested_width  = ev.window.data1;
+                requested_height = ev.window.data2;
+                break;
 
-        if (ev.type == SDL_EVENT_KEY_DOWN) {
-            bool alt = (ev.key.mod & SDL_KMOD_ALT) != 0;
-            if (ev.key.scancode == SDL_SCANCODE_F11 ||
-                (ev.key.scancode == SDL_SCANCODE_RETURN && alt)) {
-                wants_fullscreen_toggle = true;
+            case SDL_EVENT_KEY_DOWN:
+            {
+                bool alt = (ev.key.mod & SDL_KMOD_ALT) != 0;
+                if (ev.key.scancode == SDL_SCANCODE_F11 ||
+                    (ev.key.scancode == SDL_SCANCODE_RETURN && alt))
+                {
+                    wants_fullscreen_toggle = true;
+                }
+                break;
             }
+
+            default:
+                break;
         }
     }
 
-    // ────────────────────────────────────────────────
-    // Keyboard input — uses Options::Input bindings
-    // ────────────────────────────────────────────────
-    uint32_t inputFlags = 0;
+    // Time delta
+    static double lastTime = TotalTime::get().seconds();
+    double now = TotalTime::get().seconds();
+    float dt = static_cast<float>(now - lastTime);
+    lastTime = now;
+    dt *= Options::Debug::TimeScale;
+    if (dt <= 0.0f || dt > 0.5f) dt = 1.0f / 60.0f;
 
-    if (SDL3System::get().down("move_forward"))  inputFlags |= INPUT_FORWARD;
-    if (SDL3System::get().down("move_backward")) inputFlags |= INPUT_BACKWARD;
-    if (SDL3System::get().down("move_left"))     inputFlags |= INPUT_LEFT;
-    if (SDL3System::get().down("move_right"))    inputFlags |= INPUT_RIGHT;
-    if (SDL3System::get().down("sprint"))        inputFlags |= INPUT_SPRINT;
-    if (SDL3System::get().down("crouch"))        inputFlags |= INPUT_CROUCH;
-    if (SDL3System::get().down("jump"))          inputFlags |= INPUT_JUMP;
-    if (SDL3System::get().down("interact"))      inputFlags |= INPUT_INTERACT;
-    if (SDL3System::get().down("shoot"))         inputFlags |= INPUT_SHOOT;
+    // ────────────────────────────────────────────────
+    // Gather inputs (keyboard, mouse, gamepad)
+    // ────────────────────────────────────────────────
+    uint32_t flags = 0;
+    if (INPUT.down("move_forward"))  flags |= INPUT_FORWARD;
+    if (INPUT.down("move_backward")) flags |= INPUT_BACKWARD;
+    if (INPUT.down("move_left"))     flags |= INPUT_LEFT;
+    if (INPUT.down("move_right"))    flags |= INPUT_RIGHT;
+    if (INPUT.down("sprint"))        flags |= INPUT_SPRINT;
+    if (INPUT.down("crouch"))        flags |= INPUT_CROUCH;
+    if (INPUT.down("jump"))          flags |= INPUT_JUMP;
+    if (INPUT.down("interact"))      flags |= INPUT_INTERACT;
+    if (INPUT.down("shoot"))         flags |= INPUT_SHOOT;
 
-    // Mouse buttons
     Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
-    if (mouseState & SDL_BUTTON_LMASK) inputFlags |= INPUT_MOUSE_LEFT;
-    if (mouseState & SDL_BUTTON_RMASK) inputFlags |= INPUT_MOUSE_RIGHT;
-    if (mouseState & SDL_BUTTON_MMASK) inputFlags |= INPUT_MOUSE_MIDDLE;
+    if (mouseState & SDL_BUTTON_LMASK) flags |= INPUT_MOUSE_LEFT;
+    if (mouseState & SDL_BUTTON_RMASK) flags |= INPUT_MOUSE_RIGHT;
+    if (mouseState & SDL_BUTTON_MMASK) flags |= INPUT_MOUSE_MIDDLE;
 
-    // ────────────────────────────────────────────────
-    // Gamepad input — deadzone, invert, sensitivity from Options::Input
-    // ────────────────────────────────────────────────
-    int ctrlSlot = 0;
-    float leftX   = SDL3System::get().leftStickX(ctrlSlot);
-    float leftY   = SDL3System::get().leftStickY(ctrlSlot);
-    float rightX  = SDL3System::get().rightStickX(ctrlSlot);
-    float rightY  = SDL3System::get().rightStickY(ctrlSlot);
+    constexpr int slot = 0;
+    float leftX  = INPUT.leftStickX(slot);
+    float leftY  = INPUT.leftStickY(slot);
+    float rightX = INPUT.rightStickX(slot);
+    float rightY = INPUT.rightStickY(slot);
 
-    // Deadzone
-    if (std::abs(leftX) < Options::Input::CONTROLLER_DEADZONE)   leftX = 0.0f;
-    if (std::abs(leftY) < Options::Input::CONTROLLER_DEADZONE)   leftY = 0.0f;
-    if (std::abs(rightX) < Options::Input::CONTROLLER_DEADZONE)  rightX = 0.0f;
-    if (std::abs(rightY) < Options::Input::CONTROLLER_DEADZONE)  rightY = 0.0f;
+    const float dz = Options::Input::CONTROLLER_DEADZONE;
+    if (std::abs(leftX)  < dz) leftX  = 0.0f;
+    if (std::abs(leftY)  < dz) leftY  = 0.0f;
+    if (std::abs(rightX) < dz) rightX = 0.0f;
+    if (std::abs(rightY) < dz) rightY = 0.0f;
 
-    // Invert Y
-    if (Options::Input::INVERT_CONTROLLER_Y) {
-        rightY = -rightY;
-    }
+    if (Options::Input::INVERT_CONTROLLER_Y) rightY = -rightY;
 
-    // ────────────────────────────────────────────────
-    // Mouse delta — invert & sensitivity from Options::Input
-    // ────────────────────────────────────────────────
-    glm::vec2 mouseDelta = SDL3System::get().mouseDelta();
+    glm::vec2 mouseDelta = INPUT.mouseDelta();
     if (Options::Input::INVERT_MOUSE_Y) mouseDelta.y = -mouseDelta.y;
     mouseDelta *= Options::Input::MOUSE_SENSITIVITY;
 
     // ────────────────────────────────────────────────
-    // Compute dt manually (TotalTime has no deltaSeconds())
+    // Touch input (SDL3 correct API)
     // ────────────────────────────────────────────────
-    static double lastTime = TotalTime::get().seconds();
-    double currentTime = TotalTime::get().seconds();
-    float dt = static_cast<float>(currentTime - lastTime);
-    lastTime = currentTime;
+    static glm::vec2 touchLookDelta{0.0f, 0.0f};
+    static glm::vec2 touchMoveDelta{0.0f, 0.0f};
 
-    dt *= Options::Debug::TimeScale;  // Apply time scale
+    int numDevices = 0;
+    SDL_TouchID* devices = SDL_GetTouchDevices(&numDevices);
+    SDL_TouchID touchID = (numDevices > 0) ? devices[0] : 0;
+    SDL_free(devices);
+
+    int fingerCount = 0;
+    SDL_Finger** fingers = (touchID != 0) ? SDL_GetTouchFingers(touchID, &fingerCount) : nullptr;
+
+    if (fingerCount > 0 && fingers)
+    {
+        // Use the most recent finger (simple single-touch heuristic)
+        SDL_Finger* finger = fingers[fingerCount - 1];
+
+        // Right half → look
+        if (finger->x > 0.5f)
+        {
+            float sens = Options::Input::MOUSE_SENSITIVITY;
+            touchLookDelta.x = (finger->x - 0.5f) * 2.0f * sens;
+            touchLookDelta.y = (finger->y - 0.5f) * 2.0f * sens;
+        }
+        // Left half → movement
+        else
+        {
+            touchMoveDelta.x = (finger->x - 0.25f) * 4.0f;
+            touchMoveDelta.y = (finger->y - 0.5f)  * 4.0f;
+            touchMoveDelta = glm::clamp(touchMoveDelta, glm::vec2(-1.0f), glm::vec2(1.0f));
+        }
+    }
+    else
+    {
+        touchLookDelta = {0.0f, 0.0f};
+        touchMoveDelta = {0.0f, 0.0f};
+    }
 
     // ────────────────────────────────────────────────
-    // Camera update — uses Options::Camera + dt
+    // Combined look
+    // ────────────────────────────────────────────────
+    glm::vec2 lookDelta = mouseDelta;
+    lookDelta.x += rightX  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * dt * 60.0f;
+    lookDelta.y += rightY  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * dt * 60.0f;
+    lookDelta += touchLookDelta;
+
+    // ────────────────────────────────────────────────
+    // Update orientation
     // ────────────────────────────────────────────────
     static float yaw   = 0.0f;
     static float pitch = 0.0f;
 
-    // Mouse look
-    yaw   -= mouseDelta.x;
-    pitch -= mouseDelta.y;
-    pitch = std::clamp(pitch, -89.0f, 89.0f);
+    yaw   -= lookDelta.x;
+    pitch -= lookDelta.y;
+    pitch  = std::clamp(pitch, -89.0f, 89.0f);
 
     glm::quat orientation = glm::quat(glm::vec3(glm::radians(pitch), glm::radians(yaw), 0.0f));
+    CAM.setOrientation(orientation);
 
-    // Gamepad look
-    yaw   -= rightX * Options::Input::CONTROLLER_LOOK_SENSITIVITY;
-    pitch -= rightY * Options::Input::CONTROLLER_LOOK_SENSITIVITY;
-    pitch = std::clamp(pitch, -89.0f, 89.0f);
-
+    // ────────────────────────────────────────────────
     // Movement
-    glm::vec3 forward = glm::rotate(orientation, glm::vec3(0, 0, -1));
-    glm::vec3 right   = glm::rotate(orientation, glm::vec3(1, 0, 0));
+    // ────────────────────────────────────────────────
+    glm::vec3 moveDir{0.0f};
 
-    float moveSpeed = Options::Input::MOVEMENT_SPEED;
-    if (inputFlags & INPUT_SPRINT) moveSpeed *= Options::Input::SPRINT_MULTIPLIER;
+    if (flags & INPUT_FORWARD)  moveDir.z -= 1.0f;
+    if (flags & INPUT_BACKWARD) moveDir.z += 1.0f;
+    if (flags & INPUT_LEFT)     moveDir.x -= 1.0f;
+    if (flags & INPUT_RIGHT)    moveDir.x += 1.0f;
 
-    glm::vec3 moveDir(0.0f);
-    if (inputFlags & INPUT_FORWARD)  moveDir += forward;
-    if (inputFlags & INPUT_BACKWARD) moveDir -= forward;
-    if (inputFlags & INPUT_LEFT)     moveDir -= right;
-    if (inputFlags & INPUT_RIGHT)    moveDir += right;
+    moveDir.x += leftX;
+    moveDir.z += leftY;
+    moveDir.x += touchMoveDelta.x;
+    moveDir.z += touchMoveDelta.y;
 
-    if (glm::length(moveDir) > 0.01f) {
+    float moveLen = glm::length(moveDir);
+    bool isMoving    = moveLen > 0.01f;
+    bool isSprinting = (flags & INPUT_SPRINT) || std::abs(leftX) > 0.8f || std::abs(touchMoveDelta.x) > 0.8f;
+
+    glm::vec3 newPos = CAM.position();
+
+    if (isMoving)
+    {
         moveDir = glm::normalize(moveDir);
-        glm::vec3 pos = CAM.position();
-        pos += moveDir * moveSpeed * dt;
-        CAM.position() = pos;
+        float speed = Options::Input::MOVEMENT_SPEED;
+        if (isSprinting) speed *= Options::Input::SPRINT_MULTIPLIER;
+
+        glm::vec3 worldMove = orientation * moveDir;
+        newPos += worldMove * speed * dt;
     }
 
-    // ────────────────────────────────────────────────
-    // Apply Options::Camera effects (head bob, breathing, shake)
-    // ────────────────────────────────────────────────
-    glm::vec3 pos = CAM.position();
+    // Apply bob/breathing/shake (manual implementation since addEffectsOffset is missing)
+    if (Options::Camera::EnableHeadBob || Options::Camera::EnableBreathing || Options::Camera::EnableCameraShake)
+    {
+        float seconds = static_cast<float>(TotalTime::get().seconds());
+        glm::vec3 offset{0.0f};
 
-    if (Options::Camera::EnableHeadBob) {
-        float bob = std::sin(static_cast<float>(TotalTime::get().seconds()) * Options::Camera::HeadBobFrequency) * Options::Camera::HeadBobIntensity;
-        pos.y += bob;
-    }
+        // Head bob
+        if (Options::Camera::EnableHeadBob && isMoving)
+        {
+            float freq = isSprinting ? 18.0f : 12.0f;
+            float amp  = isSprinting ? 0.12f : 0.07f;
+            offset.y += std::sinf(seconds * freq) * amp;
+        }
 
-    if (Options::Camera::EnableBreathing) {
-        float breath = std::sin(static_cast<float>(TotalTime::get().seconds()) * 0.8f) * Options::Camera::BreathingIntensity;
-        pos.y += breath;
-    }
+        // Breathing
+        if (Options::Camera::EnableBreathing)
+        {
+            offset.y += std::sinf(seconds * 0.8f) * 0.04f;
+        }
 
-    if (Options::Camera::EnableCameraShake) {
+        // Shake (simple trauma simulation — you can add real trauma later)
         static float trauma = 0.0f;
-        trauma *= Options::Camera::ShakeTraumaDecay;
-        float shake = trauma * trauma * (std::sin(static_cast<float>(TotalTime::get().seconds()) * 10.0f) + std::sin(static_cast<float>(TotalTime::get().seconds()) * 7.0f));
-        pos += glm::vec3(shake, shake * 0.5f, 0.0f);
+        if (Options::Camera::EnableCameraShake)
+        {
+            // Example: small random shake when shooting or jumping
+            if (flags & INPUT_SHOOT || flags & INPUT_JUMP)
+                trauma = std::min(1.0f, trauma + 0.3f);
+
+            trauma *= Options::Camera::ShakeTraumaDecay;
+            float shake = trauma * trauma;
+            float t = seconds * 15.0f;
+            offset.x += std::sinf(t * 12.3f) * shake * 0.8f;
+            offset.y += std::cosf(t * 8.7f)  * shake * 0.6f;
+        }
+
+        newPos += offset;
     }
 
-    CAM.position() = pos;
-
-    // ────────────────────────────────────────────────
-    // Apply Options::GameStyle defaults (e.g. FOV overrides)
-    // ────────────────────────────────────────────────
-    if (Options::GameStyle::CurrentPerspective == Options::GameStyle::CameraPerspective::FirstPerson) {
-        // FOV is read-only from Options::Camera::CurrentFOV — pushed directly to shader
-    }
+    CAM.setPosition(newPos);
 }
 
 // ────────────────────────────────────────────────
@@ -650,7 +708,7 @@ void dispatch(VkCommandBuffer cmd, int width, int height, float totalTime) noexc
 
     pc.cameraPos        = CAM.position();
     pc.cameraQuat       = glm::vec4(CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
-    pc.cameraFovDeg     = CAM.fov();
+    pc.cameraFovDeg     = CAM_FOV();
     pc.aspectRatio      = static_cast<float>(width) / static_cast<float>(height);
     pc.nearPlane        = Options::Camera::NearPlane;
     pc.farPlane         = Options::Camera::FarPlane;
