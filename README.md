@@ -47,7 +47,7 @@ Linux Cross compiling SDK for RTX SECURE ZERO operational cost RTX software deve
 It will have a final form but always be updatable for your projects.  
 X11, Wayland, Windows. Adaptable for Metal or Android with toolchains.  
 
-A real star is ELLIE.hpp. It is more than full featured when it comes to debugging and logging.  
+Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
 We track and tell you everything along the way.  
 Filenames, line numbers, function names.  
 Debugging becomes a breeze.  
@@ -66,66 +66,28 @@ We are the first, last, or another. Game over.
 
 Development and memes https://x.com/ZacharyGeurts  
 I will come off as insane more than rarely if I think it is good for a joke.  
+My personal X is not part of this project, but I do share snippets and progress there.  
+My personality I try to keep mainly over there and I consider it for adults.  
 Check recent commits to follow code updates.  
-Paste https://github.com/ZacharyGeurts/AMOURANTHRTX into Grok fast, and skip the line.  
-
-SDL3 from github.  
-Vulkan SDK is at LunarG.  
-GLM and build tools I was able to get with apt.  
-The cmake build system needs internet to function and tries to help.  
-Uses tinyobj and is really smart everywhere really really.  
 
 We do a 3% profit share of every dollar we can make you.  
 I take 1% and 2% goes for the branding to Ammo and Nick.  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
 She steps on RTX and dominates it now.  
 
-There is a cmake build system and linux.sh script that is to assist with cross platform development.  
-Currently it is intended to use Linux as your SDK and Ming to make your Windows builds.  
-I am using X11 and Linux Mint.  
-
-I tried to keep the wiki smart enough that even a high school freshman can dream big.  
-Everyone gets the tab on their browser now for AI, up and comers would be foolish not to use it.  
-
-You have no obligation to share code back with us.  
-The engine integrates and is your program when you modify it.  
-We compile to 5-10 megs ourselves.  
-Operation is simple.  We are not a middleman, you just know where everything is.  
-SDL3 integration includes gamer paradise for input and audio.  
-
-Have your RTX at zero cost per watt with me.  
-[flashing lights warning](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.giphy.com%2Fmedia%2FxKpYDDlus3GE0%2Fgiphy.gif)  
-
-This is the last stop for RTX. Zero cost. Impregnable RTX engine.  
-Period.
-
 AMOURANTHRTX © 2025 by Zachary Geurts gzac5314@gmail.com  
 Free work is licensed under GPL v3.0 or higher.  
-Commercial is subject to 3% profit share.  
+Commercial is subject to 3% profit sharing.  
+Current and archived content subject to copyright.  
 
-See the [Wiki](https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki) for engine information.  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
 
-Robust logging system inspired by: [Ellie Fier](https://www.twitch.tv/elliefier)  
-
-- **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.  
-   
-If they do not like my using their brand, they can come to Michigan and stream the firing.
+- **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.    
+If they do not like my using their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH  
-I plan fireworks for the 4th of July.  
-
-Current and archived content subject to license.  
 
 **Other work**  
-And you have not reached real RTX until God shows up.  
-This is going to be pretty much, how close can I get and how many decimal points is it and why not model it in an RTX engine so lets put this part on hold until then, THE PROJECT.  
-I consider this a work in progress that I want displayed.  
-Have Grok AI Expert rewrite the code with new model ideas or whatever.  
-Results are used with Non-uniform rational basis splines, a mathematical model that is representing curves and surfaces.  
-Layman's summation: GodWave increases.  
-https://github.com/user-attachments/assets/a0f80dfc-12d2-4bcc-9df1-1d01a8e0e48e  
-https://github.com/user-attachments/assets/31bc27e6-6ae7-417e-b331-e2e5bdb307dc  
 
 # Universal Equation  🇰🇵 VS 🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
