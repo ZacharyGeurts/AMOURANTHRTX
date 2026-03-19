@@ -441,7 +441,7 @@ namespace Color {
     inline constexpr std::string_view NUCLEAR_GREEN     = "\033[1;38;5;82m";
     inline constexpr std::string_view HYPER_VIOLET      = "\033[1;38;5;141m";
     inline constexpr std::string_view PURE_ENERGY       = "\033[1;38;5;227m";
-    inline constexpr std::string_view Yeo_ul            = "\033[1;38;5;196m\033[5m";
+    inline constexpr std::string_view BLINKING_RED      = "\033[1;38;5;196m\033[5m";
 }
 
 // ========================================================================
