@@ -581,7 +581,6 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
     // Movement
     glm::vec3 forward = glm::rotate(orientation, glm::vec3(0, 0, -1));
     glm::vec3 right   = glm::rotate(orientation, glm::vec3(1, 0, 0));
-    glm::vec3 up      = glm::vec3(0, 1, 0);
 
     float moveSpeed = Options::Input::MOVEMENT_SPEED;
     if (inputFlags & INPUT_SPRINT) moveSpeed *= Options::Input::SPRINT_MULTIPLIER;
@@ -605,19 +604,19 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
     glm::vec3 pos = CAM.position();
 
     if (Options::Camera::EnableHeadBob) {
-        float bob = std::sinf(static_cast<float>(TotalTime::get().seconds() * Options::Camera::HeadBobFrequency)) * Options::Camera::HeadBobIntensity;
+        float bob = std::sinf(static_cast<float>(TotalTime::get().seconds()) * Options::Camera::HeadBobFrequency) * Options::Camera::HeadBobIntensity;
         pos.y += bob;
     }
 
     if (Options::Camera::EnableBreathing) {
-        float breath = std::sinf(static_cast<float>(TotalTime::get().seconds() * 0.8f)) * Options::Camera::BreathingIntensity;
+        float breath = std::sinf(static_cast<float>(TotalTime::get().seconds()) * 0.8f) * Options::Camera::BreathingIntensity;
         pos.y += breath;
     }
 
     if (Options::Camera::EnableCameraShake) {
         static float trauma = 0.0f;
         trauma *= Options::Camera::ShakeTraumaDecay;
-        float shake = trauma * trauma * (std::sinf(static_cast<float>(TotalTime::get().seconds() * 10.0f)) + std::sinf(static_cast<float>(TotalTime::get().seconds() * 7.0f)));
+        float shake = trauma * trauma * (std::sinf(static_cast<float>(TotalTime::get().seconds()) * 10.0f) + std::sinf(static_cast<float>(TotalTime::get().seconds()) * 7.0f));
         pos += glm::vec3(shake, shake * 0.5f, 0.0f);
     }
 

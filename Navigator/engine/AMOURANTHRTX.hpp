@@ -104,7 +104,7 @@ struct RTX {
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props{};
     bool                            rt_props_cached     = false;
-	bool                            rayTracingSupported = false;
+    bool                            rayTracingSupported = false;
 
     VkPipeline                      compute_pipeline    = VK_NULL_HANDLE;
     VkPipeline                      rt_pipeline         = VK_NULL_HANDLE;
@@ -172,32 +172,53 @@ struct VulkanExtensions {
     PFN_vkCmdEndRendering                           vkCmdEndRendering{};
 };
 
+inline void loadDeviceExtensions(VulkanExtensions& e) noexcept {
+    if (!rtx().device) return;
+
+    e.vkCreateSwapchainKHR                      = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkCreateSwapchainKHR"));
+    e.vkDestroySwapchainKHR                     = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkDestroySwapchainKHR"));
+    e.vkGetSwapchainImagesKHR                   = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkGetSwapchainImagesKHR"));
+    e.vkAcquireNextImageKHR                     = reinterpret_cast<PFN_vkAcquireNextImageKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkAcquireNextImageKHR"));
+    e.vkQueuePresentKHR                         = reinterpret_cast<PFN_vkQueuePresentKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkQueuePresentKHR"));
+
+    e.vkCreateRayTracingPipelinesKHR            = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkCreateRayTracingPipelinesKHR"));
+    e.vkGetRayTracingShaderGroupHandlesKHR      = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkGetRayTracingShaderGroupHandlesKHR"));
+    e.vkCmdTraceRaysKHR                         = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkCmdTraceRaysKHR"));
+
+    e.vkGetAccelerationStructureBuildSizesKHR   = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureBuildSizesKHR"));
+    e.vkCmdBuildAccelerationStructuresKHR       = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkCmdBuildAccelerationStructuresKHR"));
+    e.vkCreateAccelerationStructureKHR          = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkCreateAccelerationStructureKHR"));
+    e.vkDestroyAccelerationStructureKHR         = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkDestroyAccelerationStructureKHR"));
+    e.vkGetAccelerationStructureDeviceAddressKHR= reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+        vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR"));
+
+    e.vkGetBufferDeviceAddress                  = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
+        vkGetDeviceProcAddr(rtx().device, "vkGetBufferDeviceAddress"));
+
+    e.vkCmdBeginRendering                       = reinterpret_cast<PFN_vkCmdBeginRendering>(
+        vkGetDeviceProcAddr(rtx().device, "vkCmdBeginRendering"));
+    e.vkCmdEndRendering                         = reinterpret_cast<PFN_vkCmdEndRendering>(
+        vkGetDeviceProcAddr(rtx().device, "vkCmdEndRendering"));
+}
+
 inline VulkanExtensions& ext() noexcept {
     static VulkanExtensions e;
     static bool loaded = false;
 
     if (!loaded && rtx().device) {
-        e.vkCreateSwapchainKHR                      = (PFN_vkCreateSwapchainKHR)                     vkGetDeviceProcAddr(rtx().device, "vkCreateSwapchainKHR");
-        e.vkDestroySwapchainKHR                     = (PFN_vkDestroySwapchainKHR)                    vkGetDeviceProcAddr(rtx().device, "vkDestroySwapchainKHR");
-        e.vkGetSwapchainImagesKHR                   = (PFN_vkGetSwapchainImagesKHR)                  vkGetDeviceProcAddr(rtx().device, "vkGetSwapchainImagesKHR");
-        e.vkAcquireNextImageKHR                     = (PFN_vkAcquireNextImageKHR)                    vkGetDeviceProcAddr(rtx().device, "vkAcquireNextImageKHR");
-        e.vkQueuePresentKHR                         = (PFN_vkQueuePresentKHR)                        vkGetDeviceProcAddr(rtx().device, "vkQueuePresentKHR");
-
-        e.vkCreateRayTracingPipelinesKHR            = (PFN_vkCreateRayTracingPipelinesKHR)           vkGetDeviceProcAddr(rtx().device, "vkCreateRayTracingPipelinesKHR");
-        e.vkGetRayTracingShaderGroupHandlesKHR      = (PFN_vkGetRayTracingShaderGroupHandlesKHR)     vkGetDeviceProcAddr(rtx().device, "vkGetRayTracingShaderGroupHandlesKHR");
-        e.vkCmdTraceRaysKHR                         = (PFN_vkCmdTraceRaysKHR)                        vkGetDeviceProcAddr(rtx().device, "vkCmdTraceRaysKHR");
-
-        e.vkGetAccelerationStructureBuildSizesKHR   = (PFN_vkGetAccelerationStructureBuildSizesKHR)  vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureBuildSizesKHR");
-        e.vkCmdBuildAccelerationStructuresKHR       = (PFN_vkCmdBuildAccelerationStructuresKHR)      vkGetDeviceProcAddr(rtx().device, "vkCmdBuildAccelerationStructuresKHR");
-        e.vkCreateAccelerationStructureKHR          = (PFN_vkCreateAccelerationStructureKHR)         vkGetDeviceProcAddr(rtx().device, "vkCreateAccelerationStructureKHR");
-        e.vkDestroyAccelerationStructureKHR         = (PFN_vkDestroyAccelerationStructureKHR)        vkGetDeviceProcAddr(rtx().device, "vkDestroyAccelerationStructureKHR");
-        e.vkGetAccelerationStructureDeviceAddressKHR= (PFN_vkGetAccelerationStructureDeviceAddressKHR) vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR");
-
-        e.vkGetBufferDeviceAddress                  = (PFN_vkGetBufferDeviceAddress)                 vkGetDeviceProcAddr(rtx().device, "vkGetBufferDeviceAddress");
-
-        e.vkCmdBeginRendering                       = (PFN_vkCmdBeginRendering)                      vkGetDeviceProcAddr(rtx().device, "vkCmdBeginRendering");
-        e.vkCmdEndRendering                         = (PFN_vkCmdEndRendering)                        vkGetDeviceProcAddr(rtx().device, "vkCmdEndRendering");
-
+        loadDeviceExtensions(e);
         loaded = true;
     }
     return e;
@@ -246,9 +267,9 @@ inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 7, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 8, 0);
     appInfo.pEngineName        = "AMOURANTHRTX";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 7, 0);
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 8, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlCount = 0;
@@ -770,7 +791,7 @@ inline void create(SDL_Window* window, int w, int h) noexcept {
 // Inline helpers
 // ────────────────────────────────────────────────
 
-inline VkSwapchainKHR get() noexcept                { return swapchain; }
+inline VkSwapchainKHR get() noexcept                { return swapchain.value; }
 inline VkExtent2D     getExtent() noexcept          { return extent; }
 
 inline void updateRefreshEstimate(double t) noexcept {
@@ -800,6 +821,9 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     createLogicalDeviceAndSelectGPU(rtx().instance, rtx().surface);
 
     if (!rtx().device) return false;
+
+    // Load extensions after device creation
+    ext();  // This triggers loadDeviceExtensions()
 
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;

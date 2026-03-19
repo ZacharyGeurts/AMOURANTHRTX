@@ -726,6 +726,7 @@ private:
 
 private:
     SDL_Window*    window_                    = nullptr;
+
     int            window_width_              = 0;
     int            window_height_             = 0;
     int            render_width_              = 0;
@@ -735,25 +736,27 @@ private:
     bool           destroyed_                 = false;
     bool           firstFrame_                = true;
 
-    uint64_t       materialsHandle_           = 0;
-
-    VkDescriptorPool descriptorPool_          = VK_NULL_HANDLE;
-    VkDescriptorSet  descriptorSet_           = VK_NULL_HANDLE;
-    VkFence        acquireFence_              = VK_NULL_HANDLE;
-    VkCommandBuffer commandBuffer_            = VK_NULL_HANDLE;
+	uint64_t       materialsHandle_           = 0;
 
     double         adaptiveScale_             = 1.0;
     double         lastPresentTime_s_         = 0.0;
-    double         measuredRefreshRateHz_     = 60.0;
-    double         lastFpsLog_                = 0.0;
-    uint64_t       frameCount_                = 0;
-    double         lastAdaptiveAdjustTime_    = 0.0;
+	double         measuredRefreshRateHz_     = 60.0;
+	double         lastFpsLog_                = 0.0;
 
-    bool           needsRecreate_             = false;
+	uint64_t       frameCount_                = 0;
 
-    VkQueryPool    timestampQueryPool_        = VK_NULL_HANDLE;
-    double         timestampPeriodNs_         = 1.0;
-    double         smoothedGpuTimeMs_         = 16.67;
+	double         lastAdaptiveAdjustTime_    = 0.0;
+
+	bool           needsRecreate_             = false;
+
+	double         timestampPeriodNs_         = 1.0;
+	double         smoothedGpuTimeMs_         = 16.67;
+
+    VkCommandBuffer commandBuffer_            = VK_NULL_HANDLE;
+    VkQueryPool     timestampQueryPool_       = VK_NULL_HANDLE;
+    VkFence         acquireFence_             = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool_          = VK_NULL_HANDLE;
+    VkDescriptorSet  descriptorSet_           = VK_NULL_HANDLE;
 };
 
 inline RayCanvas* rayCanvas = nullptr;
