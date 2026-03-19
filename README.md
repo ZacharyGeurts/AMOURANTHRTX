@@ -1,11 +1,11 @@
-No demons permitted.  
-[Current over head code view](https://x.com/ZacharyGeurts/status/2019211083496513794)  
+[Current over head code view on X](https://x.com/ZacharyGeurts/status/2019211083496513794)  
   
 [Demonstration showcase on X](https://x.com/ZacharyGeurts/status/2031298561900446079)  
 
 [Visuals Collection on X](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 
 Help yourself to the demos folder above for Windows and Linux builds.  
+There is a wiki link above that, that I try to keep up to date.  
 
 Navigator/shaders/compute/CANVAS.comp is to be the one file to update.  
 Using push constants this one file can manage visuals, input, and audio.  
@@ -15,14 +15,13 @@ Overwrite the CANVAS.comp and rebuild.
 Have Grok write a new fun comp with rainbows or whatever.  
 
 We are not minimalist. We added every feature from every forum, efficently.  
-Disney and many researchers contributed to the materials library.  
 How efficently? Secure zero cost computing.  
+Disney and many researchers contributed to the materials library.  
+Grok finds all.  
 gcc-14 C++23 Vulkan 1.4+ and SDL3 with inclusion of GLM.  
 Requires the VulkanSDK and the cmake works to download and install the rest.  
 [VulkanSDK](https://vulkan.lunarg.com/)  
 Incremental build system to keep your workflow moving.  
-
-https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki  
 
 Welcome to the community.  
 Releases is the latest stable.  
