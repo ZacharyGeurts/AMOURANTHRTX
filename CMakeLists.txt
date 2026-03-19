@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(AMOURANTH_RTX LANGUAGES CXX)
 
 # =============================================================================
-# PRODUCTION TOGGLES - CHANGE THESE TO ENABLE/DISABLE FEATURES
+# PRODUCTION TOGGLES
 # =============================================================================
 option(BUILD_SHARED_LIBS                "Build shared libs (OFF = fully static)" OFF)
 option(DISABLE_TRACE_AND_DEBUG_LOGS    "Disable trace & debug logging" ON)
@@ -41,122 +41,28 @@ if(BUILD_FOR_WEB)
     message(STATUS "=== WEB BUILD MODE — Output locked to build-web/bin/Web/Navigator.html ===")
     add_definitions(-DUSE_WEBGPU)
 
-    # Force Emscripten-only backends (no X11/Wayland)
-    set(SDL_UNIX_CONSOLE_BUILD ON CACHE INTERNAL "" FORCE)
-    set(SDL_VIDEO_DRIVER_EMSCRIPTEN ON CACHE INTERNAL "" FORCE)
-    set(SDL_VIDEO ON CACHE INTERNAL "" FORCE)
-    set(SDL_X11 OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XFIXES OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XCURSOR OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XINPUT OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XRANDR OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XRENDER OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XSHAPE OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XSYNC OFF CACHE INTERNAL "" FORCE)
-    set(SDL_X11_XTEST OFF CACHE INTERNAL "" FORCE)
-    set(SDL_WAYLAND OFF CACHE INTERNAL "" FORCE)
-    set(SDL_KMSDRM OFF CACHE INTERNAL "" FORCE)
-    set(SDL_IBUS OFF CACHE INTERNAL "" FORCE)
-    set(SDL_DIRECTX OFF CACHE INTERNAL "" FORCE)
-    set(SDL_WASAPI OFF CACHE INTERNAL "" FORCE)
-    set(SDL_PULSEAUDIO OFF CACHE INTERNAL "" FORCE)
-    set(SDL_ALSA OFF CACHE INTERNAL "" FORCE)
-    set(SDL_JACK OFF CACHE INTERNAL "" FORCE)
-    set(SDL_SNDIO OFF CACHE INTERNAL "" FORCE)
-    set(SDL_PIPEWIRE OFF CACHE INTERNAL "" FORCE)
-    set(SDL_HIDAPI OFF CACHE INTERNAL "" FORCE)
-    set(SDL_VIRTUAL_JOYSTICK ON CACHE INTERNAL "" FORCE)
-    set(SDL_EMSCRIPTEN ON CACHE INTERNAL "" FORCE)
-    set(SDL_OFFSCREEN ON CACHE INTERNAL "" FORCE)
-    set(SDL_DUMMYAUDIO ON CACHE INTERNAL "" FORCE)
-    set(SDL_DUMMYVIDEO ON CACHE INTERNAL "" FORCE)
-    set(SDL_DUMMYCAMERA ON CACHE INTERNAL "" FORCE)
-
-    # Auto-setup emsdk if emcc not found
-    find_program(EMCC_BIN emcc)
-    if(NOT EMCC_BIN)
-        message(STATUS "emcc not found — auto-installing Emscripten")
-        set(EMSDK_DIR "${CMAKE_BINARY_DIR}/emsdk")
-        if(NOT EXISTS "${EMSDK_DIR}")
-            message(STATUS "Cloning emsdk from https://github.com/emscripten-core/emsdk...")
-            execute_process(
-                COMMAND ${GIT_EXECUTABLE} clone https://github.com/emscripten-core/emsdk.git "${EMSDK_DIR}"
-                WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-                RESULT_VARIABLE GIT_CLONE_RESULT
-            )
-            if(NOT GIT_CLONE_RESULT EQUAL 0)
-                message(FATAL_ERROR "Failed to clone emsdk — check git & internet")
-            endif()
-        endif()
-
-        message(STATUS "Installing latest Emscripten...")
-        execute_process(
-            COMMAND "${EMSDK_DIR}/emsdk" install latest
-            WORKING_DIRECTORY "${EMSDK_DIR}"
-            RESULT_VARIABLE EMSDK_INSTALL_RESULT
-        )
-        if(NOT EMSDK_INSTALL_RESULT EQUAL 0)
-            message(FATAL_ERROR "emsdk install latest failed — check ${EMSDK_DIR}/emsdk.log")
-        endif()
-
-        message(STATUS "Activating latest Emscripten...")
-        execute_process(
-            COMMAND "${EMSDK_DIR}/emsdk" activate latest
-            WORKING_DIRECTORY "${EMSDK_DIR}"
-            RESULT_VARIABLE EMSDK_ACTIVATE_RESULT
-        )
-        if(NOT EMSDK_ACTIVATE_RESULT EQUAL 0)
-            message(FATAL_ERROR "emsdk activate latest failed")
-        endif()
-
-        message(STATUS "Sourcing emsdk environment...")
-        execute_process(
-            COMMAND bash -c "source ${EMSDK_DIR}/emsdk_env.sh && env"
-            WORKING_DIRECTORY "${EMSDK_DIR}"
-            OUTPUT_VARIABLE EMSDK_ENV
-            RESULT_VARIABLE EMSDK_ENV_RESULT
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-        if(NOT EMSDK_ENV_RESULT EQUAL 0)
-            message(FATAL_ERROR "Failed to source emsdk_env.sh")
-        endif()
-
-        string(REGEX REPLACE "\n" ";" ENV_LINES "${EMSDK_ENV}")
-        foreach(line ${ENV_LINES})
-            if(line MATCHES "^([^=]+)=(.*)$")
-                set(ENV_VAR "${CMAKE_MATCH_1}")
-                string(STRIP "${CMAKE_MATCH_2}" ENV_VAL)
-                set(ENV{"${ENV_VAR}"} "${ENV_VAL}")
-            endif()
-        endforeach()
-
-        set(CMAKE_C_COMPILER "${EMSDK_DIR}/upstream/emscripten/emcc" CACHE PATH "" FORCE)
-        set(CMAKE_CXX_COMPILER "${EMSDK_DIR}/upstream/emscripten/em++" CACHE PATH "" FORCE)
-        set(CMAKE_AR "${EMSDK_DIR}/upstream/emscripten/emar" CACHE PATH "" FORCE)
-        set(CMAKE_RANLIB "${EMSDK_DIR}/upstream/emscripten/emranlib" CACHE PATH "" FORCE)
-
-        message(STATUS "Emscripten auto-setup complete — using emcc/em++")
-    else()
-        message(STATUS "Emscripten already available — using existing emcc")
-    endif()
-elseif(CMAKE_CROSSCOMPILING)
-    find_program(GCC14_BIN x86_64-w64-mingw32-g++)
-    if(NOT GCC14_BIN)
-        message(FATAL_ERROR "MinGW-w64 GCC required for cross-compile")
-    endif()
-    set(TARGET_PLATFORM "Windows")
-    set(EXE_SUFFIX ".exe")
-    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Windows")
-    message(STATUS "Cross-compiling → Windows (MinGW-w64)")
+    # Use the external toolchain file for Emscripten
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Toolchain-emscripten.cmake" CACHE PATH "" FORCE)
 else()
-    find_program(GCC14_BIN g++-14)
-    if(NOT GCC14_BIN)
-        message(FATAL_ERROR "GCC 14+ required for native build")
+    if(CMAKE_CROSSCOMPILING)
+        find_program(GCC14_BIN x86_64-w64-mingw32-g++)
+        if(NOT GCC14_BIN)
+            message(FATAL_ERROR "MinGW-w64 GCC required for cross-compile")
+        endif()
+        set(TARGET_PLATFORM "Windows")
+        set(EXE_SUFFIX ".exe")
+        set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Windows")
+        message(STATUS "Cross-compiling → Windows (MinGW-w64)")
+    else()
+        find_program(GCC14_BIN g++-14)
+        if(NOT GCC14_BIN)
+            message(FATAL_ERROR "GCC 14+ required for native build")
+        endif()
+        set(TARGET_PLATFORM "Linux")
+        set(EXE_SUFFIX "")
+        set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Linux")
+        message(STATUS "Native build → Linux")
     endif()
-    set(TARGET_PLATFORM "Linux")
-    set(EXE_SUFFIX "")
-    set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Linux")
-    message(STATUS "Native build → Linux")
 endif()
 
 set(CMAKE_CXX_COMPILER ${GCC14_BIN})
@@ -263,8 +169,11 @@ if(FETCH_SDL3)
     FetchContent_MakeAvailable(SDL3)
 endif()
 
-# SDL3_image
+# SDL3 extensions — disable version-script on Emscripten
 if(FETCH_SDL3_IMAGE)
+    if(EMSCRIPTEN)
+        set(SDL_TARGET_LINK_OPTION_VERSION_FILE OFF CACHE INTERNAL "" FORCE)
+    endif()
     if(TARGET_PLATFORM STREQUAL "Windows")
         set(CMAKE_DISABLE_FIND_PACKAGE_ZLIB ON CACHE INTERNAL "" FORCE)
         set(CMAKE_DISABLE_FIND_PACKAGE_PNG  ON CACHE INTERNAL "" FORCE)
@@ -281,10 +190,9 @@ if(FETCH_SDL3_IMAGE)
     FetchContent_MakeAvailable(SDL3_image)
 endif()
 
-# SDL3_mixer
 if(FETCH_SDL3_MIXER)
-    if(TARGET_PLATFORM STREQUAL "Windows")
-        set(SDLMIXER_MP3_MPG123 OFF CACHE INTERNAL "" FORCE)
+    if(EMSCRIPTEN)
+        set(SDL_TARGET_LINK_OPTION_VERSION_FILE OFF CACHE INTERNAL "" FORCE)
     endif()
     FetchContent_Declare(SDL3_mixer GIT_REPOSITORY https://github.com/libsdl-org/SDL_mixer.git GIT_TAG main GIT_PROGRESS TRUE)
     set(SDL3MIXER_INSTALL OFF CACHE BOOL "" FORCE)
@@ -292,8 +200,10 @@ if(FETCH_SDL3_MIXER)
     FetchContent_MakeAvailable(SDL3_mixer)
 endif()
 
-# SDL3_ttf
 if(FETCH_SDL3_TTF)
+    if(EMSCRIPTEN)
+        set(SDL_TARGET_LINK_OPTION_VERSION_FILE OFF CACHE INTERNAL "" FORCE)
+    endif()
     if(TARGET_PLATFORM STREQUAL "Windows")
         set(SDLTTF_HARFBUZZ OFF CACHE INTERNAL "" FORCE)
         set(SDLTTF_FREETYPE_VENDORED ON CACHE INTERNAL "" FORCE)
@@ -328,20 +238,6 @@ set_target_properties(amouranth_engine PROPERTIES
 
 if(TARGET_PLATFORM STREQUAL "Windows")
     target_link_options(amouranth_engine PRIVATE -mconsole)
-endif()
-
-if(TARGET_PLATFORM STREQUAL "Web")
-    target_link_options(amouranth_engine PRIVATE
-        "SHELL:-s EXPORTED_FUNCTIONS=['_main']"
-        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
-        "SHELL:-s USE_WEBGPU=1"
-        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        "SHELL:-s ENVIRONMENT=web"
-        "SHELL:-s WASM=1"
-        "SHELL:-s NO_EXIT_RUNTIME=1"
-        "SHELL:-s MIN_WEBGL_VERSION=2"
-        "SHELL:-s MAX_WEBGL_VERSION=2"
-    )
 endif()
 
 foreach(SRC ${OUR_SOURCES})
