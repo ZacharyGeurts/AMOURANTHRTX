@@ -390,28 +390,25 @@ private:
         onResize(physicalW, physicalH);
     }
 
-    void onResize(int logicalW, int logicalH) noexcept {
-        // Always use physical pixel size (4K support)
-        int physicalW = 0, physicalH = 0;
-        SDL_GetWindowSizeInPixels(window_, &physicalW, &physicalH);
-
-        if (physicalW <= 0 || physicalH <= 0) {
-            physicalW = logicalW;
-            physicalH = logicalH;
+    void onResize(int newWidth, int newHeight) noexcept {
+        if (newWidth <= 0 || newHeight <= 0) {
+            minimized_ = true;
+            return;
         }
 
-        vkDeviceWaitIdle(rtx().device);
+        if (newWidth == window_width_ && newHeight == window_height_ && !needsRecreate_) return;
 
-        window_width_  = physicalW;
-        window_height_ = physicalH;
+        if (needsRecreate_) vkDeviceWaitIdle(rtx().device);
 
-        minimized_ = (physicalW <= 0 || physicalH <= 0);
-        if (minimized_) return;
+        int actualW = 0, actualH = 0;
+        SDL_GetWindowSizeInPixels(window_, &actualW, &actualH);
+        window_width_  = actualW;
+        window_height_ = actualH;
 
+        minimized_ = false;
         needsRecreate_ = false;
 
-        // Recreate swapchain at physical size
-        Swapchain::recreate(physicalW, physicalH);
+        Swapchain::recreate(window_width_, window_height_);
 
         updateRenderResolution();
 
@@ -421,6 +418,10 @@ private:
         if (descriptorSet_ != VK_NULL_HANDLE) {
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
             descriptorSet_ = VK_NULL_HANDLE;
+        }
+        if (descriptorPool_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
+            descriptorPool_ = VK_NULL_HANDLE;
         }
 
         createDescriptorPoolAndSet();
