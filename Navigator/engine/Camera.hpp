@@ -112,7 +112,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         state_.aperture      = aperture;
         state_.focusDistance = focusDist;
-        // DoF params don't affect view/proj cache
+        // no invalidate needed — DoF not in view/proj matrices
     }
 
     // ── Look-at helper ──────────────────────────────────────────────────
@@ -121,20 +121,19 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         glm::vec3 dir = glm::normalize(target - state_.position);
         glm::quat newOri = glm::quatLookAt(dir, glm::vec3(0,1,0));
-
         state_.orientation = instant ? newOri : glm::slerp(state_.orientation, newOri, 0.25f);
         invalidateCache();
     }
 
     // ── Getters (thread-safe) ───────────────────────────────────────────
-    [[nodiscard]] glm::vec3   position()     const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.position; }
-    [[nodiscard]] glm::quat   orientation()  const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orientation; }
-    [[nodiscard]] float       fovDeg()       const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.fovDeg; }
-    [[nodiscard]] float       orthoZoom()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orthoZoom; }
-    [[nodiscard]] float       nearPlane()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.nearPlane; }
-    [[nodiscard]] float       farPlane()     const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.farPlane; }
-    [[nodiscard]] float       aperture()     const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.aperture; }
-    [[nodiscard]] float       focusDistance() const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.focusDistance; }
+    [[nodiscard]] glm::vec3   position()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.position; }
+    [[nodiscard]] glm::quat   orientation() const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orientation; }
+    [[nodiscard]] float       fovDeg()      const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.fovDeg; }
+    [[nodiscard]] float       orthoZoom()   const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orthoZoom; }
+    [[nodiscard]] float       near()        const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.nearPlane; }
+    [[nodiscard]] float       far()         const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.farPlane; }
+    [[nodiscard]] float       aperture()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.aperture; }
+    [[nodiscard]] float       focusDist()   const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.focusDistance; }
 
     [[nodiscard]] glm::vec3 forward() const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orientation * glm::vec3(0,0,-1); }
     [[nodiscard]] glm::vec3 right()   const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orientation * glm::vec3(1,0,0); }
@@ -206,8 +205,6 @@ inline glm::vec3   CAM_RIGHT()        { return CAM.right(); }
 inline glm::vec3   CAM_UP()           { return CAM.up(); }
 inline float       CAM_FOV()          { return CAM.fovDeg(); }
 inline float       CAM_ZOOM()         { return CAM.orthoZoom(); }
-inline float       CAM_NEAR()         { return CAM.nearPlane(); }
-inline float       CAM_FAR()          { return CAM.farPlane(); }
 inline glm::mat4   CAM_VIEW()         { return CAM.view(); }
 inline glm::mat4   CAM_PROJ(float a)  { return CAM.projection(a); }
 

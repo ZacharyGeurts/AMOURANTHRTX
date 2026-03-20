@@ -110,11 +110,27 @@ public:
     SDL3System(const SDL3System&) = delete;
     SDL3System& operator=(const SDL3System&) = delete;
 
-    bool init() noexcept {
-		SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD);
+    bool init(SDL_Window* window) noexcept {
+        if (initialized_) return true;
+        window_ = window;
+
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD) == 0) {
+            LOG_ERROR_CAT("SDL3", "SDL_Init failed: {}", SDL_GetError());
+            return false;
+        }
+
         applyOptions();
-        TTF_Init();
-        MIX_Init();
+
+        if (TTF_Init() == 0) {
+            LOG_ERROR_CAT("TTF", "TTF_Init failed: {}", SDL_GetError());
+            return false;
+        }
+        ttf_ready_ = true;
+
+        if (MIX_Init() == 0) {
+            LOG_ERROR_CAT("MIXER", "MIX_Init failed: {}", SDL_GetError());
+            return false;
+        }
 
         SDL_AudioSpec desired{};
         desired.freq     = AUDIO_FREQ;
@@ -123,14 +139,17 @@ public:
 
         mixer_ = MIX_CreateMixerDevice(-1, &desired);
         if (!mixer_) {
-            LOG_ERROR_CAT("MIXER", "MIX_CreateMixerDevice failed: Maybe something you ate? {}", SDL_GetError());
+            LOG_ERROR_CAT("MIXER", "MIX_CreateMixerDevice failed: {}", SDL_GetError());
             MIX_Quit();
+            return false;
         }
+        mixer_ready_ = true;
 
         preloadAudioFiles();
 
         bindDefaultActions();
 
+        initialized_ = true;
         LOG_SUCCESS_CAT("SDL3", "Initialized — audio channels: {} preloaded, soft max playing: {}",
                         channels_.size(), SOFT_MAX_SLOTS);
         return true;
@@ -168,9 +187,14 @@ public:
     }
 
     void onResize() noexcept {
-        int pixelW = 0, pixelH = 0;
-        SDL_GetWindowSizeInPixels(window_, &pixelW, &pixelH);
-        Swapchain::recreate(pixelW, pixelH);
+        if (!window_) return;
+        int pw = 0, ph = 0;
+        SDL_GetWindowSizeInPixels(window_, &pw, &ph);
+        if (pw <= 0 || ph <= 0) {
+            LOG_WARNING_CAT("SDL3", "Window minimized or invalid size");
+            return;
+        }
+        Swapchain::recreate(pw, ph);
     }
 
     void applyOptions() noexcept {
