@@ -1,12 +1,13 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine — Header-Only Hybrid 2026 Edition
-// Pure raymarching + hardware ray tracing + procedural geometry
+// AMOURANTH RTX Engine — 2026 Edition
 // (C) 2025-2026 Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
 // =============================================================================
+
+#include "ELLIE.hpp"
 
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
@@ -813,12 +814,20 @@ inline void create(SDL_Window* window, int w, int h) noexcept {
 inline VkSwapchainKHR get() noexcept                { return swapchain.value; }
 inline VkExtent2D     getExtent() noexcept          { return extent; }
 
-inline void updateRefreshEstimate(double t) noexcept {
+inline void updateRefreshEstimate() noexcept {
+    double currentTime = TotalTime::get().seconds();
+
     if (lastPresentTime_s > 0.0) {
-        double dt = t - lastPresentTime_s;
-        if (dt > 0.0005 && dt < 0.2) smoothedRefresh_s = 0.25 * dt + 0.75 * smoothedRefresh_s;
+        double dt = currentTime - lastPresentTime_s;
+
+        // Only update if dt is reasonable (avoid noise from first frame, minimize, or huge jumps)
+        if (dt > 0.0005 && dt < 0.2) {
+            // Exponential moving average (EMA) for smooth, stable estimate
+            smoothedRefresh_s = 0.25 * dt + 0.75 * smoothedRefresh_s;
+        }
     }
-    lastPresentTime_s = t;
+
+    lastPresentTime_s = currentTime;
 }
 
 inline double getSmoothedRefresh() noexcept { return smoothedRefresh_s; }

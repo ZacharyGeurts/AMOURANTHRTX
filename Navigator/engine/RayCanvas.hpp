@@ -49,10 +49,7 @@ public:
           timestampPeriodNs_(1.0),
           smoothedGpuTimeMs_(16.67)
     {
-        if (!Swapchain::get()) {
-            LOG_FATAL_CAT("RAYCANVAS", "No valid swapchain — navigator must create it first");
-            std::abort();
-        }
+        Swapchain::get();
 
         // Use physical pixel size from the start (4K support)
         int physicalW = 0, physicalH = 0;
@@ -113,266 +110,143 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Destroyed");
     }
 
-    void maybeUpdateCanvas() noexcept {
-        if (destroyed_) return;
+void maybeUpdateCanvas() noexcept {
+    if (destroyed_) return;
 
-        frameCount_++;
+    Pipeline::processInput(window_, window_width_, window_height_);
 
-        double now = TotalTime::get().seconds() * static_cast<double>(Options::Debug::TimeScale);
+    Swapchain::get();
 
-        Pipeline::processInput(window_, window_width_, window_height_);
-
-        bool quit = Pipeline::shouldQuit();
-        bool fullscreen_toggle = Pipeline::wantsFullscreenToggle();
-        int newWidth = Pipeline::getRequestedWidth();
-        int newHeight = Pipeline::getRequestedHeight();
-        bool sizeChanged = (newWidth != window_width_) || (newHeight != window_height_);
-
-        if (fullscreen_toggle) toggleFullscreen();
-
-        if (quit) {
-            destroyed_ = true;
-            LOG_INFO_CAT("RAYCANVAS", "Quit signal received from Pipeline");
-            return;
-        }
-
-        bool nowMinimized = (newWidth <= 0 || newHeight <= 0);
-        if (nowMinimized) {
-            minimized_ = true;
-            return;
-        }
-
-        if (minimized_ || sizeChanged || needsRecreate_) {
-            onResize(newWidth, newHeight);
-            minimized_ = false;
-            return;
-        }
-
-        if (!Swapchain::get() || !mainHDR_.image) return;
-
-        if (firstFrame_) {
-            TotalTime::get().seal();
-            firstFrame_ = false;
-            LOG_AMOURANTH("Raymarch engine sealed — rendering begins 💖");
-            lastAdaptiveAdjustTime_ = now;
-        }
-
-        static double lastKnownTime = 0.0;
-        if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
-        lastKnownTime = now;
-
-        uint32_t imageIndex = 0;
-        vkResetFences(rtx().device, 1, &acquireFence_);
-
-        VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
-                                                   VK_NULL_HANDLE, acquireFence_, &imageIndex);
-        vkWaitForFences(rtx().device, 1, &acquireFence_, VK_TRUE, UINT64_MAX);
-
-        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
-            needsRecreate_ = true;
-            return;
-        }
-        if (acq != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
-            if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
-            return;
-        }
-
-        VkCommandBuffer cmd = beginCommandBuffer();
-        if (!cmd) return;
-
-        vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
-
-        transitionImageLayout(cmd, mainHDR_.image,
-                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-
-        lastPresentTime_s_ = now;
-        updateRenderResolution();
-
-        bool isRt = Options::Rendering::EnableHardwareRayTracing &&
-                    (Options::Rendering::CurrentTechnique == Options::Rendering::RenderTechnique::HardwareRayTracing) &&
-                    rtx().rayTracingSupported;
-
-        VkDescriptorSet set = descriptorSet_;
-        vkCmdBindDescriptorSets(cmd,
-                                isRt ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR : VK_PIPELINE_BIND_POINT_COMPUTE,
-                                Pipeline::pipeline_layout,
-                                0, 1, &set, 0, nullptr);
-
-        Pipeline::dispatch(cmd, render_width_, render_height_, static_cast<float>(now));
-
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
-
-        VkImageMemoryBarrier postCompute{};
-        postCompute.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        postCompute.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        postCompute.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        postCompute.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        postCompute.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        postCompute.image = mainHDR_.image;
-        postCompute.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postCompute);
-
-        VkImage swapImg = Swapchain::images[imageIndex];
-
-        VkImageMemoryBarrier swapBarrier{};
-        swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        swapBarrier.image = swapImg;
-        swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
-
-        VkExtent2D swapExtent = Swapchain::getExtent();
-
-        if (render_width_ == static_cast<int>(swapExtent.width) &&
-            render_height_ == static_cast<int>(swapExtent.height)) {
-            VkImageCopy copy{};
-            copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-            copy.srcOffset      = {0, 0, 0};
-            copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-            copy.dstOffset      = {0, static_cast<int32_t>(swapExtent.height), 0};
-            copy.extent         = {static_cast<uint32_t>(render_width_),
-                                   static_cast<uint32_t>(render_height_), 1};
-
-            vkCmdCopyImage(cmd,
-                           mainHDR_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           swapImg,        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1, &copy);
-        } else {
-            VkImageBlit flipBlit{};
-            flipBlit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-            flipBlit.srcOffsets[0]  = {0, 0, 0};
-            flipBlit.srcOffsets[1]  = {render_width_, render_height_, 1};
-            flipBlit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-            flipBlit.dstOffsets[0]  = {0, static_cast<int32_t>(swapExtent.height), 0};
-            flipBlit.dstOffsets[1]  = {static_cast<int32_t>(swapExtent.width), 0, 1};
-
-            vkCmdBlitImage(cmd,
-                           mainHDR_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           swapImg,        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1, &flipBlit,
-                           VK_FILTER_LINEAR);
-        }
-
-        VkImageMemoryBarrier presentBarrier{};
-        presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-        presentBarrier.image = swapImg;
-        presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
-
-        endSubmitAndWait(cmd);
-
-        if (frameCount_ % 30 == 0) {
-            uint64_t ts[2]{};
-            VkResult res = vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
-                                                 sizeof(ts), ts, sizeof(uint64_t),
-                                                 VK_QUERY_RESULT_64_BIT);
-            if (res == VK_SUCCESS) {
-                double gpuMs = double(ts[1] - ts[0]) * timestampPeriodNs_ / 1'000'000.0;
-                double alpha = (gpuMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
-                smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuMs;
-            }
-        }
-
-        if (frameCount_ % 30 == 0 && Options::Rendering::EnableAdaptiveResolution) {
-            adjustAdaptiveScale(now);
-        }
-
-        VkPresentInfoKHR pi{};
-        pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        pi.swapchainCount = 1;
-        pi.pSwapchains    = &Swapchain::swapchain.value;
-        pi.pImageIndices  = &imageIndex;
-
-        VkResult pres = ext().vkQueuePresentKHR(rtx().present_queue, &pi);
-
-        if (pres == VK_SUCCESS) {
-            Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
-            measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
-        } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
-            needsRecreate_ = true;
-        } else if (pres != VK_SUCCESS) {
-            LOG_ERROR_CAT("SWAPCHAIN", "Present failed: {}", vkh.result(pres));
-            if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
-        }
-
-        if (now - lastFpsLog_ >= 5.0) {
-            double elapsed = now - lastFpsLog_;
-            double fps = frameCount_ ? double(frameCount_) / elapsed : 0.0;
-            double dt_us = frameCount_ ? (elapsed * 1'000'000.0) / double(frameCount_) : 0.0;
-
-            int ww = window_width_, wh = window_height_;
-            double sf = ww ? double(render_width_) / ww : 1.0;
-            const char* mode = sf < 0.98 ? "SUB" : (sf > 1.02 ? "SUPER" : "NATIVE");
-
-            double tgtMs = 1000.0 / measuredRefreshRateHz_;
-            double loadPct = tgtMs > 0.001 ? (smoothedGpuTimeMs_ / tgtMs) * 100.0 : 0.0;
-
-            const char* state = minimized_ ? "🟥 min" :
-                                (!Swapchain::get() || !mainHDR_.image) ? "⚠️ invalid" : "✅ active";
-
-            VRAMReality vram = Memory::measureReality();
-            double usedMB  = double(vram.driver_footprint) / (1024.0 * 1024.0);
-            double totalMB = double(vram.total) / (1024.0 * 1024.0);
-            double freePct = totalMB ? 100.0 * (1.0 - usedMB / totalMB) : 0.0;
-
-            std::string pathStr;
-            switch (Options::Rendering::CurrentTechnique) {
-                case Options::Rendering::RenderTechnique::Pure2DCanvas: pathStr = "Pure 2D Canvas"; break;
-                case Options::Rendering::RenderTechnique::PureRaymarching: pathStr = "Pure Raymarching"; break;
-                case Options::Rendering::RenderTechnique::HybridRasterMarch: pathStr = "Hybrid Raster + March"; break;
-                case Options::Rendering::RenderTechnique::SoftwareRayTracing: pathStr = "Software Ray Tracing"; break;
-                case Options::Rendering::RenderTechnique::HardwareRayTracing: pathStr = "Hardware Ray Tracing"; break;
-                case Options::Rendering::RenderTechnique::ProgressivePathTracing: pathStr = "Progressive Path Tracing"; break;
-            }
-
-            std::string adaptiveStr = Options::Rendering::EnableAdaptiveResolution ? "✅" : "❌";
-            std::string accumStr    = Options::Rendering::EnableAccumulation ? "✅" : "❌";
-            std::string supersampleStr = (sf > 1.0) ? "⚡" : "❌";
-
-            LOG_AMOURANTH(
-                "───────────────────────────────────────────────────────────────\n"
-                "              RayCanvas Status  •  t+{:.4}s\n"
-                "  FPS:            {}     (avg {} µs)\n"
-                "  Refresh:        {} Hz\n"
-                "  Window:         {}x{}\n"
-                "  Render:         {}x{}     ({:.4f}x — {})\n"
-                "  Adaptive scale: {:.4f}x\n"
-                "  GPU load:       {:.4f}%   (smoothed {:.4f} ms)\n"
-                "  Path:           {}\n"
-                "  State:          {}\n"
-                "  Features:       Adaptive {}  Accum {}  Supersample {}\n"
-                "  VRAM:           {:.4f}/{:.4f} MB ({:.4f}% free)\n"
-                "  Frames logged:  {}\n"
-                "───────────────────────────────────────────────────────────────",
-                now, fps, dt_us, measuredRefreshRateHz_,
-                ww, wh, render_width_, render_height_, sf, mode,
-                adaptiveScale_, loadPct, smoothedGpuTimeMs_,
-                pathStr.c_str(),
-                state,
-                adaptiveStr.c_str(),
-                accumStr.c_str(),
-                supersampleStr.c_str(),
-                usedMB, totalMB, freePct, frameCount_
-            );
-
-            lastFpsLog_ = now;
-            frameCount_ = 0;
-        }
+    if (firstFrame_) {
+        TotalTime::get().seal();
+        firstFrame_ = false;
+        LOG_AMOURANTH("Raymarch engine sealed — rendering begins 💖");
+        lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
     }
+
+	uint32_t acquiredImageIndex = 0;
+
+    vkResetFences(rtx().device, 1, &acquireFence_);
+
+    ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
+                                    VK_NULL_HANDLE, acquireFence_, &acquiredImageIndex);
+    vkWaitForFences(rtx().device, 1, &acquireFence_, VK_TRUE, UINT64_MAX);
+
+    VkCommandBuffer cmd = beginCommandBuffer();
+    if (!cmd) return;
+
+    vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
+
+    transitionImageLayout(cmd, mainHDR_.image,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    updateRenderResolution();
+
+    bool isRt = Options::Rendering::EnableHardwareRayTracing &&
+                (Options::Rendering::CurrentTechnique == Options::Rendering::RenderTechnique::HardwareRayTracing) &&
+                rtx().rayTracingSupported;
+
+    VkDescriptorSet set = descriptorSet_;
+    vkCmdBindDescriptorSets(cmd,
+                            isRt ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR : VK_PIPELINE_BIND_POINT_COMPUTE,
+                            Pipeline::pipeline_layout,
+                            0, 1, &set, 0, nullptr);
+
+    Pipeline::dispatch(cmd, render_width_, render_height_, static_cast<float>(TotalTime::get().seconds()));
+
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
+
+    VkImageMemoryBarrier postCompute{};
+    postCompute.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    postCompute.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    postCompute.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    postCompute.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    postCompute.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    postCompute.image = mainHDR_.image;
+    postCompute.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postCompute);
+
+    VkImage swapImg = Swapchain::images[acquiredImageIndex];
+
+    VkImageMemoryBarrier swapBarrier{};
+    swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    swapBarrier.image = swapImg;
+    swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
+
+    VkExtent2D swapExtent = Swapchain::getExtent();
+
+    if (render_width_ == static_cast<int>(swapExtent.width) &&
+        render_height_ == static_cast<int>(swapExtent.height)) {
+        VkImageCopy copy{};
+        copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.srcOffset      = {0, 0, 0};
+        copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.dstOffset      = {0, static_cast<int32_t>(swapExtent.height), 0};
+        copy.extent         = {static_cast<uint32_t>(render_width_),
+                               static_cast<uint32_t>(render_height_), 1};
+
+        vkCmdCopyImage(cmd,
+                       mainHDR_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg,        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &copy);
+    } else {
+        VkImageBlit flipBlit{};
+        flipBlit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        flipBlit.srcOffsets[0]  = {0, 0, 0};
+        flipBlit.srcOffsets[1]  = {render_width_, render_height_, 1};
+        flipBlit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        flipBlit.dstOffsets[0]  = {0, static_cast<int32_t>(swapExtent.height), 0};
+        flipBlit.dstOffsets[1]  = {static_cast<int32_t>(swapExtent.width), 0, 1};
+
+        vkCmdBlitImage(cmd,
+                       mainHDR_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg,        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &flipBlit,
+                       VK_FILTER_LINEAR);
+    }
+
+    VkImageMemoryBarrier presentBarrier{};
+    presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    presentBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    presentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    presentBarrier.image = swapImg;
+    presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+
+    endSubmitAndWait(cmd);
+    uint64_t ts[2]{};
+    vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2,
+                 sizeof(ts), ts, sizeof(uint64_t),
+                 VK_QUERY_RESULT_64_BIT);
+    double gpuMs = double(ts[1] - ts[0]) * timestampPeriodNs_ / 1'000'000.0;
+    double alpha = (gpuMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
+    smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuMs;
+
+    adjustAdaptiveScale();
+
+    VkPresentInfoKHR pi{};
+    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.swapchainCount = 1;
+    pi.pSwapchains    = &Swapchain::swapchain.value;
+    pi.pImageIndices  = &acquiredImageIndex;
+
+    ext().vkQueuePresentKHR(rtx().present_queue, &pi);
+    Swapchain::updateRefreshEstimate();
+    measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
+}
 
     [[nodiscard]] int  getWidth()  const noexcept { return window_width_; }
     [[nodiscard]] int  getHeight() const noexcept { return window_height_; }
@@ -380,55 +254,6 @@ public:
     [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
-    void toggleFullscreen() noexcept {
-        bool isFS = (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
-        SDL_SetWindowFullscreen(window_, !isFS ? SDL_WINDOW_FULLSCREEN : 0);
-        LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFS ? "off" : "on");
-        // After toggle, force resize update with physical size
-        int physicalW = 0, physicalH = 0;
-        SDL_GetWindowSizeInPixels(window_, &physicalW, &physicalH);
-        onResize(physicalW, physicalH);
-    }
-
-    void onResize(int newWidth, int newHeight) noexcept {
-        if (newWidth <= 0 || newHeight <= 0) {
-            minimized_ = true;
-            return;
-        }
-
-        if (newWidth == window_width_ && newHeight == window_height_ && !needsRecreate_) return;
-
-        if (needsRecreate_) vkDeviceWaitIdle(rtx().device);
-
-        int actualW = 0, actualH = 0;
-        SDL_GetWindowSizeInPixels(window_, &actualW, &actualH);
-        window_width_  = actualW;
-        window_height_ = actualH;
-
-        minimized_ = false;
-        needsRecreate_ = false;
-
-        Swapchain::recreate(window_width_, window_height_);
-
-        updateRenderResolution();
-
-        destroyHDRResources();
-        createHDRResources();
-
-        if (descriptorSet_ != VK_NULL_HANDLE) {
-            vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
-            descriptorSet_ = VK_NULL_HANDLE;
-        }
-        if (descriptorPool_ != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
-            descriptorPool_ = VK_NULL_HANDLE;
-        }
-
-        createDescriptorPoolAndSet();
-        updateDescriptorSet();
-
-        clearHDRImages();
-    }
 
     void updateRenderResolution() noexcept {
         if (!Options::Rendering::EnableAdaptiveResolution) {
@@ -441,8 +266,8 @@ private:
         auto w = static_cast<int64_t>(std::round(static_cast<double>(window_width_) * s));
         auto h = static_cast<int64_t>(std::round(static_cast<double>(window_height_) * s));
 
-        w = std::clamp(w, int64_t(1), int64_t(32768));
-        h = std::clamp(h, int64_t(1), int64_t(32768));
+        w = std::clamp(w, int64_t(1), int64_t(15360)); // Autoadaptive up to 16K too boring?
+        h = std::clamp(h, int64_t(1), int64_t(8640));
 
         render_width_  = static_cast<int>(w);
         render_height_ = static_cast<int>(h);
@@ -464,8 +289,7 @@ private:
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            "MaterialsLibrary",
-            Memory::MemoryHint::HostVisible
+            "MaterialsLibrary"
         );
 
         if (sz > 0) {
@@ -495,13 +319,21 @@ private:
     }
 
     VkCommandBuffer beginCommandBuffer() noexcept {
-        vkResetCommandBuffer(commandBuffer_, 0);
+        VkResult resetRes = vkResetCommandBuffer(
+            commandBuffer_,
+            VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT
+        );
 
-        VkCommandBufferBeginInfo b{};
-        b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		vkh.checker(resetRes, "vkResetCommandBuffer", "Failed to reset command buffer");
 
-        vkBeginCommandBuffer(commandBuffer_, &b);
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        VkResult beginRes = vkBeginCommandBuffer(commandBuffer_, &beginInfo);
+
+		vkh.checker(beginRes, "vkBeginCommandBuffer", "Failed to begin command buffer");
+
         return commandBuffer_;
     }
 
@@ -612,8 +444,8 @@ private:
         endSubmitAndWait(cmd);
     }
 
-    void adjustAdaptiveScale(double now) noexcept {
-        double elapsed = now - lastAdaptiveAdjustTime_;
+    void adjustAdaptiveScale() noexcept {
+        double elapsed = TotalTime::get().seconds() - lastAdaptiveAdjustTime_;
         if (elapsed < 0.6) return;
 
         double tgtMs = 1000.0 / measuredRefreshRateHz_;
@@ -638,7 +470,7 @@ private:
             needsRecreate_ = true;
         }
 
-        lastAdaptiveAdjustTime_ = now;
+        lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
     }
 
     void applyGameStyleDefaults() noexcept {

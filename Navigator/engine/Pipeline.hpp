@@ -469,6 +469,10 @@ bool build_shader_binding_table() noexcept {
     return true;
 }
 
+// =============================================================================
+// processInput — THE ONE AND ONLY PLACE FOR ALL INPUT HANDLING
+// (window close, maximize, fullscreen, F11, Alt+Enter, mouse, gamepad, touch, keyboard)
+// =============================================================================
 void processInput(SDL_Window* /*window*/, int window_width, int window_height) noexcept
 {
     should_quit              = false;
@@ -476,7 +480,9 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
     requested_width          = window_width;
     requested_height         = window_height;
 
-    // Poll events
+    // ────────────────────────────────────────────────
+    // Poll ALL events — this is the single source of truth
+    // ────────────────────────────────────────────────
     SDL_Event ev;
     while (SDL_PollEvent(&ev))
     {
@@ -490,6 +496,8 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
 
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+            case SDL_EVENT_WINDOW_RESTORED:
                 requested_width  = ev.window.data1;
                 requested_height = ev.window.data2;
                 break;
@@ -510,16 +518,8 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
         }
     }
 
-    // Time delta
-    static double lastTime = TotalTime::get().seconds();
-    double now = TotalTime::get().seconds();
-    float dt = static_cast<float>(now - lastTime);
-    lastTime = now;
-    dt *= Options::Debug::TimeScale;
-    if (dt <= 0.0f || dt > 0.5f) dt = 1.0f / 60.0f;
-
     // ────────────────────────────────────────────────
-    // Gather inputs (keyboard, mouse, gamepad)
+    // Gather inputs (keyboard, mouse, gamepad, touch)
     // ────────────────────────────────────────────────
     uint32_t flags = 0;
     if (INPUT.down("move_forward"))  flags |= INPUT_FORWARD;
@@ -571,17 +571,14 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
 
     if (fingerCount > 0 && fingers)
     {
-        // Use the most recent finger (simple single-touch heuristic)
         SDL_Finger* finger = fingers[fingerCount - 1];
 
-        // Right half → look
         if (finger->x > 0.5f)
         {
             float sens = Options::Input::MOUSE_SENSITIVITY;
             touchLookDelta.x = (finger->x - 0.5f) * 2.0f * sens;
             touchLookDelta.y = (finger->y - 0.5f) * 2.0f * sens;
         }
-        // Left half → movement
         else
         {
             touchMoveDelta.x = (finger->x - 0.25f) * 4.0f;
@@ -599,8 +596,8 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
     // Combined look
     // ────────────────────────────────────────────────
     glm::vec2 lookDelta = mouseDelta;
-    lookDelta.x += rightX  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * dt * 60.0f;
-    lookDelta.y += rightY  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * dt * 60.0f;
+    lookDelta.x += rightX  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * 60.0f;
+    lookDelta.y += rightY  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * 60.0f;
     lookDelta += touchLookDelta;
 
     // ────────────────────────────────────────────────
@@ -617,7 +614,7 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
     CAM.setOrientation(orientation);
 
     // ────────────────────────────────────────────────
-    // Movement
+    // Movement (pure real-time — no TimeScale)
     // ────────────────────────────────────────────────
     glm::vec3 moveDir{0.0f};
 
@@ -644,42 +641,38 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
         if (isSprinting) speed *= Options::Input::SPRINT_MULTIPLIER;
 
         glm::vec3 worldMove = orientation * moveDir;
-        newPos += worldMove * speed * dt;
+        newPos += worldMove * speed;   // RayCanvas controls real timing — no artificial multiplier
     }
 
-    // Apply bob/breathing/shake (manual implementation since addEffectsOffset is missing)
+    // Apply bob/breathing/shake
     if (Options::Camera::EnableHeadBob || Options::Camera::EnableBreathing || Options::Camera::EnableCameraShake)
     {
         float seconds = static_cast<float>(TotalTime::get().seconds());
         glm::vec3 offset{0.0f};
 
-        // Head bob
         if (Options::Camera::EnableHeadBob && isMoving)
         {
             float freq = isSprinting ? 18.0f : 12.0f;
             float amp  = isSprinting ? 0.12f : 0.07f;
-            offset.y += std::sinf(seconds * freq) * amp;
+            offset.y += std::sin(seconds * freq) * amp;
         }
 
-        // Breathing
         if (Options::Camera::EnableBreathing)
         {
-            offset.y += std::sinf(seconds * 0.8f) * 0.04f;
+            offset.y += std::sin(seconds * 0.8f) * 0.04f;
         }
 
-        // Shake (simple trauma simulation — you can add real trauma later)
         static float trauma = 0.0f;
         if (Options::Camera::EnableCameraShake)
         {
-            // Example: small random shake when shooting or jumping
             if (flags & INPUT_SHOOT || flags & INPUT_JUMP)
                 trauma = std::min(1.0f, trauma + 0.3f);
 
             trauma *= Options::Camera::ShakeTraumaDecay;
             float shake = trauma * trauma;
             float t = seconds * 15.0f;
-            offset.x += std::sinf(t * 12.3f) * shake * 0.8f;
-            offset.y += std::cosf(t * 8.7f)  * shake * 0.6f;
+            offset.x += std::sin(t * 12.3f) * shake * 0.8f;
+            offset.y += std::cos(t * 8.7f)  * shake * 0.6f;
         }
 
         newPos += offset;

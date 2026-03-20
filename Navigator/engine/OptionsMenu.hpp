@@ -191,8 +191,8 @@ namespace Options::Rendering
     inline float   MotionBlurStrength           = 0.0f;             // Per-pixel motion blur intensity
 
     inline bool    EnableAdaptiveResolution     = true;             // Dynamically scale render resolution to hit target FPS
-    inline float   MinResolutionScale           = 0.02f;            // Lowest allowed internal render scale (very blurry)
-    inline float   MaxResolutionScale           = 1.2f;             // Highest supersampling scale (sharp but expensive)
+    inline float   MinResolutionScale           = 0.02f;            // Lowest allowed internal render scale 320x200 (very blurry)
+    inline float   MaxResolutionScale           = 8.0f;             // Highest supersampling scale (16K sharp)
 
     // Debug visualization modes — override final output for inspection
     enum DebugVisMode : uint32_t
@@ -229,13 +229,11 @@ namespace Options::SDL3
     };
 
     // Window & display settings
-    inline int     DefaultWidth                 = 1920;             // Startup logical width in pixels
-    inline int     DefaultHeight                = 1080;             // Startup logical height in pixels
+    inline int     DefaultWidth                 = 1920; // Must be 1920x1080 for adaptive to work. We know 4k is 4x that.
+    inline int     DefaultHeight                = 1080; // You can turn adaptive off and bake your own
     inline bool    StartFullscreen              = false;            // Launch in exclusive fullscreen mode
     inline bool    BorderlessWindow             = false;            // Use borderless fullscreen windowed mode
     inline bool    AllowWindowResize            = true;             // Allow user to resize window manually
-    inline bool    HighDPIAware                 = true;             // Use high-DPI backing buffer (pixel-perfect on Retina/4K)
-    inline float   UIScale                      = 1.0f;             // Global UI scaling factor (1.0 = native, 1.5 = larger UI)
 
     // Audio master toggles
     inline bool    EnableAudio                  = true;             // Master audio enable/disable
@@ -249,7 +247,7 @@ namespace Options::SDL3
     inline float   GamepadLookSensitivity       = 1.65f;            // Look sensitivity multiplier for gamepad sticks
     inline bool    EnableRumble                 = true;             // Enable haptic feedback/vibration
     inline bool    EnableGyro                   = true;             // Enable gyroscopic aiming (if controller supports)
-    inline bool    EnableInputCapture           = false;            // Capture mouse/keyboard when window is focused (relative mode)
+    inline bool    EnableInputCapture           = true;             // Capture mouse/keyboard when window is focused (relative mode)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,20 +283,6 @@ namespace Options::LivingWorld
     inline bool    EnableVolumetricLighting     = true;             // Enable god rays/light shafts/volumetric fog
     inline float   VolumetricIntensity          = 0.8f;             // Strength of volumetric light scattering
     inline int     VolumetricMarchSteps         = 48;               // Marching steps for volumetric rays (cost vs quality)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Debug & Development
-// Validation layers, logging verbosity, overlay displays, time manipulation
-// ─────────────────────────────────────────────────────────────────────────────
-namespace Options::Debug
-{
-    inline bool    EnableVulkanValidation       = false;            // Enable Vulkan API validation layers (slow, developer only)
-    inline bool    EnableVerboseLogging         = false;            // Output detailed debug messages to console
-    inline bool    ShowFPSOverlay               = true;             // Display live FPS/frametime overlay on screen
-    inline bool    ShowGPUStats                 = true;             // Show GPU memory usage, pipeline stats, etc.
-    inline bool    ForceWireframe               = false;            // Force wireframe rendering (if pipeline supports)
-    inline float   TimeScale                    = 1.0f;             // Global time multiplier (0.1 = slow motion, 10 = fast-forward)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
