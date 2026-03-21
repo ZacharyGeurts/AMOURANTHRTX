@@ -30,7 +30,7 @@ static inline void showSplashPopup(SDL_Renderer* renderer, SDL_Window* window) n
     constexpr const char* ICON_PATH = "assets/textures/ammo.ico";
     constexpr const char* SOUND_PATH = "assets/audio/splash.wav";
 
-    SDL3System::get().playSound(SOUND_PATH, "play");
+    int MyAudioSlot = SDL3System::get().playSound(SOUND_PATH, "play");
 
 	// window comes from navigator_main, below
     if (SDL_Surface* iconSurf = IMG_Load(ICON_PATH)) {
@@ -87,7 +87,7 @@ static inline void showSplashPopup(SDL_Renderer* renderer, SDL_Window* window) n
 
     if (tex) SDL_DestroyTexture(tex);
 
-    SDL3System::get().playSound(SOUND_PATH, "stop");
+    SDL3System::get().playSound(SOUND_PATH, "stop", MyAudioSlot); // 3rd arg -1 stops all slots
 
     LOG_SUCCESS_CAT("SPLASH", "Splash completed (skipped={})", skip ? "yes" : "no");
 }
