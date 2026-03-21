@@ -2,6 +2,7 @@
 # =============================================================================
 # AMOURANTH RTX — WATER TEMPLE EDITION — Ultra-Simple Windows Build
 # Minimal version — almost impossible to fail under native Windows
+# Untested. Best wishes.
 # =============================================================================
 
 Write-Host ""
