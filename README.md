@@ -12,7 +12,8 @@ Using push constants this one file can manage visuals, input, and audio.
 We permit hot swapping shaders in, so now you have a full engine of whatever you want.  
 
 We pride ourselves with short files.  
-They are ~1000 lines each so even Grok fast can return full entire files in one shot.  
+They are ~1000 lines each.  
+Even Grok "Fast" can return full entire files in one shot.  
 
 GLSL builds CANVAS .comp to .spv.
 If you have a Navigator and an spv file you can run many simple programs.  
