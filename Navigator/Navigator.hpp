@@ -22,32 +22,29 @@
 #include <format>
 #include <chrono>
 
-// Global canvas
+// Global canvas. Your TV Screen or Monitor
 inline std::unique_ptr<RayCanvas> raycanvas;
 
-// Splash on main renderer (no extra window)
-static inline void showSacrificialSplash(SDL_Renderer* renderer, SDL_Window* window) noexcept {
+static inline void showSplashPopup(SDL_Renderer* renderer, SDL_Window* window) noexcept {
     constexpr const char* TEX_PATH = "assets/textures/ammo.png";
     constexpr const char* ICON_PATH = "assets/textures/ammo.ico";
     constexpr const char* SOUND_PATH = "assets/audio/splash.wav";
 
-    // Set window icon (silly but cute!)
+    SDL3System::get().playSound(SOUND_PATH, "play");
+
+	// window comes from navigator_main, below
     if (SDL_Surface* iconSurf = IMG_Load(ICON_PATH)) {
         SDL_SetWindowIcon(window, iconSurf);
         SDL_DestroySurface(iconSurf);
     }
 
-    // Load splash texture
     SDL_Texture* tex = nullptr;
     if (SDL_Surface* surf = IMG_Load(TEX_PATH)) {
         tex = SDL_CreateTextureFromSurface(renderer, surf);
         SDL_DestroySurface(surf);
     }
 
-    // Play splash sound
-    SDL3System::get().playSound(SOUND_PATH, "play");
-
-    // Render splash
+    // Recommended to start with transparent
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
@@ -61,7 +58,7 @@ static inline void showSacrificialSplash(SDL_Renderer* renderer, SDL_Window* win
         };
         SDL_RenderTexture(renderer, tex, nullptr, &dst);
     } else {
-        SDL_SetRenderDrawColor(renderer, 255, 20, 147, 255);
+        SDL_SetRenderDrawColor(renderer, 255, 20, 147, 255); // fallback color
         SDL_RenderClear(renderer);
     }
 
@@ -90,11 +87,14 @@ static inline void showSacrificialSplash(SDL_Renderer* renderer, SDL_Window* win
 
     if (tex) SDL_DestroyTexture(tex);
 
+    SDL3System::get().playSound(SOUND_PATH, "stop");
+
     LOG_SUCCESS_CAT("SPLASH", "Splash completed (skipped={})", skip ? "yes" : "no");
 }
 
 // Main engine entry point
 inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+
     install_apocalypse_handler();
     Logging::Logger::get().startup();
     LOG_SUCCESS_CAT("NAVIGATOR", "Crash handler & logger ready");
@@ -116,7 +116,6 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         return 1;
     }
 
-    // Vulkan init FIRST — claims surface
     if (!initRTX(window, Options::SDL3::DefaultWidth, Options::SDL3::DefaultHeight)) {
         LOG_FATAL_CAT("NAVIGATOR", "Vulkan init failed");
         SDL_DestroyWindow(window);
@@ -127,20 +126,16 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     // Renderer after Vulkan (try Vulkan backend first, fallback to software for splash)
     SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
     if (!renderer) {
-        LOG_WARNING_CAT("NAVIGATOR", "Vulkan renderer failed — falling back to software");
-        renderer = SDL_CreateRenderer(window, "software");
-        if (!renderer) {
-            LOG_FATAL_CAT("NAVIGATOR", "Renderer creation failed: {}", SDL_GetError());
-            cleanupRTX();
-            SDL_DestroyWindow(window);
-            SDL3System::get().shutdown();
-            return 1;
-        }
+        LOG_FATAL_CAT("NAVIGATOR", "Renderer creation failed: {}", SDL_GetError());
+        cleanupRTX();
+        SDL_DestroyWindow(window);
+        SDL3System::get().shutdown();
+        return 1;
     }
 
-    showSacrificialSplash(renderer, window);
+    showSplashPopup(renderer, window);
 
-    raycanvas = std::make_unique<RayCanvas>(
+    raycanvas = std::make_unique<RayCanvas>( // Your TV or Monitor
         Options::SDL3::DefaultWidth,
         Options::SDL3::DefaultHeight,
         window
@@ -148,34 +143,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     LOG_SUCCESS_CAT("NAVIGATOR", "Engine ready — entering main loop");
 
-    // Main loop — respects window close (X)
-    while (true) {
-        SDL_Event e;
-        bool quitRequested = false;
+    // Main loop
+	bool isRunning = true;
+    while (isRunning) { isRunning = raycanvas->maybeUpdateCanvas(isRunning); }
 
-        while (SDL_PollEvent(&e)) {
-            SDL3System::get().pump(e);
-
-            if (e.type == SDL_EVENT_QUIT) {
-                LOG_INFO_CAT("NAVIGATOR", "Window close (X) requested — shutting down");
-                Pipeline::should_quit = true;
-                quitRequested = true;
-                break;
-            }
-        }
-
-        Pipeline::processInput(window,
-                               raycanvas ? raycanvas->getWidth()  : Options::SDL3::DefaultWidth,
-                               raycanvas ? raycanvas->getHeight() : Options::SDL3::DefaultHeight);
-
-        raycanvas->maybeUpdateCanvas();
-
-        if (quitRequested || raycanvas->isDestroyed() || Pipeline::shouldQuit()) {
-            LOG_INFO_CAT("NAVIGATOR", "Exit signal received — shutting down");
-            break;
-        }
-    }
-
+	// Shut down
     raycanvas.reset();
     Pipeline::shutdown();
     cleanupRTX();

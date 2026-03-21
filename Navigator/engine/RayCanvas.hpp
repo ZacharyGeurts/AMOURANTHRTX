@@ -113,10 +113,13 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Destroyed");
     }
 
-    void maybeUpdateCanvas() noexcept {
-        if (destroyed_) return;
+    bool maybeUpdateCanvas(bool isRunning) noexcept {
+        if (destroyed_) {
+			isRunning = false;
+            return(isRunning);
+		}
 
-        frameCount_++;
+        frameCount_++; // not exactly but close enough
 
         double now = TotalTime::get().seconds() * static_cast<double>(Options::Debug::TimeScale);
 
@@ -133,22 +136,22 @@ public:
         if (quit) {
             destroyed_ = true;
             LOG_INFO_CAT("RAYCANVAS", "Quit signal received from Pipeline");
-            return;
+            return(isRunning);
         }
 
         bool nowMinimized = (newWidth <= 0 || newHeight <= 0);
         if (nowMinimized) {
             minimized_ = true;
-            return;
+            return(isRunning);
         }
 
         if (minimized_ || sizeChanged || needsRecreate_) {
             onResize(newWidth, newHeight);
             minimized_ = false;
-            return;
+            return(isRunning);
         }
 
-        if (!Swapchain::get() || !mainHDR_.image) return;
+        if (!Swapchain::get() || !mainHDR_.image) return(isRunning);
 
         if (firstFrame_) {
             TotalTime::get().seal();
@@ -170,16 +173,16 @@ public:
 
         if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
             needsRecreate_ = true;
-            return;
+            return(isRunning);
         }
         if (acq != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
             if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
-            return;
+            return(isRunning);
         }
 
         VkCommandBuffer cmd = beginCommandBuffer();
-        if (!cmd) return;
+        if (!cmd) return(isRunning);
 
         vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
@@ -372,6 +375,8 @@ public:
             lastFpsLog_ = now;
             frameCount_ = 0;
         }
+
+		return(isRunning);
     }
 
     [[nodiscard]] int  getWidth()  const noexcept { return window_width_; }

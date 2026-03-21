@@ -240,10 +240,32 @@ public:
             return slot;
         }
         else if (cmd_lower == "stop") {
+            // If no specific slot given (preferred_slot == -1), stop ALL playing tracks
+            if (preferred_slot < 0) {
+                size_t stopped = 0;
+                for (size_t i = 0; i < channels_.size(); ++i) {
+                    auto& ch = channels_[i];
+                    if (ch.state == AudioState::Playing) {
+                        MIX_StopTrack(ch.track, 0);
+                        ch.state = AudioState::Loaded;
+                        ++stopped;
+                    }
+                }
+                if (stopped > 0) {
+                    LOG_INFO_CAT("AUDIO", "Stopped all {} playing tracks", stopped);
+                } else {
+                    LOG_INFO_CAT("AUDIO", "No tracks were playing — nothing to stop");
+                }
+                return -1; // Indicate global stop (no single slot)
+            }
+
+            // Specific slot requested
             size_t idx = static_cast<size_t>(preferred_slot);
-            if (preferred_slot < 0 || idx >= channels_.size() || !channels_[idx].isActive()) {
+            if (idx >= channels_.size() || !channels_[idx].isActive()) {
+                LOG_WARNING_CAT("AUDIO", "Cannot stop channel {} — invalid or not active", preferred_slot);
                 return preferred_slot;
             }
+
             MIX_StopTrack(channels_[idx].track, 0);
             channels_[idx].state = AudioState::Loaded;
             LOG_INFO_CAT("AUDIO", "Stopped channel {}", preferred_slot);
