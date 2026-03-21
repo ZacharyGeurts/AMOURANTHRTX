@@ -46,7 +46,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 add_compile_options(-march=x86-64-v3 -mtune=generic)  # safe modern baseline
 add_link_options(-static-libgcc -static-libstdc++ -mwindows)
 
-# Make sure CMake doesn’t try to use wine or anything weird
+# Make sure CMake does not try to use wine or anything weird
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 # Optional: silence some warnings that MinGW always emits
