@@ -15,6 +15,9 @@ We pride ourselves with short files.
 They are ~1000 lines each.  
 Even Grok "Fast" can return full entire files in one shot.  
 
+We are top down, not down up.  We had triangles at one point.  
+The code tends to steer toward getting shorter rather than longer.  
+
 GLSL builds CANVAS .comp to .spv.
 If you have a Navigator and an spv file you can run many simple programs.  
 If a demo gives you a problem, you can try another Navigator version to play it.  
