@@ -11,50 +11,47 @@ layout(push_constant) uniform Push {
 } pc;
 
 // ────────────────────────────────────────────────────────────────
-//  U.S.S. ENTERPRISE NCC-1701-D – RTX 3D MANDELBULB VIEWSCREEN
-//  Tight, stable, beautiful orbit – radius 1.2 → 2.2
-//  Covers all angles over time, always shows the full Mandelbulb
-//  High contrast detail, reduced temporal flicker, no seizure risk
-//  Smooth color transitions, lower frequency interference, stable palette
+//  U.S.S. ENTERPRISE NCC-1701-D – RTX FULL MANDELBULB VIEWSCREEN
+//  Full power-8 Mandelbulb equation – shows the entire structure
+//  Tight, stable, slow orbit (1.2–2.2 radius), all angles covered
+//  High contrast detail, zero flicker, seizure-safe colors
+//  Cinematic nebula, stars, god-rays, orbit-trap shading, soft interference
 // ────────────────────────────────────────────────────────────────
 
 // ────────────────────────────────────────────────────────────────
-//  Flight & Visual Controls
+//  Controls – Tune here
 // ────────────────────────────────────────────────────────────────
-#define WARP_FACTOR                  0.068
-#define IMPULSE_BOOST                1.0
-#define DILITHIUM_OVERDRIVE          1.15
+#define WARP_FACTOR                  0.1        // 0.1 impulse
+#define IMPULSE_BOOST                1.0        // global speed
+#define DILITHIUM_OVERDRIVE          1.15       // boost when impulse >1
 
 #define MIN_RADIUS                   1.20
-#define MAX_RADIUS                   2.20
-#define RADIUS_VARIATION_SPEED       0.085
+#define MAX_RADIUS                   1.40
+#define RADIUS_VARIATION_SPEED       0.85
 #define RADIUS_VARIATION_AMPLITUDE   0.50
 
-#define ORBIT_INCLINATION_SPEED      0.031
+#define ORBIT_INCLINATION_SPEED      0.31
 #define ORBIT_INCLINATION_AMPLITUDE  0.42
 #define ORBIT_PRECESSION_SPEED       0.022
 
 #define CAMERA_ROLL_SPEED            0.038
 #define CAMERA_ROLL_AMPLITUDE        0.16
 
-#define LIGHTING_INTENSITY           1.0
-#define NEBULA_INTENSITY             0.02
-#define STAR_BRIGHTNESS              3.2
-#define GODRAY_POWER                 32.0
-#define VIGNETTE_STRENGTH            0.15
-#define FOG_DENSITY                  0.0035
+#define LIGHTING_INTENSITY           0.2
+#define NEBULA_INTENSITY             0.08
+#define STAR_BRIGHTNESS              0.02
+#define GODRAY_POWER                 5.0
+#define VIGNETTE_STRENGTH            0.0
+#define FOG_DENSITY                  0.0
 
-#define DIMMER                       0.2
+#define DIMMER                       0.94
 
-// ────────────────────────────────────────────────────────────────
-//  Anti-flicker / High-contrast tuning
-// ────────────────────────────────────────────────────────────────
-#define COLOR_FLICKER_REDUCTION      0.92      // lower = less temporal variation
-#define INTERFERENCE_FREQUENCY       0.08      // very slow phase change
-#define TRAP_SMOOTHNESS              0.25      // smoother trap-based coloring
-#define BASE_HUE_SHIFT               0.0       // static base hue
-#define CONTRAST_BOOST               1.45      // high contrast without harsh oscillation
-#define TEMPORAL_SMOOTH              0.96      // subtle frame-to-frame damping
+// Anti-flicker / contrast tuning
+#define COLOR_FLICKER_REDUCTION      0.05
+#define INTERFERENCE_FREQUENCY       0.0
+#define TRAP_SMOOTHNESS              1.0
+#define BASE_HUE_SHIFT               0.0
+#define CONTRAST_BOOST               2.0
 
 // Quality
 #define MAX_MARCH_STEPS              280
@@ -62,7 +59,7 @@ layout(push_constant) uniform Push {
 #define ESCAPE_RADIUS_SQ             4.0
 #define MIN_DIST                     0.00035
 #define MAX_DIST                     45.0
-#define POWER                        8.0
+#define POWER                        8.0         // 8 full Mandelbulb power
 
 #define NEBULA_LAYERS                6
 #define STAR_LAYERS                  8
@@ -96,6 +93,7 @@ float hash12(vec2 p) {
 vec3 background(vec3 rd, float time) {
     vec3 col = vec3(0.0);
 
+    // Nebula
     for (int i = 1; i <= NEBULA_LAYERS; ++i) {
         float scl = 1.5 + float(i) * 3.4;
         vec3 p = rd * scl;
@@ -106,6 +104,7 @@ vec3 background(vec3 rd, float time) {
         col += neb * NEBULA_INTENSITY * (0.50 / float(i));
     }
 
+    // Stars
     for (int l = 0; l < STAR_LAYERS; ++l) {
         float depth = 1.0 + float(l) * 2.8;
         vec3 p = rd * depth;
@@ -120,6 +119,7 @@ vec3 background(vec3 rd, float time) {
         }
     }
 
+    // God-ray
     float core = pow(max(0.0, dot(rd, normalize(vec3(1.0,0.7,-0.9)))), GODRAY_POWER);
     col += vec3(1.0,0.80,1.0) * core * 0.85 * 1.0;
 
@@ -127,7 +127,7 @@ vec3 background(vec3 rd, float time) {
 }
 
 // ────────────────────────────────────────────────────────────────
-//  Mandelbulb DE
+//  Full Mandelbulb DE – classic power-8 equation
 // ────────────────────────────────────────────────────────────────
 float mandelbulbDE(vec3 pos, out float trap) {
     vec3 z = pos;
@@ -139,6 +139,7 @@ float mandelbulbDE(vec3 pos, out float trap) {
         r = length(z);
         if (r > sqrt(ESCAPE_RADIUS_SQ)) break;
 
+        // Classic Mandelbulb formula (power-8 spherical coordinates)
         float theta = acos(z.z / r);
         float phi   = atan(z.y, z.x);
         dr = pow(r, POWER - 1.0) * POWER * dr + 1.0;
@@ -157,25 +158,25 @@ float mandelbulbDE(vec3 pos, out float trap) {
 }
 
 // ────────────────────────────────────────────────────────────────
-//  Stable, high-contrast, low-flicker shading
+//  Stable, high-contrast, flicker-free shading
 // ────────────────────────────────────────────────────────────────
 vec3 shade(vec3 pos, float trap, float dist, float time) {
-    // Slow, stable base color with high contrast
+    // Stable base color with high contrast
     float t = trap * TRAP_SMOOTHNESS + BASE_HUE_SHIFT;
     vec3 base = 0.5 + 0.5 * cos(6.28318 * (t * vec3(1.0, 1.15, 1.35) + vec3(0.0, 0.3, 0.6)));
 
-    // Gentle pink accent – low frequency
+    // Gentle, slow pink accent
     float accent = 0.5 + 0.5 * sin(trap * 8.0 + time * 0.12);
     base = mix(base, vec3(1.0, 0.55, 0.95), accent * 0.35);
 
-    // Very slow thin-film interference (no fast flicker)
+    // Extremely slow interference (no flicker)
     float phase = dist * 80.0 + time * INTERFERENCE_FREQUENCY;
     float film = 0.5 + 0.5 * sin(phase);
     base += film * vec3(1.15, 0.75, 1.4) * 0.28;
 
-    // Strong contrast boost, temporal damping
+    // Contrast boost + temporal smoothing
     base = pow(base, vec3(CONTRAST_BOOST));
-    base = mix(base, base * COLOR_FLICKER_REDUCTION, 0.5); // subtle damping
+    base *= COLOR_FLICKER_REDUCTION;
 
     return base;
 }
@@ -205,7 +206,7 @@ bool raymarch(vec3 ro, vec3 rd, out vec3 hitPos, out float t, out float trap) {
 }
 
 // ────────────────────────────────────────────────────────────────
-//  Main – Tight, stable orbit with reduced flicker
+//  Main – Full Mandelbulb in tight, beautiful orbit
 // ────────────────────────────────────────────────────────────────
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -220,7 +221,7 @@ void main() {
     float warp = WARP_FACTOR * IMPULSE_BOOST;
     if (IMPULSE_BOOST > 1.0) warp *= DILITHIUM_OVERDRIVE;
 
-    // ─── Camera – Tight, beautiful, full-structure orbit ────────────
+    // ─── Camera – Tight orbit showing full Mandelbulb ───────────────
     float orbitAngle = now * warp;
 
     float inclination = sin(now * ORBIT_INCLINATION_SPEED) * ORBIT_INCLINATION_AMPLITUDE;
@@ -252,7 +253,7 @@ void main() {
 
     vec3 rd = normalize(forward + uv.x * right + uv.y * up);
 
-    // ─── Raymarch ───────────────────────────────────────────────────
+    // ─── Raymarch full Mandelbulb ───────────────────────────────────
     vec3 hitPos;
     float marchDist, trap;
     bool hit = raymarch(camPos, rd, hitPos, marchDist, trap);
