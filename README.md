@@ -11,8 +11,9 @@ Navigator/shaders/compute/CANVAS.comp is to be the one file to update.
 Using push constants this one file can manage visuals, input, and audio.  
 We permit hot swapping shaders in, so now you have a full engine of whatever you want.  
 
-Overwrite the CANVAS.comp and rebuild.  
-Have Grok write a new fun comp with rainbows or whatever.  
+GLSL builds CANVAS .comp to .spv.
+If you have a Navigator and an spv file you can run many simple programs.  
+If a demo gives you a problem, you can try another Navigator version to play it.  
 
 We are not minimalist. We added every feature from every forum, efficently.  
 How efficently? Secure zero cost computing.  
