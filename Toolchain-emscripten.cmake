@@ -1,6 +1,7 @@
 # Toolchain-emscripten.cmake
 # Polished toolchain file for Emscripten/WASM + WebGPU builds
 # Compatible with AMOURANTH RTX
+# Assuming 90-100% fine. CMake txt needs work for success.
 
 set(CMAKE_SYSTEM_NAME Emscripten)
 set(CMAKE_SYSTEM_PROCESSOR wasm32)
