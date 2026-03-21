@@ -68,7 +68,7 @@ We are the first, last, or another. Game over.
 Development and memes https://x.com/ZacharyGeurts  
 I will come off as insane more than rarely if I think it is good for a joke.  
 My personal X is not part of this project, but I do share snippets and progress there.  
-My personality I try to keep mainly over there and I consider it for adults.  
+My personality I try to keep mainly over there and I consider it Pegi 16+.  
 Check recent commits to follow code updates.  
 
 We do a 3% profit share of every dollar we can make you.  
