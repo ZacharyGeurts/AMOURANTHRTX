@@ -4,6 +4,10 @@
 
 [Visuals Collection on X](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 
+Diamond Mandelbrot Mandelbulb in demos.  
+<img width="820" alt="Mandelbulb" src="https://github.com/user-attachments/assets/ecb84a68-7ba8-4c2e-aebb-4dc6ea06a7e5" />
+
+
 Help yourself to the demos folder above for Windows and Linux builds.  
 There is a wiki link above that, that I try to keep up to date.  
 
