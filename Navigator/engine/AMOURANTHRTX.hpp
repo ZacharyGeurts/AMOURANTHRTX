@@ -3,6 +3,7 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Header-Only Hybrid 2026 Edition
 // Pure raymarching + hardware ray tracing + procedural geometry
+// Multi-platform: Windows, Linux, Wine/Proton, Android Vulkan, future Metal
 // (C) 2025-2026 Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
@@ -27,6 +28,8 @@
 #include <cstring>
 #include <set>
 
+#include "ELLIE.hpp"
+
 // Required device extensions
 inline constexpr std::array<const char*, 9> requiredDeviceExtensions = {{
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -38,6 +41,12 @@ inline constexpr std::array<const char*, 9> requiredDeviceExtensions = {{
     VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
     VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+}};
+
+// Optional extensions (Wine, Android, Metal portability, etc.)
+inline constexpr std::array<const char*, 3> optionalDeviceExtensions = {{
+    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
+    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
 }};
 
 // ────────────────────────────────────────────────
@@ -99,6 +108,7 @@ struct RTX {
     SDL_Window*                     window              = nullptr;
 
     VkCommandPool                   transient_pool      = VK_NULL_HANDLE;
+    VkCommandBuffer                 persistent_transient_cmd = VK_NULL_HANDLE;  // Wine-safe: reset & reuse
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props{};
     bool                            rt_props_cached     = false;
@@ -146,7 +156,7 @@ inline RTX& rtx() noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Extension loader (cached once)
+// Extension loader (production-ready)
 // ────────────────────────────────────────────────
 
 struct VulkanExtensions {
@@ -175,6 +185,7 @@ struct VulkanExtensions {
 inline void loadDeviceExtensions(VulkanExtensions& e) noexcept {
     if (!rtx().device) return;
 
+    // Required extensions
     e.vkCreateSwapchainKHR                      = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
         vkGetDeviceProcAddr(rtx().device, "vkCreateSwapchainKHR"));
     e.vkDestroySwapchainKHR                     = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
@@ -211,6 +222,14 @@ inline void loadDeviceExtensions(VulkanExtensions& e) noexcept {
         vkGetDeviceProcAddr(rtx().device, "vkCmdBeginRendering"));
     e.vkCmdEndRendering                         = reinterpret_cast<PFN_vkCmdEndRendering>(
         vkGetDeviceProcAddr(rtx().device, "vkCmdEndRendering"));
+
+    // Optional extensions (Wine, Android, Metal portability)
+    for (const char* extName : optionalDeviceExtensions) {
+        auto proc = vkGetDeviceProcAddr(rtx().device, extName);
+        if (proc) {
+            LOG_INFO_CAT("EXT", "Optional extension loaded: {}", extName);
+        }
+    }
 }
 
 inline VulkanExtensions& ext() noexcept {
@@ -273,9 +292,9 @@ inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 8, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 9, 0);
     appInfo.pEngineName        = "AMOURANTHRTX";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 8, 0);
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 9, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlCount = 0;
@@ -420,18 +439,46 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 }
 
 // ────────────────────────────────────────────────
-// Command buffer helpers
+// Command buffer helpers — Wine-safe persistent + reset
+// Alloc once, reset every frame, no alloc/free cycle
+// Works on Windows, Linux, Wine/Proton, Android, future Metal
 // ────────────────────────────────────────────────
 
-inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
+inline VkCommandBuffer g_transientCmd = VK_NULL_HANDLE;
+
+inline bool initTransientCommandBuffer() noexcept {
     VkCommandBufferAllocateInfo alloc{};
     alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc.commandPool        = rtx().transient_pool;
     alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
 
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (vkAllocateCommandBuffers(rtx().device, &alloc, &cmd) != VK_SUCCESS) {
+    VkResult res = vkAllocateCommandBuffers(rtx().device, &alloc, &g_transientCmd);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("CMD", "Failed to allocate persistent transient cmd: {}", vkh.result(res));
+        return false;
+    }
+
+    LOG_SUCCESS_CAT("CMD", "Persistent transient command buffer allocated");
+    return true;
+}
+
+inline void destroyTransientCommandBuffer() noexcept {
+    if (g_transientCmd != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &g_transientCmd);
+        g_transientCmd = VK_NULL_HANDLE;
+    }
+}
+
+inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
+    if (g_transientCmd == VK_NULL_HANDLE) {
+        LOG_FATAL_CAT("CMD", "Transient cmd not initialized");
+        return VK_NULL_HANDLE;
+    }
+
+    VkResult res = vkResetCommandBuffer(g_transientCmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+    if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("CMD", "vkResetCommandBuffer failed: {}", vkh.result(res));
         return VK_NULL_HANDLE;
     }
 
@@ -439,12 +486,12 @@ inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+    if (vkBeginCommandBuffer(g_transientCmd, &begin) != VK_SUCCESS) {
+        LOG_ERROR_CAT("CMD", "vkBeginCommandBuffer failed");
         return VK_NULL_HANDLE;
     }
 
-    return cmd;
+    return g_transientCmd;
 }
 
 inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
@@ -466,7 +513,7 @@ inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
     vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(rtx().device, fence, nullptr);
 
-    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
+    // No vkFreeCommandBuffers — reset & reuse next frame
 }
 
 // ────────────────────────────────────────────────
@@ -851,6 +898,11 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
 
     vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
 
+    // Initialize persistent transient command buffer (Wine-safe)
+    if (!initTransientCommandBuffer()) {
+        return false;
+    }
+
     // Pre-reserve buffers and primitives
     rtx().buffers_.reserve(512);
     rtx().las_procedural_primitives.reserve(256);
@@ -862,6 +914,9 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
 
 inline void cleanupRTX() noexcept {
     vkDeviceWaitIdle(rtx().device);
+
+    // Destroy persistent transient cmd buffer before pool
+    destroyTransientCommandBuffer();
 
     Swapchain::cleanup();
 
@@ -877,5 +932,4 @@ inline void cleanupRTX() noexcept {
 
     if (rtx().device) vkDestroyDevice(rtx().device, nullptr);
     if (rtx().surface) vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);
-    if (rtx().instance) vkDestroyInstance(rtx().instance, nullptr);
 }

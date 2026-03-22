@@ -99,7 +99,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     Logging::Logger::get().startup();
     LOG_SUCCESS_CAT("NAVIGATOR", "Crash handler & logger ready");
 
-    if (!SDL3System::get().init(nullptr)) {
+    if (SDL3System::get().init(nullptr) == 0) {
         LOG_FATAL_CAT("NAVIGATOR", "SDL3 init failed");
         return 1;
     }
@@ -116,7 +116,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
         return 1;
     }
 
-    if (!initRTX(window, Options::SDL3::DefaultWidth, Options::SDL3::DefaultHeight)) {
+    if (initRTX(window, Options::SDL3::DefaultWidth, Options::SDL3::DefaultHeight) == 0) {
         LOG_FATAL_CAT("NAVIGATOR", "Vulkan init failed");
         SDL_DestroyWindow(window);
         SDL3System::get().shutdown();

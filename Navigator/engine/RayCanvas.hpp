@@ -30,7 +30,6 @@ class RayCanvas {
 public:
     RayCanvas(int initialLogicalWidth, int initialLogicalHeight, SDL_Window* window)
         : window_(window),
-          commandBuffer_(VK_NULL_HANDLE),
           timestampQueryPool_(VK_NULL_HANDLE),
           acquireFence_(VK_NULL_HANDLE),
           descriptorPool_(VK_NULL_HANDLE),
@@ -77,12 +76,11 @@ public:
         createTimestampQueryPool();
         buildMaterialLibrary();
         createAcquireFence();
-        createCommandBuffer();
         updateRenderResolution();
         createHDRResources();
         createDescriptorPoolAndSet();
         updateDescriptorSet();
-        clearHDRImages();
+        clearHDRImages();  // Initial clear
 
         LOG_SUCCESS_CAT("RAYCANVAS", "Initialized — physical {}x{} (logical {}x{}) render target ready",
                         physicalW, physicalH, initialLogicalWidth, initialLogicalHeight);
@@ -104,9 +102,6 @@ public:
         if (descriptorPool_ != VK_NULL_HANDLE)
             vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
 
-        if (commandBuffer_ != VK_NULL_HANDLE)
-            vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &commandBuffer_);
-
         destroyHDRResources();
         Memory::destroy(materialsHandle_);
 
@@ -115,15 +110,15 @@ public:
 
     bool maybeUpdateCanvas(bool isRunning) noexcept {
         if (destroyed_) {
-			isRunning = false;
-            return(isRunning);
-		}
+            isRunning = false;
+            return isRunning;
+        }
 
-        frameCount_++; // not exactly but close enough
+        frameCount_++;
 
         double now = TotalTime::get().seconds() * static_cast<double>(Options::Debug::TimeScale);
 
-        Pipeline::processInput(window_, window_width_, window_height_);
+        Pipeline::processInput(window_width_, window_height_);
 
         bool quit = Pipeline::shouldQuit();
         bool fullscreen_toggle = Pipeline::wantsFullscreenToggle();
@@ -136,22 +131,20 @@ public:
         if (quit) {
             destroyed_ = true;
             LOG_INFO_CAT("RAYCANVAS", "Quit signal received from Pipeline");
-            return(isRunning);
+            return isRunning;
         }
 
         bool nowMinimized = (newWidth <= 0 || newHeight <= 0);
         if (nowMinimized) {
             minimized_ = true;
-            return(isRunning);
+            return isRunning;
         }
 
         if (minimized_ || sizeChanged || needsRecreate_) {
             onResize(newWidth, newHeight);
             minimized_ = false;
-            return(isRunning);
+            return isRunning;
         }
-
-        if (!Swapchain::get() || !mainHDR_.image) return(isRunning);
 
         if (firstFrame_) {
             TotalTime::get().seal();
@@ -173,22 +166,23 @@ public:
 
         if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
             needsRecreate_ = true;
-            return(isRunning);
+            return isRunning;
         }
         if (acq != VK_SUCCESS) {
             LOG_ERROR_CAT("SWAPCHAIN", "Acquire failed: {}", vkh.result(acq));
             if (acq == VK_ERROR_SURFACE_LOST_KHR || acq == VK_ERROR_DEVICE_LOST) destroyed_ = true;
-            return(isRunning);
+            return isRunning;
         }
 
-        VkCommandBuffer cmd = beginCommandBuffer();
-        if (!cmd) return(isRunning);
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
+        if (!cmd) return isRunning;
+
+        // Always transition HDR images to GENERAL before dispatch
+        transitionImageLayout(cmd, mainHDR_.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        transitionImageLayout(cmd, prevHDR_.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
         vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
-
-        transitionImageLayout(cmd, mainHDR_.image,
-                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
         lastPresentTime_s_ = now;
         updateRenderResolution();
@@ -207,6 +201,7 @@ public:
 
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
 
+        // Transition HDR to TRANSFER_SRC for blit/copy
         VkImageMemoryBarrier postCompute{};
         postCompute.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         postCompute.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -264,6 +259,7 @@ public:
                            VK_FILTER_LINEAR);
         }
 
+        // Transition swapchain back to PRESENT
         VkImageMemoryBarrier presentBarrier{};
         presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -287,6 +283,8 @@ public:
                 double gpuMs = double(ts[1] - ts[0]) * timestampPeriodNs_ / 1'000'000.0;
                 double alpha = (gpuMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
                 smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuMs;
+            } else {
+                LOG_WARNING_CAT("GPU", "Query pool results failed: {}", vkh.result(res));
             }
         }
 
@@ -376,7 +374,7 @@ public:
             frameCount_ = 0;
         }
 
-		return(isRunning);
+        return isRunning;
     }
 
     [[nodiscard]] int  getWidth()  const noexcept { return window_width_; }
@@ -389,7 +387,7 @@ private:
         bool isFS = (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
         SDL_SetWindowFullscreen(window_, !isFS ? SDL_WINDOW_FULLSCREEN : 0);
         LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFS ? "off" : "on");
-        // After toggle, force resize update with physical size
+
         int physicalW = 0, physicalH = 0;
         SDL_GetWindowSizeInPixels(window_, &physicalW, &physicalH);
         onResize(physicalW, physicalH);
@@ -420,18 +418,15 @@ private:
         destroyHDRResources();
         createHDRResources();
 
-        if (descriptorSet_ != VK_NULL_HANDLE) {
-            vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
-            descriptorSet_ = VK_NULL_HANDLE;
-        }
+        // Re-create descriptor pool/set after HDR recreate
         if (descriptorPool_ != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
             descriptorPool_ = VK_NULL_HANDLE;
         }
-
         createDescriptorPoolAndSet();
         updateDescriptorSet();
 
+        // Re-clear HDR images after resize/recreate
         clearHDRImages();
     }
 
@@ -490,26 +485,6 @@ private:
         vkCreateFence(rtx().device, &f, nullptr, &acquireFence_);
     }
 
-    void createCommandBuffer() noexcept {
-        VkCommandBufferAllocateInfo a{};
-        a.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        a.commandPool        = rtx().transient_pool;
-        a.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        a.commandBufferCount = 1;
-        vkAllocateCommandBuffers(rtx().device, &a, &commandBuffer_);
-    }
-
-    VkCommandBuffer beginCommandBuffer() noexcept {
-        vkResetCommandBuffer(commandBuffer_, 0);
-
-        VkCommandBufferBeginInfo b{};
-        b.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        vkBeginCommandBuffer(commandBuffer_, &b);
-        return commandBuffer_;
-    }
-
     void createDescriptorPoolAndSet() noexcept {
         VkDescriptorPoolSize sizes[] = {
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   2},
@@ -535,7 +510,10 @@ private:
     }
 
     void updateDescriptorSet() noexcept {
-        if (!mainHDR_.view || !prevHDR_.view) return;
+        if (!mainHDR_.view || !prevHDR_.view) {
+            LOG_ERROR_CAT("RAYCANVAS", "Cannot update descriptor set — HDR views invalid");
+            return;
+        }
 
         std::array<VkWriteDescriptorSet, 3> writes{};
 
@@ -605,13 +583,13 @@ private:
         VkClearColorValue black{{0.0f, 0.0f, 0.0f, 1.0f}};
         VkImageSubresourceRange rng{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-        VkCommandBuffer cmd = beginCommandBuffer();
+        VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return;
 
-        transitionImageLayout(cmd, mainHDR_.image,  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        transitionImageLayout(cmd, mainHDR_.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         transitionImageLayout(cmd, prevHDR_.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-        vkCmdClearColorImage(cmd, mainHDR_.image,  VK_IMAGE_LAYOUT_GENERAL, &black, 1, &rng);
+        vkCmdClearColorImage(cmd, mainHDR_.image, VK_IMAGE_LAYOUT_GENERAL, &black, 1, &rng);
         vkCmdClearColorImage(cmd, prevHDR_.image, VK_IMAGE_LAYOUT_GENERAL, &black, 1, &rng);
 
         endSubmitAndWait(cmd);
@@ -641,46 +619,10 @@ private:
         if (std::abs(tgtScale - adaptiveScale_) > hyst) {
             adaptiveScale_ = tgtScale;
             needsRecreate_ = true;
+            LOG_INFO_CAT("RAYCANVAS", "Adaptive scale changed to {:.4f}x", adaptiveScale_);
         }
 
         lastAdaptiveAdjustTime_ = now;
-    }
-
-    void applyGameStyleDefaults() noexcept {
-        switch (Options::GameStyle::CurrentDimension) {
-            case Options::GameStyle::DimensionMode::TextOnly:
-                Options::Camera::CurrentFOV = 90.0f;
-                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::Pure2DCanvas;
-                break;
-            case Options::GameStyle::DimensionMode::Pure2D:
-                Options::Camera::CurrentFOV = 90.0f;
-                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::Pure2DCanvas;
-                break;
-            case Options::GameStyle::DimensionMode::TwoPointFiveD:
-                Options::Camera::CurrentFOV = 75.0f;
-                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::HybridRasterMarch;
-                break;
-            case Options::GameStyle::DimensionMode::Full3D:
-                Options::Camera::CurrentFOV = 75.0f;
-                Options::Rendering::CurrentTechnique = Options::Rendering::RenderTechnique::PureRaymarching;
-                break;
-        }
-
-        switch (Options::GameStyle::CurrentPerspective) {
-            case Options::GameStyle::CameraPerspective::FirstPerson:
-                Options::Camera::CurrentFOV = 85.0f;
-                break;
-            case Options::GameStyle::CameraPerspective::ThirdPerson:
-                Options::Camera::CurrentFOV = 70.0f;
-                break;
-            case Options::GameStyle::CameraPerspective::TopDown:
-            case Options::GameStyle::CameraPerspective::Isometric:
-            case Options::GameStyle::CameraPerspective::SideScroller:
-            case Options::GameStyle::CameraPerspective::Orthographic2D:
-            case Options::GameStyle::CameraPerspective::TextAdventure:
-                // No special FOV override for these cases
-                break;
-        }
     }
 
 private:
@@ -691,13 +633,12 @@ private:
     int            render_width_              = 0;
     int            render_height_             = 0;
 
-    VkCommandBuffer commandBuffer_            = VK_NULL_HANDLE;
     VkQueryPool     timestampQueryPool_       = VK_NULL_HANDLE;
     VkFence         acquireFence_             = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_          = VK_NULL_HANDLE;
     VkDescriptorSet  descriptorSet_           = VK_NULL_HANDLE;
 
-	uint64_t       materialsHandle_           = 0;
+    uint64_t       materialsHandle_           = 0;
 
     bool           minimized_                 = false;
     bool           destroyed_                 = false;
@@ -705,19 +646,19 @@ private:
 
     double         adaptiveScale_             = 1.0;
     double         lastPresentTime_s_         = 0.0;
-	double         measuredRefreshRateHz_     = 60.0;
-	double         lastFpsLog_                = 0.0;
+    double         measuredRefreshRateHz_     = 60.0;
+    double         lastFpsLog_                = 0.0;
 
-	uint64_t       frameCount_                = 0;
+    uint64_t       frameCount_                = 0;
 
-	double         lastAdaptiveAdjustTime_    = 0.0;
+    double         lastAdaptiveAdjustTime_    = 0.0;
 
-	bool           needsRecreate_             = false;
+    bool           needsRecreate_             = false;
 
-	double         timestampPeriodNs_         = 1.0;
-	double         smoothedGpuTimeMs_         = 16.67;
+    double         timestampPeriodNs_         = 1.0;
+    double         smoothedGpuTimeMs_         = 16.67;
 
-    // HDR resources (after scalars)
+    // HDR resources
     struct HDRResource {
         VkImage        image  = VK_NULL_HANDLE;
         VkImageView    view   = VK_NULL_HANDLE;

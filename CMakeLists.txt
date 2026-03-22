@@ -91,7 +91,7 @@ endif()
 
 if(TARGET_PLATFORM STREQUAL "Windows")
     add_compile_options(-fstack-protector-strong -fcf-protection=full -D_FORTIFY_SOURCE=3 -Wa,-mbig-obj)
-    add_link_options(-static -static-libgcc -static-libstdc++ -Wl,--whole-archive -lwinpthread -lgcc -lgcc_eh -Wl,--no-whole-archive)
+    add_link_options(-march=native -mtune=native -static -static-libgcc -static-libstdc++ -Wl,--whole-archive -lwinpthread -lgcc -lgcc_eh -Wl,--no-whole-archive)
 endif()
 
 if(DISABLE_TRACE_AND_DEBUG_LOGS)
@@ -280,9 +280,6 @@ if(TARGET_PLATFORM STREQUAL "Windows")
         -Wl,--whole-archive
         $<TARGET_FILE:${FREETYPE_TARGET}>
         -Wl,--no-whole-archive
-    )
-    target_link_options(amouranth_engine PRIVATE
-        "-Wl,--allow-multiple-definition"
     )
 else()
     target_link_libraries(amouranth_engine PRIVATE ${FREETYPE_TARGET})

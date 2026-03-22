@@ -142,61 +142,79 @@ inline glm::vec3 computeMoonDirection(float todHours) noexcept {
     return -computeSunDirection(todHours);
 }
 
-std::expected<VkShaderModule, std::string> load_spirv(const std::string& override_path = "") noexcept {
+namespace fs = std::filesystem;
+
+std::expected<VkShaderModule, std::string> load_spirv(std::string filename) noexcept {
     namespace fs = std::filesystem;
+
+    if (filename.empty()) return std::unexpected("empty filename");
+
     std::vector<fs::path> candidates;
+    fs::path given{filename};
 
-    if (!override_path.empty()) {
-        fs::path op(override_path);
-        if (fs::exists(op) && fs::is_regular_file(op)) candidates.push_back(op);
-    }
+    // Primary: exactly what caller asked for
+    candidates.push_back(given);
 
+    // Fallbacks: relative to executable directory (Linux-only reliable way)
     fs::path exe_dir;
-    try { exe_dir = fs::canonical("/proc/self/exe").parent_path(); }
-    catch (...) { }
+    try {
+        exe_dir = fs::canonical("/proc/self/exe").parent_path();
+        if (!exe_dir.empty()) {
+            candidates.emplace_back(exe_dir / "assets/shaders/compute" / given.filename());
+            candidates.emplace_back(exe_dir / given.filename());
+        }
+    } catch (...) {}
 
-    if (!exe_dir.empty()) {
-        candidates.emplace_back(exe_dir / "assets/shaders/compute/CANVAS.spv");
-        candidates.emplace_back(exe_dir / "CANVAS.spv");
-    }
-
+    // Optional: current working directory variants (less reliable but harmless)
     fs::path cwd = fs::current_path();
-    candidates.emplace_back(cwd / "assets/shaders/compute/CANVAS.spv");
-    candidates.emplace_back(cwd / "CANVAS.spv");
+    candidates.emplace_back(cwd / "assets/shaders/compute" / given.filename());
+    candidates.emplace_back(cwd / given.filename());
 
     std::vector<uint32_t> code;
-    std::string loaded_from;
+    fs::path loaded_from;
 
     for (const auto& p : candidates) {
-        if (!fs::exists(p)) continue;
-        std::ifstream file(p, std::ios::binary | std::ios::ate);
-        if (!file) continue;
-        auto size = file.tellg();
-        file.seekg(0);
-        code.resize(size / 4);
-        file.read(reinterpret_cast<char*>(code.data()), size);
-        if (file.good()) {
-            loaded_from = p.string();
+        if (!fs::exists(p) || !fs::is_regular_file(p)) continue;
+
+        std::ifstream f(p, std::ios::binary | std::ios::ate);
+        if (!f) continue;
+
+        auto sz = f.tellg();
+        if (sz <= 0 || sz % 4 != 0) continue;
+
+        f.seekg(0);
+        code.resize(sz / 4);
+        f.read(reinterpret_cast<char*>(code.data()), sz);
+
+        if (f.good()) {
+            loaded_from = p;
             break;
         }
         code.clear();
     }
 
     if (code.empty()) {
-        return std::unexpected("Shader file not found");
+        return std::unexpected("SPIR-V not found:\n  • tried: " + given.string() +
+                               "\n  • exe dir: " + (exe_dir.empty() ? "<failed>" : exe_dir.string()));
     }
 
-    VkShaderModuleCreateInfo ci{};
-    ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    ci.codeSize = code.size() * sizeof(uint32_t);
-    ci.pCode    = code.data();
+    VkShaderModuleCreateInfo ci{
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext    = nullptr,
+        .flags    = 0,
+        .codeSize = code.size() * sizeof(uint32_t),
+        .pCode    = code.data()
+    };
+
 
     VkShaderModule mod = VK_NULL_HANDLE;
     VkResult res = vkCreateShaderModule(rtx().device, &ci, nullptr, &mod);
     if (res != VK_SUCCESS) {
-        return std::unexpected("vkCreateShaderModule failed");
+        return std::unexpected(std::string("vkCreateShaderModule failed (") +
+                               std::to_string(res) + ") from " + loaded_from.string());
     }
 
+    LOG_INFO_CAT("SHADER", "Loaded {} from {}", given.filename().string(), loaded_from.string());
     return mod;
 }
 
@@ -279,18 +297,12 @@ void create_canvas_pipeline() noexcept {
     initialize_descriptors_and_layout();
     create_audio_command_buffer();
 
-    auto mod_res = load_spirv("assets/shaders/compute/CANVAS.spv");
-    if (!mod_res) {
-        raymarching_success.store(false);
-        return;
-    }
-
-    VkShaderModule module = *mod_res;
+    VkShaderModule s_module = load_spirv("assets/shaders/compute/CANVAS.spv").value_or(VK_NULL_HANDLE);
 
     VkPipelineShaderStageCreateInfo stage{};
     stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage.module = module;
+    stage.module = s_module;
     stage.pName  = "main";
 
     VkComputePipelineCreateInfo ci{};
@@ -299,7 +311,11 @@ void create_canvas_pipeline() noexcept {
     ci.layout = pipeline_layout;
 
     VkResult res = vkCreateComputePipelines(rtx().device, VK_NULL_HANDLE, 1, &ci, nullptr, &canvas_pipeline);
-    vkDestroyShaderModule(rtx().device, module, nullptr);
+    vkDestroyShaderModule(rtx().device, s_module, nullptr);
+
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "vkCreateComputePipelines failed: {}", vkh.result(res));
+    }
 
     raymarching_success.store(res == VK_SUCCESS);
 }
@@ -316,17 +332,19 @@ bool create_ray_tracing_pipeline() noexcept {
 
     if (!ext().vkCreateRayTracingPipelinesKHR) {
         raytracing_success.store(false);
+        LOG_ERROR_CAT("PIPELINE", "Ray tracing extensions not available");
         return false;
     }
 
-    auto rgen   = load_spirv("assets/shaders/raytracing/raygen.rgen");
-    auto rmiss  = load_spirv("assets/shaders/raytracing/miss.rmiss");
-    auto rchit  = load_spirv("assets/shaders/raytracing/closesthit.rchit");
-    auto rahit  = load_spirv("assets/shaders/raytracing/anyhit.rahit");
-    auto rcall  = load_spirv("assets/shaders/raytracing/callable.rcall");
+    auto rgen   = load_spirv("assets/shaders/raytracing/raygen.rgen.spv");
+    auto rmiss  = load_spirv("assets/shaders/raytracing/miss.rmiss.spv");
+    auto rchit  = load_spirv("assets/shaders/raytracing/closesthit.rchit.spv");
+    auto rahit  = load_spirv("assets/shaders/raytracing/anyhit.rahit.spv");
+    auto rcall  = load_spirv("assets/shaders/raytracing/callable.rcall.spv");
 
     if (!rgen || !rmiss || !rchit || !rahit || !rcall) {
         raytracing_success.store(false);
+        LOG_FATAL_CAT("PIPELINE", "Failed to load one or more RT shaders");
         return false;
     }
 
@@ -373,6 +391,10 @@ bool create_ray_tracing_pipeline() noexcept {
     vkDestroyShaderModule(rtx().device, *rahit, nullptr);
     vkDestroyShaderModule(rtx().device, *rcall, nullptr);
 
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR failed: {}", vkh.result(res));
+    }
+
     raytracing_success.store(res == VK_SUCCESS);
     return res == VK_SUCCESS;
 }
@@ -383,7 +405,10 @@ bool create_ray_tracing_pipeline() noexcept {
 bool build_shader_binding_table() noexcept {
     if (sbt_buffer != VK_NULL_HANDLE) return true;
 
-    if (rt_pipeline == VK_NULL_HANDLE) return false;
+    if (rt_pipeline == VK_NULL_HANDLE) {
+        LOG_ERROR_CAT("SBT", "RT pipeline not created");
+        return false;
+    }
 
     uint32_t groupCount = 4;
 
@@ -466,10 +491,11 @@ bool build_shader_binding_table() noexcept {
 
     vkUnmapMemory(rtx().device, sbt_memory);
 
+    LOG_SUCCESS_CAT("SBT", "Shader Binding Table built");
     return true;
 }
 
-void processInput(SDL_Window* /*window*/, int window_width, int window_height) noexcept
+void processInput(int window_width, int window_height) noexcept
 {
     should_quit              = false;
     wants_fullscreen_toggle  = false;
@@ -571,17 +597,14 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
 
     if (fingerCount > 0 && fingers)
     {
-        // Use the most recent finger (simple single-touch heuristic)
         SDL_Finger* finger = fingers[fingerCount - 1];
 
-        // Right half → look
         if (finger->x > 0.5f)
         {
             float sens = Options::Input::MOUSE_SENSITIVITY;
             touchLookDelta.x = (finger->x - 0.5f) * 2.0f * sens;
             touchLookDelta.y = (finger->y - 0.5f) * 2.0f * sens;
         }
-        // Left half → movement
         else
         {
             touchMoveDelta.x = (finger->x - 0.25f) * 4.0f;
@@ -647,39 +670,35 @@ void processInput(SDL_Window* /*window*/, int window_width, int window_height) n
         newPos += worldMove * speed * dt;
     }
 
-    // Apply bob/breathing/shake (manual implementation since addEffectsOffset is missing)
+    // Apply bob/breathing/shake
     if (Options::Camera::EnableHeadBob || Options::Camera::EnableBreathing || Options::Camera::EnableCameraShake)
     {
         float seconds = static_cast<float>(TotalTime::get().seconds());
         glm::vec3 offset{0.0f};
 
-        // Head bob
         if (Options::Camera::EnableHeadBob && isMoving)
         {
             float freq = isSprinting ? 18.0f : 12.0f;
             float amp  = isSprinting ? 0.12f : 0.07f;
-            offset.y += std::sinf(seconds * freq) * amp;
+            offset.y += std::sin(seconds * freq) * amp;
         }
 
-        // Breathing
         if (Options::Camera::EnableBreathing)
         {
-            offset.y += std::sinf(seconds * 0.8f) * 0.04f;
+            offset.y += std::sin(seconds * 0.8f) * 0.04f;
         }
 
-        // Shake (simple trauma simulation — you can add real trauma later)
         static float trauma = 0.0f;
         if (Options::Camera::EnableCameraShake)
         {
-            // Example: small random shake when shooting or jumping
             if (flags & INPUT_SHOOT || flags & INPUT_JUMP)
                 trauma = std::min(1.0f, trauma + 0.3f);
 
             trauma *= Options::Camera::ShakeTraumaDecay;
             float shake = trauma * trauma;
             float t = seconds * 15.0f;
-            offset.x += std::sinf(t * 12.3f) * shake * 0.8f;
-            offset.y += std::cosf(t * 8.7f)  * shake * 0.6f;
+            offset.x += std::sin(t * 12.3f) * shake * 0.8f;
+            offset.y += std::cos(t * 8.7f)  * shake * 0.6f;
         }
 
         newPos += offset;
@@ -697,7 +716,7 @@ inline int  getRequestedWidth() noexcept      { return requested_width; }
 inline int  getRequestedHeight() noexcept     { return requested_height; }
 
 // ────────────────────────────────────────────────
-// Dispatch (full, no stubs)
+// Dispatch
 // ────────────────────────────────────────────────
 void dispatch(VkCommandBuffer cmd, int width, int height, float totalTime) noexcept {
     if (width <= 0 || height <= 0) return;
@@ -775,7 +794,10 @@ void dispatch(VkCommandBuffer cmd, int width, int height, float totalTime) noexc
 
     if (!canvas_pipeline) {
         create_canvas_pipeline();
-        if (!canvas_pipeline) return;
+        if (!canvas_pipeline) {
+            LOG_FATAL_CAT("PIPELINE", "Compute pipeline creation failed");
+            return;
+        }
     }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);

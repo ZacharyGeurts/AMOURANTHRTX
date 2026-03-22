@@ -6,8 +6,9 @@
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
 //
-// This is the low-level camera: position, orientation, projection math.
+// Low-level camera: position, orientation, projection math.
 // No input handling, no animation/orbit logic — those belong in a controller.
+// Respects Options::Camera and Options::GameStyle::CurrentPerspective.
 // Designed for clean temporal accumulation, raymarching, hardware RT, path tracing.
 // =============================================================================
 
@@ -20,7 +21,7 @@
 #include <atomic>
 #include <cmath>
 
-#include "OptionsMenu.hpp"  // Options::Camera::*
+#include "OptionsMenu.hpp"  // Options::Camera::*, Options::GameStyle::*
 
 // ────────────────────────────────────────────────
 // Projection types (perspective vs orthographic)
@@ -68,7 +69,7 @@ public:
         return instance;
     }
 
-    // ── Reset to defaults ───────────────────────────────────────────────
+    // ── Reset to defaults from Options ──────────────────────────────────────
     void reset() noexcept
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -112,7 +113,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         state_.aperture      = aperture;
         state_.focusDistance = focusDist;
-        // no invalidate needed — DoF not in view/proj matrices
+        // DoF params not in view/proj matrices — no cache invalidate needed
     }
 
     // ── Look-at helper ──────────────────────────────────────────────────
@@ -130,10 +131,10 @@ public:
     [[nodiscard]] glm::quat   orientation() const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orientation; }
     [[nodiscard]] float       fovDeg()      const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.fovDeg; }
     [[nodiscard]] float       orthoZoom()   const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orthoZoom; }
-    [[nodiscard]] float       near()        const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.nearPlane; }
-    [[nodiscard]] float       far()         const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.farPlane; }
+    [[nodiscard]] float       nearPlane()   const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.nearPlane; }
+    [[nodiscard]] float       farPlane()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.farPlane; }
     [[nodiscard]] float       aperture()    const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.aperture; }
-    [[nodiscard]] float       focusDist()   const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.focusDistance; }
+    [[nodiscard]] float       focusDistance() const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.focusDistance; }
 
     [[nodiscard]] glm::vec3 forward() const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orientation * glm::vec3(0,0,-1); }
     [[nodiscard]] glm::vec3 right()   const noexcept { std::lock_guard<std::mutex> l(mtx_); return state_.orientation * glm::vec3(1,0,0); }
@@ -149,6 +150,8 @@ public:
     [[nodiscard]] glm::mat4 projection(float aspect) const noexcept
     {
         std::lock_guard<std::mutex> lock(mtx_);
+
+        // Orthographic for specific perspective modes
         if (Options::GameStyle::CurrentPerspective == Options::GameStyle::CameraPerspective::Orthographic2D ||
             Options::GameStyle::CurrentPerspective == Options::GameStyle::CameraPerspective::Isometric)
         {
@@ -157,6 +160,7 @@ public:
             return glm::ortho(-halfW, halfW, -halfH, halfH, state_.nearPlane, state_.farPlane);
         }
 
+        // Standard perspective (most modes)
         return glm::perspective(glm::radians(state_.fovDeg), aspect, state_.nearPlane, state_.farPlane);
     }
 
@@ -205,6 +209,8 @@ inline glm::vec3   CAM_RIGHT()        { return CAM.right(); }
 inline glm::vec3   CAM_UP()           { return CAM.up(); }
 inline float       CAM_FOV()          { return CAM.fovDeg(); }
 inline float       CAM_ZOOM()         { return CAM.orthoZoom(); }
+inline float       CAM_NEAR()         { return CAM.nearPlane(); }
+inline float       CAM_FAR()          { return CAM.farPlane(); }
 inline glm::mat4   CAM_VIEW()         { return CAM.view(); }
 inline glm::mat4   CAM_PROJ(float a)  { return CAM.projection(a); }
 
