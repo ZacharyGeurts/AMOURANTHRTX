@@ -336,11 +336,11 @@ bool create_ray_tracing_pipeline() noexcept {
         return false;
     }
 
-    auto rgen   = load_spirv("assets/shaders/raytracing/raygen.rgen.spv");
-    auto rmiss  = load_spirv("assets/shaders/raytracing/miss.rmiss.spv");
-    auto rchit  = load_spirv("assets/shaders/raytracing/closesthit.rchit.spv");
-    auto rahit  = load_spirv("assets/shaders/raytracing/anyhit.rahit.spv");
-    auto rcall  = load_spirv("assets/shaders/raytracing/callable.rcall.spv");
+    auto rgen   = load_spirv("assets/shaders/raytracing/raygen.spv");
+    auto rmiss  = load_spirv("assets/shaders/raytracing/miss.spv");
+    auto rchit  = load_spirv("assets/shaders/raytracing/closesthit.spv");
+    auto rahit  = load_spirv("assets/shaders/raytracing/anyhit.spv");
+    auto rcall  = load_spirv("assets/shaders/raytracing/callable.spv");
 
     if (!rgen || !rmiss || !rchit || !rahit || !rcall) {
         raytracing_success.store(false);
