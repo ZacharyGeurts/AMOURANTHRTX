@@ -15,6 +15,11 @@ We pride ourselves with short files.
 They are ~1000 lines each.  
 Even Grok "Fast" can return full entire files in one shot.  
 
+Compiling creates one file. Navigator.exe which runs your assets.  
+Our toolchain will assist with compiling your shaders and cross compiling.  
+Updates require replacing that one file.  
+CANVAS.spv will be interchangeable between earlier and later versions.  
+
 We are top down, not down up.  We had triangles at one point.  
 The code tends to steer toward getting shorter rather than longer.  
 
