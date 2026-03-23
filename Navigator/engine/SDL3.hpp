@@ -281,7 +281,7 @@ private:
     void updateFocusState() noexcept {
         if (!window_) return;
 
-        Uint32 flags = SDL_GetWindowFlags(window_);
+        Uint64 flags = SDL_GetWindowFlags(window_);
         bool newFocus = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
 
         if (newFocus != hasFocus_) {
@@ -614,23 +614,22 @@ public:
             updateFocusState();
         }
 
-        // Global hotkeys — always active (even if not focused, for quit)
-        if (ev.type == SDL_EVENT_KEY_DOWN) {
-            const bool* keys = SDL_GetKeyboardState(nullptr);
-
-            if (keys[SDL_SCANCODE_ESCAPE]) {
-                handleQuit();
-            }
-            if (keys[SDL_SCANCODE_F1]) {
-                toggleAdaptiveResolution();
-            }
-            if (keys[SDL_SCANCODE_F2]) {
-                toggleRayTracing();
-            }
-        }
-
         // Only process subscriptions & input if window has focus
         if (hasFocus_) {
+            if (ev.type == SDL_EVENT_KEY_DOWN) {
+                const bool* keys = SDL_GetKeyboardState(nullptr);
+
+                if (keys[SDL_SCANCODE_ESCAPE]) {
+                    handleQuit();
+                }
+                if (keys[SDL_SCANCODE_F1]) {
+                    toggleAdaptiveResolution();
+                }
+                if (keys[SDL_SCANCODE_F2]) {
+                    toggleRayTracing();
+                }
+            }
+
             uint64_t gen = generation_.load();
             std::vector<EventCallback> active;
             {

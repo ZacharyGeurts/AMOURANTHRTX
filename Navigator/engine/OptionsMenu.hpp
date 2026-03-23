@@ -311,15 +311,6 @@ namespace Options::LivingWorld
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Debug & Development
-// ─────────────────────────────────────────────────────────────────────────────
-namespace Options::Debug
-{
-    inline bool    EnableVulkanValidation       = false;
-    inline bool    EnableVerboseLogging         = false;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //    INPUT BITFLAGS — MUST MATCH SHADER PushConstants::controllerInput
 //    These are the ONLY input signals the raymarch shader receives from the CPU.
 //    Updated every frame in dispatch_canvas() based on keyboard/gamepad state.

@@ -66,6 +66,7 @@ struct CanvasBindings {
 // ────────────────────────────────────────────────
 struct alignas(16) PushConstants {
     f32         time;                       // total engine time (seconds)
+	uint        enableHardwareRT;           // Options::Rendering
     u32         frameSeed;                  // per-frame RNG seed
 
     glm::vec3   cameraPos;                  f32 pad0;
@@ -386,6 +387,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
 
     PushConstants pc{};
     pc.time             = totalTime;
+	pc.enableHardwareRT = Options::Rendering::EnableHardwareRayTracing ? 1u : 0u;
     pc.frameSeed        = static_cast<u32>(totalTime * 987654.321f) ^ 0xCAFEBABEu;
 
     // ── Camera (use singleton methods for runtime state) ─────────────────────

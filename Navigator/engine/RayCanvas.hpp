@@ -365,9 +365,6 @@ public:
             double gpuLoadPercent = targetFrameMs > 0.001 ?
                                     (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 : 0.0;
 
-            const char* stateEmoji = minimized_ ? "⚠️ minimized" :
-                                     (!Swapchain::get() || !hdrOutputImage_) ? "❌ invalid" : "💖 active";
-
             VRAMReality vram = Memory::measureReality();
             double usedMB = static_cast<double>(vram.driver_footprint) / (1024.0 * 1024.0);
             double totalMB = static_cast<double>(vram.total) / (1024.0 * 1024.0);
@@ -381,18 +378,19 @@ public:
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
                           "  GPU load:       {:.3f}%   (smoothed {:.3f} ms)\n"
-                          "  Render Path:    Pure Raymarched 3D (CANVAS.spv)\n"
-                          "  State:          {}\n"
                           "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
+                          "  Advanced:       HardwareRayTracing {}  RTXReflections {}  RTXGI {}\n"
                           "  VRAM:           {:.3f} MB used / {:.3f} MB total ({:.3f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
                           now, avgFps, avgDt_us, measuredRefreshRateHz_,
                           winW, winH, render_width_, render_height_, scaleFactor, mode,
                           adaptiveScale_, gpuLoadPercent, smoothedGpuTimeMs_,
-                          stateEmoji,
                           Options::Rendering::EnableAdaptiveResolution ? "💖" : "❌",
                           Options::Rendering::EnableAccumulation ? "💖" : "❌",
+						  Options::Rendering::EnableHardwareRayTracing ? "💖" : "❌",
+						  Options::Rendering::EnableRTXReflections ? "💖" : "❌",
+						  Options::Rendering::EnableRTXGI ? "💖" : "❌",
                           scaleFactor > 1.0 ? "💖" : "❌",
                           usedMB, totalMB, freePercent,
                           frameCount_);

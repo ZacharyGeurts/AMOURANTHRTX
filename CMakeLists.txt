@@ -2,11 +2,14 @@ cmake_minimum_required(VERSION 3.21)
 project(AMOURANTH_RTX LANGUAGES CXX)
 
 # =============================================================================
-# PRODUCTION TOGGLES
+# PRODUCTION + DEBUG TOGGLES
 # =============================================================================
 option(BUILD_SHARED_LIBS                "Build shared libs (OFF = fully static)" OFF)
 option(DISABLE_TRACE_AND_DEBUG_LOGS    "Disable trace & debug logging" ON)
 option(ENABLE_EXTRA_WARNINGS           "Enable extra warnings" ON)
+
+option(ENABLE_VALIDATION               "Enable Vulkan Validation Layers + Debug Utils" ON)
+option(ENABLE_VERBOSE_VALIDATION       "Enable extra verbose validation output" ON)
 
 option(FETCH_SDL3       "Fetch & build SDL3 from main"          ON)
 option(FETCH_SDL3_IMAGE "Fetch & build SDL3_image from main"    ON)
@@ -23,7 +26,7 @@ option(SDL3IMAGE_TIFF   "Enable TIFF"         OFF)
 option(BUILD_FOR_WEB    "Build for Emscripten/WebAssembly + WebGPU" OFF)
 
 # =============================================================================
-# FETCHCONTENT SETUP - EARLY INCLUDE
+# FETCHCONTENT SETUP
 # =============================================================================
 include(FetchContent)
 find_package(Git REQUIRED)
@@ -32,7 +35,7 @@ set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE)
 
 # =============================================================================
-# PLATFORM / TOOLCHAIN DETECTION
+# PLATFORM DETECTION
 # =============================================================================
 if(BUILD_FOR_WEB)
     set(TARGET_PLATFORM "Web")
@@ -40,8 +43,6 @@ if(BUILD_FOR_WEB)
     set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Web")
     message(STATUS "=== WEB BUILD MODE — Output locked to build-web/bin/Web/Navigator.html ===")
     add_definitions(-DUSE_WEBGPU)
-
-    # Use the external toolchain file for Emscripten
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Toolchain-emscripten.cmake" CACHE PATH "" FORCE)
 else()
     if(CMAKE_CROSSCOMPILING)
@@ -136,9 +137,9 @@ else()
     add_definitions(-DUSE_WEBGPU)
 endif()
 
-# FreeType - 100% static on Windows (embedded in exe, no libfreetype.dll ever)
+# FreeType - 100% static on Windows
 if(TARGET_PLATFORM STREQUAL "Windows")
-    message(STATUS "FreeType: Vendoring static build - 100% embedded in .exe (no DLL)")
+    message(STATUS "FreeType: Vendoring static build - 100% embedded in .exe")
     FetchContent_Declare(freetype
         GIT_REPOSITORY https://github.com/libsdl-org/freetype.git
         GIT_TAG        VER-2-13-3
@@ -159,7 +160,7 @@ endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-# SDL3 core
+# SDL3 + extensions
 if(FETCH_SDL3)
     if(TARGET_PLATFORM STREQUAL "Windows")
         set(SDL_HIDAPI_LIBUSB_SHARED OFF CACHE INTERNAL "" FORCE)
@@ -169,7 +170,6 @@ if(FETCH_SDL3)
     FetchContent_MakeAvailable(SDL3)
 endif()
 
-# SDL3 extensions — disable version-script on Emscripten
 if(FETCH_SDL3_IMAGE)
     if(EMSCRIPTEN)
         set(SDL_TARGET_LINK_OPTION_VERSION_FILE OFF CACHE INTERNAL "" FORCE)
@@ -224,12 +224,13 @@ set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
 set_source_files_properties(${TINYOBJLOADER_SRC} PROPERTIES COMPILE_OPTIONS "-Wno-sign-conversion;-w")
 
 # =============================================================================
-# SOURCES + EXECUTABLE
+# SOURCES + EXECUTABLE  ←←← TARGET MUST BE CREATED FIRST
 # =============================================================================
 set(OUR_SOURCES Navigator/main.cpp)
 set(ALL_SOURCES ${OUR_SOURCES} ${TINYOBJLOADER_SRC})
 
 add_executable(amouranth_engine ${ALL_SOURCES})
+
 set_target_properties(amouranth_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
     OUTPUT_NAME "Navigator"
@@ -240,13 +241,28 @@ if(TARGET_PLATFORM STREQUAL "Windows")
     target_link_options(amouranth_engine PRIVATE -mconsole)
 endif()
 
+# =============================================================================
+# VULKAN VALIDATION LAYERS  ←←← NOW AFTER TARGET EXISTS
+# =============================================================================
+if(ENABLE_VALIDATION AND NOT EMSCRIPTEN)
+    message(STATUS "🔧 Vulkan Validation Layers: ENABLED")
+    target_compile_definitions(amouranth_engine PRIVATE ENABLE_VULKAN_VALIDATION)
+    
+    if(ENABLE_VERBOSE_VALIDATION)
+        message(STATUS "   → Verbose validation enabled")
+        target_compile_definitions(amouranth_engine PRIVATE VULKAN_VALIDATION_VERBOSE)
+    endif()
+else()
+    message(STATUS "Vulkan Validation Layers: DISABLED (production mode)")
+endif()
+
+# =============================================================================
+# COMPILER FLAGS + INCLUDES
+# =============================================================================
 foreach(SRC ${OUR_SOURCES})
     set_source_files_properties(${SRC} PROPERTIES COMPILE_OPTIONS "${OUR_WARNING_FLAGS};${COMMON_OPT_FLAGS}")
 endforeach()
 
-# =============================================================================
-# INCLUDES + DEFINES
-# =============================================================================
 target_include_directories(amouranth_engine SYSTEM BEFORE PRIVATE
     ${Vulkan_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
@@ -264,8 +280,12 @@ target_include_directories(amouranth_engine SYSTEM PRIVATE
 target_include_directories(amouranth_engine PRIVATE Navigator/engine)
 
 target_compile_definitions(amouranth_engine PRIVATE
-    GLM_ENABLE_EXPERIMENTAL GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE
-    HAVE_SDL3_MIXER HAVE_SDL3_IMAGE HAVE_SDL3_TTF
+    GLM_ENABLE_EXPERIMENTAL 
+    GLM_FORCE_RADIANS 
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+    HAVE_SDL3_MIXER 
+    HAVE_SDL3_IMAGE 
+    HAVE_SDL3_TTF
 )
 
 if(DISABLE_TRACE_AND_DEBUG_LOGS)
@@ -273,7 +293,7 @@ if(DISABLE_TRACE_AND_DEBUG_LOGS)
 endif()
 
 # =============================================================================
-# LINKING - FORCE STATIC EVERYTHING (especially FreeType)
+# LINKING
 # =============================================================================
 if(TARGET_PLATFORM STREQUAL "Windows")
     target_link_libraries(amouranth_engine PRIVATE
@@ -313,7 +333,7 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
 endif()
 
 # =============================================================================
-# SHADERS - only if tools found (native only)
+# SHADERS
 # =============================================================================
 if(GLSLC AND SPIRV_VAL)
     set(SHADER_INCLUDE_FLAGS
@@ -384,17 +404,15 @@ message(STATUS "")
 message(STATUS "==================================================================")
 message(STATUS " AMOURANTHRTX")
 message(STATUS " Target:       ${BIN_DIR}/Navigator${EXE_SUFFIX}")
+message(STATUS " Validation:   ${ENABLE_VALIDATION}")
+if(ENABLE_VALIDATION)
+    message(STATUS "   → Run with: VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ${BIN_DIR}/Navigator")
+endif()
 if(TARGET_PLATFORM STREQUAL "Windows")
     message(STATUS " Run:          wine ${BIN_DIR}/Navigator.exe")
-    message(STATUS " FreeType:     100% embedded (no libfreetype.dll - forced with --whole-archive)")
 elseif(TARGET_PLATFORM STREQUAL "Web")
-    message(STATUS " Run:          ./linux.sh web run  (opens http://localhost:8000/Navigator.html)")
-    message(STATUS " Note: SDL3_image/mixer/ttf disabled on web — core SDL3 only")
+    message(STATUS " Run:          ./linux.sh web run")
 else()
     message(STATUS " Run:          ${BIN_DIR}/Navigator")
 endif()
-message(STATUS " Static:       YES (SDL + FreeType + all deps)")
-message(STATUS " SDL3_image:   PNG:${SDL3IMAGE_PNG} JPG:${SDL3IMAGE_JPG}")
-message(STATUS " MP3:          dr_mp3 only")
-message(STATUS " TTF:          basic (HarfBuzz OFF on Windows)")
 message(STATUS "==================================================================")
