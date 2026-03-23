@@ -208,14 +208,14 @@ namespace Options::Rendering
     inline RenderTechnique CurrentTechnique     = RenderTechnique::PureRaymarching;
     inline bool            AutoFallbackOnLowFPS = false;
 
-    inline float    RaymarchMaxDistance          = 220.0f;
+    inline float    RaymarchMaxDistance          = 120.0f;
     inline float    RaymarchEpsilon              = 0.0012f;
     inline uint32_t RaymarchMaxSteps             = 256u;
     inline float    RaymarchStepMultiplier       = 1.0f;
 
     inline bool     EnableAccumulation           = true;
     inline float    AccumulationWeight           = 0.04f;
-    inline int      MaxSamplesPerPixel           = 128;
+    inline int      MaxSamplesPerPixel           = 64;
     inline bool     EnableAdaptiveSampling       = true;
 
     inline bool     PreferHardwareRT             = true;
@@ -229,17 +229,17 @@ namespace Options::Rendering
     inline bool     EnableTonemapping            = false;
     inline uint32_t TonemapMode                  = 2u;                 // 0=linear, 1=filmic, 2=ACES-ish
     inline float    BloomThreshold               = 0.92f;
-    inline float    BloomIntensity               = 0.28f;
-    inline float    Contrast                     = 1.10f;
-    inline float    Saturation                   = 1.14f;
-    inline float    Gamma                        = 1.00f;
-    inline float    VignetteStrength             = 0.42f;
+    inline float    BloomIntensity               = 0.0f;
+    inline float    Contrast                     = 1.0f;
+    inline float    Saturation                   = 1.0f;
+    inline float    Gamma                        = 1.0f;
+    inline float    VignetteStrength             = 0.0f;
     inline float    ChromaticAberrationStrength  = 0.0f;
     inline float    MotionBlurStrength           = 0.0f;
 
     inline bool     EnableAdaptiveResolution     = true;
-    inline float    MinResolutionScale           = 0.5f;
-    inline float    MaxResolutionScale           = 1.5f;
+    inline float    MinResolutionScale           = 0.2f;
+    inline float    MaxResolutionScale           = 1.2f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

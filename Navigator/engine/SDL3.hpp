@@ -6,6 +6,13 @@
 // Updated to use OptionsMenu.hpp for all configuration
 // Dynamic audio slots — preload as many files as desired via Options::SDL3::PreloadedAudioFiles
 // No hard slot limit (MyAudioSlots is soft/recommended concurrent max)
+//
+// INPUT BEHAVIOR (2026 standard):
+// - Mouse capture: relative mode only when window focused (SDL_SetWindowRelativeMouseMode)
+// - Keyboard & gamepad: captured when window has focus (SDL_WINDOW_INPUT_FOCUS)
+// - Alt+Tab / lost focus: automatically releases mouse capture & stops relative mode
+// - Regain focus: auto-restores relative mouse mode if enabled in options
+// - No global/raw input hijacking — respects OS focus rules
 // =============================================================================
 
 #include <SDL3/SDL.h>
@@ -142,6 +149,9 @@ public:
 
         bindDefaultActions();
 
+        // Initial focus check
+        updateFocusState();
+
         initialized_ = true;
         LOG_SUCCESS_CAT("SDL3", "Initialized — dynamic audio slots (preloaded: {}, soft max: {}) + full controller support",
                         slots_.size(), SOFT_MAX_SLOTS);
@@ -181,6 +191,65 @@ public:
         LOG_SUCCESS_CAT("SDL3", "Shutdown complete");
     }
 
+    // Called on all window-related events
+    void onWindowEvent(const SDL_Event& ev) noexcept {
+        switch (ev.type) {
+            // Focus events → update mouse capture/grab
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+            case SDL_EVENT_WINDOW_SHOWN:
+            case SDL_EVENT_WINDOW_HIDDEN:
+                updateFocusState();
+                break;
+
+            // Size changes → recreate swapchain / adjust render resolution
+            case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                onResize();
+                break;
+    
+            // Position / display changes (optional logging or multi-monitor handling)
+            case SDL_EVENT_WINDOW_MOVED:
+            case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                // Optional: log or update multi-monitor aware rendering
+                LOG_DEBUG_CAT("SDL3", "Window moved or display changed");
+                break;
+
+            // Minimized / restored → pause/resume rendering if desired
+            case SDL_EVENT_WINDOW_MINIMIZED:
+                LOG_INFO_CAT("SDL3", "Window minimized — pausing rendering");
+                // Optional: set a paused flag to skip heavy compute dispatches
+                break;
+
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+            case SDL_EVENT_WINDOW_RESTORED:
+                LOG_INFO_CAT("SDL3", "Window restored/maximized");
+                onResize();  // Re-check size
+                break;
+
+            // User wants to close → handle gracefully
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                LOG_INFO_CAT("SDL3", "Window close requested");
+                handleQuit();  // or push SDL_QUIT event
+                break;
+
+            case SDL_EVENT_WINDOW_LAST:
+                break;
+
+            // Rare / advanced
+            case SDL_EVENT_WINDOW_HIT_TEST:
+            case SDL_EVENT_WINDOW_ICCPROF_CHANGED:
+                // Usually ignore, but log for debugging
+                LOG_DEBUG_CAT("SDL3", "Advanced window event: {}", ev.type);
+                break;
+
+            default:
+                // Not a window event — ignore or forward elsewhere
+                break;
+        }
+    }
+
     void onResize() noexcept {
         if (!window_) return;
         int pixelW = 0, pixelH = 0;
@@ -197,7 +266,59 @@ public:
         SDL_SetWindowFullscreen(window_, Options::SDL3::StartFullscreen);
         SDL_SetWindowBordered(window_, !Options::SDL3::BorderlessWindow);
         SDL_SetWindowResizable(window_, Options::SDL3::AllowWindowResize);
-        SDL_SetWindowRelativeMouseMode(window_, Options::SDL3::EnableInputCapture);
+
+        // Mouse capture only when focused — handled in updateFocusState()
+        bool capture = Options::SDL3::EnableInputCapture && hasFocus_;
+        SDL_SetWindowRelativeMouseMode(window_, capture);
+    }
+
+    // ────────────────────────────────────────────────
+    // FOCUS & CAPTURE LOGIC
+    // ────────────────────────────────────────────────
+private:
+    bool hasFocus_ = false;
+
+    void updateFocusState() noexcept {
+        if (!window_) return;
+
+        Uint32 flags = SDL_GetWindowFlags(window_);
+        bool newFocus = (flags & SDL_WINDOW_INPUT_FOCUS) == 0;
+
+        if (newFocus != hasFocus_) {
+            hasFocus_ = newFocus;
+            bool capture = Options::SDL3::EnableInputCapture && hasFocus_;
+            SDL_SetWindowRelativeMouseMode(window_, capture);
+            Options::SDL3::EnableInputCapture = true;
+
+            LOG_INFO_CAT("SDL3", "Window focus changed: {} (relative mouse: {})",
+                         hasFocus_ ? "gained" : "lost", capture ? "enabled" : "disabled");
+        }
+    }
+
+public:
+    bool hasFocus() const noexcept { return hasFocus_; }
+
+    // ── Global hotkey handlers ──────────────────────────────────────────────
+    void handleQuit() noexcept {
+        LOG_INFO_CAT("SDL3", "ESC pressed — quitting application");
+        SDL_Event quitEvent{};
+        quitEvent.type = SDL_EVENT_QUIT;
+        SDL_PushEvent(&quitEvent);
+    }
+
+    void toggleAdaptiveResolution() noexcept {
+        Options::Rendering::EnableAdaptiveResolution = !Options::Rendering::EnableAdaptiveResolution;
+        LOG_INFO_CAT("RENDER", "Adaptive resolution toggled: {}",
+                     Options::Rendering::EnableAdaptiveResolution ? "ON" : "OFF");
+    }
+
+    void toggleRayTracing() noexcept {
+        Options::Rendering::EnableHardwareRayTracing = !Options::Rendering::EnableHardwareRayTracing;
+        if (Options::Rendering::EnableHardwareRayTracing && !Options::Rendering::PreferHardwareRT) {
+            LOG_WARNING_CAT("RENDER", "Hardware RT toggled ON but PreferHardwareRT is OFF — may use software fallback");
+        }
+        LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}",
+                     Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");
     }
 
     // ────────────────────────────────────────────────
@@ -484,29 +605,52 @@ public:
         subscriptions_.erase(handle);
     }
 
-    void pump(const SDL_Event& ev) {
-        uint64_t gen = generation_.load();
-        std::vector<EventCallback> active;
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            for (const auto& p : subscriptions_) {
-                if (p.second.gen == gen) active.push_back(p.second.cb);
+    void pump(const SDL_Event& ev) noexcept {
+        // Handle window focus / visibility changes first
+        if (ev.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
+            ev.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
+            ev.type == SDL_EVENT_WINDOW_SHOWN ||
+            ev.type == SDL_EVENT_WINDOW_HIDDEN) {
+            updateFocusState();
+        }
+
+        // Global hotkeys — always active (even if not focused, for quit)
+        if (ev.type == SDL_EVENT_KEY_DOWN) {
+            const bool* keys = SDL_GetKeyboardState(nullptr);
+
+            if (keys[SDL_SCANCODE_ESCAPE]) {
+                handleQuit();
+            }
+            if (keys[SDL_SCANCODE_F1]) {
+                toggleAdaptiveResolution();
+            }
+            if (keys[SDL_SCANCODE_F2]) {
+                toggleRayTracing();
             }
         }
-        for (const auto& cb : active) cb(ev);
-        processEvent(ev);
+
+        // Only process subscriptions & input if window has focus
+        if (hasFocus_) {
+            uint64_t gen = generation_.load();
+            std::vector<EventCallback> active;
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                for (const auto& p : subscriptions_) {
+                    if (p.second.gen == gen) active.push_back(p.second.cb);
+                }
+            }
+            for (const auto& cb : active) cb(ev);
+            processEvent(ev);
+        }
     }
 
     void invalidateAll() { generation_.fetch_add(1); }
 
-    void captureMouse(bool enable) {
-        if (window_) SDL_SetWindowRelativeMouseMode(window_, enable);
-    }
-
     glm::vec2 mouseDelta() const {
+        if (!hasFocus_) return {0.0f, 0.0f};
         float x = 0, y = 0;
         SDL_GetRelativeMouseState(&x, &y);
-        return {x, y};
+        return {static_cast<float>(x), static_cast<float>(y)};
     }
 
     void bind(std::string_view action, SDL_Scancode code) {
@@ -515,19 +659,21 @@ public:
     }
 
     bool down(std::string_view action) const {
+        if (!hasFocus_) return false;
         std::lock_guard<std::mutex> lock(mtx_);
         auto it = bindings_.find(std::string(action));
         if (it == bindings_.end()) return false;
-        const bool* ks = SDL_GetKeyboardState(nullptr);
-        return ks[static_cast<int>(it->second)];
+        const bool* state = SDL_GetKeyboardState(nullptr);
+        return state[static_cast<int>(it->second)];
     }
 
     glm::vec3 movement(float speed, float dt) const {
-        glm::vec3 v(0);
-        if (down("move_forward"))  v.z -= 1;
-        if (down("move_backward")) v.z += 1;
-        if (down("move_left"))     v.x -= 1;
-        if (down("move_right"))    v.x += 1;
+        if (!hasFocus_) return glm::vec3(0.0f);
+        glm::vec3 v(0.0f);
+        if (down("move_forward"))  v.z -= 1.0f;
+        if (down("move_backward")) v.z += 1.0f;
+        if (down("move_left"))     v.x -= 1.0f;
+        if (down("move_right"))    v.x += 1.0f;
         if (glm::length(v) > 0.01f) v = glm::normalize(v);
         if (down("sprint")) v *= 2.2f;
         if (down("crouch")) v *= 0.5f;
@@ -546,46 +692,38 @@ public:
     }
 
     const char* controllerName(int slot = 0) const {
-        if (!controllerConnected(slot)) return "None";
         return SDL_GetGamepadName(controllers_[static_cast<size_t>(slot)].gamepad.get());
     }
 
     float leftStickX(int slot = 0) const {
-        if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float leftStickY(int slot = 0) const {
-        if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float rightStickX(int slot = 0) const {
-        if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float rightStickY(int slot = 0) const {
-        if (!controllerConnected(slot)) return 0.0f;
         float val = SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
         return (std::abs(val) > Options::SDL3::GamepadDeadzone) ? val : 0.0f;
     }
 
     float leftTrigger(int slot = 0) const {
-        if (!controllerConnected(slot)) return 0.0f;
         return SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
     }
 
     float rightTrigger(int slot = 0) const {
-        if (!controllerConnected(slot)) return 0.0f;
         return SDL_GetGamepadAxis(controllers_[static_cast<size_t>(slot)].gamepad.get(), SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f;
     }
 
     bool buttonDown(int slot, SDL_GamepadButton button) const {
-        if (!controllerConnected(slot)) return false;
         return SDL_GetGamepadButton(controllers_[static_cast<size_t>(slot)].gamepad.get(), button);
     }
 
@@ -654,7 +792,6 @@ private:
         bind("interact",      SDL_SCANCODE_E);
     }
 
-private:
     SDL3System() = default;
 
     bool initialized_   = false;

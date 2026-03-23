@@ -8,8 +8,8 @@
 //
 // Features:
 // - Pure raymarching compute pipeline (CANVAS.spv from CANVAS.comp)
-// - Full controller + keyboard + mouse input passed to shader
-// - Shader handles final post-processing (exposure, vignette, tonemap, bloom glow, contrast, saturation)
+// - Full controller + keyboard + mouse input passed to shader via PushConstants
+// - Shader handles final post-processing (exposure, vignette, tonemap, bloom, contrast, saturation)
 // - Shader sends audio commands via small SSBO → CPU interprets & plays via SDL3System
 // - All Options:: namespaces are read and applied where applicable
 // =============================================================================
@@ -38,22 +38,6 @@ using u32 = std::uint32_t;
 using f32 = float;
 
 // ────────────────────────────────────────────────
-// Input bitflags (keyboard & mouse buttons)
-// ────────────────────────────────────────────────
-constexpr u32 INPUT_FORWARD         = 1u << 0;
-constexpr u32 INPUT_BACKWARD        = 1u << 1;
-constexpr u32 INPUT_LEFT            = 1u << 2;
-constexpr u32 INPUT_RIGHT           = 1u << 3;
-constexpr u32 INPUT_SPRINT          = 1u << 4;
-constexpr u32 INPUT_CROUCH          = 1u << 5;
-constexpr u32 INPUT_JUMP            = 1u << 6;
-constexpr u32 INPUT_INTERACT        = 1u << 7;
-constexpr u32 INPUT_SHOOT           = 1u << 8;
-constexpr u32 INPUT_MOUSE_LEFT      = 1u << 9;
-constexpr u32 INPUT_MOUSE_RIGHT     = 1u << 10;
-constexpr u32 INPUT_MOUSE_MIDDLE    = 1u << 11;
-
-// ────────────────────────────────────────────────
 // Audio command constants (values written by shader, interpreted by CPU)
 // ────────────────────────────────────────────────
 constexpr f32 AUDIO_CMD_PLAY        = 0.8f;     // > 0.5  → one-shot trigger (play)
@@ -77,7 +61,8 @@ struct CanvasBindings {
 };
 
 // ────────────────────────────────────────────────
-// Push constants — fully expanded with mouse support
+// Push constants — fully expanded with mouse & controller support
+// Must stay aligned to 16 bytes; total size checked at compile time
 // ────────────────────────────────────────────────
 struct alignas(16) PushConstants {
     f32         time;                       // total engine time (seconds)
@@ -98,6 +83,7 @@ struct alignas(16) PushConstants {
     u32         tonemapMode;                // 0 = linear/raw, 1 = simple filmic, 2 = ACES approx
     f32         contrast;                   // 0.8–1.4 typical
     f32         saturation;                 // 0.0–2.0 typical
+    f32         gamma;                      // 1.0 typical
 
     // Environment / atmosphere
     glm::vec3   sunDir;                     f32 sunIntensity;
@@ -112,23 +98,22 @@ struct alignas(16) PushConstants {
     f32         raymarchEpsilon;
     u32         raymarchMaxSteps;
 
-    // Full input state
-    u32         controllerInput;            // keyboard + mouse button bitfield
+    // Full input state — sent every frame
+    u32         controllerInput;            // bitfield (keyboard + mouse buttons)
     f32         leftStickX;                 f32 leftStickY;
     f32         rightStickX;                f32 rightStickY;
     f32         leftTrigger;                f32 rightTrigger;
 
-    // Mouse — relative delta and normalized position
-    glm::vec2   mouseDelta;                 // raw relative movement (pixels)
+    // Mouse input
+    glm::vec2   mouseDelta;                 // raw pixel delta this frame
     glm::vec2   mouseNormalized;            // [0,1] screen space (0,0 = top-left)
     f32         mouseWheelDelta;            // accumulated scroll this frame
 
-    f32         pad1[3];                    // align to 16 bytes
+    f32         pad1[3];                    // pad to 16-byte alignment
 };
 
 // ────────────────────────────────────────────────
-// Audio command block — small SSBO (128–256 bytes)
-// Written by shader, read by CPU every frame
+// Audio command block — small SSBO (written by shader, read by CPU)
 // ────────────────────────────────────────────────
 struct alignas(16) AudioCommandBlock {
     f32 slotCommand[16];        // command code per slot (play, volume, stop, pause, ...)
@@ -137,7 +122,7 @@ struct alignas(16) AudioCommandBlock {
 };
 
 // ────────────────────────────────────────────────
-// Global objects
+// Global Vulkan objects
 // ────────────────────────────────────────────────
 inline VkDescriptorSetLayout    main_descriptor_layout  = VK_NULL_HANDLE;
 inline VkPipelineLayout         pipeline_layout         = VK_NULL_HANDLE;
@@ -362,7 +347,7 @@ inline void create_canvas_pipeline(const std::string& override_path = "") noexce
 }
 
 // ────────────────────────────────────────────────
-// Process audio commands from shader (call after compute work completes)
+// Process audio commands from shader (call after compute dispatch completes)
 // ────────────────────────────────────────────────
 inline void process_shader_audio_commands() noexcept {
     if (!audio_cmd_mapped) return;
@@ -374,32 +359,30 @@ inline void process_shader_audio_commands() noexcept {
         f32 value   = cmd->slotValue[slot];
 
         if (command > 0.51f) {
-            // Trigger play — you can map slot → specific file here
-            // Example: simple naming convention or lookup table
+            // Trigger play
             std::string file = "assets/audio/sfx_slot_" + std::to_string(slot) + ".wav";
             INPUT.playSound(file, "play", slot);
             LOG_INFO_CAT("AUDIO_SHADER", "Play triggered on slot {} (value={})", slot, value);
         }
         else if (command >= 0.20f && command <= 0.50f) {
-            // Continuous volume modulation
+            // Continuous volume
             f32 normalized_vol = glm::clamp(value, 0.0f, 1.2f);
-            // TODO: expose or add helper INPUT.setTrackVolume(slot, normalized_vol);
-            // For now: log only — implement actual volume set in SDL3System if needed
+            // TODO: INPUT.setTrackVolume(slot, normalized_vol);
             LOG_INFO_CAT("AUDIO_SHADER", "Volume set on slot {} → {:.3f}", slot, normalized_vol);
         }
         else if (command < -0.1f) {
             // Stop / pause
-            INPUT.playSound("", "stop", slot);  // or "pause"
+            INPUT.playSound("", "stop", slot);
             LOG_INFO_CAT("AUDIO_SHADER", "Stop requested on slot {}", slot);
         }
     }
 
-    // Clear for next frame (optional — shader can also clear)
+    // Clear for next frame
     std::memset(cmd, 0, sizeof(AudioCommandBlock));
 }
 
 // ────────────────────────────────────────────────
-// Main dispatch function — full input, mouse, audio feedback
+// Main dispatch — full input to shader, camera from singleton, audio feedback
 // ────────────────────────────────────────────────
 inline void dispatch_canvas(VkCommandBuffer cmd,
                             int width, int height,
@@ -419,25 +402,26 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.time             = totalTime;
     pc.frameSeed        = static_cast<u32>(totalTime * 987654.321f) ^ 0xCAFEBABEu;
 
-    // Camera state
+    // ── Camera (use singleton methods for runtime state) ─────────────────────
     pc.cameraPos        = CAM.position();
     pc.cameraQuat       = glm::vec4(CAM.orientation().x, CAM.orientation().y,
                                     CAM.orientation().z, CAM.orientation().w);
-    pc.cameraFovDeg     = CAM_FOV();
+    pc.cameraFovDeg     = CAM.fovDeg();
     pc.aspectRatio      = static_cast<f32>(width) / static_cast<f32>(height);
     pc.nearPlane        = Options::Camera::NearPlane;
     pc.farPlane         = Options::Camera::FarPlane;
 
-    // Post-process from options (shader will apply)
+    // ── Post-process (shader applies) ────────────────────────────────────────
     pc.exposure         = Options::Rendering::Exposure;
     pc.vignetteStrength = Options::Rendering::VignetteStrength;
     pc.bloomThreshold   = Options::Rendering::BloomThreshold;
     pc.bloomIntensity   = Options::Rendering::BloomIntensity;
     pc.tonemapMode      = Options::Rendering::EnableTonemapping;
-    pc.contrast         = 1.0f;                    // placeholder — expose later
-    pc.saturation       = 1.0f;                    // placeholder
+    pc.contrast         = Options::Rendering::Contrast;
+    pc.saturation       = Options::Rendering::Saturation;
+    pc.gamma            = Options::Rendering::Gamma;
 
-    // Environment
+    // ── Environment / TOD (Howie©) ───────────────────────────────────────────
     f32 tod = Options::LivingWorld::CurrentTimeOfDay;
     pc.sunDir           = computeSunDirection(tod);
     pc.moonDir          = computeMoonDirection(tod);
@@ -449,32 +433,34 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     pc.dayNightFactor   = tod / 24.0f;
     pc.cloudCoverage    = Options::LivingWorld::CloudCoverage;
 
-    // Raymarching quality
+    // ── Raymarching quality ──────────────────────────────────────────────────
     pc.raymarchMaxDist  = Options::Rendering::RaymarchMaxDistance;
     pc.raymarchEpsilon  = Options::Rendering::RaymarchEpsilon;
     pc.raymarchMaxSteps = Options::Rendering::RaymarchMaxSteps;
 
-    // Full input state — keyboard, controller, mouse
-    int ctrl_slot = 0; // primary controller
+    // ── Full input state (keyboard + mouse + controller) ─────────────────────
+    pc.controllerInput = 0u;
 
-    pc.controllerInput = 0;
-    if (INPUT.down("move_forward"))  pc.controllerInput |= INPUT_FORWARD;
-    if (INPUT.down("move_backward")) pc.controllerInput |= INPUT_BACKWARD;
-    if (INPUT.down("move_left"))     pc.controllerInput |= INPUT_LEFT;
-    if (INPUT.down("move_right"))    pc.controllerInput |= INPUT_RIGHT;
-    if (INPUT.down("sprint"))        pc.controllerInput |= INPUT_SPRINT;
-    if (INPUT.down("crouch"))        pc.controllerInput |= INPUT_CROUCH;
-    if (INPUT.down("jump"))          pc.controllerInput |= INPUT_JUMP;
-    if (INPUT.down("interact"))      pc.controllerInput |= INPUT_INTERACT;
-    if (INPUT.down("shoot"))         pc.controllerInput |= INPUT_SHOOT;
+    // Keyboard actions (string-based → bitflag)
+    if (INPUT.down("move_forward"))  pc.controllerInput |= Options::Input::Flags::FORWARD;
+    if (INPUT.down("move_backward")) pc.controllerInput |= Options::Input::Flags::BACKWARD;
+    if (INPUT.down("move_left"))     pc.controllerInput |= Options::Input::Flags::LEFT;
+    if (INPUT.down("move_right"))    pc.controllerInput |= Options::Input::Flags::RIGHT;
 
-    // Mouse buttons as bitflags
+    if (INPUT.down("sprint"))        pc.controllerInput |= Options::Input::Flags::SPRINT;
+    if (INPUT.down("crouch"))        pc.controllerInput |= Options::Input::Flags::CROUCH;
+    if (INPUT.down("jump"))          pc.controllerInput |= Options::Input::Flags::JUMP;
+    if (INPUT.down("interact"))      pc.controllerInput |= Options::Input::Flags::INTERACT;
+    if (INPUT.down("shoot"))         pc.controllerInput |= Options::Input::Flags::SHOOT;
+
+    // Mouse buttons
     Uint32 mouse_state = SDL_GetMouseState(nullptr, nullptr);
-    if (mouse_state & SDL_BUTTON_LMASK) pc.controllerInput |= INPUT_MOUSE_LEFT;
-    if (mouse_state & SDL_BUTTON_RMASK) pc.controllerInput |= INPUT_MOUSE_RIGHT;
-    if (mouse_state & SDL_BUTTON_MMASK) pc.controllerInput |= INPUT_MOUSE_MIDDLE;
+    if (mouse_state & SDL_BUTTON_LMASK) pc.controllerInput |= Options::Input::Flags::MOUSE_LEFT;
+    if (mouse_state & SDL_BUTTON_RMASK) pc.controllerInput |= Options::Input::Flags::MOUSE_RIGHT;
+    if (mouse_state & SDL_BUTTON_MMASK) pc.controllerInput |= Options::Input::Flags::MOUSE_MIDDLE;
 
-    // Analog sticks & triggers
+    // Analog input (sticks & triggers)
+    int ctrl_slot = 0; // primary controller
     pc.leftStickX   = INPUT.leftStickX(ctrl_slot);
     pc.leftStickY   = INPUT.leftStickY(ctrl_slot);
     pc.rightStickX  = INPUT.rightStickX(ctrl_slot);
@@ -486,22 +472,23 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
     glm::vec2 delta = INPUT.mouseDelta();
     pc.mouseDelta       = delta;
     pc.mouseNormalized  = glm::vec2(
-        (delta.x + width * 0.5f)  / static_cast<f32>(width),
-        (delta.y + height * 0.5f) / static_cast<f32>(height)
+        (delta.x + static_cast<f32>(width)  * 0.5f) / static_cast<f32>(width),
+        (delta.y + static_cast<f32>(height) * 0.5f) / static_cast<f32>(height)
     );
+    pc.mouseWheelDelta  = 0.0f; // TODO: accumulate from SDL wheel events if needed
 
-    // Bind & push
+    // ── Vulkan dispatch ──────────────────────────────────────────────────────
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
     vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(PushConstants), &pc);
 
-    // Assume descriptor set is already bound with all 7 bindings
+    // Assume descriptor set already bound (output, prev frame, audio SSBO, etc.)
 
     u32 dx = (static_cast<u32>(width)  + 15u) / 16u;
     u32 dy = (static_cast<u32>(height) + 15u) / 16u;
     vkCmdDispatch(cmd, dx, dy, 1u);
 
-    // Process audio feedback after dispatch (in real code: after submit + fence)
+    // Audio feedback (after fence/wait in real usage)
     process_shader_audio_commands();
 }
 
