@@ -3,7 +3,6 @@
 // =============================================================================
 // AMOURANTH RTX Engine — Header-Only Hybrid 2026 Edition
 // Pure raymarching + hardware ray tracing + procedural geometry
-// Multi-platform: Windows, Linux, Wine/Proton, Android Vulkan, future Metal
 // (C) 2025-2026 Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
@@ -21,14 +20,14 @@
 #include <cstdint>
 #include <format>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
+#include <set>
 #include <algorithm>
 #include <cstring>
-#include <set>
-
-#include "ELLIE.hpp"
 
 // Required device extensions
 inline constexpr std::array<const char*, 9> requiredDeviceExtensions = {{
@@ -41,12 +40,6 @@ inline constexpr std::array<const char*, 9> requiredDeviceExtensions = {{
     VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
     VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
-}};
-
-// Optional extensions (Wine, Android, Metal portability, etc.)
-inline constexpr std::array<const char*, 3> optionalDeviceExtensions = {{
-    VK_KHR_MAINTENANCE_1_EXTENSION_NAME,
-    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
 }};
 
 // ────────────────────────────────────────────────
@@ -86,7 +79,7 @@ struct VRAMReality {
 };
 
 // ────────────────────────────────────────────────
-// Core context (dense vector + free list for buffers)
+// Core context
 // ────────────────────────────────────────────────
 
 struct RTX {
@@ -108,11 +101,9 @@ struct RTX {
     SDL_Window*                     window              = nullptr;
 
     VkCommandPool                   transient_pool      = VK_NULL_HANDLE;
-    VkCommandBuffer                 persistent_transient_cmd = VK_NULL_HANDLE;  // Wine-safe: reset & reuse
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props{};
     bool                            rt_props_cached     = false;
-    bool                            rayTracingSupported = false;
 
     VkPipeline                      compute_pipeline    = VK_NULL_HANDLE;
     VkPipeline                      rt_pipeline         = VK_NULL_HANDLE;
@@ -123,7 +114,6 @@ struct RTX {
     VkAccelerationStructureKHR      las_as              = VK_NULL_HANDLE;
     uint64_t                        las_as_storage      = 0;
     std::vector<UniversalPrimitive> las_procedural_primitives;
-
     bool                            las_initialized     = false;
     bool                            las_dirty           = true;
 
@@ -144,10 +134,9 @@ struct RTX {
         std::string         tag;
     };
 
-    std::vector<BufferInfo>         buffers_;
-    std::vector<uint64_t>           free_handles_;
-    uint64_t                        next_buffer_handle_ = 1ULL;
-    std::mutex                      buffer_mutex_;
+    std::unordered_map<uint64_t, BufferInfo> buffers;
+    uint64_t                        next_buffer_handle  = 1ULL;
+    std::mutex                      buffer_mutex;
 };
 
 inline RTX& rtx() noexcept {
@@ -156,7 +145,7 @@ inline RTX& rtx() noexcept {
 }
 
 // ────────────────────────────────────────────────
-// Extension loader (production-ready)
+// Extension loader
 // ────────────────────────────────────────────────
 
 struct VulkanExtensions {
@@ -182,80 +171,44 @@ struct VulkanExtensions {
     PFN_vkCmdEndRendering                           vkCmdEndRendering{};
 };
 
-inline void loadDeviceExtensions(VulkanExtensions& e) noexcept {
-    if (!rtx().device) return;
-
-    // Required extensions
-    e.vkCreateSwapchainKHR                      = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkCreateSwapchainKHR"));
-    e.vkDestroySwapchainKHR                     = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkDestroySwapchainKHR"));
-    e.vkGetSwapchainImagesKHR                   = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkGetSwapchainImagesKHR"));
-    e.vkAcquireNextImageKHR                     = reinterpret_cast<PFN_vkAcquireNextImageKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkAcquireNextImageKHR"));
-    e.vkQueuePresentKHR                         = reinterpret_cast<PFN_vkQueuePresentKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkQueuePresentKHR"));
-
-    e.vkCreateRayTracingPipelinesKHR            = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkCreateRayTracingPipelinesKHR"));
-    e.vkGetRayTracingShaderGroupHandlesKHR      = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkGetRayTracingShaderGroupHandlesKHR"));
-    e.vkCmdTraceRaysKHR                         = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkCmdTraceRaysKHR"));
-
-    e.vkGetAccelerationStructureBuildSizesKHR   = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureBuildSizesKHR"));
-    e.vkCmdBuildAccelerationStructuresKHR       = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkCmdBuildAccelerationStructuresKHR"));
-    e.vkCreateAccelerationStructureKHR          = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkCreateAccelerationStructureKHR"));
-    e.vkDestroyAccelerationStructureKHR         = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkDestroyAccelerationStructureKHR"));
-    e.vkGetAccelerationStructureDeviceAddressKHR= reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
-        vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR"));
-
-    e.vkGetBufferDeviceAddress                  = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(
-        vkGetDeviceProcAddr(rtx().device, "vkGetBufferDeviceAddress"));
-
-    e.vkCmdBeginRendering                       = reinterpret_cast<PFN_vkCmdBeginRendering>(
-        vkGetDeviceProcAddr(rtx().device, "vkCmdBeginRendering"));
-    e.vkCmdEndRendering                         = reinterpret_cast<PFN_vkCmdEndRendering>(
-        vkGetDeviceProcAddr(rtx().device, "vkCmdEndRendering"));
-
-    // Optional extensions (Wine, Android, Metal portability)
-    for (const char* extName : optionalDeviceExtensions) {
-        auto proc = vkGetDeviceProcAddr(rtx().device, extName);
-        if (proc) {
-            LOG_INFO_CAT("EXT", "Optional extension loaded: {}", extName);
-        }
-    }
-}
-
 inline VulkanExtensions& ext() noexcept {
     static VulkanExtensions e;
     static bool loaded = false;
 
     if (!loaded && rtx().device) {
-        loadDeviceExtensions(e);
+        e.vkCreateSwapchainKHR                      = (PFN_vkCreateSwapchainKHR)                     vkGetDeviceProcAddr(rtx().device, "vkCreateSwapchainKHR");
+        e.vkDestroySwapchainKHR                     = (PFN_vkDestroySwapchainKHR)                    vkGetDeviceProcAddr(rtx().device, "vkDestroySwapchainKHR");
+        e.vkGetSwapchainImagesKHR                   = (PFN_vkGetSwapchainImagesKHR)                  vkGetDeviceProcAddr(rtx().device, "vkGetSwapchainImagesKHR");
+        e.vkAcquireNextImageKHR                     = (PFN_vkAcquireNextImageKHR)                    vkGetDeviceProcAddr(rtx().device, "vkAcquireNextImageKHR");
+        e.vkQueuePresentKHR                         = (PFN_vkQueuePresentKHR)                        vkGetDeviceProcAddr(rtx().device, "vkQueuePresentKHR");
+
+        e.vkCreateRayTracingPipelinesKHR            = (PFN_vkCreateRayTracingPipelinesKHR)           vkGetDeviceProcAddr(rtx().device, "vkCreateRayTracingPipelinesKHR");
+        e.vkGetRayTracingShaderGroupHandlesKHR      = (PFN_vkGetRayTracingShaderGroupHandlesKHR)     vkGetDeviceProcAddr(rtx().device, "vkGetRayTracingShaderGroupHandlesKHR");
+        e.vkCmdTraceRaysKHR                         = (PFN_vkCmdTraceRaysKHR)                        vkGetDeviceProcAddr(rtx().device, "vkCmdTraceRaysKHR");
+
+        e.vkGetAccelerationStructureBuildSizesKHR   = (PFN_vkGetAccelerationStructureBuildSizesKHR)  vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureBuildSizesKHR");
+        e.vkCmdBuildAccelerationStructuresKHR       = (PFN_vkCmdBuildAccelerationStructuresKHR)      vkGetDeviceProcAddr(rtx().device, "vkCmdBuildAccelerationStructuresKHR");
+        e.vkCreateAccelerationStructureKHR          = (PFN_vkCreateAccelerationStructureKHR)         vkGetDeviceProcAddr(rtx().device, "vkCreateAccelerationStructureKHR");
+        e.vkDestroyAccelerationStructureKHR         = (PFN_vkDestroyAccelerationStructureKHR)        vkGetDeviceProcAddr(rtx().device, "vkDestroyAccelerationStructureKHR");
+        e.vkGetAccelerationStructureDeviceAddressKHR= (PFN_vkGetAccelerationStructureDeviceAddressKHR) vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR");
+
+        e.vkGetBufferDeviceAddress                  = (PFN_vkGetBufferDeviceAddress)                 vkGetDeviceProcAddr(rtx().device, "vkGetBufferDeviceAddress");
+
+        e.vkCmdBeginRendering                       = (PFN_vkCmdBeginRendering)                      vkGetDeviceProcAddr(rtx().device, "vkCmdBeginRendering");
+        e.vkCmdEndRendering                         = (PFN_vkCmdEndRendering)                        vkGetDeviceProcAddr(rtx().device, "vkCmdEndRendering");
+
         loaded = true;
     }
     return e;
 }
 
 // ────────────────────────────────────────────────
-// Queue family helper (sentinel values)
+// Queue family helper
 // ────────────────────────────────────────────────
 
 struct QueueFamilyIndices {
-    uint32_t graphics = ~0u;
-    uint32_t present  = ~0u;
-    uint32_t compute  = ~0u;
-    uint32_t transfer = ~0u;
-
-    bool complete() const noexcept {
-        return graphics != ~0u && present != ~0u && compute != ~0u;
-    }
+    std::optional<uint32_t> graphics, present, compute, transfer;
+    bool complete() const noexcept { return graphics && present && compute; }
 };
 
 inline QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR surf) noexcept {
@@ -278,8 +231,8 @@ inline QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
             indices.transfer = i;
     }
 
-    if (indices.compute == ~0u) indices.compute = indices.graphics;
-    if (indices.transfer == ~0u) indices.transfer = indices.graphics;
+    if (!indices.compute.has_value()) indices.compute = indices.graphics;
+    if (!indices.transfer.has_value()) indices.transfer = indices.graphics;
 
     return indices;
 }
@@ -292,9 +245,9 @@ inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 9, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 6, 0);
     appInfo.pEngineName        = "AMOURANTHRTX";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 9, 0);
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 6, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
 
     uint32_t sdlCount = 0;
@@ -371,9 +324,9 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
     rtx().physical = selected;
 
     std::set<uint32_t> families = {
-        best.graphics,
-        best.present,
-        best.compute != ~0u ? best.compute : best.graphics
+        best.graphics.value(),
+        best.present.value(),
+        best.compute.value_or(best.graphics.value())
     };
 
     float priority = 1.0f;
@@ -420,10 +373,10 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 
     rtx().device = dev;
 
-    rtx().graphics_family = best.graphics;
-    rtx().present_family  = best.present;
-    rtx().compute_family  = best.compute != ~0u ? best.compute : best.graphics;
-    rtx().transfer_family = best.transfer != ~0u ? best.transfer : best.graphics;
+    rtx().graphics_family = best.graphics.value();
+    rtx().present_family  = best.present.value();
+    rtx().compute_family  = best.compute.value_or(best.graphics.value());
+    rtx().transfer_family = best.transfer.value_or(best.graphics.value());
 
     vkGetDeviceQueue(dev, rtx().graphics_family, 0, &rtx().graphics_queue);
     vkGetDeviceQueue(dev, rtx().present_family,  0, &rtx().present_queue);
@@ -439,46 +392,18 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 }
 
 // ────────────────────────────────────────────────
-// Command buffer helpers — Wine-safe persistent + reset
-// Alloc once, reset every frame, no alloc/free cycle
-// Works on Windows, Linux, Wine/Proton, Android, future Metal
+// Command buffer helpers (used by Memory::uploadToBuffer)
 // ────────────────────────────────────────────────
 
-inline VkCommandBuffer g_transientCmd = VK_NULL_HANDLE;
-
-inline bool initTransientCommandBuffer() noexcept {
+inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
     VkCommandBufferAllocateInfo alloc{};
     alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc.commandPool        = rtx().transient_pool;
     alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
 
-    VkResult res = vkAllocateCommandBuffers(rtx().device, &alloc, &g_transientCmd);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("CMD", "Failed to allocate persistent transient cmd: {}", vkh.result(res));
-        return false;
-    }
-
-    LOG_SUCCESS_CAT("CMD", "Persistent transient command buffer allocated");
-    return true;
-}
-
-inline void destroyTransientCommandBuffer() noexcept {
-    if (g_transientCmd != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &g_transientCmd);
-        g_transientCmd = VK_NULL_HANDLE;
-    }
-}
-
-inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
-    if (g_transientCmd == VK_NULL_HANDLE) {
-        LOG_FATAL_CAT("CMD", "Transient cmd not initialized");
-        return VK_NULL_HANDLE;
-    }
-
-    VkResult res = vkResetCommandBuffer(g_transientCmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
-    if (res != VK_SUCCESS) {
-        LOG_ERROR_CAT("CMD", "vkResetCommandBuffer failed: {}", vkh.result(res));
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(rtx().device, &alloc, &cmd) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
 
@@ -486,12 +411,12 @@ inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    if (vkBeginCommandBuffer(g_transientCmd, &begin) != VK_SUCCESS) {
-        LOG_ERROR_CAT("CMD", "vkBeginCommandBuffer failed");
+    if (vkBeginCommandBuffer(cmd, &begin) != VK_SUCCESS) {
+        vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
         return VK_NULL_HANDLE;
     }
 
-    return g_transientCmd;
+    return cmd;
 }
 
 inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
@@ -513,11 +438,11 @@ inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
     vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(rtx().device, fence, nullptr);
 
-    // No vkFreeCommandBuffers — reset & reuse next frame
+    vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
 }
 
 // ────────────────────────────────────────────────
-// Memory implementation (dense vector + free list)
+// Memory implementation
 // ────────────────────────────────────────────────
 
 namespace Memory {
@@ -534,18 +459,6 @@ inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags requir
         }
     }
     return ~0u;
-}
-
-inline uint64_t allocHandle() noexcept {
-    std::lock_guard<std::mutex> lock(rtx().buffer_mutex_);
-    if (!rtx().free_handles_.empty()) {
-        uint64_t h = rtx().free_handles_.back();
-        rtx().free_handles_.pop_back();
-        return h;
-    }
-    uint64_t h = rtx().next_buffer_handle_++;
-    if (h >= rtx().buffers_.size()) rtx().buffers_.resize(h + 128);
-    return h;
 }
 
 inline uint64_t createBuffer(
@@ -609,28 +522,27 @@ inline uint64_t createBuffer(
         vkMapMemory(rtx().device, mem, 0, size, 0, &mapped);
     }
 
-    uint64_t handle = allocHandle();
-    rtx().buffers_[handle] = {buf, mem, size, addr, mapped, usage, std::string(tag)};
+    uint64_t handle = rtx().next_buffer_handle++;
+    rtx().buffers.emplace(handle, RTX::BufferInfo{buf, mem, size, addr, mapped, usage, std::string(tag)});
 
     return handle;
 }
 
 inline void destroy(uint64_t handle) noexcept {
-    std::lock_guard<std::mutex> lock(rtx().buffer_mutex_);
-    if (handle == 0 || handle >= rtx().buffers_.size()) return;
+    std::lock_guard<std::mutex> lock(rtx().buffer_mutex);
+    auto it = rtx().buffers.find(handle);
+    if (it == rtx().buffers.end()) return;
 
-    auto& b = rtx().buffers_[handle];
+    auto& b = it->second;
     if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
     vkDestroyBuffer(rtx().device, b.buffer, nullptr);
     vkFreeMemory(rtx().device, b.memory, nullptr);
-
-    b = {}; // clear
-    rtx().free_handles_.push_back(handle);
+    rtx().buffers.erase(it);
 }
 
 inline RTX::BufferInfo* get(uint64_t handle) noexcept {
-    if (handle == 0 || handle >= rtx().buffers_.size()) return nullptr;
-    return &rtx().buffers_[handle];
+    auto it = rtx().buffers.find(handle);
+    return (it != rtx().buffers.end()) ? &it->second : nullptr;
 }
 
 inline VkBuffer getBuffer(uint64_t handle) noexcept {
@@ -721,7 +633,7 @@ inline VRAMReality measureReality() noexcept {
 } // namespace Memory
 
 // ────────────────────────────────────────────────
-// Swapchain
+// Swapchain — functions in dependency order: cleanup → recreate → create
 // ────────────────────────────────────────────────
 
 namespace Swapchain {
@@ -745,7 +657,7 @@ inline double               lastPresentTime_s   = 0.0;
 inline double               smoothedRefresh_s   = 1.0 / 60.0;
 
 // ────────────────────────────────────────────────
-// Forward declarations
+// Forward declarations inside namespace
 // ────────────────────────────────────────────────
 
 inline VkSwapchainKHR get() noexcept;
@@ -754,7 +666,7 @@ inline void           updateRefreshEstimate(double t) noexcept;
 inline double         getSmoothedRefresh() noexcept;
 
 // ────────────────────────────────────────────────
-// Cleanup
+// Cleanup (first — used by recreate)
 // ────────────────────────────────────────────────
 
 inline void cleanup() noexcept {
@@ -857,7 +769,7 @@ inline void create(SDL_Window* window, int w, int h) noexcept {
 // Inline helpers
 // ────────────────────────────────────────────────
 
-inline VkSwapchainKHR get() noexcept                { return swapchain.value; }
+inline VkSwapchainKHR get() noexcept                { return swapchain; }
 inline VkExtent2D     getExtent() noexcept          { return extent; }
 
 inline void updateRefreshEstimate(double t) noexcept {
@@ -888,24 +800,12 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
 
     if (!rtx().device) return false;
 
-    // Load extensions after device creation
-    ext();  // Triggers loadDeviceExtensions()
-
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolInfo.queueFamilyIndex = rtx().graphics_family;
 
     vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
-
-    // Initialize persistent transient command buffer (Wine-safe)
-    if (!initTransientCommandBuffer()) {
-        return false;
-    }
-
-    // Pre-reserve buffers and primitives
-    rtx().buffers_.reserve(512);
-    rtx().las_procedural_primitives.reserve(256);
 
     Swapchain::create(window, width, height);
 
@@ -915,21 +815,18 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
 inline void cleanupRTX() noexcept {
     vkDeviceWaitIdle(rtx().device);
 
-    // Destroy persistent transient cmd buffer before pool
-    destroyTransientCommandBuffer();
-
     Swapchain::cleanup();
 
-    for (auto& b : rtx().buffers_) {
+    for (auto& [h, b] : rtx().buffers) {
         if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
         vkDestroyBuffer(rtx().device, b.buffer, nullptr);
         vkFreeMemory(rtx().device, b.memory, nullptr);
     }
-    rtx().buffers_.clear();
-    rtx().free_handles_.clear();
+    rtx().buffers.clear();
 
     if (rtx().transient_pool) vkDestroyCommandPool(rtx().device, rtx().transient_pool, nullptr);
 
     if (rtx().device) vkDestroyDevice(rtx().device, nullptr);
     if (rtx().surface) vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);
+    if (rtx().instance) vkDestroyInstance(rtx().instance, nullptr);
 }

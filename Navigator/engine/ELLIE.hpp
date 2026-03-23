@@ -10,10 +10,10 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
-#include <SDL3/SDL.h>
+#include <SDL3/SDL.h>  // Added for SDL3 support in checker
 
-#include <algorithm>
-#include <array>
+#include <algorithm> // for std::sort
+#include <array>     // for std::array
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -137,7 +137,7 @@ private:
 
     void verify() const noexcept {
         if ((entropy_ ^ 0x9E37AF18C64D8A17UL) != entropy_check_) [[unlikely]] {
-            std::abort();  // memory corruption — fatal - no hacking
+            std::abort();  // memory corruption — fatal
         }
     }
 
@@ -441,7 +441,7 @@ namespace Color {
     inline constexpr std::string_view NUCLEAR_GREEN     = "\033[1;38;5;82m";
     inline constexpr std::string_view HYPER_VIOLET      = "\033[1;38;5;141m";
     inline constexpr std::string_view PURE_ENERGY       = "\033[1;38;5;227m";
-    inline constexpr std::string_view BLINKING_RED      = "\033[1;38;5;196m\033[5m";
+    inline constexpr std::string_view ETERNAL_FLAME     = "\033[1;38;5;196m\033[5m";
 }
 
 // ========================================================================

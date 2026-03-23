@@ -202,15 +202,15 @@ private:
 // ────────────────────────────────────────────────
 inline Camera& CAM = Camera::get();
 
-inline glm::vec3   CAM_POS()          { return CAM.position(); }
+inline glm::vec3   CAM_POS()          { return Options::Camera::StartPosition; }
 inline glm::quat   CAM_ORI()          { return CAM.orientation(); }
 inline glm::vec3   CAM_FWD()          { return CAM.forward(); }
 inline glm::vec3   CAM_RIGHT()        { return CAM.right(); }
 inline glm::vec3   CAM_UP()           { return CAM.up(); }
-inline float       CAM_FOV()          { return CAM.fovDeg(); }
-inline float       CAM_ZOOM()         { return CAM.orthoZoom(); }
-inline float       CAM_NEAR()         { return CAM.nearPlane(); }
-inline float       CAM_FAR()          { return CAM.farPlane(); }
+inline float       CAM_FOV()          { return Options::Camera::CurrentFOV; }
+inline float       CAM_ZOOM()         { return Options::Camera::OrthoZoom; }
+inline float       CAM_NEAR()         { return Options::Camera::NearPlane; }
+inline float       CAM_FAR()          { return Options::Camera::FarPlane; }
 inline glm::mat4   CAM_VIEW()         { return CAM.view(); }
 inline glm::mat4   CAM_PROJ(float a)  { return CAM.projection(a); }
 

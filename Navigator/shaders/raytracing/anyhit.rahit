@@ -1,10 +1,9 @@
-// filename: anyhit.rahit
-#version 460
-#extension GL_EXT_ray_tracing : require
+// Filename:     anyhit.rahit
+// Path:         Navigator/raytracing/anyhit.rahit
+// Purpose:      Primitive placeholder — empty function to allow compilation
 
-layout(location = 0) rayPayloadEXT vec3 hitColor;
+#version 460
 
 void main() {
-    // For this minimal example we don't do alpha testing → just accept
-    // You can add discard; here for alpha-tested geometry later
+    // Empty — compiles cleanly
 }

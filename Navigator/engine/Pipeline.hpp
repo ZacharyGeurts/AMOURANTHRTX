@@ -1,275 +1,296 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine — (Raymarching + Hardware Ray Tracing)
+// AMOURANTH RTX Engine — Pipeline (pure raymarched 3D with full input & audio)
 // (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
+//
+// Features:
+// - Pure raymarching compute pipeline (CANVAS.spv from CANVAS.comp)
+// - Full controller + keyboard + mouse input passed to shader
+// - Shader handles final post-processing (exposure, vignette, tonemap, bloom glow, contrast, saturation)
+// - Shader sends audio commands via small SSBO → CPU interprets & plays via SDL3System
+// - All Options:: namespaces are read and applied where applicable
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "Camera.hpp"
+#include "Camera.hpp"           // CAM singleton
 #include "Materials.hpp"
-#include "SDL3.hpp"
+#include "SDL3.hpp"             // INPUT access via SDL3System
 
+#include <algorithm>
 #include <vector>
-#include <string>
-#include <filesystem>
 #include <fstream>
 #include <format>
+#include <filesystem>
+#include <cstdint>
+#include <string>
 #include <expected>
+#include <cmath>
 #include <cstring>
-#include <algorithm>
-#include <atomic>
-#include <SDL3/SDL_gamepad.h>
 
 namespace Pipeline {
 
-constexpr uint32_t INPUT_FORWARD         = 1u << 0;
-constexpr uint32_t INPUT_BACKWARD        = 1u << 1;
-constexpr uint32_t INPUT_LEFT            = 1u << 2;
-constexpr uint32_t INPUT_RIGHT           = 1u << 3;
-constexpr uint32_t INPUT_SPRINT          = 1u << 4;
-constexpr uint32_t INPUT_CROUCH          = 1u << 5;
-constexpr uint32_t INPUT_JUMP            = 1u << 6;
-constexpr uint32_t INPUT_INTERACT        = 1u << 7;
-constexpr uint32_t INPUT_SHOOT           = 1u << 8;
-constexpr uint32_t INPUT_MOUSE_LEFT      = 1u << 9;
-constexpr uint32_t INPUT_MOUSE_RIGHT     = 1u << 10;
-constexpr uint32_t INPUT_MOUSE_MIDDLE    = 1u << 11;
+using u32 = std::uint32_t;
+using f32 = float;
 
-constexpr float AUDIO_CMD_PLAY        = 0.8f;
-constexpr float AUDIO_CMD_VOLUME      = 0.35f;
-constexpr float AUDIO_CMD_STOP        = -0.5f;
-constexpr float AUDIO_CMD_PAUSE       = -0.3f;
+// ────────────────────────────────────────────────
+// Input bitflags (keyboard & mouse buttons)
+// ────────────────────────────────────────────────
+constexpr u32 INPUT_FORWARD         = 1u << 0;
+constexpr u32 INPUT_BACKWARD        = 1u << 1;
+constexpr u32 INPUT_LEFT            = 1u << 2;
+constexpr u32 INPUT_RIGHT           = 1u << 3;
+constexpr u32 INPUT_SPRINT          = 1u << 4;
+constexpr u32 INPUT_CROUCH          = 1u << 5;
+constexpr u32 INPUT_JUMP            = 1u << 6;
+constexpr u32 INPUT_INTERACT        = 1u << 7;
+constexpr u32 INPUT_SHOOT           = 1u << 8;
+constexpr u32 INPUT_MOUSE_LEFT      = 1u << 9;
+constexpr u32 INPUT_MOUSE_RIGHT     = 1u << 10;
+constexpr u32 INPUT_MOUSE_MIDDLE    = 1u << 11;
 
+// ────────────────────────────────────────────────
+// Audio command constants (values written by shader, interpreted by CPU)
+// ────────────────────────────────────────────────
+constexpr f32 AUDIO_CMD_PLAY        = 0.8f;     // > 0.5  → one-shot trigger (play)
+constexpr f32 AUDIO_CMD_VOLUME      = 0.35f;    // 0.2–0.5 → continuous volume set (0.0–1.0)
+constexpr f32 AUDIO_CMD_STOP        = -0.5f;    // < 0     → stop or pause track
+constexpr f32 AUDIO_CMD_PAUSE       = -0.3f;    // alternative pause signal
+
+// ────────────────────────────────────────────────
+// Descriptor bindings (set = 0)
+// ────────────────────────────────────────────────
+struct CanvasBindings {
+    static constexpr VkDescriptorSetLayoutBinding bindings[] = {
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // output image (final LDR)
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // previous frame (accumulation / TAA)
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // optional geometry/instances
+        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // optional lights/environment
+        {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // optional materials
+        {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // optional textures/data
+        {6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, // audio commands (small SSBO)
+    };
+};
+
+// ────────────────────────────────────────────────
+// Push constants — fully expanded with mouse support
+// ────────────────────────────────────────────────
 struct alignas(16) PushConstants {
-    float       time;
-    uint32_t    frameSeed;
+    f32         time;                       // total engine time (seconds)
+    u32         frameSeed;                  // per-frame RNG seed
 
-    glm::vec3   cameraPos;                  float pad0;
-    glm::vec4   cameraQuat;
-    float       cameraFovDeg;
-    float       aspectRatio;
-    float       nearPlane;
-    float       farPlane;
+    glm::vec3   cameraPos;                  f32 pad0;
+    glm::vec4   cameraQuat;                 // xyzw orientation quaternion
+    f32         cameraFovDeg;               // vertical FOV in degrees
+    f32         aspectRatio;                // width / height
+    f32         nearPlane;
+    f32         farPlane;
 
-    float       exposure;
-    float       vignetteStrength;
-    float       bloomThreshold;
-    float       bloomIntensity;
-    uint32_t    tonemapMode;
-    float       contrast;
-    float       saturation;
+    // Post-process controls — shader applies these
+    f32         exposure;                   // EV stops compensation
+    f32         vignetteStrength;           // 0 = off, typical 0.3–0.8
+    f32         bloomThreshold;             // brightness where glow begins
+    f32         bloomIntensity;             // self-bloom strength (0 = disabled)
+    u32         tonemapMode;                // 0 = linear/raw, 1 = simple filmic, 2 = ACES approx
+    f32         contrast;                   // 0.8–1.4 typical
+    f32         saturation;                 // 0.0–2.0 typical
 
-    glm::vec3   sunDir;                     float sunIntensity;
-    glm::vec3   moonDir;                    float moonIntensity;
-    glm::vec3   windDir;                    float windStrength;
-    float       fogDensity;
-    float       dayNightFactor;
-    float       cloudCoverage;
+    // Environment / atmosphere
+    glm::vec3   sunDir;                     f32 sunIntensity;
+    glm::vec3   moonDir;                    f32 moonIntensity;
+    glm::vec3   windDir;                    f32 windStrength;
+    f32         fogDensity;
+    f32         dayNightFactor;
+    f32         cloudCoverage;
 
-    float       raymarchMaxDist;
-    float       raymarchEpsilon;
-    uint32_t    raymarchMaxSteps;
+    // Raymarching quality
+    f32         raymarchMaxDist;
+    f32         raymarchEpsilon;
+    u32         raymarchMaxSteps;
 
-    uint32_t    controllerInput;
-    float       leftStickX;                 float leftStickY;
-    float       rightStickX;                float rightStickY;
-    float       leftTrigger;                float rightTrigger;
+    // Full input state
+    u32         controllerInput;            // keyboard + mouse button bitfield
+    f32         leftStickX;                 f32 leftStickY;
+    f32         rightStickX;                f32 rightStickY;
+    f32         leftTrigger;                f32 rightTrigger;
 
-    glm::vec2   mouseDelta;
-    glm::vec2   mouseNormalized;
-    float       mouseWheelDelta;
+    // Mouse — relative delta and normalized position
+    glm::vec2   mouseDelta;                 // raw relative movement (pixels)
+    glm::vec2   mouseNormalized;            // [0,1] screen space (0,0 = top-left)
+    f32         mouseWheelDelta;            // accumulated scroll this frame
 
-    float       pad1[3];
+    f32         pad1[3];                    // align to 16 bytes
 };
 
+// ────────────────────────────────────────────────
+// Audio command block — small SSBO (128–256 bytes)
+// Written by shader, read by CPU every frame
+// ────────────────────────────────────────────────
 struct alignas(16) AudioCommandBlock {
-    float slotCommand[16];
-    float slotValue[16];
-    float reserved[16];
+    f32 slotCommand[16];        // command code per slot (play, volume, stop, pause, ...)
+    f32 slotValue[16];          // parameter (volume 0–1, pitch multiplier, etc.)
+    f32 reserved[16];           // future: pan, reverb send, effect index, ...
 };
 
+// ────────────────────────────────────────────────
+// Global objects
+// ────────────────────────────────────────────────
 inline VkDescriptorSetLayout    main_descriptor_layout  = VK_NULL_HANDLE;
 inline VkPipelineLayout         pipeline_layout         = VK_NULL_HANDLE;
-
 inline VkPipeline               canvas_pipeline         = VK_NULL_HANDLE;
-inline VkPipeline               rt_pipeline             = VK_NULL_HANDLE;
 
-inline VkBuffer                 sbt_buffer              = VK_NULL_HANDLE;
-inline VkDeviceMemory           sbt_memory              = VK_NULL_HANDLE;
-inline VkDeviceAddress          sbt_device_address      = 0;
-
-inline VkStridedDeviceAddressRegionKHR  rgen_region     {};
-inline VkStridedDeviceAddressRegionKHR  miss_region     {};
-inline VkStridedDeviceAddressRegionKHR  hit_region      {};
-inline VkStridedDeviceAddressRegionKHR  call_region     {};
-
+// Audio command buffer (persistent host-visible mapping)
 inline VkBuffer                 audio_cmd_buffer        = VK_NULL_HANDLE;
 inline VkDeviceMemory           audio_cmd_memory        = VK_NULL_HANDLE;
 inline void*                    audio_cmd_mapped        = nullptr;
 
-inline uint32_t                 shader_group_handle_size      = 0;
-inline uint32_t                 shader_group_handle_alignment = 0;
-inline uint32_t                 shader_group_base_alignment   = 0;
-
-inline std::atomic<bool>        raymarching_tried{false};
-inline std::atomic<bool>        raymarching_success{false};
-inline std::atomic<bool>        raytracing_tried{false};
-inline std::atomic<bool>        raytracing_success{false};
-
-inline bool                     should_quit             = false;
-inline bool                     wants_fullscreen_toggle = false;
-inline int                      requested_width         = 0;
-inline int                      requested_height        = 0;
-
 // ────────────────────────────────────────────────
-// Helpers
+// Sun / moon direction helpers
 // ────────────────────────────────────────────────
-inline uint32_t alignedSize(uint32_t size, uint32_t alignment) noexcept {
-    return (size + alignment - 1u) & ~(alignment - 1u);
+[[nodiscard]] inline glm::vec3 computeSunDirection(f32 todHours) noexcept {
+    f32 angle = (todHours / 24.0f) * glm::two_pi<f32>() - glm::half_pi<f32>();
+    return glm::normalize(glm::vec3(
+        std::cos(angle) * 0.8f,
+        std::sin(angle),
+        std::cos(angle) * 0.6f
+    ));
 }
 
-inline glm::vec3 computeSunDirection(float todHours) noexcept {
-    float angle = (todHours / 24.0f) * glm::two_pi<float>() - glm::half_pi<float>();
-    return glm::normalize(glm::vec3(std::cos(angle)*0.8f, std::sin(angle), std::cos(angle)*0.6f));
-}
-
-inline glm::vec3 computeMoonDirection(float todHours) noexcept {
+[[nodiscard]] inline glm::vec3 computeMoonDirection(f32 todHours) noexcept {
     return -computeSunDirection(todHours);
 }
 
-namespace fs = std::filesystem;
-
-std::expected<VkShaderModule, std::string> load_spirv(std::string filename) noexcept {
+// ────────────────────────────────────────────────
+// Load shader module (CANVAS.spv)
+// ────────────────────────────────────────────────
+[[nodiscard]] inline std::expected<VkShaderModule, std::string> load_canvas_shader(
+    const std::string& override_path = "") noexcept
+{
     namespace fs = std::filesystem;
-
-    if (filename.empty()) return std::unexpected("empty filename");
-
     std::vector<fs::path> candidates;
-    fs::path given{filename};
 
-    // Primary: exactly what caller asked for
-    candidates.push_back(given);
+    if (!override_path.empty()) {
+        fs::path op(override_path);
+        if (fs::exists(op) && fs::is_regular_file(op)) candidates.push_back(op);
+    }
 
-    // Fallbacks: relative to executable directory (Linux-only reliable way)
     fs::path exe_dir;
-    try {
-        exe_dir = fs::canonical("/proc/self/exe").parent_path();
-        if (!exe_dir.empty()) {
-            candidates.emplace_back(exe_dir / "assets/shaders/compute" / given.filename());
-            candidates.emplace_back(exe_dir / given.filename());
-        }
-    } catch (...) {}
+    try { exe_dir = fs::canonical("/proc/self/exe").parent_path(); }
+    catch (...) { /* fallback */ }
 
-    // Optional: current working directory variants (less reliable but harmless)
+    if (!exe_dir.empty()) {
+        candidates.emplace_back(exe_dir / "assets/shaders/compute/CANVAS.spv");
+        candidates.emplace_back(exe_dir / "CANVAS.spv");
+    }
+
     fs::path cwd = fs::current_path();
-    candidates.emplace_back(cwd / "assets/shaders/compute" / given.filename());
-    candidates.emplace_back(cwd / given.filename());
+    candidates.emplace_back(cwd / "assets/shaders/compute/CANVAS.spv");
+    candidates.emplace_back(cwd / "CANVAS.spv");
 
     std::vector<uint32_t> code;
-    fs::path loaded_from;
-
     for (const auto& p : candidates) {
-        if (!fs::exists(p) || !fs::is_regular_file(p)) continue;
-
-        std::ifstream f(p, std::ios::binary | std::ios::ate);
-        if (!f) continue;
-
-        auto sz = f.tellg();
-        if (sz <= 0 || sz % 4 != 0) continue;
-
-        f.seekg(0);
-        code.resize(sz / 4);
-        f.read(reinterpret_cast<char*>(code.data()), sz);
-
-        if (f.good()) {
-            loaded_from = p;
+        if (!fs::exists(p)) continue;
+        std::ifstream file(p, std::ios::binary | std::ios::ate);
+        if (!file) continue;
+        auto size = file.tellg();
+        file.seekg(0);
+        code.resize(size / 4);
+        file.read(reinterpret_cast<char*>(code.data()), size);
+        if (file.good()) {
+            LOG_SUCCESS_CAT("PIPELINE", "Loaded shader from {}", p.string());
             break;
         }
         code.clear();
     }
 
     if (code.empty()) {
-        return std::unexpected("SPIR-V not found:\n  • tried: " + given.string() +
-                               "\n  • exe dir: " + (exe_dir.empty() ? "<failed>" : exe_dir.string()));
+        return std::unexpected("Failed to load CANVAS.spv from any candidate path");
     }
 
-    VkShaderModuleCreateInfo ci{
-        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .pNext    = nullptr,
-        .flags    = 0,
-        .codeSize = code.size() * sizeof(uint32_t),
-        .pCode    = code.data()
-    };
-
+    VkShaderModuleCreateInfo ci{};
+    ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ci.codeSize = code.size() * sizeof(uint32_t);
+    ci.pCode    = code.data();
 
     VkShaderModule mod = VK_NULL_HANDLE;
     VkResult res = vkCreateShaderModule(rtx().device, &ci, nullptr, &mod);
     if (res != VK_SUCCESS) {
-        return std::unexpected(std::string("vkCreateShaderModule failed (") +
-                               std::to_string(res) + ") from " + loaded_from.string());
+        return std::unexpected(std::format("vkCreateShaderModule failed: {}", static_cast<int>(res)));
     }
 
-    LOG_INFO_CAT("SHADER", "Loaded {} from {}", given.filename().string(), loaded_from.string());
     return mod;
 }
 
 // ────────────────────────────────────────────────
-// Descriptor & Pipeline Setup
+// Initialize descriptor layout
 // ────────────────────────────────────────────────
-void initialize_descriptors_and_layout() noexcept {
-    if (main_descriptor_layout != VK_NULL_HANDLE) return;
+inline void initialize_descriptors() noexcept {
+    if (main_descriptor_layout) return;
 
-    VkDescriptorSetLayoutBinding bindings[] = {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR,   nullptr},
-        {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR,   nullptr},
-        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR, nullptr},
-        {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
-        {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR, nullptr},
-        {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
-    };
+    VkDescriptorSetLayoutCreateInfo ci{};
+    ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    ci.bindingCount = std::size(CanvasBindings::bindings);
+    ci.pBindings    = CanvasBindings::bindings;
 
-    VkDescriptorSetLayoutCreateInfo dslCI{};
-    dslCI.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCI.bindingCount = static_cast<uint32_t>(std::size(bindings));
-    dslCI.pBindings    = bindings;
+    VkResult res = vkCreateDescriptorSetLayout(rtx().device, &ci, nullptr, &main_descriptor_layout);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("DESCRIPTOR", "Failed to create descriptor layout: {}", static_cast<int>(res));
+        return;
+    }
 
-    vkCreateDescriptorSetLayout(rtx().device, &dslCI, nullptr, &main_descriptor_layout);
+    LOG_SUCCESS_CAT("DESCRIPTOR", "Descriptor layout created (7 bindings incl. audio commands)");
+}
+
+// ────────────────────────────────────────────────
+// Create pipeline layout
+// ────────────────────────────────────────────────
+inline void create_pipeline_layout() noexcept {
+    if (pipeline_layout) return;
+
+    initialize_descriptors();
 
     VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
-                    | VK_SHADER_STAGE_RAYGEN_BIT_KHR
-                    | VK_SHADER_STAGE_MISS_BIT_KHR
-                    | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
-                    | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
-                    | VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+    push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     push.offset     = 0;
     push.size       = sizeof(PushConstants);
 
-    VkPipelineLayoutCreateInfo plCI{};
-    plCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    plCI.setLayoutCount         = 1;
-    plCI.pSetLayouts            = &main_descriptor_layout;
-    plCI.pushConstantRangeCount = 1;
-    plCI.pPushConstantRanges    = &push;
+    VkPipelineLayoutCreateInfo ci{};
+    ci.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    ci.setLayoutCount         = 1;
+    ci.pSetLayouts            = &main_descriptor_layout;
+    ci.pushConstantRangeCount = 1;
+    ci.pPushConstantRanges    = &push;
 
-    vkCreatePipelineLayout(rtx().device, &plCI, nullptr, &pipeline_layout);
+    VkResult res = vkCreatePipelineLayout(rtx().device, &ci, nullptr, &pipeline_layout);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("PIPELINE", "vkCreatePipelineLayout failed: {}", static_cast<int>(res));
+        return;
+    }
+
+    LOG_SUCCESS_CAT("PIPELINE", "Pipeline layout ready with push constants");
 }
 
-void create_audio_command_buffer() noexcept {
-    if (audio_cmd_buffer != VK_NULL_HANDLE) return;
+// ────────────────────────────────────────────────
+// Create persistent host-visible audio command buffer
+// ────────────────────────────────────────────────
+inline void create_audio_command_buffer() noexcept {
+    if (audio_cmd_buffer) return;
 
-    VkBufferCreateInfo bufCI{};
-    bufCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufCI.size        = sizeof(AudioCommandBlock);
-    bufCI.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBufferCreateInfo bufInfo{};
+    bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufInfo.size        = sizeof(AudioCommandBlock);
+    bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    vkCreateBuffer(rtx().device, &bufCI, nullptr, &audio_cmd_buffer);
+    VkResult res = vkCreateBuffer(rtx().device, &bufInfo, nullptr, &audio_cmd_buffer);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("AUDIO", "vkCreateBuffer failed: {}", static_cast<int>(res));
+        return;
+    }
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, audio_cmd_buffer, &req);
@@ -280,29 +301,48 @@ void create_audio_command_buffer() noexcept {
     alloc.memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    vkAllocateMemory(rtx().device, &alloc, nullptr, &audio_cmd_memory);
+    res = vkAllocateMemory(rtx().device, &alloc, nullptr, &audio_cmd_memory);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("AUDIO", "vkAllocateMemory failed: {}", static_cast<int>(res));
+        return;
+    }
+
     vkBindBufferMemory(rtx().device, audio_cmd_buffer, audio_cmd_memory, 0);
 
-    vkMapMemory(rtx().device, audio_cmd_memory, 0, sizeof(AudioCommandBlock), 0, &audio_cmd_mapped);
+    res = vkMapMemory(rtx().device, audio_cmd_memory, 0, sizeof(AudioCommandBlock), 0, &audio_cmd_mapped);
+    if (res != VK_SUCCESS) {
+        LOG_FATAL_CAT("AUDIO", "vkMapMemory failed: {}", static_cast<int>(res));
+        return;
+    }
+
     std::memset(audio_cmd_mapped, 0, sizeof(AudioCommandBlock));
+    LOG_SUCCESS_CAT("AUDIO", "Audio command buffer created & persistently mapped");
 }
 
 // ────────────────────────────────────────────────
-// Canvas Pipeline (Compute - Raymarching)
+// Create or recreate compute pipeline
 // ────────────────────────────────────────────────
-void create_canvas_pipeline() noexcept {
-    if (raymarching_tried.load()) return;
-    raymarching_tried.store(true);
+inline void create_canvas_pipeline(const std::string& override_path = "") noexcept {
+    if (canvas_pipeline) {
+        vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
+        canvas_pipeline = VK_NULL_HANDLE;
+    }
 
-    initialize_descriptors_and_layout();
+    create_pipeline_layout();
     create_audio_command_buffer();
 
-    VkShaderModule s_module = load_spirv("assets/shaders/compute/CANVAS.spv").value_or(VK_NULL_HANDLE);
+    auto shader_res = load_canvas_shader(override_path);
+    if (!shader_res) {
+        LOG_ERROR_CAT("PIPELINE", "Cannot load shader: {}", shader_res.error());
+        return;
+    }
+
+    VkShaderModule module = *shader_res;
 
     VkPipelineShaderStageCreateInfo stage{};
     stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage.module = s_module;
+    stage.module = module;
     stage.pName  = "main";
 
     VkComputePipelineCreateInfo ci{};
@@ -311,436 +351,94 @@ void create_canvas_pipeline() noexcept {
     ci.layout = pipeline_layout;
 
     VkResult res = vkCreateComputePipelines(rtx().device, VK_NULL_HANDLE, 1, &ci, nullptr, &canvas_pipeline);
-    vkDestroyShaderModule(rtx().device, s_module, nullptr);
+    vkDestroyShaderModule(rtx().device, module, nullptr);
 
     if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkCreateComputePipelines failed: {}", vkh.result(res));
+        LOG_ERROR_CAT("PIPELINE", "vkCreateComputePipelines failed: {}", static_cast<int>(res));
+        return;
     }
 
-    raymarching_success.store(res == VK_SUCCESS);
+    LOG_SUCCESS_CAT("PIPELINE", "Compute pipeline created (CANVAS.spv loaded)");
 }
 
 // ────────────────────────────────────────────────
-// Ray Tracing Pipeline (Hardware RT)
+// Process audio commands from shader (call after compute work completes)
 // ────────────────────────────────────────────────
-bool create_ray_tracing_pipeline() noexcept {
-    if (raytracing_tried.load()) return raytracing_success.load();
-    raytracing_tried.store(true);
+inline void process_shader_audio_commands() noexcept {
+    if (!audio_cmd_mapped) return;
 
-    initialize_descriptors_and_layout();
-    create_audio_command_buffer();
+    AudioCommandBlock* cmd = static_cast<AudioCommandBlock*>(audio_cmd_mapped);
 
-    if (!ext().vkCreateRayTracingPipelinesKHR) {
-        raytracing_success.store(false);
-        LOG_ERROR_CAT("PIPELINE", "Ray tracing extensions not available");
-        return false;
+    for (int slot = 0; slot < 16; ++slot) {
+        f32 command = cmd->slotCommand[slot];
+        f32 value   = cmd->slotValue[slot];
+
+        if (command > 0.51f) {
+            // Trigger play — you can map slot → specific file here
+            // Example: simple naming convention or lookup table
+            std::string file = "assets/audio/sfx_slot_" + std::to_string(slot) + ".wav";
+            INPUT.playSound(file, "play", slot);
+            LOG_INFO_CAT("AUDIO_SHADER", "Play triggered on slot {} (value={})", slot, value);
+        }
+        else if (command >= 0.20f && command <= 0.50f) {
+            // Continuous volume modulation
+            f32 normalized_vol = glm::clamp(value, 0.0f, 1.2f);
+            // TODO: expose or add helper INPUT.setTrackVolume(slot, normalized_vol);
+            // For now: log only — implement actual volume set in SDL3System if needed
+            LOG_INFO_CAT("AUDIO_SHADER", "Volume set on slot {} → {:.3f}", slot, normalized_vol);
+        }
+        else if (command < -0.1f) {
+            // Stop / pause
+            INPUT.playSound("", "stop", slot);  // or "pause"
+            LOG_INFO_CAT("AUDIO_SHADER", "Stop requested on slot {}", slot);
+        }
     }
 
-    auto rgen   = load_spirv("assets/shaders/raytracing/raygen.spv");
-    auto rmiss  = load_spirv("assets/shaders/raytracing/miss.spv");
-    auto rchit  = load_spirv("assets/shaders/raytracing/closesthit.spv");
-    auto rahit  = load_spirv("assets/shaders/raytracing/anyhit.spv");
-    auto rcall  = load_spirv("assets/shaders/raytracing/callable.spv");
-
-    if (!rgen || !rmiss || !rchit || !rahit || !rcall) {
-        raytracing_success.store(false);
-        LOG_FATAL_CAT("PIPELINE", "Failed to load one or more RT shaders");
-        return false;
-    }
-
-    std::vector<VkPipelineShaderStageCreateInfo> stages = {
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_RAYGEN_BIT_KHR,   *rgen,  "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_MISS_BIT_KHR,     *rmiss, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, *rchit, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_ANY_HIT_BIT_KHR,  *rahit, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_CALLABLE_BIT_KHR, *rcall, "main", nullptr},
-    };
-
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups = {
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 0, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, nullptr},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 1, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, nullptr},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, 2, 3, VK_SHADER_UNUSED_KHR, nullptr},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 4, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, nullptr},
-    };
-
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR props{};
-    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    VkPhysicalDeviceProperties2 pdp2{};
-    pdp2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    pdp2.pNext = &props;
-    vkGetPhysicalDeviceProperties2(rtx().physical, &pdp2);
-
-    shader_group_handle_size      = props.shaderGroupHandleSize;
-    shader_group_handle_alignment = props.shaderGroupHandleAlignment;
-    shader_group_base_alignment   = props.shaderGroupBaseAlignment;
-
-    VkRayTracingPipelineCreateInfoKHR pipeCI{};
-    pipeCI.sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-    pipeCI.stageCount                   = static_cast<uint32_t>(stages.size());
-    pipeCI.pStages                      = stages.data();
-    pipeCI.groupCount                   = static_cast<uint32_t>(groups.size());
-    pipeCI.pGroups                      = groups.data();
-    pipeCI.maxPipelineRayRecursionDepth = 1u;
-    pipeCI.layout                       = pipeline_layout;
-
-    VkResult res = ext().vkCreateRayTracingPipelinesKHR(rtx().device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &rt_pipeline);
-
-    vkDestroyShaderModule(rtx().device, *rgen,  nullptr);
-    vkDestroyShaderModule(rtx().device, *rmiss, nullptr);
-    vkDestroyShaderModule(rtx().device, *rchit, nullptr);
-    vkDestroyShaderModule(rtx().device, *rahit, nullptr);
-    vkDestroyShaderModule(rtx().device, *rcall, nullptr);
-
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("PIPELINE", "vkCreateRayTracingPipelinesKHR failed: {}", vkh.result(res));
-    }
-
-    raytracing_success.store(res == VK_SUCCESS);
-    return res == VK_SUCCESS;
+    // Clear for next frame (optional — shader can also clear)
+    std::memset(cmd, 0, sizeof(AudioCommandBlock));
 }
 
 // ────────────────────────────────────────────────
-// Shader Binding Table (SBT) for RT
+// Main dispatch function — full input, mouse, audio feedback
 // ────────────────────────────────────────────────
-bool build_shader_binding_table() noexcept {
-    if (sbt_buffer != VK_NULL_HANDLE) return true;
-
-    if (rt_pipeline == VK_NULL_HANDLE) {
-        LOG_ERROR_CAT("SBT", "RT pipeline not created");
-        return false;
-    }
-
-    uint32_t groupCount = 4;
-
-    uint32_t handleSize   = shader_group_handle_size;
-    uint32_t alignHandle  = shader_group_handle_alignment;
-    uint32_t alignBase    = shader_group_base_alignment;
-
-    uint32_t rgenEntrySize  = alignedSize(handleSize, alignHandle);
-    uint32_t missEntrySize  = alignedSize(handleSize, alignHandle);
-    uint32_t hitEntrySize   = alignedSize(handleSize, alignHandle);
-    uint32_t callEntrySize  = alignedSize(handleSize, alignHandle);
-
-    uint32_t rgenRegionSize  = alignedSize(rgenEntrySize,  alignBase);
-    uint32_t missRegionSize  = alignedSize(missEntrySize * 1, alignBase);
-    uint32_t hitRegionSize   = alignedSize(hitEntrySize  * 1, alignBase);
-    uint32_t callRegionSize  = alignedSize(callEntrySize * 1, alignBase);
-
-    uint32_t totalSize = rgenRegionSize + missRegionSize + hitRegionSize + callRegionSize;
-
-    VkBufferCreateInfo bufCI{};
-    bufCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufCI.size        = totalSize;
-    bufCI.usage       = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(rtx().device, &bufCI, nullptr, &sbt_buffer);
-
-    VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(rtx().device, sbt_buffer, &req);
-
-    VkMemoryAllocateFlagsInfo flags{};
-    flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-
-    VkMemoryAllocateInfo allocCI{};
-    allocCI.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocCI.pNext           = &flags;
-    allocCI.allocationSize  = req.size;
-    allocCI.memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(rtx().device, &allocCI, nullptr, &sbt_memory);
-    vkBindBufferMemory(rtx().device, sbt_buffer, sbt_memory, 0);
-
-    VkBufferDeviceAddressInfo addrInfo{};
-    addrInfo.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    addrInfo.buffer = sbt_buffer;
-    sbt_device_address = ext().vkGetBufferDeviceAddress(rtx().device, &addrInfo);
-
-    std::vector<uint8_t> handles(groupCount * handleSize);
-    ext().vkGetRayTracingShaderGroupHandlesKHR(rtx().device, rt_pipeline, 0, groupCount, handles.size(), handles.data());
-
-    void* mapped = nullptr;
-    vkMapMemory(rtx().device, sbt_memory, 0, totalSize, 0, &mapped);
-    uint8_t* dst = static_cast<uint8_t*>(mapped);
-
-    uint64_t offset = 0;
-
-    std::memcpy(dst + offset, handles.data() + 0 * handleSize, handleSize);
-    rgen_region.deviceAddress = sbt_device_address + offset;
-    rgen_region.stride        = rgenEntrySize;
-    rgen_region.size          = rgenEntrySize;
-    offset += rgenRegionSize;
-
-    std::memcpy(dst + offset, handles.data() + 1 * handleSize, handleSize);
-    miss_region.deviceAddress = sbt_device_address + offset;
-    miss_region.stride        = missEntrySize;
-    miss_region.size          = missEntrySize;
-    offset += missRegionSize;
-
-    std::memcpy(dst + offset, handles.data() + 2 * handleSize, handleSize);
-    hit_region.deviceAddress = sbt_device_address + offset;
-    hit_region.stride        = hitEntrySize;
-    hit_region.size          = hitEntrySize;
-    offset += hitRegionSize;
-
-    std::memcpy(dst + offset, handles.data() + 3 * handleSize, handleSize);
-    call_region.deviceAddress = sbt_device_address + offset;
-    call_region.stride        = callEntrySize;
-    call_region.size          = callEntrySize;
-
-    vkUnmapMemory(rtx().device, sbt_memory);
-
-    LOG_SUCCESS_CAT("SBT", "Shader Binding Table built");
-    return true;
-}
-
-void processInput(int window_width, int window_height) noexcept
+inline void dispatch_canvas(VkCommandBuffer cmd,
+                            int width, int height,
+                            float totalTime) noexcept
 {
-    should_quit              = false;
-    wants_fullscreen_toggle  = false;
-    requested_width          = window_width;
-    requested_height         = window_height;
-
-    // Poll events
-    SDL_Event ev;
-    while (SDL_PollEvent(&ev))
-    {
-        INPUT.pump(ev);
-
-        switch (ev.type)
-        {
-            case SDL_EVENT_QUIT:
-                should_quit = true;
-                break;
-
-            case SDL_EVENT_WINDOW_RESIZED:
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                requested_width  = ev.window.data1;
-                requested_height = ev.window.data2;
-                break;
-
-            case SDL_EVENT_KEY_DOWN:
-            {
-                bool alt = (ev.key.mod & SDL_KMOD_ALT) != 0;
-                if (ev.key.scancode == SDL_SCANCODE_F11 ||
-                    (ev.key.scancode == SDL_SCANCODE_RETURN && alt))
-                {
-                    wants_fullscreen_toggle = true;
-                }
-                break;
-            }
-
-            default:
-                break;
-        }
+    if (!canvas_pipeline) {
+        create_canvas_pipeline();
+        if (!canvas_pipeline) return;
     }
 
-    // Time delta
-    static double lastTime = TotalTime::get().seconds();
-    double now = TotalTime::get().seconds();
-    float dt = static_cast<float>(now - lastTime);
-    lastTime = now;
-    dt *= Options::Debug::TimeScale;
-    if (dt <= 0.0f || dt > 0.5f) dt = 1.0f / 60.0f;
-
-    // ────────────────────────────────────────────────
-    // Gather inputs (keyboard, mouse, gamepad)
-    // ────────────────────────────────────────────────
-    uint32_t flags = 0;
-    if (INPUT.down("move_forward"))  flags |= INPUT_FORWARD;
-    if (INPUT.down("move_backward")) flags |= INPUT_BACKWARD;
-    if (INPUT.down("move_left"))     flags |= INPUT_LEFT;
-    if (INPUT.down("move_right"))    flags |= INPUT_RIGHT;
-    if (INPUT.down("sprint"))        flags |= INPUT_SPRINT;
-    if (INPUT.down("crouch"))        flags |= INPUT_CROUCH;
-    if (INPUT.down("jump"))          flags |= INPUT_JUMP;
-    if (INPUT.down("interact"))      flags |= INPUT_INTERACT;
-    if (INPUT.down("shoot"))         flags |= INPUT_SHOOT;
-
-    Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
-    if (mouseState & SDL_BUTTON_LMASK) flags |= INPUT_MOUSE_LEFT;
-    if (mouseState & SDL_BUTTON_RMASK) flags |= INPUT_MOUSE_RIGHT;
-    if (mouseState & SDL_BUTTON_MMASK) flags |= INPUT_MOUSE_MIDDLE;
-
-    constexpr int slot = 0;
-    float leftX  = INPUT.leftStickX(slot);
-    float leftY  = INPUT.leftStickY(slot);
-    float rightX = INPUT.rightStickX(slot);
-    float rightY = INPUT.rightStickY(slot);
-
-    const float dz = Options::Input::CONTROLLER_DEADZONE;
-    if (std::abs(leftX)  < dz) leftX  = 0.0f;
-    if (std::abs(leftY)  < dz) leftY  = 0.0f;
-    if (std::abs(rightX) < dz) rightX = 0.0f;
-    if (std::abs(rightY) < dz) rightY = 0.0f;
-
-    if (Options::Input::INVERT_CONTROLLER_Y) rightY = -rightY;
-
-    glm::vec2 mouseDelta = INPUT.mouseDelta();
-    if (Options::Input::INVERT_MOUSE_Y) mouseDelta.y = -mouseDelta.y;
-    mouseDelta *= Options::Input::MOUSE_SENSITIVITY;
-
-    // ────────────────────────────────────────────────
-    // Touch input (SDL3 correct API)
-    // ────────────────────────────────────────────────
-    static glm::vec2 touchLookDelta{0.0f, 0.0f};
-    static glm::vec2 touchMoveDelta{0.0f, 0.0f};
-
-    int numDevices = 0;
-    SDL_TouchID* devices = SDL_GetTouchDevices(&numDevices);
-    SDL_TouchID touchID = (numDevices > 0) ? devices[0] : 0;
-    SDL_free(devices);
-
-    int fingerCount = 0;
-    SDL_Finger** fingers = (touchID != 0) ? SDL_GetTouchFingers(touchID, &fingerCount) : nullptr;
-
-    if (fingerCount > 0 && fingers)
-    {
-        SDL_Finger* finger = fingers[fingerCount - 1];
-
-        if (finger->x > 0.5f)
-        {
-            float sens = Options::Input::MOUSE_SENSITIVITY;
-            touchLookDelta.x = (finger->x - 0.5f) * 2.0f * sens;
-            touchLookDelta.y = (finger->y - 0.5f) * 2.0f * sens;
-        }
-        else
-        {
-            touchMoveDelta.x = (finger->x - 0.25f) * 4.0f;
-            touchMoveDelta.y = (finger->y - 0.5f)  * 4.0f;
-            touchMoveDelta = glm::clamp(touchMoveDelta, glm::vec2(-1.0f), glm::vec2(1.0f));
-        }
+    if (width <= 0 || height <= 0) {
+        LOG_WARNING_CAT("PIPELINE", "Invalid dispatch size: {}x{}", width, height);
+        return;
     }
-    else
-    {
-        touchLookDelta = {0.0f, 0.0f};
-        touchMoveDelta = {0.0f, 0.0f};
-    }
-
-    // ────────────────────────────────────────────────
-    // Combined look
-    // ────────────────────────────────────────────────
-    glm::vec2 lookDelta = mouseDelta;
-    lookDelta.x += rightX  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * dt * 60.0f;
-    lookDelta.y += rightY  * Options::Input::CONTROLLER_LOOK_SENSITIVITY * dt * 60.0f;
-    lookDelta += touchLookDelta;
-
-    // ────────────────────────────────────────────────
-    // Update orientation
-    // ────────────────────────────────────────────────
-    static float yaw   = 0.0f;
-    static float pitch = 0.0f;
-
-    yaw   -= lookDelta.x;
-    pitch -= lookDelta.y;
-    pitch  = std::clamp(pitch, -89.0f, 89.0f);
-
-    glm::quat orientation = glm::quat(glm::vec3(glm::radians(pitch), glm::radians(yaw), 0.0f));
-    CAM.setOrientation(orientation);
-
-    // ────────────────────────────────────────────────
-    // Movement
-    // ────────────────────────────────────────────────
-    glm::vec3 moveDir{0.0f};
-
-    if (flags & INPUT_FORWARD)  moveDir.z -= 1.0f;
-    if (flags & INPUT_BACKWARD) moveDir.z += 1.0f;
-    if (flags & INPUT_LEFT)     moveDir.x -= 1.0f;
-    if (flags & INPUT_RIGHT)    moveDir.x += 1.0f;
-
-    moveDir.x += leftX;
-    moveDir.z += leftY;
-    moveDir.x += touchMoveDelta.x;
-    moveDir.z += touchMoveDelta.y;
-
-    float moveLen = glm::length(moveDir);
-    bool isMoving    = moveLen > 0.01f;
-    bool isSprinting = (flags & INPUT_SPRINT) || std::abs(leftX) > 0.8f || std::abs(touchMoveDelta.x) > 0.8f;
-
-    glm::vec3 newPos = CAM.position();
-
-    if (isMoving)
-    {
-        moveDir = glm::normalize(moveDir);
-        float speed = Options::Input::MOVEMENT_SPEED;
-        if (isSprinting) speed *= Options::Input::SPRINT_MULTIPLIER;
-
-        glm::vec3 worldMove = orientation * moveDir;
-        newPos += worldMove * speed * dt;
-    }
-
-    // Apply bob/breathing/shake
-    if (Options::Camera::EnableHeadBob || Options::Camera::EnableBreathing || Options::Camera::EnableCameraShake)
-    {
-        float seconds = static_cast<float>(TotalTime::get().seconds());
-        glm::vec3 offset{0.0f};
-
-        if (Options::Camera::EnableHeadBob && isMoving)
-        {
-            float freq = isSprinting ? 18.0f : 12.0f;
-            float amp  = isSprinting ? 0.12f : 0.07f;
-            offset.y += std::sin(seconds * freq) * amp;
-        }
-
-        if (Options::Camera::EnableBreathing)
-        {
-            offset.y += std::sin(seconds * 0.8f) * 0.04f;
-        }
-
-        static float trauma = 0.0f;
-        if (Options::Camera::EnableCameraShake)
-        {
-            if (flags & INPUT_SHOOT || flags & INPUT_JUMP)
-                trauma = std::min(1.0f, trauma + 0.3f);
-
-            trauma *= Options::Camera::ShakeTraumaDecay;
-            float shake = trauma * trauma;
-            float t = seconds * 15.0f;
-            offset.x += std::sin(t * 12.3f) * shake * 0.8f;
-            offset.y += std::cos(t * 8.7f)  * shake * 0.6f;
-        }
-
-        newPos += offset;
-    }
-
-    CAM.setPosition(newPos);
-}
-
-// ────────────────────────────────────────────────
-// High-level getters (used by RayCanvas)
-// ────────────────────────────────────────────────
-inline bool shouldQuit() noexcept             { return should_quit; }
-inline bool wantsFullscreenToggle() noexcept  { return wants_fullscreen_toggle; }
-inline int  getRequestedWidth() noexcept      { return requested_width; }
-inline int  getRequestedHeight() noexcept     { return requested_height; }
-
-// ────────────────────────────────────────────────
-// Dispatch
-// ────────────────────────────────────────────────
-void dispatch(VkCommandBuffer cmd, int width, int height, float totalTime) noexcept {
-    if (width <= 0 || height <= 0) return;
 
     PushConstants pc{};
     pc.time             = totalTime;
-    pc.frameSeed        = static_cast<uint32_t>(totalTime * 987654.321f) ^ 0xCAFEBABEu;
+    pc.frameSeed        = static_cast<u32>(totalTime * 987654.321f) ^ 0xCAFEBABEu;
 
+    // Camera state
     pc.cameraPos        = CAM.position();
-    pc.cameraQuat       = glm::vec4(CAM.orientation().x, CAM.orientation().y, CAM.orientation().z, CAM.orientation().w);
+    pc.cameraQuat       = glm::vec4(CAM.orientation().x, CAM.orientation().y,
+                                    CAM.orientation().z, CAM.orientation().w);
     pc.cameraFovDeg     = CAM_FOV();
-    pc.aspectRatio      = static_cast<float>(width) / static_cast<float>(height);
+    pc.aspectRatio      = static_cast<f32>(width) / static_cast<f32>(height);
     pc.nearPlane        = Options::Camera::NearPlane;
     pc.farPlane         = Options::Camera::FarPlane;
 
+    // Post-process from options (shader will apply)
     pc.exposure         = Options::Rendering::Exposure;
     pc.vignetteStrength = Options::Rendering::VignetteStrength;
     pc.bloomThreshold   = Options::Rendering::BloomThreshold;
     pc.bloomIntensity   = Options::Rendering::BloomIntensity;
-    pc.tonemapMode      = Options::Rendering::EnableTonemapping ? 2u : 0u;
-    pc.contrast         = Options::Rendering::Contrast;
-    pc.saturation       = Options::Rendering::Saturation;
+    pc.tonemapMode      = Options::Rendering::EnableTonemapping;
+    pc.contrast         = 1.0f;                    // placeholder — expose later
+    pc.saturation       = 1.0f;                    // placeholder
 
-    float tod = Options::LivingWorld::CurrentTimeOfDay;
+    // Environment
+    f32 tod = Options::LivingWorld::CurrentTimeOfDay;
     pc.sunDir           = computeSunDirection(tod);
     pc.moonDir          = computeMoonDirection(tod);
     pc.sunIntensity     = Options::LivingWorld::SunIntensityDay;
@@ -751,80 +449,95 @@ void dispatch(VkCommandBuffer cmd, int width, int height, float totalTime) noexc
     pc.dayNightFactor   = tod / 24.0f;
     pc.cloudCoverage    = Options::LivingWorld::CloudCoverage;
 
+    // Raymarching quality
     pc.raymarchMaxDist  = Options::Rendering::RaymarchMaxDistance;
     pc.raymarchEpsilon  = Options::Rendering::RaymarchEpsilon;
     pc.raymarchMaxSteps = Options::Rendering::RaymarchMaxSteps;
 
+    // Full input state — keyboard, controller, mouse
+    int ctrl_slot = 0; // primary controller
+
     pc.controllerInput = 0;
-    pc.leftStickX      = 0.0f;
-    pc.leftStickY      = 0.0f;
-    pc.rightStickX     = 0.0f;
-    pc.rightStickY     = 0.0f;
-    pc.leftTrigger     = 0.0f;
-    pc.rightTrigger    = 0.0f;
+    if (INPUT.down("move_forward"))  pc.controllerInput |= INPUT_FORWARD;
+    if (INPUT.down("move_backward")) pc.controllerInput |= INPUT_BACKWARD;
+    if (INPUT.down("move_left"))     pc.controllerInput |= INPUT_LEFT;
+    if (INPUT.down("move_right"))    pc.controllerInput |= INPUT_RIGHT;
+    if (INPUT.down("sprint"))        pc.controllerInput |= INPUT_SPRINT;
+    if (INPUT.down("crouch"))        pc.controllerInput |= INPUT_CROUCH;
+    if (INPUT.down("jump"))          pc.controllerInput |= INPUT_JUMP;
+    if (INPUT.down("interact"))      pc.controllerInput |= INPUT_INTERACT;
+    if (INPUT.down("shoot"))         pc.controllerInput |= INPUT_SHOOT;
 
-    pc.mouseDelta       = glm::vec2(0.0f);
-    pc.mouseNormalized  = glm::vec2(0.5f);
-    pc.mouseWheelDelta  = 0.0f;
+    // Mouse buttons as bitflags
+    Uint32 mouse_state = SDL_GetMouseState(nullptr, nullptr);
+    if (mouse_state & SDL_BUTTON_LMASK) pc.controllerInput |= INPUT_MOUSE_LEFT;
+    if (mouse_state & SDL_BUTTON_RMASK) pc.controllerInput |= INPUT_MOUSE_RIGHT;
+    if (mouse_state & SDL_BUTTON_MMASK) pc.controllerInput |= INPUT_MOUSE_MIDDLE;
 
-    bool rt_enabled   = Options::Rendering::EnableHardwareRayTracing;
-    bool rt_supported = rtx().rayTracingSupported;
-    bool pipeline_ok  = false;
-    bool sbt_ok       = false;
+    // Analog sticks & triggers
+    pc.leftStickX   = INPUT.leftStickX(ctrl_slot);
+    pc.leftStickY   = INPUT.leftStickY(ctrl_slot);
+    pc.rightStickX  = INPUT.rightStickX(ctrl_slot);
+    pc.rightStickY  = INPUT.rightStickY(ctrl_slot);
+    pc.leftTrigger  = INPUT.leftTrigger(ctrl_slot);
+    pc.rightTrigger = INPUT.rightTrigger(ctrl_slot);
 
-    if (rt_enabled && rt_supported) {
-        pipeline_ok = create_ray_tracing_pipeline();
-        if (pipeline_ok) sbt_ok = build_shader_binding_table();
-    }
+    // Mouse delta & normalized position
+    glm::vec2 delta = INPUT.mouseDelta();
+    pc.mouseDelta       = delta;
+    pc.mouseNormalized  = glm::vec2(
+        (delta.x + width * 0.5f)  / static_cast<f32>(width),
+        (delta.y + height * 0.5f) / static_cast<f32>(height)
+    );
 
-    bool use_rt = rt_enabled && rt_supported && pipeline_ok && sbt_ok;
-
-    if (use_rt) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rt_pipeline);
-        vkCmdPushConstants(cmd, pipeline_layout,
-                           VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                           VK_SHADER_STAGE_CALLABLE_BIT_KHR,
-                           0, sizeof(PushConstants), &pc);
-
-        ext().vkCmdTraceRaysKHR(cmd, &rgen_region, &miss_region, &hit_region, &call_region,
-                                static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u);
-        return;
-    }
-
-    if (!canvas_pipeline) {
-        create_canvas_pipeline();
-        if (!canvas_pipeline) {
-            LOG_FATAL_CAT("PIPELINE", "Compute pipeline creation failed");
-            return;
-        }
-    }
-
+    // Bind & push
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
     vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
                        0, sizeof(PushConstants), &pc);
 
-    uint32_t dx = (static_cast<uint32_t>(width) + 15u) / 16u;
-    uint32_t dy = (static_cast<uint32_t>(height) + 15u) / 16u;
+    // Assume descriptor set is already bound with all 7 bindings
+
+    u32 dx = (static_cast<u32>(width)  + 15u) / 16u;
+    u32 dy = (static_cast<u32>(height) + 15u) / 16u;
     vkCmdDispatch(cmd, dx, dy, 1u);
+
+    // Process audio feedback after dispatch (in real code: after submit + fence)
+    process_shader_audio_commands();
 }
 
-void shutdown() noexcept {
+// ────────────────────────────────────────────────
+// Cleanup everything
+// ────────────────────────────────────────────────
+inline void shutdown() noexcept {
+    process_shader_audio_commands(); // flush any last commands
+
     if (audio_cmd_mapped) {
         vkUnmapMemory(rtx().device, audio_cmd_memory);
         audio_cmd_mapped = nullptr;
     }
+    if (audio_cmd_buffer) {
+        vkDestroyBuffer(rtx().device, audio_cmd_buffer, nullptr);
+        audio_cmd_buffer = VK_NULL_HANDLE;
+    }
+    if (audio_cmd_memory) {
+        vkFreeMemory(rtx().device, audio_cmd_memory, nullptr);
+        audio_cmd_memory = VK_NULL_HANDLE;
+    }
 
-    if (audio_cmd_buffer != VK_NULL_HANDLE) vkDestroyBuffer(rtx().device, audio_cmd_buffer, nullptr);
-    if (audio_cmd_memory != VK_NULL_HANDLE) vkFreeMemory(rtx().device, audio_cmd_memory, nullptr);
+    if (canvas_pipeline) {
+        vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
+        canvas_pipeline = VK_NULL_HANDLE;
+    }
+    if (pipeline_layout) {
+        vkDestroyPipelineLayout(rtx().device, pipeline_layout, nullptr);
+        pipeline_layout = VK_NULL_HANDLE;
+    }
+    if (main_descriptor_layout) {
+        vkDestroyDescriptorSetLayout(rtx().device, main_descriptor_layout, nullptr);
+        main_descriptor_layout = VK_NULL_HANDLE;
+    }
 
-    if (canvas_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
-    if (rt_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(rtx().device, rt_pipeline, nullptr);
-    if (sbt_buffer != VK_NULL_HANDLE) vkDestroyBuffer(rtx().device, sbt_buffer, nullptr);
-    if (sbt_memory != VK_NULL_HANDLE) vkFreeMemory(rtx().device, sbt_memory, nullptr);
-
-    if (pipeline_layout != VK_NULL_HANDLE) vkDestroyPipelineLayout(rtx().device, pipeline_layout, nullptr);
-    if (main_descriptor_layout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(rtx().device, main_descriptor_layout, nullptr);
+    LOG_SUCCESS_CAT("PIPELINE", "Full shutdown complete — canvas, audio buffer, descriptors released");
 }
 
 } // namespace Pipeline
