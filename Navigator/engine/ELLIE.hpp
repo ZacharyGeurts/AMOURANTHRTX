@@ -317,7 +317,7 @@ enum class LogLevel { Trace, Debug, Info, Success, Attempt, Perf, Warning, Error
 // 1. HYPER-VIVID ANSI COLORS
 // ========================================================================
 namespace Color {
-    inline constexpr const char* AMOURANTH                      = "\033[1;38;2;153;0;0;48;2;255;255;255m";
+    inline constexpr const char* AMOURANTH = "\033[1;38;2;200;30;80;48;2;255;210;220m";
     inline constexpr std::string_view RESET                     = "\033[0m";
     inline constexpr std::string_view BOLD                      = "\033[1m";
     inline constexpr std::string_view PARTY_PINK                = "\033[1;38;5;213m";

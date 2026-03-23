@@ -365,8 +365,8 @@ public:
             double gpuLoadPercent = targetFrameMs > 0.001 ?
                                     (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 : 0.0;
 
-            const char* stateEmoji = minimized_ ? "🟥 minimized" :
-                                     (!Swapchain::get() || !hdrOutputImage_) ? "⚠️ invalid" : "✅ active";
+            const char* stateEmoji = minimized_ ? "⚠️ minimized" :
+                                     (!Swapchain::get() || !hdrOutputImage_) ? "❌ invalid" : "💖 active";
 
             VRAMReality vram = Memory::measureReality();
             double usedMB = static_cast<double>(vram.driver_footprint) / (1024.0 * 1024.0);
@@ -391,9 +391,9 @@ public:
                           winW, winH, render_width_, render_height_, scaleFactor, mode,
                           adaptiveScale_, gpuLoadPercent, smoothedGpuTimeMs_,
                           stateEmoji,
-                          Options::Rendering::EnableAdaptiveResolution ? "✅" : "❌",
-                          Options::Rendering::EnableAccumulation ? "✅" : "❌",
-                          scaleFactor > 1.0 ? "⚡" : "❌",
+                          Options::Rendering::EnableAdaptiveResolution ? "💖" : "❌",
+                          Options::Rendering::EnableAccumulation ? "💖" : "❌",
+                          scaleFactor > 1.0 ? "💖" : "❌",
                           usedMB, totalMB, freePercent,
                           frameCount_);
             lastFpsLog_ = now;

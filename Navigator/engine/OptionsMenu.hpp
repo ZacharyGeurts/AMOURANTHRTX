@@ -362,7 +362,7 @@ namespace Options::Input::Flags
 // [LT]            [RT]
 // [LB]            [RB]
 //    ◀️▶️    🟡 Y △
-//  💠      🔵 X □   ○ 🔴 B                     
+// 💠       🔵 X □   ○ 🔴 B                     
 //    🔘○🔘   🟢 A ×
 //    L3 R2
 

@@ -282,7 +282,7 @@ private:
         if (!window_) return;
 
         Uint32 flags = SDL_GetWindowFlags(window_);
-        bool newFocus = (flags & SDL_WINDOW_INPUT_FOCUS) == 0;
+        bool newFocus = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
 
         if (newFocus != hasFocus_) {
             hasFocus_ = newFocus;

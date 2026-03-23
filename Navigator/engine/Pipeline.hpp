@@ -263,6 +263,7 @@ inline void create_pipeline_layout() noexcept {
 // Create persistent host-visible audio command buffer
 // ────────────────────────────────────────────────
 inline void create_audio_command_buffer() noexcept {
+    LOG_AMOURANTH("Audio command buffer creation and mapping.");
     if (audio_cmd_buffer) return;
 
     VkBufferCreateInfo bufInfo{};
@@ -271,11 +272,7 @@ inline void create_audio_command_buffer() noexcept {
     bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkResult res = vkCreateBuffer(rtx().device, &bufInfo, nullptr, &audio_cmd_buffer);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("AUDIO", "vkCreateBuffer failed: {}", static_cast<int>(res));
-        return;
-    }
+    vkCreateBuffer(rtx().device, &bufInfo, nullptr, &audio_cmd_buffer);
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, audio_cmd_buffer, &req);
@@ -286,22 +283,11 @@ inline void create_audio_command_buffer() noexcept {
     alloc.memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    res = vkAllocateMemory(rtx().device, &alloc, nullptr, &audio_cmd_memory);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("AUDIO", "vkAllocateMemory failed: {}", static_cast<int>(res));
-        return;
-    }
-
+    vkAllocateMemory(rtx().device, &alloc, nullptr, &audio_cmd_memory);
     vkBindBufferMemory(rtx().device, audio_cmd_buffer, audio_cmd_memory, 0);
-
-    res = vkMapMemory(rtx().device, audio_cmd_memory, 0, sizeof(AudioCommandBlock), 0, &audio_cmd_mapped);
-    if (res != VK_SUCCESS) {
-        LOG_FATAL_CAT("AUDIO", "vkMapMemory failed: {}", static_cast<int>(res));
-        return;
-    }
+    vkMapMemory(rtx().device, audio_cmd_memory, 0, sizeof(AudioCommandBlock), 0, &audio_cmd_mapped);
 
     std::memset(audio_cmd_mapped, 0, sizeof(AudioCommandBlock));
-    LOG_SUCCESS_CAT("AUDIO", "Audio command buffer created & persistently mapped");
 }
 
 // ────────────────────────────────────────────────
