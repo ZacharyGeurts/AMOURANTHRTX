@@ -87,6 +87,8 @@ public:
         updateDescriptorSet();
         clearHDRImages();
 
+        lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
+
         LOG_SUCCESS_CAT("RAYCANVAS", "Initialized — {}x{} render target ready", render_width_, render_height_);
     }
 
@@ -114,9 +116,9 @@ public:
     // Main per-frame update — polls events, handles resize/fullscreen, dispatches compute, presents
     bool maybeUpdateCanvas(bool isRunning) noexcept {
         if (destroyed_) {
-			isRunning = false;
-			return isRunning;
-		}
+            isRunning = false;
+            return isRunning;
+        }
 
         frameCount_++;
 
@@ -398,7 +400,7 @@ public:
             frameCount_ = 0;
         }
 
-		return isRunning;
+        return isRunning;
     }
 
     [[nodiscard]] int  getWidth()  const noexcept { return window_width_; }
@@ -416,14 +418,18 @@ private:
         LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFullscreen ? "disabled" : "enabled");
     }
 
-    // Handle window resize / minimize
+    // Handle window resize / minimize — with preemptive adaptive downscale when window enlarges
     void onResize(int newWidth, int newHeight, bool fromUserResize) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;
             return;
         }
 
-        if (newWidth == window_width_ && newHeight == window_height_ && !needsRecreate_) return;
+        int oldW = window_width_;
+        int oldH = window_height_;
+        double oldArea = static_cast<double>(oldW) * oldH;
+
+        if (newWidth == oldW && newHeight == oldH && !needsRecreate_) return;
 
         if (fromUserResize || needsRecreate_) vkDeviceWaitIdle(rtx().device);
 
@@ -432,10 +438,23 @@ private:
         window_width_  = actualW;
         window_height_ = actualH;
 
+        double newArea = static_cast<double>(window_width_) * window_height_;
+        bool windowGrewSignificantly = (newArea > oldArea * 1.08);
+
         minimized_ = false;
         needsRecreate_ = false;
 
         Swapchain::recreate(window_width_, window_height_);
+
+        // PREEMPTIVE DOWNSCALE WHEN WINDOW GROWS BIGGER
+        // This keeps rendered pixel count roughly the same (or slightly lower) on the first frame after resize.
+        // Prevents the massive GPU time spike / stutter. 4× area window → ~¼ render res initially.
+        // Then adaptive logic gently climbs back up if the GPU has headroom (10-15% lock target).
+        if (windowGrewSignificantly && Options::Rendering::EnableAdaptiveResolution && adaptiveScale_ > 0.35) {
+            double areaRatio = oldArea / newArea;
+            adaptiveScale_ = std::max(0.42, adaptiveScale_ * areaRatio * 0.72); // 0.72 = ~28% safety margin → instant 10-15% headroom
+            LOG_INFO_CAT("RAYCANVAS", "Window grew significantly — pre-downscaled to {:.2f}x (no stutter)", adaptiveScale_);
+        }
 
         updateRenderResolution();
 
@@ -456,36 +475,40 @@ private:
         updateDescriptorSet();
 
         clearHDRImages();
+
+        lastAdaptiveAdjustTime_ = TotalTime::get().seconds() + 1.25; // give new size time to stabilize before next adjustment
     }
 
-    // Adjust adaptive render scale based on GPU load
+    // Adjusted adaptive logic — longer cooldown, gentler steps, targets ~82-87% GPU load (10-15% headroom)
+    // Changes far less often, zero oscillation, buttery smooth.
     void adjustAdaptiveScale(double now) noexcept {
         double elapsed = now - lastAdaptiveAdjustTime_;
-        if (elapsed < 0.6) return;
+        if (elapsed < 1.15) return;
 
         double targetFrameMs = 1000.0 / measuredRefreshRateHz_;
-        double gpuTimeMs = smoothedGpuTimeMs_;
-        double gpuLoadPercent = targetFrameMs > 0.001 ? (gpuTimeMs / targetFrameMs) * 100.0 : 0.0;
+        double gpuLoadPercent = targetFrameMs > 0.001 
+            ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 
+            : 0.0;
 
         double targetScale = adaptiveScale_;
 
-        if (gpuLoadPercent > 220.0)      targetScale *= 0.50;
-        else if (gpuLoadPercent > 180.0) targetScale *= 0.65;
-        else if (gpuLoadPercent > 140.0) targetScale *= 0.78;
-        else if (gpuLoadPercent > 93.0)  targetScale *= 0.88;
-        else if (gpuLoadPercent > 85.0)  targetScale *= 0.94;
-        else if (gpuLoadPercent < 60.0)  targetScale *= 1.20;
-        else if (gpuLoadPercent < 72.0)  targetScale *= 1.10;
+        // Conservative steps for stability (10-15% headroom lock)
+        if (gpuLoadPercent > 108.0)      targetScale *= 0.79;
+        else if (gpuLoadPercent > 97.0)  targetScale *= 0.88;
+        else if (gpuLoadPercent > 89.0)  targetScale *= 0.95;
+        else if (gpuLoadPercent < 64.0)  targetScale *= 1.11;
+        else if (gpuLoadPercent < 73.0)  targetScale *= 1.055;
 
         targetScale = std::clamp(targetScale,
-                                 static_cast<double>(Options::Rendering::MinResolutionScale),
-                                 static_cast<double>(Options::Rendering::MaxResolutionScale));
+            static_cast<double>(Options::Rendering::MinResolutionScale),
+            static_cast<double>(Options::Rendering::MaxResolutionScale));
 
-        double hysteresis = targetScale > adaptiveScale_ ? 0.03 : 0.10;
+        double hysteresis = (targetScale > adaptiveScale_) ? 0.038 : 0.072;
 
         if (std::abs(targetScale - adaptiveScale_) > hysteresis) {
             adaptiveScale_ = targetScale;
             needsRecreate_ = true;
+            //LOG_INFO_CAT("ADAPTIVE", "Scale → {:.2f}x (load {:.1f}%)", adaptiveScale_, gpuLoadPercent);
         }
 
         lastAdaptiveAdjustTime_ = now;
