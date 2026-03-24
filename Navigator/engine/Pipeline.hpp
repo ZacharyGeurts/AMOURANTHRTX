@@ -66,7 +66,7 @@ struct CanvasBindings {
 // ────────────────────────────────────────────────
 struct alignas(16) PushConstants {
     f32         time;                       // total engine time (seconds)
-	uint        enableHardwareRT;           // Options::Rendering
+	bool        enableHardwareRT;           // Options::Rendering
     u32         frameSeed;                  // per-frame RNG seed
 
     glm::vec3   cameraPos;                  f32 pad0;
