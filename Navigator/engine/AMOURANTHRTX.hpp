@@ -190,7 +190,7 @@ inline VulkanExtensions& ext() noexcept {
         e.vkCmdBuildAccelerationStructuresKHR       = (PFN_vkCmdBuildAccelerationStructuresKHR)      vkGetDeviceProcAddr(rtx().device, "vkCmdBuildAccelerationStructuresKHR");
         e.vkCreateAccelerationStructureKHR          = (PFN_vkCreateAccelerationStructureKHR)         vkGetDeviceProcAddr(rtx().device, "vkCreateAccelerationStructureKHR");
         e.vkDestroyAccelerationStructureKHR         = (PFN_vkDestroyAccelerationStructureKHR)        vkGetDeviceProcAddr(rtx().device, "vkDestroyAccelerationStructureKHR");
-        e.vkGetAccelerationStructureDeviceAddressKHR= (PFN_vkGetAccelerationStructureDeviceAddressKHR) vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR");
+        e.vkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR) vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR");
 
         e.vkGetBufferDeviceAddress                  = (PFN_vkGetBufferDeviceAddress)                 vkGetDeviceProcAddr(rtx().device, "vkGetBufferDeviceAddress");
 
