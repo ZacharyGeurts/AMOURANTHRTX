@@ -67,6 +67,7 @@ struct alignas(16) UniversalPrimitive {
 // ────────────────────────────────────────────────
 // VRAM tracking (for RayCanvas log)
 // ────────────────────────────────────────────────
+
 struct VRAMReality {
     VkDeviceSize total            = 0;
     VkDeviceSize driver_footprint = 0;
@@ -78,8 +79,9 @@ struct VRAMReality {
 };
 
 // ────────────────────────────────────────────────
-// Core context - rtx().everything
+// Core context
 // ────────────────────────────────────────────────
+
 struct RTX {
     VkInstance                      instance            = VK_NULL_HANDLE;
     VkPhysicalDevice                physical            = VK_NULL_HANDLE;
@@ -137,7 +139,6 @@ struct RTX {
     std::mutex                      buffer_mutex;
 };
 
-// RIP BW 🧑🏾‍🩰
 inline RTX& rtx() noexcept {
     static RTX ctx;
     return ctx;
@@ -146,6 +147,7 @@ inline RTX& rtx() noexcept {
 // ────────────────────────────────────────────────
 // Extension loader
 // ────────────────────────────────────────────────
+
 struct VulkanExtensions {
     PFN_vkCreateSwapchainKHR                        vkCreateSwapchainKHR{};
     PFN_vkDestroySwapchainKHR                       vkDestroySwapchainKHR{};
@@ -188,7 +190,7 @@ inline VulkanExtensions& ext() noexcept {
         e.vkCmdBuildAccelerationStructuresKHR       = (PFN_vkCmdBuildAccelerationStructuresKHR)      vkGetDeviceProcAddr(rtx().device, "vkCmdBuildAccelerationStructuresKHR");
         e.vkCreateAccelerationStructureKHR          = (PFN_vkCreateAccelerationStructureKHR)         vkGetDeviceProcAddr(rtx().device, "vkCreateAccelerationStructureKHR");
         e.vkDestroyAccelerationStructureKHR         = (PFN_vkDestroyAccelerationStructureKHR)        vkGetDeviceProcAddr(rtx().device, "vkDestroyAccelerationStructureKHR");
-        e.vkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR) vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR");
+        e.vkGetAccelerationStructureDeviceAddressKHR= (PFN_vkGetAccelerationStructureDeviceAddressKHR) vkGetDeviceProcAddr(rtx().device, "vkGetAccelerationStructureDeviceAddressKHR");
 
         e.vkGetBufferDeviceAddress                  = (PFN_vkGetBufferDeviceAddress)                 vkGetDeviceProcAddr(rtx().device, "vkGetBufferDeviceAddress");
 
@@ -203,6 +205,7 @@ inline VulkanExtensions& ext() noexcept {
 // ────────────────────────────────────────────────
 // Queue family helper
 // ────────────────────────────────────────────────
+
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphics, present, compute, transfer;
     bool complete() const noexcept { return graphics && present && compute; }
@@ -237,6 +240,7 @@ inline QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
 // ────────────────────────────────────────────────
 // Vulkan Instance Creation
 // ────────────────────────────────────────────────
+
 inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -265,6 +269,7 @@ inline VkInstance createVulkanInstance() noexcept {
 // ────────────────────────────────────────────────
 // Logical Device & GPU Selection
 // ────────────────────────────────────────────────
+
 inline VkDevice createLogicalDeviceAndSelectGPU(
     VkInstance instance,
     VkSurfaceKHR surface,
@@ -389,6 +394,7 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 // ────────────────────────────────────────────────
 // Command buffer helpers (used by Memory::uploadToBuffer)
 // ────────────────────────────────────────────────
+
 inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
     VkCommandBufferAllocateInfo alloc{};
     alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -438,14 +444,10 @@ inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
 // ────────────────────────────────────────────────
 // Memory implementation
 // ────────────────────────────────────────────────
+
 namespace Memory {
 
-enum class MemoryHint {
-    Auto,           // Device local preferred
-    HostVisible,    // For frequent CPU writes (staging buffers, etc.)
-    HostCoherent,   // Same as HostVisible but guarantees coherence
-    DeviceLocal     // Explicit device-only
-};
+enum class MemoryHint : uint8_t { Auto = 0, DeviceLocalOnly = 1, HostVisible = 2, DescriptorBuffer = 3 };
 
 inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags required) noexcept {
     VkPhysicalDeviceMemoryProperties props{};
@@ -462,60 +464,45 @@ inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags requir
 inline uint64_t createBuffer(
     VkDeviceSize        size,
     VkBufferUsageFlags  usage,
-    std::string_view    tag  = "",
-    MemoryHint          hint = MemoryHint::Auto
-) noexcept 
-{
+    std::string_view    tag         = "",
+    MemoryHint          hint        = MemoryHint::Auto
+) noexcept {
     if (size == 0 || !rtx().device) return 0;
 
-    // Create the buffer with shader device address support (required for SBT, AS, etc.)
-    VkBufferCreateInfo bci{
-        .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size        = size,
-        .usage       = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
+    bool hostVisible = (hint == MemoryHint::HostVisible) ||
+                       (hint == MemoryHint::Auto && size < (1ULL << 20));
+
+    VkBufferCreateInfo bci{};
+    bci.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size        = size;
+    bci.usage       = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer buf = VK_NULL_HANDLE;
-    if (vkCreateBuffer(rtx().device, &bci, nullptr, &buf) != VK_SUCCESS) {
-        return 0;
-    }
+    if (vkCreateBuffer(rtx().device, &bci, nullptr, &buf) != VK_SUCCESS) return 0;
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, buf, &req);
 
-    // Choose memory properties based on hint
-    VkMemoryPropertyFlags desiredProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VkMemoryPropertyFlags props = hostVisible ?
+        (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) :
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    if (hint == MemoryHint::HostVisible || hint == MemoryHint::HostCoherent) {
-        desiredProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    }
-    // You can add more cases later (e.g. HostCached)
-
-    uint32_t memType = findMemoryType(req.memoryTypeBits, desiredProps);
-
-    // Fallback for SBT / performance-critical buffers: prefer DEVICE_LOCAL even if host-visible was requested
-    if (memType == ~0u && (hint == MemoryHint::HostVisible || hint == MemoryHint::HostCoherent)) {
-        memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    }
-
+    uint32_t memType = findMemoryType(req.memoryTypeBits, props);
     if (memType == ~0u) {
         vkDestroyBuffer(rtx().device, buf, nullptr);
         return 0;
     }
 
-    // Required for shader device address (SBT, ray tracing, etc.)
-    VkMemoryAllocateFlagsInfo allocFlags{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
-    };
+    VkMemoryAllocateFlagsInfo flags{};
+    flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
-    VkMemoryAllocateInfo mai{
-        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext           = &allocFlags,
-        .allocationSize  = req.size,
-        .memoryTypeIndex = memType
-    };
+    VkMemoryAllocateInfo mai{};
+    mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.pNext           = &flags;
+    mai.allocationSize  = req.size;
+    mai.memoryTypeIndex = memType;
 
     VkDeviceMemory mem = VK_NULL_HANDLE;
     if (vkAllocateMemory(rtx().device, &mai, nullptr, &mem) != VK_SUCCESS) {
@@ -523,39 +510,20 @@ inline uint64_t createBuffer(
         return 0;
     }
 
-    if (vkBindBufferMemory(rtx().device, buf, mem, 0) != VK_SUCCESS) {
-        vkFreeMemory(rtx().device, mem, nullptr);
-        vkDestroyBuffer(rtx().device, buf, nullptr);
-        return 0;
-    }
+    vkBindBufferMemory(rtx().device, buf, mem, 0);
 
-    // Get device address (needed for SBT regions)
-    VkBufferDeviceAddressInfo addrInfo{
-        .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .buffer = buf
-    };
+    VkBufferDeviceAddressInfo addrInfo{};
+    addrInfo.sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addrInfo.buffer = buf;
     VkDeviceAddress addr = ext().vkGetBufferDeviceAddress(rtx().device, &addrInfo);
 
-    // Map only when explicitly requested as host-visible
     void* mapped = nullptr;
-    bool shouldMap = (hint == MemoryHint::HostVisible || hint == MemoryHint::HostCoherent);
-
-    if (shouldMap) {
-        vkMapMemory(rtx().device, mem, 0, VK_WHOLE_SIZE, 0, &mapped);
-        // Note: we ignore map failure here (rare); mapped remains nullptr
+    if (hostVisible) {
+        vkMapMemory(rtx().device, mem, 0, size, 0, &mapped);
     }
 
-    // Store in your registry
     uint64_t handle = rtx().next_buffer_handle++;
-    rtx().buffers.emplace(handle, RTX::BufferInfo{
-        .buffer   = buf,
-        .memory   = mem,
-        .size     = size,
-        .deviceAddress = addr,
-        .mapped   = mapped,
-        .usage    = usage,
-        .tag      = std::string(tag)
-    });
+    rtx().buffers.emplace(handle, RTX::BufferInfo{buf, mem, size, addr, mapped, usage, std::string(tag)});
 
     return handle;
 }

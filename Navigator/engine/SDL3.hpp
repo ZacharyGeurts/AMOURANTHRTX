@@ -5,7 +5,14 @@
 // Full 4-axis controller support + real track finished callbacks
 // Updated to use OptionsMenu.hpp for all configuration
 // Dynamic audio slots — preload as many files as desired via Options::SDL3::PreloadedAudioFiles
-// No hard slot limit (MyAudioFiles is soft/recommended concurrent max)
+// No hard slot limit (MyAudioSlots is soft/recommended concurrent max)
+//
+// INPUT BEHAVIOR (2026 standard):
+// - Mouse capture: relative mode only when window focused (SDL_SetWindowRelativeMouseMode)
+// - Keyboard & gamepad: captured when window has focus (SDL_WINDOW_INPUT_FOCUS)
+// - Alt+Tab / lost focus: automatically releases mouse capture & stops relative mode
+// - Regain focus: auto-restores relative mouse mode if enabled in options
+// - No global/raw input hijacking — respects OS focus rules
 // =============================================================================
 
 #include <SDL3/SDL.h>
@@ -29,12 +36,17 @@
 
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "AMOURANTHRTX.hpp"
+#include "AMOURANTHRTX.hpp"  // for Swapchain
 
+// =============================================================================
+// CONSTANTS — centralized from Options::SDL3
+// =============================================================================
 constexpr int     AUDIO_FREQ           = Options::SDL3::AudioFrequency;
 constexpr int     AUDIO_CHANNELS       = Options::SDL3::AudioChannels;
 constexpr float   DEFAULT_VOLUME       = Options::SDL3::DefaultVolume;
-constexpr int     SOFT_MAX_SLOTS       = Options::SDL3::MyAudioFiles;
+
+// Soft / recommended maximum concurrent playing tracks
+constexpr int     SOFT_MAX_SLOTS       = Options::SDL3::MyAudioSlots;
 
 // =============================================================================
 // TYPES
@@ -108,7 +120,6 @@ public:
         }
 
         applyOptions();
-	    openAllControllers();
 
         if (TTF_Init() == 0) {
             LOG_ERROR_CAT("TTF", "TTF_Init failed: {}", SDL_GetError());
@@ -135,11 +146,14 @@ public:
         mixer_ready_ = true;
 
         preloadAudioFiles();
+
         bindDefaultActions();
+
+        // Initial focus check
         updateFocusState();
 
         initialized_ = true;
-        LOG_SUCCESS_CAT("SDL3", "Initialized — dynamic audio files (preloaded: {}, soft max: {}) + full controller support",
+        LOG_SUCCESS_CAT("SDL3", "Initialized — dynamic audio slots (preloaded: {}, soft max: {}) + full controller support",
                         slots_.size(), SOFT_MAX_SLOTS);
         return true;
     }
@@ -177,40 +191,47 @@ public:
         LOG_SUCCESS_CAT("SDL3", "Shutdown complete");
     }
 
+    // Called on all window-related events
     void onWindowEvent(const SDL_Event& ev) noexcept {
         switch (ev.type) {
+            // Focus events → update mouse capture/grab
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
-			    Options::SDL3::EnableInputCapture = true;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
-			    Options::SDL3::EnableInputCapture = false;
             case SDL_EVENT_WINDOW_SHOWN:
             case SDL_EVENT_WINDOW_HIDDEN:
                 updateFocusState();
                 break;
+
+            // Size changes → recreate swapchain / adjust render resolution
             case SDL_EVENT_WINDOW_RESIZED:
-                onResize();
-                break;
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                onResize();
-                break;
             case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
                 onResize();
                 break;
+    
+            // Position / display changes (optional logging or multi-monitor handling)
             case SDL_EVENT_WINDOW_MOVED:
             case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                // Optional: log or update multi-monitor aware rendering
                 LOG_DEBUG_CAT("SDL3", "Window moved or display changed");
                 break;
+
+            // Minimized / restored → pause/resume rendering if desired
             case SDL_EVENT_WINDOW_MINIMIZED:
                 LOG_INFO_CAT("SDL3", "Window minimized — pausing rendering");
+                // Optional: set a paused flag to skip heavy compute dispatches
                 break;
+
             case SDL_EVENT_WINDOW_MAXIMIZED:
             case SDL_EVENT_WINDOW_RESTORED:
                 LOG_INFO_CAT("SDL3", "Window restored/maximized");
-                onResize();
+                onResize();  // Re-check size
                 break;
+
+            // User wants to close → handle gracefully
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 LOG_INFO_CAT("SDL3", "Window close requested");
-                handleQuit();
+                handleQuit();  // or push SDL_QUIT event
                 break;
 
             case SDL_EVENT_WINDOW_LAST:
@@ -219,6 +240,7 @@ public:
             // Rare / advanced
             case SDL_EVENT_WINDOW_HIT_TEST:
             case SDL_EVENT_WINDOW_ICCPROF_CHANGED:
+                // Usually ignore, but log for debugging
                 LOG_DEBUG_CAT("SDL3", "Advanced window event: {}", ev.type);
                 break;
 
@@ -244,6 +266,8 @@ public:
         SDL_SetWindowFullscreen(window_, Options::SDL3::StartFullscreen);
         SDL_SetWindowBordered(window_, !Options::SDL3::BorderlessWindow);
         SDL_SetWindowResizable(window_, Options::SDL3::AllowWindowResize);
+
+        // Mouse capture only when focused — handled in updateFocusState()
         bool capture = Options::SDL3::EnableInputCapture && hasFocus_;
         SDL_SetWindowRelativeMouseMode(window_, capture);
     }
@@ -258,12 +282,16 @@ private:
         if (!window_) return;
 
         Uint64 flags = SDL_GetWindowFlags(window_);
-        bool newFocus = (flags & SDL_WINDOW_INPUT_FOCUS) != 0; // likely incorrect but I like having mouse atm
+        bool newFocus = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
 
         if (newFocus != hasFocus_) {
             hasFocus_ = newFocus;
-            bool shouldCapture = Options::SDL3::EnableInputCapture && hasFocus_;
-            SDL_SetWindowRelativeMouseMode(window_, shouldCapture);
+            bool capture = Options::SDL3::EnableInputCapture && hasFocus_;
+            SDL_SetWindowRelativeMouseMode(window_, capture);
+            Options::SDL3::EnableInputCapture = true;
+
+            LOG_INFO_CAT("SDL3", "Window focus changed: {} (relative mouse: {})",
+                         hasFocus_ ? "gained" : "lost", capture ? "enabled" : "disabled");
         }
     }
 
@@ -286,10 +314,16 @@ public:
 
     void toggleRayTracing() noexcept {
         Options::Rendering::EnableHardwareRayTracing = !Options::Rendering::EnableHardwareRayTracing;
-        LOG_INFO_CAT("RENDER", "Hardware Ray Tracing Shaders toggled: {}",
+        if (Options::Rendering::EnableHardwareRayTracing && !Options::Rendering::PreferHardwareRT) {
+            LOG_WARNING_CAT("RENDER", "Hardware RT toggled ON but PreferHardwareRT is OFF — may use software fallback");
+        }
+        LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}",
                      Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");
     }
 
+    // ────────────────────────────────────────────────
+    // AUDIO
+    // ────────────────────────────────────────────────
     int playSound(const std::string& file, const std::string& cmd, int preferred_slot = -1) {
         if (!mixer_ready_) return -1;
 
@@ -315,9 +349,9 @@ public:
                     LOG_WARNING_CAT("AUDIO", "Active playing count ({}) exceeds soft max ({})", getPlayingCount(), SOFT_MAX_SLOTS);
                 }
 
-                LOG_SUCCESS_CAT("AUDIO", "Playing '{}' file {}", s.filename, slot);
+                LOG_SUCCESS_CAT("AUDIO", "Playing '{}' on slot {}", s.filename, slot);
             } else {
-                LOG_SUCCESS_CAT("AUDIO", "Loaded '{}' file {}", file, slot);
+                LOG_SUCCESS_CAT("AUDIO", "Loaded '{}' into slot {}", file, slot);
             }
             return slot;
         }
@@ -326,7 +360,7 @@ public:
             if (preferred_slot >= 0 && s < slots_.size() && slots_[s].isActive()) {
                 MIX_StopTrack(tracks_[s], 0);
                 slots_[s].state = AudioSlotState::Loaded;
-                LOG_INFO_CAT("AUDIO", "Stopped audio file {}", preferred_slot);
+                LOG_INFO_CAT("AUDIO", "Stopped slot {}", preferred_slot);
             }
             return preferred_slot;
         }
@@ -335,7 +369,7 @@ public:
             if (preferred_slot >= 0 && s < slots_.size() && slots_[s].state == AudioSlotState::Playing) {
                 MIX_PauseTrack(tracks_[s]);
                 slots_[s].state = AudioSlotState::Paused;
-                LOG_INFO_CAT("AUDIO", "Paused audio file {}", preferred_slot);
+                LOG_INFO_CAT("AUDIO", "Paused slot {}", preferred_slot);
             }
             return preferred_slot;
         }
@@ -344,7 +378,7 @@ public:
             if (preferred_slot >= 0 && s < slots_.size() && slots_[s].audio) {
                 MIX_StopTrack(tracks_[s], 0);
                 slots_[s].reset();
-                LOG_INFO_CAT("AUDIO", "Removed audio file {}", preferred_slot);
+                LOG_INFO_CAT("AUDIO", "Removed slot {}", preferred_slot);
             }
             return preferred_slot;
         }
@@ -355,6 +389,7 @@ public:
 
     void onTrackFinished(int slot, std::function<void(int)> cb) {
         if (!mixer_ready_ || slot < 0 || static_cast<size_t>(slot) >= slots_.size() || !tracks_[static_cast<size_t>(slot)]) return;
+
         std::lock_guard<std::mutex> lock(callback_mtx_);
         stopped_callbacks_[tracks_[static_cast<size_t>(slot)]] = std::move(cb);
     }
@@ -407,7 +442,7 @@ private:
             MIX_SetTrackStoppedCallback(t, track_stopped_callback, this);
             tracks_.push_back(t);
 
-            LOG_INFO_CAT("AUDIO", "Preloaded '{}' → file {}", path, idx);
+            LOG_INFO_CAT("AUDIO", "Preloaded '{}' → slot {}", path, idx);
             ++loaded;
         }
 
@@ -466,7 +501,7 @@ private:
         MIX_SetTrackStoppedCallback(t, track_stopped_callback, this);
         tracks_.push_back(t);
 
-        LOG_INFO_CAT("AUDIO", "Allocated new file {} for '{}'", idx, file);
+        LOG_INFO_CAT("AUDIO", "Allocated new slot {} for '{}'", idx, file);
         return static_cast<int>(idx);
     }
 
@@ -506,6 +541,9 @@ private:
     }
 
 public:
+    // ────────────────────────────────────────────────
+    // IMAGE & TEXT
+    // ────────────────────────────────────────────────
     SDL_Texture* loadTexture(SDL_Renderer* r, const std::string& path) {
         SDL_Surface* s = IMG_Load(path.c_str());
         if (!s) {
@@ -689,6 +727,11 @@ public:
     }
 
 private:
+    void processEvent(const SDL_Event& ev) {
+        if (ev.type == SDL_EVENT_GAMEPAD_ADDED) openController(ev.gdevice.which);
+        if (ev.type == SDL_EVENT_GAMEPAD_REMOVED) closeController(ev.gdevice.which);
+    }
+
     void openAllControllers() {
         int n = 0;
         auto* ids = SDL_GetGamepads(&n);
@@ -697,13 +740,9 @@ private:
             SDL_free(ids);
         }
     }
-	
-    void processEvent(const SDL_Event& ev) {
-        if (ev.type == SDL_EVENT_GAMEPAD_ADDED) openController(ev.gdevice.which);
-        if (ev.type == SDL_EVENT_GAMEPAD_REMOVED) closeController(ev.gdevice.which);
-    }
 
     void openController(SDL_JoystickID id) {
+        if (!SDL_IsGamepad(id)) return;
         auto* gp = SDL_OpenGamepad(id);
         if (!gp) {
             LOG_WARNING_CAT("INPUT", "SDL_OpenGamepad failed for id {}: {}", id, SDL_GetError());

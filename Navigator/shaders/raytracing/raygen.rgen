@@ -1,117 +1,40 @@
-// raygen.rgen
+// filename: raygen.rgen
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_scalar_block_layout : require
 
-struct Payload {
-    vec3 color;
-    vec3 attenuation;
-    uint depth;
-    bool miss;
-};
+layout(location = 0) rayPayloadEXT vec3 hitColor;
 
-layout(location = 0) rayPayloadEXT Payload payload;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 0, binding = 1, rgba32f) uniform image2D outputImage;
 
-layout(binding = 0, set = 0) uniform accelerationStructureEXT tlas;
-layout(binding = 1, set = 0, rgba32f) uniform image2D rtOutput;
-layout(binding = 2, set = 0) uniform sampler2D envMap;
-layout(binding = 3, set = 0) uniform sampler2D monsterTex;
+void main() {
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    const vec2 uv = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    vec2 d = uv * 2.0 - 1.0;
+    d.x *= (float(gl_LaunchSizeEXT.x) / float(gl_LaunchSizeEXT.y));  // aspect
 
-layout(push_constant) uniform PushConstants {
-    mat4 invView;
-    mat4 invProj;
-    float totalTime;
-    uint spp;
-    uint frameSeed;
-    uint forceEnvOnly;
-    float jitterStrength;
-    uint maxRecursion;
-    uint useEnvSky;
-    uint flipEnvV;
-    uint showHotPink;
-    float environmentExposure;
-    float skyIntensity;
-    float environmentRotationY;
-    vec3 billboardBaseColor;
-    float billboardAlphaCutoff;
-    uint billboardUseAlphaBlend;
-    uint showNormals;
-    uint showUVs;
-    uint showWireframe;
-    uint enableReflections;
-    uint enableShadows;
-    uint enableVolumetrics;
-    float fogPulseSpeed;
-    float fogPulseAmount;
-    float lightBobSpeed;
-    float lightBobAmplitude;
-    float lightOrbitSpeed;
-    float lightOrbitAmplitude;
-    float lightColorPulseSpeed;
-    float lightColorPulseAmount;
-} pc;
+    vec3 origin    = vec3(0.0, 1.0, 5.0);
+    vec3 direction = normalize(vec3(d.x, -d.y, -1.8));  // simple perspective
 
-uint pcg(uint v)
-{
-    uint state = v * 747796405u + 2891336453u;
-    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
-}
+    traceRayEXT(
+        topLevelAS,                // acceleration structure
+        gl_RayFlagsOpaqueEXT,      // ray flags
+        0xff,                      // cull mask
+        0,                         // sbt raygen offset
+        1,                         // sbt stride (bytes per record)
+        0,                         // miss index
+        origin,
+        0.001,                     // tmin
+        direction,
+        1000.0,                    // tmax
+        0                          // payload location
+    );
 
-float rand(inout uint seed)
-{
-    seed = pcg(seed);
-    return float(seed) / float(0xffffffffu);
-}
+    vec3 color = hitColor;
 
-vec2 hash2(uint seed)
-{
-    uint s = seed;
-    return vec2(rand(s), rand(s));
-}
+    // very basic tonemap + gamma
+    color = color / (color + 1.0);
+    color = pow(color, vec3(1.0/2.2));
 
-vec3 sampleEnvironment(vec3 dir)
-{
-    vec2 uv;
-    uv.x = atan(dir.z, dir.x) * (0.5 / 3.14159265359) + 0.5 + (pc.environmentRotationY / (2.0 * 3.14159265359));
-    uv.y = acos(clamp(dir.y, -1.0, 1.0)) / 3.14159265359;
-    if (pc.flipEnvV == 1) uv.y = 1.0 - uv.y;
-    uv.x = fract(uv.x);
-    return texture(envMap, uv).rgb * pc.environmentExposure * pc.skyIntensity;
-}
-
-void main()
-{
-    const uvec2 pixel = gl_LaunchIDEXT.xy;
-    const vec2 uv = vec2(pixel + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
-
-    uint rngSeed = pc.frameSeed + pc.spp + pixel.x * 1973 + pixel.y * 9277;
-
-    vec2 jitter = (pc.jitterStrength > 0.0) ? (hash2(rngSeed) - vec2(0.5)) * pc.jitterStrength : vec2(0.0);
-    vec2 ndc = uv * 2.0 - 1.0 + jitter / vec2(gl_LaunchSizeEXT.xy);
-
-    vec4 near = pc.invProj * vec4(ndc, -1.0, 1.0);
-    near /= near.w;
-    vec4 far = pc.invProj * vec4(ndc, 1.0, 1.0);
-    far /= far.w;
-
-    vec3 origin = (pc.invView * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    vec3 direction = normalize((pc.invView * vec4(normalize(far.xyz - near.xyz), 0.0)).xyz);
-
-    payload.color = vec3(0.0);
-    payload.attenuation = vec3(1.0);
-    payload.depth = 0;
-    payload.miss = false;
-
-    uint flags = gl_RayFlagsOpaqueEXT;
-
-    traceRayEXT(tlas, flags, 0xFF, 0, 0, 0, origin, 0.001, direction, 10000.0, 0);
-
-    vec3 finalColor = payload.color;
-
-    finalColor *= pc.environmentExposure;
-    finalColor = finalColor / (finalColor + vec3(1.0));
-    finalColor = pow(finalColor, vec3(1.0 / 2.2));
-
-    imageStore(rtOutput, ivec2(pixel), vec4(finalColor, 1.0));
+    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1.0));
 }
