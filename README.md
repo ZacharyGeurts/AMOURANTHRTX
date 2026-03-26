@@ -125,6 +125,8 @@ Contributions are welcome!
 Please submit pull requests or open issues on the repository.  
 Ensure code follows C++20 standards and includes proper error handling.  
 I am now a stickler for OMP parallelization and memory safety with C++20 due to advent of AI coding.  
+<img width="820" alt="Jorts" src="https://github.com/user-attachments/assets/b5c142a7-6ac3-4027-81f2-a1b94d9663d0" />
+
 
 ![gif](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/gif.gif)  
 
