@@ -153,6 +153,7 @@ namespace Options::SDL3
 	// If you play more than "16" then the first then second so on files get replaced.
 	// Explore your Navigator/engine/SDL3.hpp file sometime, and see the wiki.
 	// https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki/SDL3
+	
     inline const std::vector<std::string> PreloadedAudioFiles = {
         "assets/audio/splash.wav"
     };

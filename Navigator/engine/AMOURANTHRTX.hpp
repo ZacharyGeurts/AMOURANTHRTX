@@ -67,7 +67,6 @@ struct alignas(16) UniversalPrimitive {
 // ────────────────────────────────────────────────
 // VRAM tracking (for RayCanvas log)
 // ────────────────────────────────────────────────
-
 struct VRAMReality {
     VkDeviceSize total            = 0;
     VkDeviceSize driver_footprint = 0;
@@ -79,9 +78,8 @@ struct VRAMReality {
 };
 
 // ────────────────────────────────────────────────
-// Core context
+// Core context - rtx().everything
 // ────────────────────────────────────────────────
-
 struct RTX {
     VkInstance                      instance            = VK_NULL_HANDLE;
     VkPhysicalDevice                physical            = VK_NULL_HANDLE;
@@ -139,6 +137,7 @@ struct RTX {
     std::mutex                      buffer_mutex;
 };
 
+// RIP BW 🧑🏾‍🩰
 inline RTX& rtx() noexcept {
     static RTX ctx;
     return ctx;
@@ -147,7 +146,6 @@ inline RTX& rtx() noexcept {
 // ────────────────────────────────────────────────
 // Extension loader
 // ────────────────────────────────────────────────
-
 struct VulkanExtensions {
     PFN_vkCreateSwapchainKHR                        vkCreateSwapchainKHR{};
     PFN_vkDestroySwapchainKHR                       vkDestroySwapchainKHR{};
@@ -205,7 +203,6 @@ inline VulkanExtensions& ext() noexcept {
 // ────────────────────────────────────────────────
 // Queue family helper
 // ────────────────────────────────────────────────
-
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphics, present, compute, transfer;
     bool complete() const noexcept { return graphics && present && compute; }
@@ -240,7 +237,6 @@ inline QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
 // ────────────────────────────────────────────────
 // Vulkan Instance Creation
 // ────────────────────────────────────────────────
-
 inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -269,7 +265,6 @@ inline VkInstance createVulkanInstance() noexcept {
 // ────────────────────────────────────────────────
 // Logical Device & GPU Selection
 // ────────────────────────────────────────────────
-
 inline VkDevice createLogicalDeviceAndSelectGPU(
     VkInstance instance,
     VkSurfaceKHR surface,
@@ -394,7 +389,6 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 // ────────────────────────────────────────────────
 // Command buffer helpers (used by Memory::uploadToBuffer)
 // ────────────────────────────────────────────────
-
 inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
     VkCommandBufferAllocateInfo alloc{};
     alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;

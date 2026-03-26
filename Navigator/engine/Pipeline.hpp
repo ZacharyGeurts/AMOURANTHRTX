@@ -407,7 +407,7 @@ void create_ray_tracing_pipeline() noexcept {
     pipeCI.maxPipelineRayRecursionDepth = 1u;
     pipeCI.layout                       = pipeline_layout;
 
-    VkResult res = ext().vkCreateRayTracingPipelinesKHR(rtx().device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &rt_pipeline);
+    ext().vkCreateRayTracingPipelinesKHR(rtx().device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &rt_pipeline);
 
     vkDestroyShaderModule(rtx().device, rgen,  nullptr);
     vkDestroyShaderModule(rtx().device, rmiss, nullptr);
@@ -415,20 +415,11 @@ void create_ray_tracing_pipeline() noexcept {
     vkDestroyShaderModule(rtx().device, rahit, nullptr);
     vkDestroyShaderModule(rtx().device, rcall, nullptr);
 
-    if (res == VK_SUCCESS) {
-        LOG_SUCCESS_CAT("PIPELINE", "Hardware Ray Tracing pipeline created successfully");
-        raytracing_success = true;
-    } else {
-        LOG_FATAL("vkCreateRayTracingPipelinesKHR FAILED! VkResult = {}", static_cast<int>(res));
-        rt_pipeline = VK_NULL_HANDLE;
-    }
-
     raytracing_tried = true;
 }
 
-void build_shader_binding_table() {
-    if (rtx().raygen_sbt_region.deviceAddress) return;
-
+void build_shader_binding_table()
+{
     const uint32_t handleSize  = rtx().rt_props.shaderGroupHandleSize;
     const uint32_t handleAlign = rtx().rt_props.shaderGroupHandleAlignment;
     const uint32_t baseAlign   = rtx().rt_props.shaderGroupBaseAlignment;
@@ -436,10 +427,11 @@ void build_shader_binding_table() {
     const uint32_t alignedHandleSize = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
     const uint32_t sbtStride         = alignedHandleSize;
 
-    VkDeviceSize sbtSize = static_cast<VkDeviceSize>(sbtStride) * 4;
+    const uint32_t numGroups = 4;
+
+    VkDeviceSize sbtSize = static_cast<VkDeviceSize>(sbtStride) * numGroups;
     sbtSize = (sbtSize + baseAlign - 1) & ~(baseAlign - 1);
 
-    // Create persistent SBT buffer using AMOURANTHRTX Memory system
     uint64_t sbtBufferHandle = Memory::createBuffer(
         sbtSize,
         VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
@@ -449,66 +441,54 @@ void build_shader_binding_table() {
     );
 
     if (sbtBufferHandle == 0) {
-        // Handle error - buffer creation failed
         return;
     }
 
     rtx().sbt_address = Memory::get(sbtBufferHandle)->deviceAddress;
     rtx().sbt_size    = sbtSize;
 
-    // Get shader group handles (raygen, miss, closest-hit, any-hit or whatever your 4 groups are)
-    std::vector<uint8_t> shaderHandles(4 * handleSize);
+    std::vector<uint8_t> shaderHandles(numGroups * handleSize);
     ext().vkGetRayTracingShaderGroupHandlesKHR(
         rtx().device,
-        rtx().rt_pipeline,  // Note: changed from pipeline_ to rtx().rt_pipeline
-        0, 4,
+        rtx().rt_pipeline,
+        0,
+        numGroups,
         shaderHandles.size(),
         shaderHandles.data()
     );
 
-    // Upload handles to SBT buffer (Memory::uploadToBuffer handles staging + copy internally)
-    Memory::uploadToBuffer(sbtBufferHandle, shaderHandles.data(), 4 * handleSize);
+    std::vector<uint8_t> sbtData(sbtSize, 0);
+    const uint8_t* src = shaderHandles.data();
+    uint8_t*       dst = sbtData.data();
 
-    // Note: uploadToBuffer does a full copy of 4*handleSize.
-    // Since stride > handleSize, we need to manually place them at correct offsets with padding.
-
-    // Better: upload with proper strided layout
-    {
-        std::vector<uint8_t> sbtData(sbtSize, 0);
-
-        const uint8_t* src = shaderHandles.data();
-        uint8_t* dst = sbtData.data();
-
-        memcpy(dst + 0 * sbtStride, src + 0 * handleSize, handleSize);
-        memcpy(dst + 1 * sbtStride, src + 1 * handleSize, handleSize);
-        memcpy(dst + 2 * sbtStride, src + 2 * handleSize, handleSize);
-        memcpy(dst + 3 * sbtStride, src + 3 * handleSize, handleSize);
-
-        Memory::uploadToBuffer(sbtBufferHandle, sbtData.data(), sbtSize);
+    for (uint32_t i = 0; i < numGroups; ++i) {
+        memcpy(dst + i * sbtStride, src + i * handleSize, handleSize);
     }
 
-    // Setup Strided Device Address Regions
-    VkDeviceAddress baseAddr = rtx().sbt_address;
+    Memory::uploadToBuffer(sbtBufferHandle, sbtData.data(), sbtSize);
+    const VkDeviceAddress baseAddr = rtx().sbt_address;
 
     rtx().raygen_sbt_region = {
-        baseAddr + 0 * sbtStride,
-        sbtStride,
-        sbtStride
+        .deviceAddress = baseAddr + 0 * sbtStride,
+        .stride        = sbtStride,
+        .size          = sbtStride
     };
 
     rtx().miss_sbt_region = {
-        baseAddr + 1 * sbtStride,
-        sbtStride,
-        sbtStride
+        .deviceAddress = baseAddr + 1 * sbtStride,
+        .stride        = sbtStride,
+        .size          = sbtStride
     };
 
     rtx().hit_sbt_region = {
-        baseAddr + 3 * sbtStride,   // assuming group 2 = closest hit, group 3 = any-hit or your layout
-        sbtStride,
-        sbtStride
+        .deviceAddress = baseAddr + 2 * sbtStride,
+        .stride        = sbtStride,
+        .size          = sbtStride
     };
 
     rtx().callable_sbt_region = { 0, 0, 0 };
+
+	LOG_SUCCESS_CAT("SBT", "Shader Binding Table has been created.");
 }
 
 // ────────────────────────────────────────────────
