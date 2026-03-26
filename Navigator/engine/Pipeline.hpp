@@ -98,10 +98,6 @@ inline VkPipelineLayout         pipeline_layout         = VK_NULL_HANDLE;
 inline VkPipeline               canvas_pipeline         = VK_NULL_HANDLE;
 inline VkPipeline               rt_pipeline             = VK_NULL_HANDLE;
 
-inline VkBuffer                 sbt_buffer              = VK_NULL_HANDLE;
-inline VkDeviceMemory           sbt_memory              = VK_NULL_HANDLE;
-inline VkDeviceAddress          sbt_device_address      = 0;
-
 inline VkStridedDeviceAddressRegionKHR  rgen_region     {};
 inline VkStridedDeviceAddressRegionKHR  miss_region     {};
 inline VkStridedDeviceAddressRegionKHR  hit_region      {};
@@ -189,10 +185,11 @@ std::expected<VkShaderModule, std::string> load_spirv(const std::string& path) n
 
     LOG_SUCCESS_CAT("SHADER", "Loaded SPIR-V: {} ({} bytes)", loaded_path, code.size() * 4);
 
-    VkShaderModuleCreateInfo ci{};
-    ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    ci.codeSize = code.size() * sizeof(uint32_t);
-    ci.pCode    = code.data();
+    VkShaderModuleCreateInfo ci{
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = code.size() * sizeof(uint32_t),
+        .pCode    = code.data()
+    };
 
     VkShaderModule mod = VK_NULL_HANDLE;
     VkResult res = vkCreateShaderModule(rtx().device, &ci, nullptr, &mod);
@@ -221,10 +218,11 @@ void initialize_descriptors_and_layout() noexcept {
         {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
     };
 
-    VkDescriptorSetLayoutCreateInfo dslCI{};
-    dslCI.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCI.bindingCount = static_cast<uint32_t>(std::size(bindings));
-    dslCI.pBindings    = bindings;
+    VkDescriptorSetLayoutCreateInfo dslCI{
+        .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = static_cast<uint32_t>(std::size(bindings)),
+        .pBindings    = bindings
+    };
 
     VkResult res = vkCreateDescriptorSetLayout(rtx().device, &dslCI, nullptr, &main_descriptor_layout);
     if (res != VK_SUCCESS) {
@@ -232,22 +230,24 @@ void initialize_descriptors_and_layout() noexcept {
         return;
     }
 
-    VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+    VkPushConstantRange push{
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
                     | VK_SHADER_STAGE_RAYGEN_BIT_KHR
                     | VK_SHADER_STAGE_MISS_BIT_KHR
                     | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
                     | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
-                    | VK_SHADER_STAGE_CALLABLE_BIT_KHR;
-    push.offset     = 0;
-    push.size       = sizeof(PushConstants);
+                    | VK_SHADER_STAGE_CALLABLE_BIT_KHR,
+        .offset     = 0,
+        .size       = sizeof(PushConstants)
+    };
 
-    VkPipelineLayoutCreateInfo plCI{};
-    plCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    plCI.setLayoutCount         = 1;
-    plCI.pSetLayouts            = &main_descriptor_layout;
-    plCI.pushConstantRangeCount = 1;
-    plCI.pPushConstantRanges    = &push;
+    VkPipelineLayoutCreateInfo plCI{
+        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount         = 1,
+        .pSetLayouts            = &main_descriptor_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges    = &push
+    };
 
     res = vkCreatePipelineLayout(rtx().device, &plCI, nullptr, &pipeline_layout);
     if (res != VK_SUCCESS) {
@@ -265,11 +265,12 @@ void create_audio_command_buffer() noexcept {
 
     LOG_INFO_CAT("AUDIO", "Creating audio command buffer");
 
-    VkBufferCreateInfo bufCI{};
-    bufCI.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufCI.size        = sizeof(AudioCommandBlock);
-    bufCI.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBufferCreateInfo bufCI{
+        .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size        = sizeof(AudioCommandBlock),
+        .usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
 
     VkResult res = vkCreateBuffer(rtx().device, &bufCI, nullptr, &audio_cmd_buffer);
     if (res != VK_SUCCESS) {
@@ -280,11 +281,12 @@ void create_audio_command_buffer() noexcept {
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, audio_cmd_buffer, &req);
 
-    VkMemoryAllocateInfo alloc{};
-    alloc.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc.allocationSize  = req.size;
-    alloc.memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkMemoryAllocateInfo alloc{
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize  = req.size,
+        .memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+    };
 
     res = vkAllocateMemory(rtx().device, &alloc, nullptr, &audio_cmd_memory);
     if (res != VK_SUCCESS) {
@@ -309,7 +311,6 @@ void create_audio_command_buffer() noexcept {
 // Canvas Compute Pipeline (Raymarching)
 // ────────────────────────────────────────────────
 void create_canvas_pipeline() noexcept {
-
     initialize_descriptors_and_layout();
 
     auto mod_res = load_spirv("assets/shaders/compute/CANVAS.spv");
@@ -317,24 +318,23 @@ void create_canvas_pipeline() noexcept {
         LOG_FATAL("CRITICAL: Failed to load CANVAS.spv");
         return;
     }
-	else
-	{
-		// glsl from VulkanSDK builds these, we handle at CMAKE txt
-		LOG_INFO_CAT("CANVAS", "Loaded CANVAS.spv (binary CANVAS.comp)");
-	}
+
+    LOG_INFO_CAT("CANVAS", "Loaded CANVAS.spv (binary CANVAS.comp)");
 
     VkShaderModule module = mod_res.value();
 
-    VkPipelineShaderStageCreateInfo stage{};
-    stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
-    stage.module = module;
-    stage.pName  = "main";
+    VkPipelineShaderStageCreateInfo stage{
+        .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = module,
+        .pName  = "main"
+    };
 
-    VkComputePipelineCreateInfo ci{};
-    ci.sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    ci.stage  = stage;
-    ci.layout = pipeline_layout;
+    VkComputePipelineCreateInfo ci{
+        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage  = stage,
+        .layout = pipeline_layout
+    };
 
     vkCreateComputePipelines(rtx().device, VK_NULL_HANDLE, 1, &ci, nullptr, &canvas_pipeline);
     vkDestroyShaderModule(rtx().device, module, nullptr);
@@ -346,7 +346,6 @@ void create_canvas_pipeline() noexcept {
 // Ray Tracing Pipeline (Hardware RT)
 // ────────────────────────────────────────────────
 void create_ray_tracing_pipeline() noexcept {
-
     initialize_descriptors_and_layout();
 
     auto rgen_res  = load_spirv("assets/shaders/raytracing/raygen.spv");
@@ -362,9 +361,8 @@ void create_ray_tracing_pipeline() noexcept {
         raytracing_tried = true;
         return;
     }
-	else {
-		LOG_INFO_CAT("RAY TRACING","Loaded set assets/shaders/raytracing.");
-	}
+
+    LOG_INFO_CAT("RAY TRACING", "Loaded ray tracing shaders");
 
     VkShaderModule rgen  = rgen_res.value();
     VkShaderModule rmiss = rmiss_res.value();
@@ -373,39 +371,42 @@ void create_ray_tracing_pipeline() noexcept {
     VkShaderModule rcall = rcall_res.value();
 
     std::vector<VkPipelineShaderStageCreateInfo> stages = {
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_RAYGEN_BIT_KHR,   rgen,  "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_MISS_BIT_KHR,     rmiss, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, rchit, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_ANY_HIT_BIT_KHR,  rahit, "main", nullptr},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_CALLABLE_BIT_KHR, rcall, "main", nullptr},
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR,   .module = rgen,  .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_MISS_BIT_KHR,     .module = rmiss, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, .module = rchit, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_ANY_HIT_BIT_KHR,  .module = rahit, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_CALLABLE_BIT_KHR, .module = rcall, .pName = "main" }
     };
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups = {
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 0, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, nullptr},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 1, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, nullptr},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, VK_SHADER_UNUSED_KHR, 2, 3, VK_SHADER_UNUSED_KHR, nullptr},
-        {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 4, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, nullptr},
+        { .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, .generalShader = 0 },
+        { .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, .generalShader = 1 },
+        { .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR, .closestHitShader = 2, .anyHitShader = 3 },
+        { .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, .generalShader = 4 }
     };
 
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR props{};
-    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    VkPhysicalDeviceProperties2 pdp2{};
-    pdp2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    pdp2.pNext = &props;
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR props{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+    };
+    VkPhysicalDeviceProperties2 pdp2{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &props
+    };
     vkGetPhysicalDeviceProperties2(rtx().physical, &pdp2);
 
     shader_group_handle_size      = props.shaderGroupHandleSize;
     shader_group_handle_alignment = props.shaderGroupHandleAlignment;
     shader_group_base_alignment   = props.shaderGroupBaseAlignment;
 
-    VkRayTracingPipelineCreateInfoKHR pipeCI{};
-    pipeCI.sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-    pipeCI.stageCount                   = static_cast<uint32_t>(stages.size());
-    pipeCI.pStages                      = stages.data();
-    pipeCI.groupCount                   = static_cast<uint32_t>(groups.size());
-    pipeCI.pGroups                      = groups.data();
-    pipeCI.maxPipelineRayRecursionDepth = 1u;
-    pipeCI.layout                       = pipeline_layout;
+    VkRayTracingPipelineCreateInfoKHR pipeCI{
+        .sType                        = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+        .stageCount                   = static_cast<uint32_t>(stages.size()),
+        .pStages                      = stages.data(),
+        .groupCount                   = static_cast<uint32_t>(groups.size()),
+        .pGroups                      = groups.data(),
+        .maxPipelineRayRecursionDepth = 1u,
+        .layout                       = pipeline_layout
+    };
 
     ext().vkCreateRayTracingPipelinesKHR(rtx().device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipeCI, nullptr, &rt_pipeline);
 
@@ -418,16 +419,16 @@ void create_ray_tracing_pipeline() noexcept {
     raytracing_tried = true;
 }
 
-void build_shader_binding_table()
-{
+void build_shader_binding_table() {
+    if (rtx().raygen_sbt_region.deviceAddress != 0) return;
+
     const uint32_t handleSize  = rtx().rt_props.shaderGroupHandleSize;
     const uint32_t handleAlign = rtx().rt_props.shaderGroupHandleAlignment;
     const uint32_t baseAlign   = rtx().rt_props.shaderGroupBaseAlignment;
 
     const uint32_t alignedHandleSize = (handleSize + handleAlign - 1) & ~(handleAlign - 1);
     const uint32_t sbtStride         = alignedHandleSize;
-
-    const uint32_t numGroups = 4;
+    const uint32_t numGroups         = 4;
 
     VkDeviceSize sbtSize = static_cast<VkDeviceSize>(sbtStride) * numGroups;
     sbtSize = (sbtSize + baseAlign - 1) & ~(baseAlign - 1);
@@ -441,6 +442,7 @@ void build_shader_binding_table()
     );
 
     if (sbtBufferHandle == 0) {
+        LOG_ERROR_CAT("SBT", "Failed to create SBT buffer");
         return;
     }
 
@@ -448,47 +450,53 @@ void build_shader_binding_table()
     rtx().sbt_size    = sbtSize;
 
     std::vector<uint8_t> shaderHandles(numGroups * handleSize);
-    ext().vkGetRayTracingShaderGroupHandlesKHR(
+
+    VkResult res = ext().vkGetRayTracingShaderGroupHandlesKHR(
         rtx().device,
         rtx().rt_pipeline,
-        0,
-        numGroups,
+        0, numGroups,
         shaderHandles.size(),
         shaderHandles.data()
     );
 
+    if (res != VK_SUCCESS) {
+        LOG_ERROR_CAT("SBT", "vkGetRayTracingShaderGroupHandlesKHR failed: {}", static_cast<int>(res));
+        return;
+    }
+
     std::vector<uint8_t> sbtData(sbtSize, 0);
     const uint8_t* src = shaderHandles.data();
-    uint8_t*       dst = sbtData.data();
+    uint8_t* dst = sbtData.data();
 
     for (uint32_t i = 0; i < numGroups; ++i) {
         memcpy(dst + i * sbtStride, src + i * handleSize, handleSize);
     }
 
     Memory::uploadToBuffer(sbtBufferHandle, sbtData.data(), sbtSize);
+
     const VkDeviceAddress baseAddr = rtx().sbt_address;
 
-    rtx().raygen_sbt_region = {
+    rgen_region = {
         .deviceAddress = baseAddr + 0 * sbtStride,
         .stride        = sbtStride,
         .size          = sbtStride
     };
 
-    rtx().miss_sbt_region = {
+    miss_region = {
         .deviceAddress = baseAddr + 1 * sbtStride,
         .stride        = sbtStride,
         .size          = sbtStride
     };
 
-    rtx().hit_sbt_region = {
+    hit_region = {
         .deviceAddress = baseAddr + 2 * sbtStride,
         .stride        = sbtStride,
         .size          = sbtStride
     };
 
-    rtx().callable_sbt_region = { 0, 0, 0 };
+    call_region = { 0, 0, 0 };
 
-	LOG_SUCCESS_CAT("SBT", "Shader Binding Table has been created.");
+    LOG_SUCCESS_CAT("SBT", "Shader Binding Table has been created.");
 }
 
 // ────────────────────────────────────────────────
@@ -573,7 +581,7 @@ bool processInput(int current_width, int current_height, bool isRunning) noexcep
     if (Options::Input::InvertMouseY) mouseDelta.y = -mouseDelta.y;
     mouseDelta *= Options::Input::MouseSensitivity;
 
-    // Touch fallback (unchanged)
+    // Touch fallback
     static glm::vec2 touchLookDelta{0.0f, 0.0f};
     static glm::vec2 touchMoveDelta{0.0f, 0.0f};
 
@@ -677,7 +685,7 @@ bool processInput(int current_width, int current_height, bool isRunning) noexcep
 }
 
 // ────────────────────────────────────────────────
-// Dispatch — Choose compute or ray tracing
+// Dispatch — Choose compute or ray tracing (hybrid)
 // ────────────────────────────────────────────────
 void dispatch(VkCommandBuffer cmd, int width, int height) noexcept {
     if (width <= 0 || height <= 0 || cmd == VK_NULL_HANDLE) {
@@ -704,7 +712,7 @@ void dispatch(VkCommandBuffer cmd, int width, int height) noexcept {
     pc.contrast         = Options::Rendering::Contrast;
     pc.saturation       = Options::Rendering::Saturation;
 
-    const float tod = Options::LivingWorld::CurrentTimeOfDay; // Howie
+    const float tod = Options::LivingWorld::CurrentTimeOfDay;
     pc.sunDir           = computeSunDirection(tod);
     pc.moonDir          = computeMoonDirection(tod);
     pc.sunIntensity     = Options::LivingWorld::SunIntensityDay;
@@ -717,20 +725,28 @@ void dispatch(VkCommandBuffer cmd, int width, int height) noexcept {
     pc.raymarchMaxDist  = Options::Rendering::RaymarchMaxDistance;
     pc.raymarchEpsilon  = Options::Rendering::RaymarchEpsilon;
     pc.raymarchMaxSteps = Options::Rendering::RaymarchMaxSteps;
-    pc.controllerInput = 0;   // processInput
+    pc.controllerInput = 0;   // filled by processInput if needed in future
 
-    if (Options::Rendering::EnableHardwareRayTracing && Options::Rendering::CurrentTechnique == Options::Rendering::RenderTechnique::HardwareRayTracing && rt_pipeline != VK_NULL_HANDLE)
-	{	
+    if (Options::Rendering::EnableHardwareRayTracing &&
+        Options::Rendering::CurrentTechnique == Options::Rendering::RenderTechnique::HardwareRayTracing &&
+        rt_pipeline != VK_NULL_HANDLE) {
+
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rt_pipeline);
-        vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
-                           VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
-                           VK_SHADER_STAGE_CALLABLE_BIT_KHR, 0, sizeof(PushConstants), &pc);
-        ext().vkCmdTraceRaysKHR(cmd, &rgen_region, &miss_region, &hit_region, &call_region, static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u);
+        vkCmdPushConstants(cmd, pipeline_layout,
+            VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+            VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+            VK_SHADER_STAGE_CALLABLE_BIT_KHR,
+            0, sizeof(PushConstants), &pc);
+
+        ext().vkCmdTraceRaysKHR(cmd, &rgen_region, &miss_region, &hit_region, &call_region,
+                                static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u);
         return;
     }
 
+    // Raymarching fallback
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
-    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
+    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+                       0, sizeof(PushConstants), &pc);
 
     const uint32_t dx = (static_cast<uint32_t>(width)  + 15u) / 16u;
     const uint32_t dy = (static_cast<uint32_t>(height) + 15u) / 16u;
@@ -753,9 +769,6 @@ void shutdown() noexcept {
 
     if (canvas_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(rtx().device, canvas_pipeline, nullptr);
     if (rt_pipeline    != VK_NULL_HANDLE) vkDestroyPipeline(rtx().device, rt_pipeline,    nullptr);
-
-    if (sbt_buffer != VK_NULL_HANDLE) vkDestroyBuffer(rtx().device, sbt_buffer, nullptr);
-    if (sbt_memory != VK_NULL_HANDLE) vkFreeMemory(rtx().device, sbt_memory, nullptr);
 
     if (pipeline_layout != VK_NULL_HANDLE) vkDestroyPipelineLayout(rtx().device, pipeline_layout, nullptr);
     if (main_descriptor_layout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(rtx().device, main_descriptor_layout, nullptr);

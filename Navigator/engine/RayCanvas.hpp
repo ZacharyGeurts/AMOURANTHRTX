@@ -160,13 +160,11 @@ public:
         
         lastKnownTime = now;
 
-        // Acquire swapchain image — only proceed if we have a valid image
         uint32_t imageIndex = 0;
         VkFence fence = VK_NULL_HANDLE;
-        {
-            VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-            vkCreateFence(rtx().device, &fci, nullptr, &fence);
-        }
+        VkFenceCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        vkCreateFence(rtx().device, &fci, nullptr, &fence);
 
         VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
                                                    VK_NULL_HANDLE, fence, &imageIndex);
