@@ -105,7 +105,7 @@ namespace Options::Rendering
 
 	inline bool     EnableAdaptiveResolution     = true;  // predictive sub super render scaling
     inline float    MinResolutionScale           = 0.2f;  // 320x200 - just let adaptive have all the sub space
-    inline float    MaxResolutionScale           = 1.0f;  // 1.0 is native screen. We can go super or force sub (1.2, 0.8, etc)
+    inline float    MaxResolutionScale           = 1.2f;  // 1.0 is native screen. We can go super or force sub (1.2, 0.8, etc)
     inline bool     AutoFallbackOnLowFPS         = false;
 
     inline float    RaymarchMaxDistance          = 120.0f;

@@ -388,10 +388,10 @@ public:
                           adaptiveScale_, gpuLoadPercent, smoothedGpuTimeMs_,
                           Options::Rendering::EnableAdaptiveResolution ? "💖" : "❌",
                           Options::Rendering::EnableAccumulation ? "💖" : "❌",
+						  scaleFactor > 1.0 ? "💖" : "❌",
 						  Options::Rendering::EnableHardwareRayTracing ? "💖" : "❌",
 						  Options::Rendering::EnableRTXReflections ? "💖" : "❌",
-						  Options::Rendering::EnableRTXGI ? "💖" : "❌",
-                          scaleFactor > 1.0 ? "💖" : "❌",
+						  Options::Rendering::EnableRTXGI ? "💖" : "❌",                          
                           usedMB, totalMB, freePercent,
                           frameCount_);
             lastFpsLog_ = now;
