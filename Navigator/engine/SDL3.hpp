@@ -46,7 +46,7 @@ constexpr int     AUDIO_CHANNELS       = Options::SDL3::AudioChannels;
 constexpr float   DEFAULT_VOLUME       = Options::SDL3::DefaultVolume;
 
 // Soft / recommended maximum concurrent playing tracks
-constexpr int     SOFT_MAX_SLOTS       = Options::SDL3::MyAudioSlots;
+constexpr int     SOFT_MAX_SLOTS       = Options::SDL3::MyAudioFiles;
 
 // =============================================================================
 // TYPES
@@ -314,7 +314,7 @@ public:
 
     void toggleRayTracing() noexcept {
         Options::Rendering::EnableHardwareRayTracing = !Options::Rendering::EnableHardwareRayTracing;
-        if (Options::Rendering::EnableHardwareRayTracing && !Options::Rendering::PreferHardwareRT) {
+        if (Options::Rendering::EnableHardwareRayTracing) {
             LOG_WARNING_CAT("RENDER", "Hardware RT toggled ON but PreferHardwareRT is OFF — may use software fallback");
         }
         LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}",

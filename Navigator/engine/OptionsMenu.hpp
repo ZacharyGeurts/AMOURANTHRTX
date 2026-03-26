@@ -5,26 +5,6 @@
 // (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
-//
-// CENTRAL CONFIGURATION HUB FOR THE ENTIRE ENGINE
-// ────────────────────────────────────────────────
-// This single header contains EVERY user-adjustable setting.
-// All values are:
-//   • Live-editable via in-game menu (ImGui or custom UI)
-//   • Changeable via debug console (e.g. `set Rendering.Exposure -0.4`)
-//   • Persisted to config files (.ini / .json recommended)
-//   • Pushed to shaders via PushConstants (per-frame or on-change)
-//   • Used by CPU systems: camera controller, input mapper, audio mixer, etc.
-//
-// Every section includes:
-//   - Purpose of the namespace / setting
-//   - Typical range and recommended values
-//   - Performance / visual / gameplay impact
-//   - When/how the value is consumed (per-frame, init-only, etc.)
-//   - Default reasoning and why it was chosen
-//
-// Special attention given to GameStyle enums — they act as the "personality"
-// preset system that cascades sane defaults across many other options.
 // =============================================================================
 
 #include <glm/glm.hpp>
@@ -33,17 +13,8 @@
 #include <string>
 #include <SDL3/SDL.h>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. GAME STYLE & PERSPECTIVE — DEFINES THE ENGINE'S "GENRE PERSONALITY"
-//    These three values together control presets, defaults, shader paths,
-//    camera behavior, input feel, post-processing bias, and UI layout.
-//    Changing CurrentGenre usually triggers a full preset reload of many options.
-// ─────────────────────────────────────────────────────────────────────────────
 namespace Options::GameStyle
 {
-    // ─── DimensionMode ───────────────────────────────────────────────────────
-    // Core rendering fidelity / world representation
-    // Directly selects major shader code paths (huge perf difference)
     enum class DimensionMode : uint32_t
     {
         TextOnly       = 0,     // Zero GPU — console/debug/fallback only
@@ -52,9 +23,6 @@ namespace Options::GameStyle
         Full3D         = 3      // Full volumetric raymarching/raytracing — flagship mode
     };
 
-    // ─── CameraPerspective ───────────────────────────────────────────────────
-    // How the world is framed + how input controls the view
-    // Strongly influences default FOV, sensitivity, projection math
     enum class CameraPerspective : uint32_t
     {
         FirstPerson       = 0,  // Immersive FPS view — mouse + WASD dominant
@@ -66,79 +34,9 @@ namespace Options::GameStyle
         TextAdventure     = 6   // Static or no camera — narrative focus
     };
 
-    // ─── GenrePreset ─────────────────────────────────────────────────────────
-    // High-level style/theme that auto-applies balanced defaults when changed
-    // Controls FOV, speed, lighting mood, post effects, input scheme, etc.
-    // None = full manual tuning (no auto-apply)
-    enum class GenrePreset : uint32_t
-    {
-        None                = 0,    // Manual — no automatic preset application
-
-        FPS                 = 1,    // Fast first-person shooter
-                                    // Wide FOV, responsive look, dynamic lights, low fog
-
-        ThirdPersonAction   = 2,    // Action-adventure (Uncharted, God of War vibe)
-                                    // Orbiting cam, character emphasis, cinematic bloom
-
-        Platformer          = 3,    // Precision jumping (Mario, Celeste style)
-                                    // Side view, tight controls, clean & colorful
-
-        Metroidvania        = 4,    // Exploration / secrets (Hollow Knight, Ori)
-                                    // Layered world, atmospheric fog, subtle glow
-
-        TopDownRPG          = 5,    // Classic overhead RPG (Diablo, Zelda-Like)
-                                    // Top-down, slower pace, detailed environments
-
-        TwinStickShooter    = 6,    // Dual-analog action (Geometry Wars, Enter the Gungeon)
-                                    // Independent move/aim, fast, particle heavy
-
-        SurvivalHorror      = 7,    // Tense survival (Resident Evil, Amnesia)
-                                    // Heavy fog, low light, strong audio cues, vignette
-
-        Roguelike           = 8,    // Procedural / high replay (Hades, Binding of Isaac)
-                                    // Clean UI, turn-based or real-time, high contrast
-
-        TextAdventure       = 9,    // Pure narrative (Zork, AI Dungeon style)
-                                    // Minimal graphics, text + choice focus
-
-        Shmup               = 10,   // Bullet-hell shooter
-                                    // Scrolling, fast movement, dense particles
-
-        Racing              = 11,   // Vehicle/time-trial focus
-                                    // Motion blur, dynamic FOV, speed effects
-
-        Puzzle              = 12,   // Logic & pattern solving (Portal, The Witness)
-                                    // Clean visuals, high readability, no distractions
-
-        Fighting            = 13,   // Arena combat (Street Fighter, Smash)
-                                    // Tight controls, close camera, health HUD
-
-        Sports              = 14,   // Simulated sports (FIFA, Rocket League)
-                                    // Physics heavy, team indicators, multiplayer focus
-
-        Simulation          = 15,   // Life/building/management (Sims, Cities Skylines)
-                                    // Detailed open world, realistic lighting
-
-        Strategy            = 16,   // Tactical/RTS (StarCraft, Civ)
-                                    // Top-down, unit selection, minimap emphasis
-
-        MMORPG              = 17,   // Massive persistent world
-                                    // Large draw distance, social UI, atmospheric
-
-        PartyGame           = 18,   // Casual multiplayer (Jackbox, Fall Guys)
-                                    // Bright, simple, social mechanics, fun colors
-
-        DemosceneRetro      = 19,   // 80s/90s low-res aesthetic
-                                    // Pixelation, CRT effects, limited palette
-
-        DemosceneModern     = 20    // High-fidelity RTX/volumetric showcase (current default)
-                                    // God rays, bloom, complex raymarched scenes
-    };
-
     // ─── ACTIVE SETTINGS ─────────────────────────────────────────────────────
     inline DimensionMode       CurrentDimension     = DimensionMode::Full3D;
     inline CameraPerspective   CurrentPerspective   = CameraPerspective::FirstPerson;
-    inline GenrePreset         CurrentGenre         = GenrePreset::DemosceneModern;
 
     // ─── CONVENIENCE HELPERS ─────────────────────────────────────────────────
     inline bool Is3D()             { return CurrentDimension == DimensionMode::Full3D; }
@@ -147,7 +45,6 @@ namespace Options::GameStyle
     inline bool IsTextMode()       { return CurrentDimension == DimensionMode::TextOnly; }
     inline bool IsFirstPerson()    { return CurrentPerspective == CameraPerspective::FirstPerson; }
     inline bool IsTopDownStyle()   { return CurrentPerspective == CameraPerspective::TopDown || CurrentPerspective == CameraPerspective::Isometric; }
-    inline bool IsRetroDemoscene() { return CurrentGenre == GenrePreset::DemosceneRetro; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,21 +101,23 @@ namespace Options::Rendering
         HardwareRayTracing      = 4,
         ProgressivePathTracing  = 5
     };
+	inline RenderTechnique CurrentTechnique = RenderTechnique::PureRaymarching;
 
-    inline RenderTechnique CurrentTechnique     = RenderTechnique::PureRaymarching;
-    inline bool            AutoFallbackOnLowFPS = false;
+	inline bool     EnableAdaptiveResolution     = true;  // predictive sub super render scaling
+    inline float    MinResolutionScale           = 0.2f;  // 320x200 - just let adaptive have all the sub space
+    inline float    MaxResolutionScale           = 1.0f;  // 1.0 is native screen. We can go super or force sub (1.2, 0.8, etc)
+    inline bool     AutoFallbackOnLowFPS         = false;
 
     inline float    RaymarchMaxDistance          = 120.0f;
     inline float    RaymarchEpsilon              = 0.0012f;
     inline uint32_t RaymarchMaxSteps             = 256u;
-    inline float    RaymarchStepMultiplier       = 1.0f;
+    inline float    RaymarchStepMultiplier       = 0.95f;
 
     inline bool     EnableAccumulation           = true;
     inline float    AccumulationWeight           = 0.04f;
     inline int      MaxSamplesPerPixel           = 64;
     inline bool     EnableAdaptiveSampling       = true;
 
-    inline bool     PreferHardwareRT             = true;
     inline bool     EnableHardwareRayTracing     = false;
     inline bool     EnableRTXReflections         = true;
     inline bool     EnableRTXShadows             = true;
@@ -227,7 +126,7 @@ namespace Options::Rendering
 
     inline float    Exposure                     = 0.0f;
     inline bool     EnableTonemapping            = false;
-    inline uint32_t TonemapMode                  = 2u;                 // 0=linear, 1=filmic, 2=ACES-ish
+    inline uint32_t TonemapMode                  = 2;     // 0=linear, 1=filmic, 2=ACES-ish
     inline float    BloomThreshold               = 0.92f;
     inline float    BloomIntensity               = 0.0f;
     inline float    Contrast                     = 1.0f;
@@ -236,10 +135,6 @@ namespace Options::Rendering
     inline float    VignetteStrength             = 0.0f;
     inline float    ChromaticAberrationStrength  = 0.0f;
     inline float    MotionBlurStrength           = 0.0f;
-
-    inline bool     EnableAdaptiveResolution     = true;
-    inline float    MinResolutionScale           = 0.2f;
-    inline float    MaxResolutionScale           = 1.2f;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,11 +142,18 @@ namespace Options::Rendering
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::SDL3
 {
-    inline constexpr int     MyAudioSlots       = 16;
+    inline constexpr int     MyAudioFiles       = 16;
     inline constexpr int     AudioFrequency     = 48000;
-    inline constexpr int     AudioChannels      = 8;
+    inline constexpr int     AudioChannels      = 8; // 7.1
     inline constexpr float   DefaultVolume      = 0.82f;
 
+	// You can preload 16 wav mp3 or whatever, only because that says 16 up there. 17...
+	// #include SDL3.hpp and INPUT.playSound("assets/audio/splash.wav", "play");
+	// If you did not preload, we will load, play, and return the file number.
+	// If you play more than "16" then the first then second so on files get replaced.
+	// Explore your Navigator/engine/SDL3.hpp file sometime, and see the wiki.
+	// https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki/SDL3
+	
     inline const std::vector<std::string> PreloadedAudioFiles = {
         "assets/audio/splash.wav"
     };
@@ -262,11 +164,10 @@ namespace Options::SDL3
     inline bool    BorderlessWindow             = false;
     inline bool    AllowWindowResize            = true;
     inline bool    HighDPIAware                 = true;
-    inline float   UIScale                      = 1.0f;
 
     inline bool    EnableAudio                  = true;
     inline bool    EnableSpatialAudio           = true;
-    inline bool    EnableHRTF                   = false;
+    inline bool    EnableHRTF                   = false; // headphones
 
     inline bool    EnableGamepad                = true;
     inline float   GamepadDeadzone              = 0.135f;
@@ -274,7 +175,7 @@ namespace Options::SDL3
     inline float   GamepadLookSensitivity       = 1.80f;
     inline bool    EnableRumble                 = true;
     inline bool    EnableGyro                   = true;
-    inline bool    EnableInputCapture           = false;
+    inline bool    EnableInputCapture           = true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -282,7 +183,7 @@ namespace Options::SDL3
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::LivingWorld
 {
-    inline float   CurrentTimeOfDay             = 13.5f;            // Howie© TOD in hours
+    inline float   CurrentTimeOfDay             = 13.5f;
 
     inline bool    SunEnabled                   = true;
     inline glm::vec3 SunColor                   = glm::vec3(1.00f, 0.95f, 0.84f);
@@ -349,13 +250,13 @@ namespace Options::Input::Flags
 //    Face buttons + shoulders/triggers/sticks — pick your platform flavor!
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ← W  E →
+// ← West  East →
 // [LT]            [RT]
 // [LB]            [RB]
-//    ◀️▶️    🟡 Y △
-// 💠       🔵 X □   ○ 🔴 B                     
-//    🔘○🔘   🟢 A ×
-//    L3 R2
+//    ◀️○▶️   🟡Y △
+// 💠        🔵X □ ○🔴B                     
+//    🔘○🔘   🟢A ×
+//    L3 R3
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input — Default Bindings & Sensitivities (remappable)
@@ -388,6 +289,7 @@ namespace Options::Input
     inline constexpr SDL_GamepadButton GP_Sprint   = SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
 
     // Sensitivities & deadzones
+	inline bool   MovementSpeed                 = 1.0;
     inline bool   InvertMouseY                  = false;
     inline float  MouseSensitivity              = 0.090f;
 
