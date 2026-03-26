@@ -7,8 +7,8 @@
 Diamond Mandelbrot Voxel Mandelbulb in demos.  
 <img width="820" alt="Mandelbulb" src="https://github.com/user-attachments/assets/ecb84a68-7ba8-4c2e-aebb-4dc6ea06a7e5" />  
 
-Mandel Toupée - This is our Frosted Demo.  
-<img width="820" alt="Mandelbub" src="https://github.com/user-attachments/assets/4c25a25b-5b34-4ae0-b051-b15949f05aa3" />  
+Mandel Spire - This is our Frosted Demo.  
+<img width="820" alt="Mandelbub" src="https://github.com/user-attachments/assets/7c7a3a4a-c128-4248-80e0-ad8194abc899" />  
 https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Windows%203D%20Frosted.zip  
 https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Linux%203D%20Frosted.zip  
 <img width="820" alt="image" src="https://github.com/user-attachments/assets/8c482464-b5d3-454e-90fc-0b132321afe9" />  
