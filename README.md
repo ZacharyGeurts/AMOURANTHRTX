@@ -7,7 +7,7 @@
 Diamond Mandelbrot Voxel Mandelbulb in demos.  
 <img width="820" alt="Mandelbulb" src="https://github.com/user-attachments/assets/ecb84a68-7ba8-4c2e-aebb-4dc6ea06a7e5" />  
 
-Mandel Toupée  
+Mandel Toupée - This is our Frosted Demo.  
 <img width="820" alt="Mandelbub" src="https://github.com/user-attachments/assets/4c25a25b-5b34-4ae0-b051-b15949f05aa3" />  
   
 Help yourself to the demos folder above for Windows and Linux builds.  
