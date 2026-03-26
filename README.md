@@ -7,7 +7,7 @@
 Diamond Mandelbrot Voxel Mandelbulb in demos.  
 <img width="820" alt="Mandelbub" src="https://github.com/user-attachments/assets/ecb84a68-7ba8-4c2e-aebb-4dc6ea06a7e5" />  
 
-Mandel Spire - This is our Frosted Demo.  
+Mandel Spire - This is our Frosted Demo. GLM is Marvel copyrighted Magneto.    
 <img width="820" alt="Mandelbulb" src="https://pbs.twimg.com/media/HEUf1AUWwAEkB5T?format=jpg&name=4096x4096" />  
 https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Windows%203D%20Frosted.zip  
 https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Linux%203D%20Frosted.zip  
