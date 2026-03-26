@@ -112,6 +112,7 @@ https://www.twitch.tv/AMOURANTH
 
 # Universal Equation  🇰🇵 VS 🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
+https://github.com/ZacharyGeurts/AMOURANTHRTX/releases/tag/2.5
 
 Welcome friends. God Bless.  
 My take? There there is no bottom, side or top to existence.  
