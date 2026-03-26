@@ -385,13 +385,8 @@ void create_ray_tracing_pipeline() noexcept {
         { .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, .generalShader = 4 }
     };
 
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR props{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-    };
-    VkPhysicalDeviceProperties2 pdp2{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &props
-    };
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR props{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
+    VkPhysicalDeviceProperties2 pdp2{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &props };
     vkGetPhysicalDeviceProperties2(rtx().physical, &pdp2);
 
     shader_group_handle_size      = props.shaderGroupHandleSize;
