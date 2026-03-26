@@ -106,13 +106,16 @@ Current and archived content subject to copyright.
 
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.    
 If they do not like my using their brand, they can come to Michigan and stream the firing.  
-https://www.twitch.tv/AMOURANTH  
+https://www.twitch.tv/AMOURANTH
+
+<img width="820" alt="Jorts" src="https://github.com/user-attachments/assets/b5c142a7-6ac3-4027-81f2-a1b94d9663d0" />  
 
 **Other work**  
 
 # Universal Equation  🇰🇵 VS 🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
-https://github.com/ZacharyGeurts/AMOURANTHRTX/releases/tag/2.5
+
+You may find God in the media folder or various screen archery of various projections or whatevery science word Grok knows and I do not.
 
 Welcome friends. God Bless.  
 My take? There there is no bottom, side or top to existence.  
@@ -121,9 +124,3 @@ Climb inside the blanket and have a look around.
 I think this proves the number 1 is real and 0 is not real.  
 Grab the latest release if only interested in the Universal Equation.  
 It is a Glorified calculator and you can set it to experimental theory.  
-
-Contributions are welcome!  
-Please submit pull requests or open issues on the repository.  
-Ensure code follows C++20 standards and includes proper error handling.  
-I am now a stickler for OMP parallelization and memory safety with C++20 due to advent of AI coding.  
-<img width="820" alt="Jorts" src="https://github.com/user-attachments/assets/b5c142a7-6ac3-4027-81f2-a1b94d9663d0" />
