@@ -166,7 +166,7 @@ namespace Options::SDL3
 
     inline bool    EnableAudio                  = true;
     inline bool    EnableSpatialAudio           = true;
-    inline bool    EnableHRTF                   = false;
+    inline bool    EnableHRTF                   = false; // headphones
 
     inline bool    EnableGamepad                = true;
     inline float   GamepadDeadzone              = 0.135f;
@@ -174,7 +174,7 @@ namespace Options::SDL3
     inline float   GamepadLookSensitivity       = 1.80f;
     inline bool    EnableRumble                 = true;
     inline bool    EnableGyro                   = true;
-    inline bool    EnableInputCapture           = false;
+    inline bool    EnableInputCapture           = true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
