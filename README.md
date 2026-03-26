@@ -103,7 +103,7 @@ Commercial is subject to 3% profit sharing.
 Current and archived content subject to copyright.  
 
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
-<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/Screenshot%20from%202025-11-14%2021-05-10.png" />  
+<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/ELLIE.png" />  
 
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.    
 If they do not like my using their brand, they can come to Michigan and stream the firing.  
