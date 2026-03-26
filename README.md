@@ -9,6 +9,8 @@ Diamond Mandelbrot Voxel Mandelbulb in demos.
 
 Mandel Toupée - This is our Frosted Demo.  
 <img width="820" alt="Mandelbub" src="https://github.com/user-attachments/assets/4c25a25b-5b34-4ae0-b051-b15949f05aa3" />  
+https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Windows%203D%20Frosted.zip  
+https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Linux%203D%20Frosted.zip  
   
 Help yourself to the demos folder above for Windows and Linux builds.  
 There is a wiki link above that, that I try to keep up to date.  
