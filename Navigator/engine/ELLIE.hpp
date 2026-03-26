@@ -10,10 +10,10 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_beta.h>
 
-#include <SDL3/SDL.h>  // Added for SDL3 support in checker
+#include <SDL3/SDL.h> 
 
-#include <algorithm> // for std::sort
-#include <array>     // for std::array
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -175,7 +175,11 @@ inline void ptt(const char* prefix = nullptr) noexcept {
 }
 
 // =============================================================================
-// std::formatter specializations
+// END TOTALTIME v∞ MONOLITH — The One True Clock
+// =============================================================================
+
+// =============================================================================
+// One of many lookups
 // =============================================================================
 namespace std {
     template <>
@@ -253,7 +257,7 @@ namespace std {
 } // namespace std
 
 // ========================================================================
-// CONFIGURATION & LOGGING MACROS
+// CONFIGURATION & LOGGING MACROS you can flip before building for no logs
 // ========================================================================
 constexpr bool ENABLE_TRACE   = true;
 constexpr bool ENABLE_DEBUG   = true;
@@ -650,24 +654,23 @@ private:
             }
         };
         static const std::map<std::string_view, std::string_view, CIless> map{
-            {"General", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD}, {"Init", AURORA_BOREALIS},
-            {"Dispose", PARTY_PINK}, {"Logger", ELECTRIC_BLUE}, {"Vulkan", ORANGE},
-            {"Device", QUASAR_BLUE}, {"Swapchain", OCEAN_TEAL}, {"Command", CHROMIUM_SILVER},
-            {"Queue", OBSIDIAN_BLACK}, {"RayTrace", TURQUOISE_BLUE}, {"RTX", HYPERSPACE_WARP},
-            {"Accel", PULSAR_GREEN}, {"TLAS", LIME}, {"BLAS", GREEN},
-            {"LAS", FROSTFIRE_BLUE}, {"AI", COSMIC_GOLD}, {"Memory", PEACHES_AND_CREAM},
-            {"SBT", RASPBERRY_PINK}, {"Shader", NEBULA_VIOLET}, {"Renderer", BRIGHT_PINKISH_PURPLE},
-            {"Render", THERMO_PINK}, {"Tonemap", PEACHES_AND_CREAM}, {"GBuffer", QUANTUM_FLUX},
-            {"Post", NUCLEAR_REACTOR}, {"Buffer", GOLD}, {"Image", LIME_YELLOW},
-            {"Texture", SPEARMINT_MINT}, {"Sampler", LILAC_LAVENDER}, {"Descriptor", FUCHSIA_MAGENTA},
-            {"Perf", COSMIC_GOLD}, {"GPU", BLACK_HOLE}, {"VULKAN", ORANGE}, {"HOT", SUNGLOW_ORANGE},
-            {"CPU", PLASMA_FUCHSIA}, {"Input", SPEARMINT_MINT}, {"Audio", OCEAN_TEAL},
-            {"Physics", EMERALD_GREEN}, {"SIMULATION", BRONZE_BROWN}, {"MeshLoader", LIME_YELLOW},
-            {"GLTF", QUANTUM_PURPLE}, {"Material", PEACHES_AND_CREAM}, {"Debug", ARCTIC_CYAN},
+            {"ELLIE", ELECTRIC_BLUE},
+			{"GENERAL", DIAMOND_SPARKLE}, {"MAIN", VALHALLA_GOLD},
+            {"VULKAN", ORANGE}, {"SWAPCHAIN", OCEAN_TEAL}, {"DISPOSE", PARTY_PINK}, 
+			{"COMMAND", CHROMIUM_SILVER}, {"MEMORY", PEACHES_AND_CREAM},
+            {"RTX", HYPERSPACE_WARP}, {"TLAS", LIME}, {"BLAS", GREEN}, {"LAS", FROSTFIRE_BLUE},
+			{"SBT", RASPBERRY_PINK}, {"SHADER", NEBULA_VIOLET}, {"RENDERER", BRIGHT_PINKISH_PURPLE},
+            {"RENDER", THERMO_PINK}, {"TONEMAP", PEACHES_AND_CREAM}, {"BUFFER", GOLD},
+            {"TEXTURE", SPEARMINT_MINT}, {"DESCRIPTOR", FUCHSIA_MAGENTA},
+            {"PERF", COSMIC_GOLD}, {"GPU", BLACK_HOLE},
+            {"CPU", PLASMA_FUCHSIA}, {"INPUT", OCEAN_TEAL}, {"AUDIO", OCEAN_TEAL},
+            {"MATERIAL", SUNGLOW_ORANGE}, {"MESHLOADER", LIME_YELLOW}, {"DEBUG", ARCTIC_CYAN},
             {"ATTEMPT", QUANTUM_PURPLE}, {"VOID", COSMIC_VOID}, {"SPLASH", LILAC_LAVENDER},
-            {"MARKER", DIAMOND_SPARKLE}, {"SDL3_window", SAPPHIRE_BLUE}, {"SDL3_audio", SAPPHIRE_BLUE},
-            {"SDL3_font", SAPPHIRE_BLUE}, {"SDL3_image", SAPPHIRE_BLUE}, {"SDL3_init", SAPPHIRE_BLUE},
-            {"SDL3_input", SAPPHIRE_BLUE}, {"SDL3_vulkan", SAPPHIRE_BLUE}, {"PIPELINE", SPEARMINT_MINT}
+            {"MARKER", DIAMOND_SPARKLE}, {"SDL3", HYPERSPACE_WARP},
+			
+			{"AMOURANTH", AMOURANTH},
+			{"PIPELINE", SPEARMINT_MINT}, {"CANVAS", BRONZE_BROWN}, {"RAYCANVAS", PEACHES_AND_CREAM},
+			{"RAY TRACING", LIME_YELLOW}
         };
         auto it = map.find(cat);
         if (it != map.end()) [[likely]]
