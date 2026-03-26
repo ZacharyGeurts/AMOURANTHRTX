@@ -146,14 +146,11 @@ public:
         mixer_ready_ = true;
 
         preloadAudioFiles();
-
-        bindDefaultActions();
-
-        // Initial focus check
+        bindDefaultActions();        
         updateFocusState();
 
         initialized_ = true;
-        LOG_SUCCESS_CAT("SDL3", "Initialized — dynamic audio slots (preloaded: {}, soft max: {}) + full controller support",
+        LOG_SUCCESS_CAT("SDL3", "Initialized — dynamic audio files (preloaded: {}, soft max: {}) + full controller support",
                         slots_.size(), SOFT_MAX_SLOTS);
         return true;
     }

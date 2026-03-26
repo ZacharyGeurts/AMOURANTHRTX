@@ -683,7 +683,6 @@ inline void cleanup() noexcept {
 // ────────────────────────────────────────────────
 // Recreate
 // ────────────────────────────────────────────────
-
 inline void recreate(int w, int h) noexcept {
     vkDeviceWaitIdle(rtx().device);
 

@@ -5,21 +5,14 @@
 // (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
-//
-// Features:
-// - Pure raymarching compute pipeline (CANVAS.spv from CANVAS.comp)
-// - Full controller + keyboard + mouse input passed to shader via PushConstants
-// - Shader handles final post-processing (exposure, vignette, tonemap, bloom, contrast, saturation)
-// - Shader sends audio commands via small SSBO → CPU interprets & plays via SDL3System
-// - All Options:: namespaces are read and applied where applicable
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "Camera.hpp"           // CAM singleton
+#include "Camera.hpp"
 #include "Materials.hpp"
-#include "SDL3.hpp"             // INPUT access via SDL3System
+#include "SDL3.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -135,7 +128,7 @@ inline VkDeviceMemory           audio_cmd_memory        = VK_NULL_HANDLE;
 inline void*                    audio_cmd_mapped        = nullptr;
 
 // ────────────────────────────────────────────────
-// Sun / moon direction helpers
+// Sun / moon direction helpers - Only so many tod Howers in a day
 // ────────────────────────────────────────────────
 [[nodiscard]] inline glm::vec3 computeSunDirection(f32 todHours) noexcept {
     f32 angle = (todHours / 24.0f) * glm::two_pi<f32>() - glm::half_pi<f32>();
