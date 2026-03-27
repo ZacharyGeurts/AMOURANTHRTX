@@ -342,18 +342,18 @@ inline void process_shader_audio_commands() noexcept {
             // Trigger play
             std::string file = "assets/audio/sfx_slot_" + std::to_string(slot) + ".wav";
             INPUT.playSound(file, "play", slot);
-            LOG_INFO_CAT("AUDIO_SHADER", "Play triggered on slot {} (value={})", slot, value);
+            LOG_INFO_CAT("AUDIO_SHADER", "Play triggered on file {} (value={})", slot, value);
         }
         else if (command >= 0.20f && command <= 0.50f) {
             // Continuous volume
             f32 normalized_vol = glm::clamp(value, 0.0f, 1.2f);
             // TODO: INPUT.setTrackVolume(slot, normalized_vol);
-            LOG_INFO_CAT("AUDIO_SHADER", "Volume set on slot {} → {:.3f}", slot, normalized_vol);
+            LOG_INFO_CAT("AUDIO_SHADER", "Volume set on file {} → {:.3f}", slot, normalized_vol);
         }
         else if (command < -0.1f) {
             // Stop / pause
             INPUT.playSound("", "stop", slot);
-            LOG_INFO_CAT("AUDIO_SHADER", "Stop requested on slot {}", slot);
+            LOG_INFO_CAT("AUDIO_SHADER", "Stop requested on file {}", slot);
         }
     }
 
@@ -460,16 +460,11 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
 
     // ── Vulkan dispatch ──────────────────────────────────────────────────────
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, canvas_pipeline);
-    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(PushConstants), &pc);
-
-    // Assume descriptor set already bound (output, prev frame, audio SSBO, etc.)
+    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
 
     u32 dx = (static_cast<u32>(width)  + 15u) / 16u;
     u32 dy = (static_cast<u32>(height) + 15u) / 16u;
     vkCmdDispatch(cmd, dx, dy, 1u);
-
-    // Audio feedback (after fence/wait in real usage)
     process_shader_audio_commands();
 }
 
@@ -477,7 +472,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
 // Cleanup everything
 // ────────────────────────────────────────────────
 inline void shutdown() noexcept {
-    process_shader_audio_commands(); // flush any last commands
+    process_shader_audio_commands();
 
     if (audio_cmd_mapped) {
         vkUnmapMemory(rtx().device, audio_cmd_memory);

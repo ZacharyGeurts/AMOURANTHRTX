@@ -13,7 +13,7 @@
 #include "OptionsMenu.hpp"
 #include "Pipeline.hpp"
 #include "Materials.hpp"
-#include "SDL3.hpp"  // SDL3 macro defined here as SDL3System::get()
+#include "SDL3.hpp"  // SDL3System::get() or INPUT.
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/rotate_vector.hpp>
@@ -69,7 +69,6 @@ public:
         vkGetPhysicalDeviceProperties(rtx().physical, &props);
         timestampPeriodNs_ = props.limits.timestampPeriod;
 
-        // Pipeline setup first — ensures descriptor layout exists before we allocate sets
         Pipeline::create_pipeline_layout();
         Pipeline::create_canvas_pipeline();  // Loads CANVAS.spv
 
@@ -116,7 +115,6 @@ public:
         }
 
         frameCount_++;
-
         double now = TotalTime::get().seconds();
 
         // Poll SDL events (RayCanvas owns polling for responsiveness)
@@ -405,18 +403,13 @@ public:
 private:
 
     void toggleFullscreen() noexcept {
-        auto flags = SDL_GetWindowFlags(window_);
-        bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN) != 0;
-        SDL_SetWindowFullscreen(window_, !isFullscreen);
+        const bool wasFullscreen = (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
+        const bool nowFullscreen = !wasFullscreen;
 
-        if (isFullscreen) {
-            SDL_SetWindowRelativeMouseMode(window_, false);
-		}
-		else {
-            SDL_SetWindowRelativeMouseMode(window_, true);
-		}
+        SDL_SetWindowFullscreen(window_, nowFullscreen);
+        SDL_SetWindowRelativeMouseMode(window_, nowFullscreen);
 
-        LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFullscreen ? "disabled" : "enabled");
+        LOG_INFO_CAT("WINDOW", "Fullscreen {}", nowFullscreen ? "enabled" : "disabled");
     }
 
     void onResize(int newWidth, int newHeight, bool fromUserResize) noexcept {

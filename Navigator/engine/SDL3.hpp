@@ -359,17 +359,12 @@ public:
 
     void toggleAdaptiveResolution() noexcept {
         Options::Rendering::EnableAdaptiveResolution = !Options::Rendering::EnableAdaptiveResolution;
-        LOG_INFO_CAT("RENDER", "Adaptive resolution toggled: {}",
-                     Options::Rendering::EnableAdaptiveResolution ? "ON" : "OFF");
+        LOG_INFO_CAT("RENDER", "Adaptive resolution toggled: {}", Options::Rendering::EnableAdaptiveResolution ? "ON" : "OFF");
     }
 
     void toggleRayTracing() noexcept {
         Options::Rendering::EnableHardwareRayTracing = !Options::Rendering::EnableHardwareRayTracing;
-        if (Options::Rendering::EnableHardwareRayTracing) {
-            LOG_WARNING_CAT("RENDER", "Hardware RT toggled ON but PreferHardwareRT is OFF — may use software fallback");
-        }
-        LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}",
-                     Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");
+        LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}", Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");
     }
 
     // ────────────────────────────────────────────────
