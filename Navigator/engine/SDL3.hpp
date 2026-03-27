@@ -297,7 +297,6 @@ public:
 
     // ── Global hotkey handlers ──────────────────────────────────────────────
     void handleQuit() noexcept {
-        LOG_INFO_CAT("SDL3", "ESC pressed — quitting application");
         SDL_Event quitEvent{};
         quitEvent.type = SDL_EVENT_QUIT;
         SDL_PushEvent(&quitEvent);
@@ -603,21 +602,23 @@ public:
     }
 
     void pump(const SDL_Event& ev) noexcept {
-        // Handle window focus / visibility changes first
-        if (ev.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
-            ev.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
-            ev.type == SDL_EVENT_WINDOW_SHOWN ||
-            ev.type == SDL_EVENT_WINDOW_HIDDEN) {
+
+		if (ev.type == SDL_EVENT_WINDOW_FOCUS_GAINED || ev.type == SDL_EVENT_WINDOW_SHOWN) {
+            SDL_SetWindowRelativeMouseMode(window_, true);
             updateFocusState();
         }
 
-        // Only process subscriptions & input if window has focus
+        if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST || ev.type == SDL_EVENT_WINDOW_HIDDEN) {
+            SDL_SetWindowRelativeMouseMode(window_, false);
+            updateFocusState();
+        }
+
         if (hasFocus_) {
             if (ev.type == SDL_EVENT_KEY_DOWN) {
                 const bool* keys = SDL_GetKeyboardState(nullptr);
 
                 if (keys[SDL_SCANCODE_ESCAPE]) {
-                    handleQuit();
+                    SDL_SetWindowRelativeMouseMode(window_, false);
                 }
                 if (keys[SDL_SCANCODE_F1]) {
                     toggleAdaptiveResolution();
