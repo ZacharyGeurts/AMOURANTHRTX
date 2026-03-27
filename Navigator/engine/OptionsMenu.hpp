@@ -145,7 +145,6 @@ namespace Options::SDL3
     inline constexpr int     MyAudioFiles       = 16;
     inline constexpr int     AudioFrequency     = 48000;
     inline constexpr int     AudioChannels      = 8; // 7.1
-    inline constexpr float   DefaultVolume      = 0.82f;
 
 	// You can preload 16 wav mp3 or whatever, only because that says 16 up there. 17...
 	// #include SDL3.hpp and INPUT.playSound("assets/audio/splash.wav", "play");

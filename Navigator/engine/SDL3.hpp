@@ -1,18 +1,10 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX — SDL3 Core + Image + Mixer + TTF + Full Input
-// Full 4-axis controller support + real track finished callbacks
-// Updated to use OptionsMenu.hpp for all configuration
-// Dynamic audio slots — preload as many files as desired via Options::SDL3::PreloadedAudioFiles
-// No hard slot limit (MyAudioSlots is soft/recommended concurrent max)
-//
-// INPUT BEHAVIOR (2026 standard):
-// - Mouse capture: relative mode only when window focused (SDL_SetWindowRelativeMouseMode)
-// - Keyboard & gamepad: captured when window has focus (SDL_WINDOW_INPUT_FOCUS)
-// - Alt+Tab / lost focus: automatically releases mouse capture & stops relative mode
-// - Regain focus: auto-restores relative mouse mode if enabled in options
-// - No global/raw input hijacking — respects OS focus rules
+// AMOURANTH RTX Engine — SDL3.hpp
+// (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
+// Dual licensed: GPL v3 or commercial
+// AMOURANTH FOREVER 💖
 // =============================================================================
 
 #include <SDL3/SDL.h>
@@ -33,17 +25,90 @@
 #include <algorithm>
 #include <utility>
 #include <cctype>
+#include <optional>
+#include <cstdio>
 
 #include "ELLIE.hpp"
 #include "OptionsMenu.hpp"
-#include "AMOURANTHRTX.hpp"  // for Swapchain
+#include "AMOURANTHRTX.hpp"
+
+#ifdef _WIN32
+    #include <windows.h>
+    #include <mmdeviceapi.h>
+    #include <endpointvolume.h>
+    #pragma comment(lib, "ole32.lib")
+#endif
+
+// Returns current system master volume as 0.0–1.0
+// Returns std::nullopt if it fails to read the OS volume
+inline std::optional<float> GetSystemMasterVolume() noexcept
+{
+#ifdef _WIN32
+    HRESULT hr = CoInitialize(nullptr);
+    if (FAILED(hr)) return std::nullopt;
+
+    IMMDeviceEnumerator* enumerator = nullptr;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                          __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
+    if (FAILED(hr)) {
+        CoUninitialize();
+        return std::nullopt;
+    }
+
+    IMMDevice* device = nullptr;
+    hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+    if (FAILED(hr)) {
+        enumerator->Release();
+        CoUninitialize();
+        return std::nullopt;
+    }
+
+    IAudioEndpointVolume* endpointVolume = nullptr;
+    hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
+                          reinterpret_cast<void**>(&endpointVolume));
+    if (FAILED(hr)) {
+        device->Release();
+        enumerator->Release();
+        CoUninitialize();
+        return std::nullopt;
+    }
+
+    float volume = 0.0f;
+    hr = endpointVolume->GetMasterVolumeLevelScalar(&volume);
+
+    endpointVolume->Release();
+    device->Release();
+    enumerator->Release();
+    CoUninitialize();
+
+    return SUCCEEDED(hr) ? std::optional<float>(volume) : std::nullopt;
+
+#elif defined(__linux__)
+    // Simple PulseAudio / PipeWire query via pactl
+    FILE* pipe = popen("pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -Po '\\d+(?=%)' | head -n1", "r");
+    if (!pipe) return std::nullopt;
+
+    int percent = 50;
+    if (fscanf(pipe, "%d", &percent) != 1) {
+        pclose(pipe);
+        return std::nullopt;
+    }
+    pclose(pipe);
+
+    return static_cast<float>(percent) / 100.0f;
+
+#else
+    // macOS or other platforms — fallback
+    return std::nullopt;
+#endif
+}
 
 // =============================================================================
 // CONSTANTS — centralized from Options::SDL3
 // =============================================================================
 constexpr int     AUDIO_FREQ           = Options::SDL3::AudioFrequency;
 constexpr int     AUDIO_CHANNELS       = Options::SDL3::AudioChannels;
-constexpr float   DEFAULT_VOLUME       = Options::SDL3::DefaultVolume;
+float             DEFAULT_VOLUME       = GetSystemMasterVolume().value_or(0.5f);   // 0.5f only if query fails
 
 // Soft / recommended maximum concurrent playing tracks
 constexpr int     SOFT_MAX_SLOTS       = Options::SDL3::MyAudioFiles;
@@ -144,6 +209,7 @@ public:
             return false;
         }
         mixer_ready_ = true;
+        MIX_SetMixerGain(mixer_, DEFAULT_VOLUME);
 
         preloadAudioFiles();
         bindDefaultActions();        
@@ -295,7 +361,7 @@ public:
         Options::Rendering::EnableAdaptiveResolution = !Options::Rendering::EnableAdaptiveResolution;
         LOG_INFO_CAT("RENDER", "Adaptive resolution toggled: {}",
                      Options::Rendering::EnableAdaptiveResolution ? "ON" : "OFF");
-		onResize();
+		Swapchain::needsRecreate = true;
     }
 
     void toggleRayTracing() noexcept {
@@ -304,9 +370,8 @@ public:
             LOG_WARNING_CAT("RENDER", "Hardware RT toggled ON but PreferHardwareRT is OFF — may use software fallback");
         }
         LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}",
-                     Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");
-	
-		onResize();
+                     Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");	
+		Swapchain::needsRecreate = true;
     }
 
     // ────────────────────────────────────────────────

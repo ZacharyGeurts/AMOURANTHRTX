@@ -5,11 +5,6 @@
 // (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
-//
-// Pure 3D raymarching canvas — owns HDR pair, descriptors, materials, adaptive dispatch,
-// timing, resize, SDL event polling, quit detection, fullscreen toggle
-// Fully integrated with current SDL3.hpp, Pipeline.hpp, Materials.hpp, OptionsMenu.hpp
-// Uses CANVAS.spv (compiled from CANVAS.comp) via Pipeline
 // =============================================================================
 
 #include "AMOURANTHRTX.hpp"

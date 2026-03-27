@@ -1,8 +1,7 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine — Header-Only Hybrid 2026 Edition
-// Pure raymarching + hardware ray tracing + procedural geometry
+// AMOURANTH RTX Engine — AMOURANTHRTX.hpp
 // (C) 2025-2026 Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
