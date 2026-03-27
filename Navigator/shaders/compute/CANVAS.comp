@@ -14,8 +14,8 @@
 #define SKIN_TEXTURE_AMP            0.08
 
 #define SHIRT_COLOR                 vec3(0.92, 0.18, 0.28)   // vivid red-pink
-#define SHIRT_TEXTURE_AMP           1.10
-#define SHIRT_ROUGHNESS             0.48
+#define SHIRT_TEXTURE_AMP           12.10
+#define SHIRT_ROUGHNESS             10.08
 #define SHIRT_SPECULAR              0.0
 
 #define DENIM_COLOR                 vec3(0.18, 0.28, 0.48)   // deep blue denim
@@ -138,7 +138,7 @@
 #define HAND_ROLL_L_BASE            0.45
 #define HAND_ROLL_R_BASE           -0.45
 
-#define ARM_RAISE_THRESHOLD         0.8
+#define ARM_RAISE_THRESHOLD         1.0
 #define ARM_RAISE_CURL_FACTOR       2.5
 #define ARM_RAISE_FAN_FACTOR        0.3
 #define ARM_RAISE_OPPOSITION_FACTOR 0.4
@@ -148,12 +148,12 @@
 #define LEG_LENGTH                  1.0
 #define THIGH_RADIUS                0.24
 #define CALF_RADIUS                 0.13
-#define QUAD_BULGE                  0.07
+#define QUAD_BULGE                  0.04
 #define ANKLE_TAPER                 0.06
 #define FOOT_LENGTH                 0.21
 #define HEEL_HEIGHT                 0.11
 
-#define ASS_CHEEK_RADIUS            0.33
+#define ASS_CHEEK_RADIUS            0.30
 #define ASS_CHEEK_SEP               0.135
 #define ASS_Y_POS                   0.6
 #define ASS_Z_POS                   0.0
