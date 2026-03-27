@@ -111,7 +111,7 @@ https://www.twitch.tv/AMOURANTH
 
 <img width="820" alt="Jorts" src="https://github.com/user-attachments/assets/b5c142a7-6ac3-4027-81f2-a1b94d9663d0" />  
 
-**Other work**  
+**🔮ther work**  
 
 # Universal Equation  🇰🇵 VS 🇺🇸  VS  🇷🇺  VS  🇸🇬  VS  🇨🇳  VS 🇬🇧  VS  🇫🇷  VS  🇲🇽 VS 🇰🇷  VS  🇫🇮  VS  🇯🇵  VS  🇨🇦  VS  🏴󠁧󠁢󠁳󠁣󠁴󠁿  VS  🇦🇺  ...  
 **Never condone violence, incorrectness, nor the new Oxford comma.**  
