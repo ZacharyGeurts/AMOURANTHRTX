@@ -28,7 +28,6 @@
 #include <algorithm>
 #include <cstring>
 
-// Required device extensions
 inline constexpr std::array<const char*, 9> requiredDeviceExtensions = {{
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -40,10 +39,6 @@ inline constexpr std::array<const char*, 9> requiredDeviceExtensions = {{
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
     VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
 }};
-
-// ────────────────────────────────────────────────
-// Procedural geometry
-// ────────────────────────────────────────────────
 
 enum class GeometryType : uint32_t {
     ProceduralPlane      = 0,
@@ -63,10 +58,6 @@ struct alignas(16) UniversalPrimitive {
     float       pad0            = 0.0f;
 };
 
-// ────────────────────────────────────────────────
-// VRAM tracking (for RayCanvas log)
-// ────────────────────────────────────────────────
-
 struct VRAMReality {
     VkDeviceSize total            = 0;
     VkDeviceSize driver_footprint = 0;
@@ -80,7 +71,6 @@ struct VRAMReality {
 // ────────────────────────────────────────────────
 // Core context
 // ────────────────────────────────────────────────
-
 struct RTX {
     VkInstance                      instance            = VK_NULL_HANDLE;
     VkPhysicalDevice                physical            = VK_NULL_HANDLE;
@@ -143,10 +133,6 @@ inline RTX& rtx() noexcept {
     return ctx;
 }
 
-// ────────────────────────────────────────────────
-// Extension loader
-// ────────────────────────────────────────────────
-
 struct VulkanExtensions {
     PFN_vkCreateSwapchainKHR                        vkCreateSwapchainKHR{};
     PFN_vkDestroySwapchainKHR                       vkDestroySwapchainKHR{};
@@ -201,10 +187,6 @@ inline VulkanExtensions& ext() noexcept {
     return e;
 }
 
-// ────────────────────────────────────────────────
-// Queue family helper
-// ────────────────────────────────────────────────
-
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphics, present, compute, transfer;
     bool complete() const noexcept { return graphics && present && compute; }
@@ -236,10 +218,6 @@ inline QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev, VkSurfaceKHR s
     return indices;
 }
 
-// ────────────────────────────────────────────────
-// Vulkan Instance Creation
-// ────────────────────────────────────────────────
-
 inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -264,10 +242,6 @@ inline VkInstance createVulkanInstance() noexcept {
     vkCreateInstance(&ci, nullptr, &inst);
     return inst;
 }
-
-// ────────────────────────────────────────────────
-// Logical Device & GPU Selection
-// ────────────────────────────────────────────────
 
 inline VkDevice createLogicalDeviceAndSelectGPU(
     VkInstance instance,
@@ -390,10 +364,6 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
     return dev;
 }
 
-// ────────────────────────────────────────────────
-// Command buffer helpers (used by Memory::uploadToBuffer)
-// ────────────────────────────────────────────────
-
 inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
     VkCommandBufferAllocateInfo alloc{};
     alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -436,14 +406,12 @@ inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
     vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
     vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(rtx().device, fence, nullptr);
-
     vkFreeCommandBuffers(rtx().device, rtx().transient_pool, 1, &cmd);
 }
 
 // ────────────────────────────────────────────────
 // Memory implementation
 // ────────────────────────────────────────────────
-
 namespace Memory {
 
 enum class MemoryHint : uint8_t { Auto = 0, DeviceLocalOnly = 1, HostVisible = 2, DescriptorBuffer = 3 };
@@ -634,7 +602,6 @@ inline VRAMReality measureReality() noexcept {
 // ────────────────────────────────────────────────
 // Swapchain — functions in dependency order: cleanup → recreate → create
 // ────────────────────────────────────────────────
-
 namespace Swapchain {
 
 struct Handle {
@@ -655,18 +622,11 @@ inline bool                 needsRecreate   = false;
 inline double               lastPresentTime_s   = 0.0;
 inline double               smoothedRefresh_s   = 1.0 / 60.0;
 
-// ────────────────────────────────────────────────
-// Forward declarations inside namespace
-// ────────────────────────────────────────────────
+inline VkSwapchainKHR       get() noexcept;
+inline VkExtent2D           getExtent() noexcept;
+inline void                 updateRefreshEstimate(double t) noexcept;
+inline double               getSmoothedRefresh() noexcept;
 
-inline VkSwapchainKHR get() noexcept;
-inline VkExtent2D     getExtent() noexcept;
-inline void           updateRefreshEstimate(double t) noexcept;
-inline double         getSmoothedRefresh() noexcept;
-
-// ────────────────────────────────────────────────
-// Cleanup (first — used by recreate)
-// ────────────────────────────────────────────────
 inline void cleanup() noexcept {
     for (auto v : views) vkDestroyImageView(rtx().device, v, nullptr);
     views.clear();
@@ -679,8 +639,8 @@ inline void cleanup() noexcept {
 }
 
 inline void recreate(int w, int h) noexcept {
-    vkDeviceWaitIdle(rtx().device);
 
+    vkDeviceWaitIdle(rtx().device);
     cleanup();
 
     VkSurfaceCapabilitiesKHR caps{};
@@ -750,25 +710,10 @@ inline void recreate(int w, int h) noexcept {
     minimized = false;
 }
 
-inline void reset() noexcept {
-    vkDeviceWaitIdle(rtx().device);
-    cleanup();
-    int w = 0, h = 0;
-    SDL_GetWindowSizeInPixels(rtx().window, &w, &h);
-    if (w > 0 && h > 0) recreate(w, h);
-}
-
-// ────────────────────────────────────────────────
-// Create
-// ────────────────────────────────────────────────
 inline void create(SDL_Window* window, int w, int h) noexcept {
     rtx().window = window;
     recreate(w, h);
 }
-
-// ────────────────────────────────────────────────
-// Inline helpers
-// ────────────────────────────────────────────────
 
 inline VkSwapchainKHR get() noexcept                { return swapchain; }
 inline VkExtent2D     getExtent() noexcept          { return extent; }
@@ -788,7 +733,6 @@ inline double getSmoothedRefresh() noexcept { return smoothedRefresh_s; }
 // ────────────────────────────────────────────────
 // Engine init / shutdown
 // ────────────────────────────────────────────────
-
 inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     rtx().instance = createVulkanInstance();
     if (!rtx().instance) return false;
@@ -807,7 +751,6 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     poolInfo.queueFamilyIndex = rtx().graphics_family;
 
     vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
-
     Swapchain::create(window, width, height);
 
     return true;
@@ -815,7 +758,6 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
 
 inline void cleanupRTX() noexcept {
     vkDeviceWaitIdle(rtx().device);
-
     Swapchain::cleanup();
 
     for (auto& [h, b] : rtx().buffers) {
@@ -826,8 +768,7 @@ inline void cleanupRTX() noexcept {
     rtx().buffers.clear();
 
     if (rtx().transient_pool) vkDestroyCommandPool(rtx().device, rtx().transient_pool, nullptr);
-
-    if (rtx().device) vkDestroyDevice(rtx().device, nullptr);
-    if (rtx().surface) vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);
-    if (rtx().instance) vkDestroyInstance(rtx().instance, nullptr);
+    if (rtx().device)         vkDestroyDevice(rtx().device, nullptr);
+    if (rtx().surface)        vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);
+    if (rtx().instance)       vkDestroyInstance(rtx().instance, nullptr);
 }
