@@ -1,0 +1,305 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// AMOURANTH RTX — Canvas Compute Shader (optimized)
+// =============================================================================
+
+#define WORKGROUP_SIZE_X        16
+#define WORKGROUP_SIZE_Y        16
+
+#define ENTITY_SCALE            0.085
+#define CHOMP_FREQ              2.75
+#define CHOMP_PHASE_SPREAD      1.0
+#define GHOST_WAVE_FREQ         12.0
+#define GHOST_WAVE_AMP          0.08
+#define AA_WIDTH                0.010
+#define GLOW_WIDTH              0.015
+#define DOT_PULSE_SPEED         5.0
+#define DOT_PULSE_AMP           0.15
+#define WALL_HEIGHT_GRAD        0.35
+#define LIGHT_INTENSITY         0.08
+#define SPEC_ROUGHNESS          0.4
+#define SPEC_POWER              32.0
+#define GHOST_TILT_MAX_DEG      18.0
+
+layout(push_constant) uniform PushConstants {
+    float       time;
+    uint        frameSeed;
+    vec3        cameraPos;
+    float       pad0;
+    vec4        cameraQuat;
+    float       cameraFovDeg;
+    float       aspectRatio;
+    float       exposure;
+    vec3        sunDir;
+    float       sunIntensity;
+    vec3        moonDir;
+    float       moonIntensity;
+    vec3        windDir;
+    float       windStrength;
+    float       temperatureC;
+    float       humidity;
+    float       airPressureKPa;
+    float       precipitationFactor;
+    float       fogDensity;
+    float       dayNightFactor;
+    float       cloudCoverage;
+    uint        debugFlags;
+    int         samplesPerPixel;
+    float       temporalBlend;
+    int         maxRecursion;
+    float       pad1[4];
+} pc;
+
+layout(local_size_x = WORKGROUP_SIZE_X, local_size_y = WORKGROUP_SIZE_Y, local_size_z = 1) in;
+layout(rgba32f, set = 0, binding = 0) writeonly uniform image2D outputImage;
+
+// --- Minor helpers (inlined-friendly, low-cost math) ---
+float hash11(float p) {
+    p = fract(p * 0.1031);
+    p *= p + 33.33;
+    return fract(2.0 * p * (p + 33.33));
+}
+vec2 hash22(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+mat2 rot2(float a) {
+    float c = cos(a), s = sin(a);
+    return mat2(c, -s, s, c);
+}
+float sdCircle(vec2 p, float r) { return length(p) - r; }
+
+// --- SDFs ---
+float sdPacMouth(vec2 p, float r, float openAngle) {
+    float d = sdCircle(p, r);
+    float halfOpen = openAngle * 0.5;
+    float a = abs(atan(p.y, p.x));
+    // use smooth cut via max with large positive/negative to keep branchless-ish
+    float cut = (a < halfOpen) ? 100.0 : -100.0;
+    return max(d, cut);
+}
+
+float sdGhostBody(vec2 p, float waveTime) {
+    // combine circle body with a shifted "skirt" circle — few ops
+    float body = sdCircle(p, 1.0);
+    vec2 skirt = p;
+    skirt.x += GHOST_WAVE_AMP * sin(GHOST_WAVE_FREQ * skirt.y + waveTime);
+    float skirtCircle = sdCircle(skirt - vec2(0.0, -0.85), 0.92);
+    return min(body, skirtCircle);
+}
+
+float sdPacCharacter(vec2 p, float mouthOpen) {
+    vec2 q = p / ENTITY_SCALE;
+    return sdPacMouth(q, 1.0, mouthOpen) * ENTITY_SCALE;
+}
+float sdGhostCharacter(vec2 p, float mouthOpen, float waveTime) {
+    vec2 q = p / ENTITY_SCALE;
+    return sdGhostBody(q, waveTime + mouthOpen * 2.0) * ENTITY_SCALE;
+}
+
+// --- Maze (cheap grid-based approximation) ---
+float sdMaze(vec2 p) {
+    p *= 0.45;
+    vec2 cell = floor(p + 0.5);
+    vec2 frac = fract(p + 0.5) - 0.5;
+
+    bool wall = false;
+    float ax = abs(cell.x), ay = abs(cell.y);
+
+    if (ax > 13.0 || ay > 15.0) wall = true;
+    if (ay == 0.0 && ax < 13.0) wall = false;
+    if (ay == 7.0) wall = true;
+    if (ax == 0.0 || ax == 6.0) wall = (ay > 3.0 && ay < 11.0);
+    if (ax == 3.0 || ax == 9.0) wall = (ay > 9.0);
+    if (cell.y > 4.0 && cell.y < 8.0 && ax < 4.0) wall = true;
+
+    if (!wall) return 100.0;
+    return max(abs(frac.x), abs(frac.y)) - 0.48;
+}
+
+// --- Dots & pellets ---
+float sdDots(vec2 p) {
+    vec2 mp = p * 0.45;
+    vec2 grid = floor(mp * 12.0 + 0.5);
+    vec2 fp = fract(mp * 12.0 + 0.5) - 0.5;
+    float d = sdCircle(fp, 0.12);
+    if (sdMaze(p) < 0.0) return 100.0; // skip inside walls early
+    float eat = sin(pc.time * DOT_PULSE_SPEED + hash11(grid.x + grid.y * 31.0) * 6.283185) * 0.5 + 0.5;
+    d += eat * DOT_PULSE_AMP;
+    return d * 0.08;
+}
+float sdPowerPellet(vec2 p, vec2 center, float baseR) {
+    vec2 lp = p - center;
+    float pulse = 0.03 * sin(pc.time * 25.0 + length(lp) * 12.0);
+    return sdCircle(lp, baseR + pulse);
+}
+
+// --- Lighting helper (cheap spec) ---
+vec3 roughMetalSpec(vec3 N, vec3 L, vec3 V, vec3 baseCol, float roughness) {
+    vec3 H = normalize(L + V);
+    float NdotH = max(dot(N, H), 0.0);
+    float spec = pow(NdotH, SPEC_POWER * (1.0 - roughness));
+    spec *= (1.0 - roughness * 0.7);
+    return baseCol * spec * 0.8;
+}
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = ivec2(gl_NumWorkGroups.xy * gl_WorkGroupSize.xy);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    // NDC-style uv
+    vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
+    uv.x *= pc.aspectRatio;
+    vec2 squareUV = vec2(uv.x / pc.aspectRatio, uv.y); // keep cache-friendly layout
+
+    vec3 color = vec3(0.008, 0.01, 0.015);
+
+    // Maze walls (early, cheap evaluation)
+    float md = sdMaze(uv);
+    if (md < GLOW_WIDTH) {
+        float heightShade = 1.0 - (uv.y * 0.5 + 0.5) * WALL_HEIGHT_GRAD;
+        vec3 wallBase = mix(vec3(0.015, 0.03, 0.09), vec3(0.03, 0.09, 0.25), heightShade);
+        float glow = smoothstep(GLOW_WIDTH, -0.005, md);
+        color = mix(color, wallBase, glow * 0.6);
+        if (md > -0.04 && md < 0.0) {
+            color *= mix(0.5, 1.0, smoothstep(-0.04, 0.0, md));
+        }
+    }
+
+    // Dots (cheap)
+    float dd = sdDots(uv);
+    if (dd < GLOW_WIDTH) color += vec3(0.7, 0.6, 0.35) * smoothstep(GLOW_WIDTH, 0.0, dd) * 0.6;
+
+    // Entities
+    const int N = 5;
+    const vec3 ghostCols[4] = vec3[](
+        vec3(1.00, 0.22, 0.22),
+        vec3(1.00, 0.55, 0.75),
+        vec3(0.25, 0.85, 1.00),
+        vec3(1.00, 0.65, 0.15)
+    );
+
+    vec3 lightAccum = vec3(0.0);
+
+    // precompute some time-multiples once
+    float t = pc.time;
+    float t_chomp = t * CHOMP_FREQ;
+    float t_dot = t * DOT_PULSE_SPEED;
+    float t_baseAnim = t * 12.5;
+
+    for (int i = 0; i < N; ++i) {
+        float fi = float(i);
+
+        // position & motion (reduced trig calls by reusing sin/cos pairs)
+        float speed = (0.05 + fi * 0.012) * 5.0;
+        float a = t * speed + fi * 2.1;
+        float b = t * speed * 0.7 + fi * 3.4;
+
+        vec2 rawPos = vec2(sin(a) * 0.60, cos(b) * 0.45);
+        vec2 jitter = hash22(vec2(fi)) * 0.14 - 0.07;
+        rawPos += jitter;
+        vec2 pos = clamp(rawPos, vec2(-0.75), vec2(0.75));
+
+        // velocity approx using a small time offset (reduced divisions)
+        float lagT = t - 0.024; // adjusted for faster speed (0.12/5.0)
+        float la = lagT * speed + fi * 2.1;
+        float lb = lagT * speed * 0.7 + fi * 3.4;
+        vec2 prev = vec2(sin(la) * 0.60, cos(lb) * 0.45) + jitter;
+        vec2 vel = pos - prev;
+
+        float velLen = length(vel);
+        vec2 moveDir = (velLen > 0.0005) ? (vel / velLen) : vec2(1.0, 0.0);
+
+        vec2 local = squareUV - pos;
+
+        // mouth/chomp
+        float chompPhase = abs(sin(t_chomp + fi * CHOMP_PHASE_SPREAD));
+        float openAngle = chompPhase * 1.2;
+
+        // faster per-entity anim T
+        float animT = t_baseAnim + fi * 4.0;
+
+        float d;
+        vec3 col = (i == 0) ? vec3(1.00, 0.92, 0.08) : ghostCols[i-1];
+
+        if (i == 0) {
+            float angle = atan(moveDir.y, moveDir.x);
+            local = rot2(angle) * local;
+            d = sdPacCharacter(local, openAngle);
+        } else {
+            float tiltStrength = smoothstep(0.0005, 0.006, velLen);
+            float tiltAngleRad = radians(GHOST_TILT_MAX_DEG) * tiltStrength;
+            tiltAngleRad += sin(t * 9.0 + fi * 4.2) * 0.15 * tiltStrength;
+            // use moveDir.x as sign to favor branchless rotation
+            mat2 tiltRot = rot2(-tiltAngleRad * moveDir.x);
+            local = tiltRot * local;
+            d = sdGhostCharacter(local, openAngle, animT);
+        }
+
+        float distToEntity = length(squareUV - pos);
+        float entityLight = LIGHT_INTENSITY / (1.0 + distToEntity * distToEntity * 8.0);
+        lightAccum += col * entityLight;
+
+        // anti-aliased fill and soft glow (combine conditions to reduce branching)
+        if (d < AA_WIDTH) {
+            color = mix(color, col, smoothstep(AA_WIDTH, -0.005, d));
+        }
+        if (abs(d) < AA_WIDTH * 3.0) {
+            color += col * (1.0 - abs(d / (AA_WIDTH * 3.0)));
+        }
+    }
+
+    color += lightAccum * 0.25;
+
+    // Power pellets (centers const, cheaper sin/cos reuse)
+    const vec2 ppCenters[4] = vec2[](
+        vec2(-0.55,  0.45),
+        vec2( 0.55,  0.45),
+        vec2(-0.55, -0.45),
+        vec2( 0.55, -0.45)
+    );
+    vec3 ppBaseCol = vec3(0.95, 0.80, 0.35);
+
+    // precompute common pellet time multiple
+    float t_pp = t * 4.0;
+    for (int j = 0; j < 4; ++j) {
+        float fj = float(j);
+        float ph = t_pp + fj * 1.5708;
+        vec2 center = ppCenters[j] + vec2(sin(ph) * 0.03, cos(ph) * 0.03);
+
+        float pd = sdPowerPellet(squareUV, center, 0.028);
+        if (pd < GLOW_WIDTH * 1.5) {
+            vec3 normal = normalize(vec3(squareUV - center, 0.3));
+            vec3 fakeL = normalize(vec3(0.5, 0.8, 1.2));
+            vec3 fakeV = normalize(vec3(0.0, -0.3, 1.0));
+            vec3 spec = roughMetalSpec(normal, fakeL, fakeV, ppBaseCol, SPEC_ROUGHNESS);
+            spec += lightAccum * 0.4 * (1.0 - SPEC_ROUGHNESS);
+
+            float flash = 0.5 + 0.5 * sin(t * 40.0 + fj * 2.0);
+            vec3 ppColor = mix(ppBaseCol, vec3(1.1), flash * 0.3);
+            float alpha = smoothstep(GLOW_WIDTH * 1.5, -0.005, pd);
+
+            color = mix(color, ppColor + spec, alpha);
+            color += ppBaseCol * smoothstep(0.06, 0.015, pd) * 0.3;
+        }
+    }
+
+    // Post-processing: vignette, scanline, gamma, exposure
+    float vig = length(uv) * 0.55;
+    color *= 1.0 - vig * vig * 0.75;
+
+    // subtle scanline using integer dim.y to avoid extra trig per-pixel; use uv.y*dim.y
+    float scan = sin(uv.y * float(dim.y) * 6.2831853) * 0.025;
+    color += scan;
+
+    // tone mapping / gamma and final exposure scale
+    color = pow(color, vec3(0.92)) * 0.1;
+
+    if ((pc.debugFlags & 1u) != 0u) color = mix(color, vec3(1.0, 0.2, 0.8), 0.15);
+
+    imageStore(outputImage, pix, vec4(color, 1.0));
+}
