@@ -669,6 +669,7 @@ public:
 
                 if (keys[SDL_SCANCODE_ESCAPE]) {
                     SDL_SetWindowRelativeMouseMode(window_, false);
+					handleQuit(); // Your menu probably
                 }
             }
 
