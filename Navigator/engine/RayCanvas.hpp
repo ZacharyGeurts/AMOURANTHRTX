@@ -407,16 +407,22 @@ public:
     [[nodiscard]] bool isDestroyed() const noexcept { return destroyed_; }
 
 private:
-    // Toggle fullscreen mode
+
     void toggleFullscreen() noexcept {
         auto flags = SDL_GetWindowFlags(window_);
         bool isFullscreen = (flags & SDL_WINDOW_FULLSCREEN) != 0;
-
         SDL_SetWindowFullscreen(window_, !isFullscreen);
+
+        if (isFullscreen) {
+            SDL_SetWindowRelativeMouseMode(window_, false);
+		}
+		else {
+            SDL_SetWindowRelativeMouseMode(window_, true);
+		}
+
         LOG_INFO_CAT("WINDOW", "Fullscreen {}", isFullscreen ? "disabled" : "enabled");
     }
 
-    // Handle window resize / minimize — with preemptive adaptive downscale when window enlarges
     void onResize(int newWidth, int newHeight, bool fromUserResize) noexcept {
         if (newWidth <= 0 || newHeight <= 0) {
             minimized_ = true;

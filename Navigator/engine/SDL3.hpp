@@ -188,10 +188,9 @@ public:
         LOG_SUCCESS_CAT("SDL3", "Shutdown complete");
     }
 
-    // Called on all window-related events
     void onWindowEvent(const SDL_Event& ev) noexcept {
         switch (ev.type) {
-            // Focus events → update mouse capture/grab
+
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
             case SDL_EVENT_WINDOW_FOCUS_LOST:
             case SDL_EVENT_WINDOW_SHOWN:
@@ -199,50 +198,41 @@ public:
                 updateFocusState();
                 break;
 
-            // Size changes → recreate swapchain / adjust render resolution
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
                 onResize();
                 break;
     
-            // Position / display changes (optional logging or multi-monitor handling)
             case SDL_EVENT_WINDOW_MOVED:
             case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
-                // Optional: log or update multi-monitor aware rendering
                 LOG_DEBUG_CAT("SDL3", "Window moved or display changed");
                 break;
 
-            // Minimized / restored → pause/resume rendering if desired
             case SDL_EVENT_WINDOW_MINIMIZED:
                 LOG_INFO_CAT("SDL3", "Window minimized — pausing rendering");
-                // Optional: set a paused flag to skip heavy compute dispatches
                 break;
 
             case SDL_EVENT_WINDOW_MAXIMIZED:
             case SDL_EVENT_WINDOW_RESTORED:
                 LOG_INFO_CAT("SDL3", "Window restored/maximized");
-                onResize();  // Re-check size
+                onResize();
                 break;
 
-            // User wants to close → handle gracefully
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 LOG_INFO_CAT("SDL3", "Window close requested");
-                handleQuit();  // or push SDL_QUIT event
+                handleQuit();
                 break;
 
             case SDL_EVENT_WINDOW_LAST:
                 break;
 
-            // Rare / advanced
             case SDL_EVENT_WINDOW_HIT_TEST:
             case SDL_EVENT_WINDOW_ICCPROF_CHANGED:
-                // Usually ignore, but log for debugging
                 LOG_DEBUG_CAT("SDL3", "Advanced window event: {}", ev.type);
                 break;
 
             default:
-                // Not a window event — ignore or forward elsewhere
                 break;
         }
     }
@@ -264,7 +254,6 @@ public:
         SDL_SetWindowBordered(window_, !Options::SDL3::BorderlessWindow);
         SDL_SetWindowResizable(window_, Options::SDL3::AllowWindowResize);
 
-        // Mouse capture only when focused — handled in updateFocusState()
         bool capture = Options::SDL3::EnableInputCapture && hasFocus_;
         SDL_SetWindowRelativeMouseMode(window_, capture);
     }
@@ -306,6 +295,7 @@ public:
         Options::Rendering::EnableAdaptiveResolution = !Options::Rendering::EnableAdaptiveResolution;
         LOG_INFO_CAT("RENDER", "Adaptive resolution toggled: {}",
                      Options::Rendering::EnableAdaptiveResolution ? "ON" : "OFF");
+		onResize();
     }
 
     void toggleRayTracing() noexcept {
@@ -315,6 +305,8 @@ public:
         }
         LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}",
                      Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");
+	
+		onResize();
     }
 
     // ────────────────────────────────────────────────
@@ -488,7 +480,7 @@ private:
 
         MIX_Track* t = MIX_CreateTrack(mixer_);
         if (!t) {
-            LOG_ERROR_CAT("AUDIO", "Failed to create track for '{}'", file);
+            LOG_ERROR_CAT("AUDIO", "Failed to create file for '{}'", file);
             slot.reset();
             return -1;
         }
@@ -497,7 +489,7 @@ private:
         MIX_SetTrackStoppedCallback(t, track_stopped_callback, this);
         tracks_.push_back(t);
 
-        LOG_INFO_CAT("AUDIO", "Allocated new slot {} for '{}'", idx, file);
+        LOG_INFO_CAT("AUDIO", "Allocated new file {} for '{}'", idx, file);
         return static_cast<int>(idx);
     }
 
