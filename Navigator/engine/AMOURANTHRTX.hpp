@@ -667,7 +667,6 @@ inline double         getSmoothedRefresh() noexcept;
 // ────────────────────────────────────────────────
 // Cleanup (first — used by recreate)
 // ────────────────────────────────────────────────
-
 inline void cleanup() noexcept {
     for (auto v : views) vkDestroyImageView(rtx().device, v, nullptr);
     views.clear();
@@ -679,9 +678,6 @@ inline void cleanup() noexcept {
     }
 }
 
-// ────────────────────────────────────────────────
-// Recreate
-// ────────────────────────────────────────────────
 inline void recreate(int w, int h) noexcept {
     vkDeviceWaitIdle(rtx().device);
 
@@ -754,10 +750,17 @@ inline void recreate(int w, int h) noexcept {
     minimized = false;
 }
 
+inline void reset() noexcept {
+    vkDeviceWaitIdle(rtx().device);
+    cleanup();
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(rtx().window, &w, &h);
+    if (w > 0 && h > 0) recreate(w, h);
+}
+
 // ────────────────────────────────────────────────
 // Create
 // ────────────────────────────────────────────────
-
 inline void create(SDL_Window* window, int w, int h) noexcept {
     rtx().window = window;
     recreate(w, h);

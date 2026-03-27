@@ -361,7 +361,6 @@ public:
         Options::Rendering::EnableAdaptiveResolution = !Options::Rendering::EnableAdaptiveResolution;
         LOG_INFO_CAT("RENDER", "Adaptive resolution toggled: {}",
                      Options::Rendering::EnableAdaptiveResolution ? "ON" : "OFF");
-		Swapchain::needsRecreate = true;
     }
 
     void toggleRayTracing() noexcept {
@@ -370,8 +369,7 @@ public:
             LOG_WARNING_CAT("RENDER", "Hardware RT toggled ON but PreferHardwareRT is OFF — may use software fallback");
         }
         LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}",
-                     Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");	
-		Swapchain::needsRecreate = true;
+                     Options::Rendering::EnableHardwareRayTracing ? "ON" : "OFF");
     }
 
     // ────────────────────────────────────────────────
@@ -676,12 +674,6 @@ public:
 
                 if (keys[SDL_SCANCODE_ESCAPE]) {
                     SDL_SetWindowRelativeMouseMode(window_, false);
-                }
-                if (keys[SDL_SCANCODE_F1]) {
-                    toggleAdaptiveResolution();
-                }
-                if (keys[SDL_SCANCODE_F2]) {
-                    toggleRayTracing();
                 }
             }
 

@@ -144,6 +144,14 @@ public:
                     (ev.key.scancode == SDL_SCANCODE_RETURN && altPressed)) {
                     fullscreen_toggle = true;
                 }
+                if (ev.key.scancode == SDL_SCANCODE_F1) {
+                    INPUT.toggleAdaptiveResolution();
+					needsRecreate_ = true;
+                }
+                if (ev.key.scancode == SDL_SCANCODE_F2) {
+                    INPUT.toggleRayTracing();
+					needsRecreate_ = true;
+                }
             }
         }
 
@@ -187,11 +195,9 @@ public:
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
         vkCreateFence(rtx().device, &fci, nullptr, &fence);
-
-        VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX,
-                                                   VK_NULL_HANDLE, fence, &imageIndex);
-
+        VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX, VK_NULL_HANDLE, fence, &imageIndex);
         vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(rtx().device, fence, nullptr);
 
@@ -211,20 +217,15 @@ public:
 
         vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
-
-        transitionImageLayout(cmd, hdrOutputImage_,
-                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
         VkDescriptorSet set = descriptorSet_;
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout,
-                                0, 1, &set, 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
 
         lastPresentTime_s_ = now;
 
         updateRenderResolution();
-
         Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
-
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
 
         VkImageMemoryBarrier postComputeBarrier{};
