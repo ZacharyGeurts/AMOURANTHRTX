@@ -9,15 +9,89 @@ layout(push_constant) uniform Push {
     float totalTime;
 } pc;
 
-#define PI  3.14159265359
-#define TAU (2.0 * PI)
-#define MAX_STEPS 160
-#define MAX_DIST  50.0
-#define SURF_DIST 0.001
+// =============================================================================
+// TUNABLE PARAMETERS — Change these freely
+// =============================================================================
 
-// Generate colorful noise for vibrant backgrounds and effects
+#define MAX_STEPS           240
+#define MAX_DIST            90.0
+#define SURF_DIST           0.0008
+
+// Camera
+#define CAM_SPEED           0.11
+#define CAM_RADIUS          23.0
+#define CAM_HEIGHT_BASE     9.0
+#define CAM_HEIGHT_SWING    5.0
+#define CAM_LOOK_HEIGHT     4.2
+#define FOV_SCALE           1.8
+
+// Main Island
+#define MAIN_RADIUS         5.1
+#define MAIN_BOB_FREQ       0.28
+#define MAIN_BOB_AMP        0.3
+#define MAIN_NOISE_SCALE    1.45
+#define MAIN_NOISE_AMP      2.2
+#define MAIN_NOISE_SPEED    0.45
+
+// Satellite Islands (12 total)
+#define SAT_COUNT           12
+#define SAT_ORBIT_RADIUS    10.5
+#define SAT_HEIGHT_BASE     3.0
+#define SAT_HEIGHT_AMP      4.0
+#define SAT_VEL_SCALE       1.1
+#define SAT_COLLISION_MAIN  6.8
+#define SAT_COLLISION_SAT   3.4
+#define SAT_SIZE            1.85
+#define SAT_BOX_SIZE        vec3(1.95, 1.7, 1.95)
+#define SAT_ROUNDNESS       0.55
+#define SAT_NOISE_SCALE     3.2
+#define SAT_NOISE_AMP       1.35
+#define SAT_NOISE_SPEED     0.4
+
+// Crystal Core
+#define CRYSTAL_RADIUS      0.62
+#define CRYSTAL_ROT_SPEED   0.48
+#define CRYSTAL_BOB_FREQ    1.35
+#define CRYSTAL_BOB_AMP     0.7
+#define CRYSTAL_NOISE_SCALE 8.5
+#define CRYSTAL_NOISE_AMP   0.45
+#define CRYSTAL_NOISE_SPEED 3.8
+
+// Debris
+#define DEBRIS_COUNT        8
+#define DEBRIS_RADIUS       0.22
+#define DEBRIS_ORBIT        4.8
+#define DEBRIS_HEIGHT_BASE  6.2
+#define DEBRIS_HEIGHT_AMP   2.4
+
+// Lighting & Material
+#define DIFFUSE_INTENSITY   2.1
+#define RIM_POWER           4.0
+#define RIM_INTENSITY       2.8
+#define SPARKLE_THRESHOLD   0.5
+#define SPARKLE_INTENSITY   5.5
+#define GOLD_MIX            0.65
+
+// Background
+#define SKY_DARK            vec3(0.006, 0.0, 0.04)
+#define SKY_BRIGHT          vec3(0.04, 0.006, 0.16)
+#define NEBULA_INTENSITY    0.085
+#define CENTER_GLOW         vec3(0.48, 0.32, 0.68)
+#define CENTER_GLOW_POWER   11.0
+#define CENTER_GLOW_STRENGTH 0.28
+#define STAR_THRESHOLD      0.955
+#define STAR_INTENSITY      2.8
+
+// Post-processing
+#define OVERALL_BRIGHTNESS  0.65
+#define GAMMA               0.89
+#define FINAL_CONTRAST      1.08
+
+// =============================================================================
+// Helpers
+// =============================================================================
 float hash(vec3 p) {
-    p = fract(p * 0.3183099 + .1);
+    p = fract(p * 0.3183099 + 0.1);
     p *= 17.0;
     return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
 }
@@ -26,88 +100,133 @@ float noise(vec3 p) {
     vec3 i = floor(p);
     vec3 f = fract(p);
     f = f*f*(3.0-2.0*f);
-    return mix(mix(mix( hash(i + vec3(0,0,0)), 
-                        hash(i + vec3(1,0,0)), f.x),
-                   mix( hash(i + vec3(0,1,0)), 
-                        hash(i + vec3(1,1,0)), f.x), f.y),
-               mix(mix( hash(i + vec3(0,0,1)), 
-                        hash(i + vec3(1,0,1)), f.x),
-                   mix( hash(i + vec3(0,1,1)), 
-                        hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+    return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
+                   mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                   mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 
-// Create a rainbow color effect
 vec3 rainbow(float t) {
     t = fract(t);
-    return 0.5 + 0.5 * cos(TAU * (t + vec3(0.0, 0.33, 0.67)));
+    return 0.5 + 0.5 * cos(6.283185 * (t + vec3(0.0, 0.33, 0.67)));
 }
 
-// Rotation matrix for swirl effects
 mat2 rot(float a) {
     float c = cos(a), s = sin(a);
     return mat2(c, -s, s, c);
 }
 
-// Signed Distance Functions for shapes
-float sdSphere(vec3 p, float r) { return length(p) - r; }
-
-float sdBox(vec3 p, vec3 b) {
+float sdRoundedBox(vec3 p, vec3 b, float r) {
     vec3 q = abs(p) - b;
-    return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
 }
 
-// Scene: Dreamlike islands in a colorful sky
-float map(vec3 p) {
-    float d = MAX_DIST;
+// =============================================================================
+// Voxel Density with Solid Collisions
+// =============================================================================
+float voxelDensity(vec3 p) {
+    float d = 100.0;
 
-    // Fanciful main island
-    vec3 baseP = p;
-    baseP.y += 1.5 + sin(pc.totalTime * 0.3) * 0.15;
-    float base = sdSphere(baseP, 4.0);
-    base += 1.2 * noise(baseP * 1.2 + vec3(0.0, pc.totalTime * 0.4, 0.0));
-    d = min(d, base);
+    // Main central island
+    vec3 mp = p;
+    mp.y += 1.6 + sin(pc.totalTime * MAIN_BOB_FREQ) * MAIN_BOB_AMP;
+    float mainIsland = length(mp) - MAIN_RADIUS;
+    mainIsland += MAIN_NOISE_AMP * noise(mp * MAIN_NOISE_SCALE + vec3(0.0, pc.totalTime * MAIN_NOISE_SPEED, 0.0));
+    d = min(d, mainIsland);
 
-    // Satellite islands rotating around
-    for (int i = 0; i < 6; ++i) {
+    // Satellite islands with collisions
+    for (int i = 0; i < SAT_COUNT; ++i) {
         float fi = float(i);
-        vec3 off = vec3(sin(fi * 1.618 + pc.totalTime * 0.5) * 6.0,
-                        2.0 + sin(fi * 2.718 + pc.totalTime * 0.6) * 2.0,
-                        cos(fi * 3.141 + pc.totalTime * 0.7) * 6.0);
-        float chunk = sdSphere(p - off, 1.5 + 0.5 * sin(fi * 12.0 + pc.totalTime));
-        chunk += 0.6 * noise((p - off) * 4.0);
-        d = min(d, chunk);
+        float t = pc.totalTime;
+
+        vec3 vel = vec3(
+            sin(fi * 1.37 + t * 0.07) * SAT_VEL_SCALE,
+            cos(fi * 2.31 + t * 0.09) * (SAT_VEL_SCALE * 0.68),
+            sin(fi * 0.88 + t * 0.11) * SAT_VEL_SCALE
+        );
+
+        vec3 pos = vec3(
+            sin(fi * 1.618 + t * 0.48) * SAT_ORBIT_RADIUS,
+            SAT_HEIGHT_BASE + sin(fi * 2.71 + t * 0.55) * SAT_HEIGHT_AMP,
+            cos(fi * 3.14 + t * 0.42) * SAT_ORBIT_RADIUS
+        );
+
+        // Collision with main island
+        vec3 toMain = pos;
+        float distMain = length(toMain);
+        if (distMain < SAT_COLLISION_MAIN) {
+            vec3 normal = normalize(toMain);
+            pos += normal * (SAT_COLLISION_MAIN - distMain) * 1.3;
+            vel = reflect(vel, normal) * 0.9;
+        }
+
+        // Pairwise satellite collisions
+        for (int j = i + 1; j < SAT_COUNT; ++j) {
+            float fj = float(j);
+            vec3 posJ = vec3(
+                sin(fj * 1.618 + t * 0.48) * SAT_ORBIT_RADIUS,
+                SAT_HEIGHT_BASE + sin(fj * 2.71 + t * 0.55) * SAT_HEIGHT_AMP,
+                cos(fj * 3.14 + t * 0.42) * SAT_ORBIT_RADIUS
+            );
+
+            vec3 delta = pos - posJ;
+            float dist = length(delta);
+            if (dist < SAT_COLLISION_SAT && dist > 0.001) {
+                vec3 n = delta / dist;
+                float overlap = SAT_COLLISION_SAT - dist;
+                pos += n * overlap * 0.6;
+                vel = vel - 1.6 * dot(vel, n) * n;
+            }
+        }
+
+        // Chunky voxel island
+        vec3 lp = p - pos;
+        float island = length(lp) - SAT_SIZE;
+        island = max(island, sdRoundedBox(lp, SAT_BOX_SIZE, SAT_ROUNDNESS));
+        island += SAT_NOISE_AMP * noise(lp * SAT_NOISE_SCALE + vec3(t * SAT_NOISE_SPEED + fi));
+
+        d = min(d, island);
     }
 
-    // Crystal features glowing with light
-    vec3 cryP = p;
-    cryP.xz *= rot(pc.totalTime * 0.2);
-    cryP.y += 3.0;
-    float crystal = sdSphere(cryP, 0.4 + 0.2 * sin(cryP.y * 15.0 + pc.totalTime * 2.0));
+    // Crystal core
+    vec3 cp = p;
+    cp.xz *= rot(pc.totalTime * CRYSTAL_ROT_SPEED);
+    cp.y += 3.8 + sin(pc.totalTime * CRYSTAL_BOB_FREQ) * CRYSTAL_BOB_AMP;
+    float crystal = length(cp) - CRYSTAL_RADIUS;
+    crystal += CRYSTAL_NOISE_AMP * noise(cp * CRYSTAL_NOISE_SCALE + pc.totalTime * CRYSTAL_NOISE_SPEED);
     d = min(d, crystal);
+
+    // Small debris
+    for (int i = 0; i < DEBRIS_COUNT; ++i) {
+        float fi = float(i);
+        vec3 sp = vec3(
+            sin(pc.totalTime * 2.4 + fi) * DEBRIS_ORBIT,
+            DEBRIS_HEIGHT_BASE + cos(pc.totalTime * 2.1 + fi * 1.6) * DEBRIS_HEIGHT_AMP,
+            cos(pc.totalTime * 1.8 + fi * 1.3) * DEBRIS_ORBIT
+        );
+        d = min(d, length(p - sp) - DEBRIS_RADIUS);
+    }
 
     return d;
 }
 
-// Raymarching to render the scene
 float rayMarch(vec3 ro, vec3 rd) {
     float dO = 0.0;
-    for (int i = 0; i < MAX_STEPS; i++) {
+    for (int i = 0; i < MAX_STEPS; ++i) {
         vec3 p = ro + rd * dO;
-        float dS = map(p);
-        dO += dS;
+        float dS = voxelDensity(p);
+        dO += dS * 0.82;
         if (dO > MAX_DIST || abs(dS) < SURF_DIST) break;
     }
     return dO;
 }
 
-// Calculate normal vectors for lighting
 vec3 getNormal(vec3 p) {
-    float d = map(p);
-    vec2 e = vec2(0.001, 0.0);
-    vec3 n = d - vec3(
-        map(p - e.xyy),
-        map(p - e.yxy),
-        map(p - e.yyx));
+    float d = voxelDensity(p);
+    vec2 e = vec2(0.0015, 0.0);
+    vec3 n = d - vec3(voxelDensity(p - e.xyy),
+                      voxelDensity(p - e.yxy),
+                      voxelDensity(p - e.yyx));
     return normalize(n);
 }
 
@@ -119,55 +238,57 @@ void main() {
     vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
     uv.x *= float(dim.x) / float(dim.y);
 
-    // Dynamic camera orbiting the scene
-    float camT = pc.totalTime * 0.12;
-    vec3 ro = vec3(sin(camT) * 18.0, 5.0 + sin(camT * 0.8) * 3.0, cos(camT) * 18.0);
-    vec3 ta = vec3(0.0, 3.0, 0.0);
+    // Camera
+    float camT = pc.totalTime * CAM_SPEED;
+    vec3 ro = vec3(sin(camT) * CAM_RADIUS, CAM_HEIGHT_BASE + sin(camT * 0.65) * CAM_HEIGHT_SWING, cos(camT) * CAM_RADIUS);
+    vec3 ta = vec3(0.0, CAM_LOOK_HEIGHT, 0.0);
     vec3 ww = normalize(ta - ro);
     vec3 uu = normalize(cross(ww, vec3(0,1,0)));
     vec3 vv = cross(uu, ww);
-    vec3 rd = normalize(uv.x * uu + uv.y * vv + 1.6 * ww);
+    vec3 rd = normalize(uv.x * uu + uv.y * vv + FOV_SCALE * ww);
 
     float d = rayMarch(ro, rd);
 
-    vec3 col = vec3(0.0);
+    // Background
+    float sky = 0.5 + 0.5 * uv.y;
+    vec3 col = mix(SKY_DARK, SKY_BRIGHT, sky);
+    col = mix(col, vec3(0.0), pow(1.0 - sky, 3.2));
 
-    // Vibrant sky background
-    float skyGrad = 0.5 + 0.5 * uv.y;
-    col = rainbow(skyGrad * 0.3 + pc.totalTime * 0.05) * 0.8;
-    col += vec3(1.0, 0.95, 0.8) * pow(1.0 - length(uv) * 0.4, 6.0) * 0.6; // Sunlight
+    col += rainbow(sky * 0.18 + pc.totalTime * 0.012) * NEBULA_INTENSITY;
 
-    // Twinkling stars for added magic
-    float stars = smoothstep(0.98, 1.0, noise(vec3(uv * 200.0, pc.totalTime * 0.5)));
-    col += vec3(1.0) * stars * 1.5;
+    col += CENTER_GLOW * pow(max(0.0, 1.0 - length(uv) * 0.52), CENTER_GLOW_POWER) * CENTER_GLOW_STRENGTH;
+
+    // Stars
+    float stars = smoothstep(STAR_THRESHOLD, 1.0, noise(vec3(uv * 300.0, pc.totalTime * 0.32)));
+    col += vec3(1.08) * stars * STAR_INTENSITY;
 
     if (d < MAX_DIST) {
         vec3 p = ro + rd * d;
         vec3 n = getNormal(p);
 
-        // Bright ambient light effect
-        vec3 lightDir = normalize(vec3(0.6, 1.0, 0.8));
-        float diff = max(0.0, dot(n, lightDir));
+        vec3 ldir = normalize(vec3(0.6, 1.0, 0.65));
+        float diff = max(0.0, dot(n, ldir));
 
-        // Rainbow accents and sparkle effects
-        float rim = pow(1.0 - max(0.0, dot(n, -rd)), 3.0);
-        float sparkle = smoothstep(0.7, 0.95, noise(p * 20.0 + vec3(pc.totalTime * 3.0)));
+        float rim = pow(1.0 - max(0.0, dot(n, -rd)), RIM_POWER);
 
-        // Colorful crystal material with golden hints
-        float rainbowAmt = smoothstep(0.3, 0.8, noise(p * 4.0 + pc.totalTime * 0.3));
-        vec3 albedo = rainbow(rainbowAmt * 0.4 + pc.totalTime * 0.1);
-        albedo = mix(albedo, vec3(0.98, 0.85, 0.55), 0.6); // Golden touch
+        float sparkle = smoothstep(SPARKLE_THRESHOLD, 0.92, noise(p * 32.0 + pc.totalTime * 5.0));
 
-        vec3 lighting = albedo * diff * vec3(1.0, 0.95, 0.85) * 2.0; // Sunlight effect
-        lighting += albedo * rim * rainbow(rim * 2.0 + pc.totalTime * 0.8) * 1.8;
-        lighting += albedo * sparkle * 3.0; // Sparkling effects
-        lighting += albedo * 0.25; // Ambient light bounce
+        float rainT = smoothstep(0.1, 0.98, noise(p * 5.5 + pc.totalTime * 0.55));
+        vec3 albedo = rainbow(rainT * 0.6 + pc.totalTime * 0.11);
+        albedo = mix(albedo, vec3(0.92, 0.76, 0.38), GOLD_MIX);
+
+        vec3 lighting = albedo * diff * DIFFUSE_INTENSITY;
+        lighting += albedo * rim * rainbow(rim * 2.6 + pc.totalTime * 0.85) * RIM_INTENSITY;
+        lighting += albedo * sparkle * SPARKLE_INTENSITY;
+        lighting += albedo * 0.13;
 
         col = lighting;
     }
 
-    // Final color boosting for a vibrant glow
-    col *= 1.5 * sin(pc.totalTime * 0.5 + length(uv));
+    // Post
+    col *= OVERALL_BRIGHTNESS;
+    col = pow(col, vec3(GAMMA));
+    col = clamp(col * FINAL_CONTRAST, 0.0, 1.0);
 
     imageStore(outputImage, pix, vec4(col, 1.0));
 }
