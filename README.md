@@ -109,7 +109,7 @@ Current and archived content subject to copyright.
 If they do not like my using their brand, they can come to Michigan and stream the firing.  
 https://www.twitch.tv/AMOURANTH
 
-<img width="820" alt="Jorts" src="https://github.com/user-attachments/assets/b5c142a7-6ac3-4027-81f2-a1b94d9663d0" />  
+<img width="820" alt="Jorts" src="https://github.com/user-attachments/assets/8b1376d0-f0c2-499d-8dd9-cdef9bb188e2" />  
 
 **🔮ther work**  
 
