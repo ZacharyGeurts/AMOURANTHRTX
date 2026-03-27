@@ -34,22 +34,22 @@ layout(push_constant) uniform Push {
 #define MAIN_NOISE_SPEED    0.45
 
 // Satellite Islands (12 total)
-#define SAT_COUNT           12
+#define SAT_COUNT           20
 #define SAT_ORBIT_RADIUS    10.5
-#define SAT_HEIGHT_BASE     3.0
-#define SAT_HEIGHT_AMP      4.0
+#define SAT_HEIGHT_BASE     1.0
+#define SAT_HEIGHT_AMP      1.0
 #define SAT_VEL_SCALE       1.1
 #define SAT_COLLISION_MAIN  6.8
 #define SAT_COLLISION_SAT   3.4
 #define SAT_SIZE            1.85
 #define SAT_BOX_SIZE        vec3(1.95, 1.7, 1.95)
 #define SAT_ROUNDNESS       0.55
-#define SAT_NOISE_SCALE     3.2
-#define SAT_NOISE_AMP       1.35
+#define SAT_NOISE_SCALE     1.2
+#define SAT_NOISE_AMP       0.35
 #define SAT_NOISE_SPEED     0.4
 
 // Crystal Core
-#define CRYSTAL_RADIUS      0.62
+#define CRYSTAL_RADIUS      1.62
 #define CRYSTAL_ROT_SPEED   0.48
 #define CRYSTAL_BOB_FREQ    1.35
 #define CRYSTAL_BOB_AMP     0.7
