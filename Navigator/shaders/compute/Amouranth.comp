@@ -14,13 +14,13 @@
 #define SKIN_TEXTURE_AMP            0.08
 
 #define SHIRT_COLOR                 vec3(0.92, 0.18, 0.28)   // vivid red-pink
-#define SHIRT_TEXTURE_AMP           12.10
-#define SHIRT_ROUGHNESS             10.08
+#define SHIRT_TEXTURE_AMP           1.40
+#define SHIRT_ROUGHNESS             0.8
 #define SHIRT_SPECULAR              0.0
 
 #define DENIM_COLOR                 vec3(0.18, 0.28, 0.48)   // deep blue denim
 #define DENIM_TEXTURE_AMP           1.40
-#define DENIM_ROUGHNESS             0.65
+#define DENIM_ROUGHNESS             1.65
 #define DENIM_SPECULAR              0.0
 
 #define HAT_FELT_COLOR              vec3(0.28, 0.22, 0.18)
@@ -41,7 +41,7 @@
 #define HEEL_COLOR                  vec3(0.85, 0.05, 0.05)
 
 #define RIM_COLOR                   vec3(1.00, 0.94, 0.90)
-#define RIM_INTENSITY               2.4
+#define RIM_INTENSITY               0.02
 
 // ── Camera & Animation ──────────────────────────────────────────────────────
 #define CAMERA_ORBIT_DISTANCE       4.2
@@ -70,8 +70,8 @@
 #define BOOB_BASE_Y                 0.98
 #define BOOB_BASE_Z                 0.24
 #define BOOB_SEPARATION             0.16
-#define BOOB_RADIUS_LEFT            0.2
-#define BOOB_RADIUS_RIGHT           0.2
+#define BOOB_RADIUS_LEFT            0.22
+#define BOOB_RADIUS_RIGHT           0.22
 
 #define HEAD_Y_OFFSET               -0.19
 #define HAT_X_OFFSET                0.0
@@ -83,7 +83,7 @@
 #define HAT_BRIM_THICKNESS          0.05
 
 #define HAIR_BASE_Y                 1.20
-#define HAIR_Z_OFFSET               -0.2
+#define HAIR_Z_OFFSET               -0.18
 #define HAIR_SCALE_X                0.33
 #define HAIR_SCALE_Y                0.86
 #define HAIR_SCALE_Z                0.35
