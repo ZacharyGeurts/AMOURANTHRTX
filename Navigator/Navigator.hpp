@@ -5,7 +5,7 @@
 // Dual licensed: GPL v3 or commercial (gzac5314@gmail.com)
 // AMOURANTH FOREVER 💖
 //
-// Main engine entry point — called from developer's empty main.cpp
+// Main engine entry point — called from developer's main.cpp
 // =============================================================================
 
 #include "engine/Camera.hpp"
@@ -23,28 +23,21 @@
 #include <format>
 #include <chrono>
 
-// Global canvas
+// Global canvas - TV or monitor display
 inline std::unique_ptr<RayCanvas> raycanvas;
 
-// Sacrificial Splash — skippable with any input, plays single WAV audio
+// Splash screen - 3 seconds
 static inline void showSacrificialSplash() noexcept {
     constexpr int W = 1280, H = 720;
     constexpr const char* TITLE = "AMOURANTHRTX";
 
-    SDL_Window* splashWin = SDL_CreateWindow(
-        TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN
-    );
-    if (!splashWin) {
-        LOG_ERROR_CAT("SPLASH", "Create splash window failed: {}", SDL_GetError());
-        return;
-    }
+    SDL_Window* splashWin = SDL_CreateWindow(TITLE, W, H, SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN);
+    if (!splashWin) { LOG_ERROR_CAT("SPLASH", "Create splash window failed: {}", SDL_GetError()); return; }
 
     SDL_Rect bounds{};
-    if (SDL_GetDisplayBounds(0, &bounds) == 0) {
-        SDL_SetWindowPosition(splashWin,
-                              bounds.x + (bounds.w - W)/2,
-                              bounds.y + (bounds.h - H)/2);
-    }
+    if (SDL_GetDisplayBounds(0, &bounds) == 0) { 
+		SDL_SetWindowPosition(splashWin, bounds.x + (bounds.w - W)/2, bounds.y + (bounds.h - H)/2); 
+	}
 
     const char* iconPaths[] = {"assets/textures/ammo.ico", nullptr};
     for (int i = 0; iconPaths[i]; ++i) {
@@ -88,16 +81,16 @@ static inline void showSacrificialSplash() noexcept {
     SDL_RenderPresent(splashRen);
 
     // Play splash sound (will use whatever free slot the dynamic system assigns)
-    SDL3System::get().playSound("assets/audio/splash.wav", "play");
+    INPUT.playSound("assets/audio/splash.wav", "play");
+	// that is it. reuse the same filename and if already there, it will use the storage.
+	// default 16 slot rotating storage. See OptionsMenu.hpp to increase.
 
-    // Visual timeout + input skip (~3.4s max)
     double start = TotalTime::get().seconds();
     bool skip = false;
-
-    while (TotalTime::get().seconds() - start < 3.0 && !skip) {
+    while (TotalTime::get().seconds() - start < 3.0 && !skip) { // 3 second delay
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            SDL3System::get().pump(e);
+            INPUT.pump(e);
 
             if (e.type == SDL_EVENT_QUIT ||
                 e.type == SDL_EVENT_KEY_DOWN ||
@@ -113,13 +106,13 @@ static inline void showSacrificialSplash() noexcept {
     }
 
     // Stop ALL currently playing tracks (dynamic system — no fixed slot count)
-    size_t playing_count = SDL3System::get().getPlayingCount();
+    size_t playing_count = INPUT.getPlayingCount();
     if (playing_count > 0) {
         LOG_INFO_CAT("SPLASH", "Stopping {} lingering audio track(s)", playing_count);
         // Since we don't track which slot the splash used, safest is to stop everything
-        for (size_t i = 0; i < SDL3System::get().getActiveSlotCount(); ++i) {
-            if (SDL3System::get().isTrackPlaying(static_cast<int>(i))) {
-                SDL3System::get().playSound("", "stop", static_cast<int>(i));
+        for (size_t i = 0; i < INPUT.getActiveSlotCount(); ++i) {
+            if (INPUT.isTrackPlaying(static_cast<int>(i))) {
+                INPUT.playSound("", "stop", static_cast<int>(i));
             }
         }
     }
@@ -138,20 +131,16 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     Logging::Logger::get().startup();
     LOG_SUCCESS_CAT("MAIN", "Apocalypse handler & logger ready");
 
-    // Window — uses Options::SDL3 defaults
-    SDL_Window* window = SDL_CreateWindow(
-        "AMOURANTHRTX",
-        Options::SDL3::DefaultWidth,
-        Options::SDL3::DefaultHeight,
+    SDL_Window* window = SDL_CreateWindow("AMOURANTHRTX", Options::SDL3::DefaultWidth, Options::SDL3::DefaultHeight,
         SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
     );
+
     if (!window) {
         LOG_FATAL_CAT("SDL3", "Window creation failed: {}", SDL_GetError());
         return 1;
     }
-
-    // SDL3 init (this also preloads all files from Options::SDL3::PreloadedAudioFiles)
-    if (!SDL3System::get().init(window)) {
+    
+    if (!INPUT.init(window)) {
         LOG_FATAL_CAT("SDL3", "SDL3.init failed");
         SDL_DestroyWindow(window);
         return 1;
@@ -159,11 +148,10 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     showSacrificialSplash();
 
-    // Vulkan setup
     VkInstance instance = createVulkanInstance();
     if (instance == VK_NULL_HANDLE) {
         LOG_FATAL_CAT("VULKAN", "Instance creation failed");
-        SDL3System::get().shutdown();
+        INPUT.shutdown();
         SDL_DestroyWindow(window);
         return 1;
     }
@@ -172,7 +160,7 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
         LOG_FATAL_CAT("VULKAN", "Failed to create Vulkan surface");
         vkDestroyInstance(instance, nullptr);
-        SDL3System::get().shutdown();
+        INPUT.shutdown();
         SDL_DestroyWindow(window);
         return 1;
     }
@@ -180,13 +168,12 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
     uint32_t graphics_family = 0, present_family = 0;
     uint32_t compute_family = 0, transfer_family = 0;
 
-    VkDevice device = createLogicalDeviceAndSelectGPU(instance, surface,
-                                                      &graphics_family, &present_family,
-                                                      &compute_family, &transfer_family);
+    VkDevice device = createLogicalDeviceAndSelectGPU(instance, surface, &graphics_family, &present_family, &compute_family, &transfer_family);
+
     if (device == VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
-        SDL3System::get().shutdown();
+        INPUT.shutdown();
         SDL_DestroyWindow(window);
         return 1;
     }
@@ -219,16 +206,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
 
     Swapchain::create(window, Options::SDL3::DefaultWidth, Options::SDL3::DefaultHeight);
 
-    LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", 
-                 Swapchain::getExtent().width, Swapchain::getExtent().height);
+    LOG_INFO_CAT("MAIN", "Swapchain ready — {}x{}", Swapchain::getExtent().width, Swapchain::getExtent().height);
 
-    raycanvas = std::make_unique<RayCanvas>(
-        Options::SDL3::DefaultWidth,
-        Options::SDL3::DefaultHeight,
-        window
-    );
+    raycanvas = std::make_unique<RayCanvas>(Options::SDL3::DefaultWidth, Options::SDL3::DefaultHeight, window);
 
-    // Main loop — everything flows from the sealed eternal clock
+// Main loop —
     while (bool isRunning = true) {
 
         isRunning = raycanvas->maybeUpdateCanvas(isRunning);
@@ -238,10 +220,11 @@ inline int navigator_main([[maybe_unused]] int argc, [[maybe_unused]] char* argv
             break;
         }
     }
+// o7
 
     raycanvas.reset();
     Pipeline::shutdown();
-    SDL3System::get().shutdown();
+    INPUT.shutdown();
     SDL_DestroyWindow(window);
 
     LOG_SUCCESS_CAT("MAIN", "Engine shutdown complete");

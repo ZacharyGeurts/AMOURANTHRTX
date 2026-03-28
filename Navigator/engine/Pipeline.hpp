@@ -368,10 +368,6 @@ inline void dispatch_canvas(VkCommandBuffer cmd,
                             int width, int height,
                             float totalTime) noexcept
 {
-    if (!canvas_pipeline) {
-        create_canvas_pipeline();
-        if (!canvas_pipeline) return;
-    }
 
     if (width <= 0 || height <= 0) {
         LOG_WARNING_CAT("PIPELINE", "Invalid dispatch size: {}x{}", width, height);

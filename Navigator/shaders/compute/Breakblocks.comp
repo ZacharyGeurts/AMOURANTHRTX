@@ -144,27 +144,34 @@ void main() {
     vec2  ballVel = loadStateVec2(1);
     float paddleX = loadStateFloat(2);
     float startTime = loadStateFloat(4);
-    float introPlayed = loadStateFloat(5);  // 1.0 = already played the 5s intro sound
+    float introPlayed = loadStateFloat(5);
+    float score = loadStateFloat(6);               // NEW: score state slot
 
-    // Reset / init
-    bool reset = false;
-    reset = reset || ((pc.controllerInput & INPUT_ESCAPE) != 0u);
-    reset = reset || (pc.leftTrigger  > 0.98 && pc.rightTrigger > 0.98);
-    reset = reset || (ballPos.y < -0.25);           // ball lost
-    reset = reset || (startTime <= 0.0);            // first frame / uninitialized
+    // Reset / init logic (full reset vs ball-lost reset)
+    bool fullReset = false;
+    fullReset = fullReset || ((pc.controllerInput & INPUT_ESCAPE) != 0u);
+    fullReset = fullReset || (pc.leftTrigger > 0.98 && pc.rightTrigger > 0.98);
+    fullReset = fullReset || (startTime <= 0.0);            // first frame / uninitialized
 
-    if (isStateRow && reset) {
+    bool ballLost = (ballPos.y < -0.25);
+
+    if (isStateRow && (fullReset || ballLost)) {
         ballPos = vec2(0.5, 0.35);
         ballVel = vec2(0.0, 0.0);  // will be launched on input
         paddleX = 0.5;
-        startTime = pc.time;
-        introPlayed = 0.0;
 
-        // Reset bricks (all bits on = bricks present)
-        for (int r = 0; r < BRICK_ROWS; ++r) {
-            uint full = (1u << BRICK_COLS) - 1u;
-            imageStore(outputImage, ivec2(3 + r, stateRow), vec4(uintBitsToFloat(full), 0.0, 0.0, 0.0));
+        if (fullReset) {
+            startTime = pc.time;
+            introPlayed = 0.0;
+            score = 0.0;
+
+            // Reset bricks (all bits on = bricks present)
+            for (int r = 0; r < BRICK_ROWS; ++r) {
+                uint full = (1u << BRICK_COLS) - 1u;
+                imageStore(outputImage, ivec2(3 + r, stateRow), vec4(uintBitsToFloat(full), 0.0, 0.0, 0.0));
+            }
         }
+        // ballLost keeps existing bricks + score (classic Breakout behavior)
 
         // Stop any lingering audio
         audio.slotCommand[0] = AUDIO_CMD_STOP;
@@ -192,7 +199,7 @@ void main() {
     launchInput = launchInput || (pc.leftTrigger  > 0.35);
     launchInput = launchInput || (pc.rightTrigger > 0.35);
 
-    // Physics update — only on narrow stripe + state row
+    // Physics update — only on narrow stripe + state row (single-threaded simulation)
     if (pix.x < 8 || isStateRow) {
         vec2 nextPos = ballPos + ballVel;
 
@@ -253,10 +260,16 @@ void main() {
                     else
                         ballVel.x *= -1.04;
 
-                    // Hit sound (only once per frame from state row)
+                    // Hit sound + score (only once per frame from state row)
                     if (isStateRow) {
                         audio.slotCommand[1] = AUDIO_CMD_PLAY;
                         audio.slotValue[1]   = 0.7 + fract(pc.time * 17.1) * 0.3;
+
+                        // Atari-style scoring per row
+                        float points = (hitRow < 2) ? 7.0 :
+                                       (hitRow < 4) ? 5.0 :
+                                       (hitRow < 6) ? 3.0 : 1.0;
+                        score += points;
                     }
                 }
             }
@@ -283,6 +296,7 @@ void main() {
         if (pix.x == 2) imageStore(outputImage, pix, vec4(paddleX, 0.0, 0.0, 0.0));
         if (pix.x == 4) imageStore(outputImage, pix, vec4(startTime, 0.0, 0.0, 0.0));
         if (pix.x == 5) imageStore(outputImage, pix, vec4(introPlayed, 0.0, 0.0, 0.0));
+        if (pix.x == 6) imageStore(outputImage, pix, vec4(score, 0.0, 0.0, 0.0));   // NEW: persist score
 
         // One-time intro sound after ~5 seconds
         float elapsed = pc.time - startTime;
@@ -339,7 +353,50 @@ void main() {
     float glow = smoothstep(0.07, 0.0, length(uv - ballPos));
     color += ballCol * glow * 1.1;
 
-    // Post
+    // ────────────────────────────────────────────────────────────────
+    // SCORE HUD – Atari-style 3×5 block font (5 digits, golden yellow)
+    // ────────────────────────────────────────────────────────────────
+    uint digitMasks[10] = uint[10](
+        31599u,  // 0
+         8786u,  // 1
+        29671u,  // 2
+        29647u,  // 3
+        23497u,  // 4
+        31183u,  // 5
+        31215u,  // 6
+        29257u,  // 7
+        31727u,  // 8
+        31695u   // 9
+    );
+
+    vec2 hudPos = vec2(0.02, 0.93);
+    float digitScale = 0.022;
+    float digitW = 3.0 * digitScale;
+    float digitH = 5.0 * digitScale;
+    float gap = digitScale * 0.8;
+    int numDigits = 5;
+
+    for (int d = 0; d < numDigits; ++d) {
+        float power = pow(10.0, float(numDigits - 1 - d));
+        int digit = int(floor(score / power)) % 10;
+
+        vec2 digPos = hudPos + vec2(float(d) * (digitW + gap), 0.0);
+        vec2 local = (uv - digPos) / vec2(digitW, digitH);
+
+        if (local.x >= 0.0 && local.x < 1.0 && local.y >= 0.0 && local.y < 1.0) {
+            int px = int(floor(local.x * 3.0));
+            int py = 4 - int(floor(local.y * 5.0));   // py = 0 at top of digit
+            if (px >= 0 && px < 3 && py >= 0 && py < 5) {
+                uint mask = digitMasks[digit];
+                int bitIndex = py * 3 + px;
+                if ((mask & (1u << uint(bitIndex))) != 0u) {
+                    color = vec3(0.98, 0.85, 0.15);   // classic Atari golden yellow
+                }
+            }
+        }
+    }
+
+    // Post-process
     color *= pow(2.0, pc.exposure);
     color = pow(color, vec3(1.0 / pc.gamma));
     color = (color - 0.5) * pc.contrast + 0.5;
@@ -350,9 +407,11 @@ void main() {
     float vig = 1.0 - pc.vignetteStrength * length(uv - 0.5) * 2.3;
     color *= vig;
 
-    // Accumulation
+    // Accumulation (smooth motion)
     vec4 prev = imageLoad(outputImage, pix);
     vec4 finalColor = mix(prev, vec4(color, 1.0), ACCUM_BLEND);
+
+    finalColor *= 0.08;
 
     imageStore(outputImage, pix, finalColor);
 }
