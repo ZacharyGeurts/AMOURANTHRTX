@@ -42,7 +42,7 @@ layout(push_constant) uniform Push {
 #define CAMERA_ROLL_SPEED            0.038
 #define CAMERA_ROLL_AMPLITUDE        0.16
 
-#define LIGHTING_INTENSITY           0.02
+#define LIGHTING_INTENSITY           0.2
 #define NEBULA_INTENSITY             0.08
 #define STAR_BRIGHTNESS              0.027
 #define GODRAY_POWER                 5.1
