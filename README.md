@@ -20,17 +20,17 @@ Navigator/shaders/compute/CANVAS.comp is to be the one file to update.
 Using push constants this one file can manage visuals, input, and audio.  
 We permit hot swapping shaders in, so now you have a full engine of whatever you want.  
 
-We pride ourselves with short files.  
-They are ~1000 lines each.  
+We pride ourselves with having files under 1000 lines in length.  
 Even Grok "Fast" can return full entire files in one shot.  
 
 Compiling creates one file. Navigator.exe which runs your assets.  
 Our toolchain will assist with compiling your shaders and cross compiling.  
 Updates require replacing that one file.  
-CANVAS.spv will be interchangeable between earlier and later versions.  
+assets/shaders/compute/CANVAS.spv will generally be interchangeable between earlier and later versions.  
 
 We are top down, not down up.  We had triangles at one point.  
-The code tends to steer toward getting shorter rather than longer.  
+The gource video where the top down coder runs around, is me.  
+The code tends to steer toward getting shorter rather than longer, and there should be an eventual stopping point for the core components.  
 
 GLSL builds CANVAS .comp to .spv.
 If you have a Navigator and an spv file you can run many simple programs.  
