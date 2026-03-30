@@ -9,7 +9,7 @@
 
 Mandel Spire - This is our Frosted Demo. [GLM](https://github.com/g-truc/glm) is Marvel copyrighted Magneto.    
 Adaptive resolution down to 320x200 and over 4K. Tested on Wine and Linux 4070ti.  
-Recommend running Navigator from Terminal, console, or command line.  
+Recommend running Navigator from a command prompt.  
 <img width="820" height="2160" alt="image" src="https://github.com/user-attachments/assets/3c915450-a7cc-43e8-9664-c6894f33e161" />  
 [Windows Download](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/3D%20Frosted%20Windows.zip)  
 [Linux Download](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/3D%20Frosted%20Linux.zip)  
