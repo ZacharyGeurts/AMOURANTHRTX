@@ -103,8 +103,8 @@ AMOURANTHRTX © 2025 by Zachary Geurts gzac5314@gmail.com
 Free work is licensed under GPL v3.0 or higher.  
 Commercial is subject to 3% profit sharing.  
 Current and archived content subject to copyright.  
-
-<img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/assets/textures/ammo.png" />  
+  
+<img width="820" alt="ammo" src="https://github.com/user-attachments/assets/e7037903-fbda-4d1c-8979-76ffab99144c" />  
 <img width="820" src="https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/media/ELLIE.png" />  
 
 - **Why AMOURANTH?** They said they were hiring so I figured I would try to bring in a customer.    
