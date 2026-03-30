@@ -90,13 +90,12 @@ There is no hacking permissable within these walls. Tampering aborts.
 We are the first, last, or another. Game over.  
 
 Development and memes https://x.com/ZacharyGeurts  
-I will come off as insane more than rarely if I think it is good for a joke.  
-My personal X is not part of this project, but I do share snippets and progress there.  
 My personality I try to keep mainly over there and I consider it Pegi 16+.  
 Check recent commits to follow code updates.  
 
 We do a 3% profit share of every dollar we can make you.  
 I take 1% and 2% goes for the branding to Ammo and Nick.  
+This is a solo project, unless you count Grok.  
 If you enjoyed anything from here, send Amouranth a swag bag if you have it, and free copy or Steamlink key.  
 She steps on RTX and dominates it now.  
 
