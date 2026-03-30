@@ -5,7 +5,7 @@
 [Visuals Collection on X](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 
 3D Mandelbulb Diamond Demo   
-<img width="820" alt="Mandelbub" src="https://github.com/user-attachments/assets/ecb84a68-7ba8-4c2e-aebb-4dc6ea06a7e5" />  
+<img width="820" height="2160" alt="image" src="https://github.com/user-attachments/assets/0f506617-19ba-4f59-bd3f-88995462200a" />
 
 Mandel Spire - This is our Frosted Demo. [GLM](https://github.com/g-truc/glm) is Marvel copyrighted Magneto.    
 <img width="820" height="2160" alt="image" src="https://github.com/user-attachments/assets/3c915450-a7cc-43e8-9664-c6894f33e161" />  
