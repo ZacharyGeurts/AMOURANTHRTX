@@ -41,7 +41,7 @@ if(BUILD_FOR_WEB)
     set(TARGET_PLATFORM "Web")
     set(EXE_SUFFIX ".html")
     set(BIN_DIR "${CMAKE_BINARY_DIR}/bin/Web")
-    message(STATUS "=== WEB BUILD MODE — Output locked to build-web/bin/Web/Navigator.html ===")
+    message(STATUS "=== WEB BUILD MODE — Output locked to build-web/bin/Web/AMOURANTHRTX.html ===")
     add_definitions(-DUSE_WEBGPU)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Toolchain-emscripten.cmake" CACHE PATH "" FORCE)
 else()
@@ -224,7 +224,7 @@ set(TINYOBJLOADER_SRC "${tinyobjloader_SOURCE_DIR}/tiny_obj_loader.cc")
 set_source_files_properties(${TINYOBJLOADER_SRC} PROPERTIES COMPILE_OPTIONS "-Wno-sign-conversion;-w")
 
 # =============================================================================
-# SOURCES + EXECUTABLE  ←←← TARGET MUST BE CREATED FIRST
+# SOURCES + EXECUTABLE
 # =============================================================================
 set(OUR_SOURCES Navigator/main.cpp)
 set(ALL_SOURCES ${OUR_SOURCES} ${TINYOBJLOADER_SRC})
@@ -242,7 +242,7 @@ if(TARGET_PLATFORM STREQUAL "Windows")
 endif()
 
 # =============================================================================
-# VULKAN VALIDATION LAYERS  ←←← NOW AFTER TARGET EXISTS
+# VULKAN VALIDATION LAYERS
 # =============================================================================
 if(ENABLE_VALIDATION AND NOT EMSCRIPTEN)
     message(STATUS "🔧 Vulkan Validation Layers: ENABLED")
@@ -403,16 +403,16 @@ endif()
 message(STATUS "")
 message(STATUS "==================================================================")
 message(STATUS " AMOURANTHRTX")
-message(STATUS " Target:       ${BIN_DIR}/Navigator${EXE_SUFFIX}")
+message(STATUS " Target:       ${BIN_DIR}/AMOURANTHRTX${EXE_SUFFIX}")
 message(STATUS " Validation:   ${ENABLE_VALIDATION}")
 if(ENABLE_VALIDATION)
-    message(STATUS "   → Run with: VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ${BIN_DIR}/Navigator")
+    message(STATUS "   → Run with: VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation ${BIN_DIR}/AMOURANTHRTX")
 endif()
 if(TARGET_PLATFORM STREQUAL "Windows")
-    message(STATUS " Run:          wine ${BIN_DIR}/Navigator.exe")
+    message(STATUS " Run:          wine ${BIN_DIR}/AMOURANTHRTX.exe")
 elseif(TARGET_PLATFORM STREQUAL "Web")
     message(STATUS " Run:          ./linux.sh web run")
 else()
-    message(STATUS " Run:          ${BIN_DIR}/Navigator")
+    message(STATUS " Run:          ${BIN_DIR}/AMOURANTHRTX")
 endif()
 message(STATUS "==================================================================")
