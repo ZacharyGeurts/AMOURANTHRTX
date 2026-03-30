@@ -358,15 +358,15 @@ public:
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
                           "              RayCanvas Status  •  t+{:.4}s   (HYBRID RTX)\n"
-                          "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
-                          "  Refresh Rate:   {:.1f} Hz\n"
+                          "  FPS:            {}     (avg frame {} µs)\n"
+                          "  Refresh Rate:   {} Hz\n"
                           "  Window:         {} x {}\n"
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
-                          "  GPU load:       {:.2f}%   (smoothed {:.3f} ms)\n"
+                          "  GPU load:       {:.3f}%   (smoothed {:.3f} ms)\n"
                           "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
                           "  Advanced:       HardwareRayTracing {}  RTXReflections {}  RTXGI {}\n"
-                          "  VRAM:           {:.1f} MB used / {:.1f} MB total ({:.1f}% free)\n"
+                          "  VRAM:           {:.3f} MB used / {:.3f} MB total ({:.3f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
                           now, avgFps, avgDt_us, measuredRefreshRateHz_,
