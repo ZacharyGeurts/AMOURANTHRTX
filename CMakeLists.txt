@@ -233,7 +233,7 @@ add_executable(amouranth_engine ${ALL_SOURCES})
 
 set_target_properties(amouranth_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}"
-    OUTPUT_NAME "Navigator"
+    OUTPUT_NAME "AMOURANTHRTX"
     SUFFIX "${EXE_SUFFIX}"
 )
 
