@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine — AMOURANTHRTX.hpp
+// AMOURANTH RTX Engine — AMOURANTHRTX.hpp (HYBRID RTX ready)
 // (C) 2025-2026 Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
@@ -69,7 +69,7 @@ struct VRAMReality {
 };
 
 // ────────────────────────────────────────────────
-// Core context
+// Core context - rtx().everything
 // ────────────────────────────────────────────────
 struct RTX {
     VkInstance                      instance            = VK_NULL_HANDLE;
@@ -222,22 +222,18 @@ inline VkInstance createVulkanInstance() noexcept {
     VkApplicationInfo appInfo{};
     appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName   = "AMOURANTHRTX";
-    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 6, 0);
+    appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 2, 0, 0);
     appInfo.pEngineName        = "AMOURANTHRTX";
-    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 1, 6, 0);
+    appInfo.engineVersion      = VK_MAKE_API_VERSION(0, 2, 0, 0);
     appInfo.apiVersion         = VK_API_VERSION_1_3;
-
     uint32_t sdlCount = 0;
     const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
-
     std::vector<const char*> extensions(sdlExts, sdlExts + sdlCount);
-
     VkInstanceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ci.pApplicationInfo        = &appInfo;
     ci.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
     ci.ppEnabledExtensionNames = extensions.data();
-
     VkInstance inst = VK_NULL_HANDLE;
     vkCreateInstance(&ci, nullptr, &inst);
     return inst;
@@ -296,11 +292,7 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 
     rtx().physical = selected;
 
-    std::set<uint32_t> families = {
-        best.graphics.value(),
-        best.present.value(),
-        best.compute.value_or(best.graphics.value())
-    };
+    std::set<uint32_t> families = { best.graphics.value(), best.present.value(), best.compute.value_or(best.graphics.value()) };
 
     float priority = 1.0f;
     std::vector<VkDeviceQueueCreateInfo> qcis;
@@ -315,16 +307,13 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
 
     VkPhysicalDeviceFeatures features{};
     features.shaderFloat64 = VK_TRUE;
-
     VkPhysicalDeviceVulkan12Features vk12{};
     vk12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     vk12.bufferDeviceAddress = VK_TRUE;
-
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{};
     accel.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     accel.accelerationStructure = VK_TRUE;
     accel.pNext = &vk12;
-
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipe{};
     rtPipe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     rtPipe.rayTracingPipeline = VK_TRUE;
@@ -345,7 +334,6 @@ inline VkDevice createLogicalDeviceAndSelectGPU(
     vkCreateDevice(selected, &dci, nullptr, &dev);
 
     rtx().device = dev;
-
     rtx().graphics_family = best.graphics.value();
     rtx().present_family  = best.present.value();
     rtx().compute_family  = best.compute.value_or(best.graphics.value());
@@ -390,19 +378,15 @@ inline VkCommandBuffer beginTransientCommandBuffer() noexcept {
 
 inline void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
     if (!cmd) return;
-
     vkEndCommandBuffer(cmd);
-
     VkFence fence = VK_NULL_HANDLE;
     VkFenceCreateInfo fci{};
     fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     vkCreateFence(rtx().device, &fci, nullptr, &fence);
-
     VkSubmitInfo submit{};
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &cmd;
-
     vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
     vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
     vkDestroyFence(rtx().device, fence, nullptr);
@@ -428,16 +412,10 @@ inline uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags requir
     return ~0u;
 }
 
-inline uint64_t createBuffer(
-    VkDeviceSize        size,
-    VkBufferUsageFlags  usage,
-    std::string_view    tag         = "",
-    MemoryHint          hint        = MemoryHint::Auto
-) noexcept {
+inline uint64_t createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, std::string_view tag = "", MemoryHint hint = MemoryHint::Auto) noexcept {
     if (size == 0 || !rtx().device) return 0;
 
-    bool hostVisible = (hint == MemoryHint::HostVisible) ||
-                       (hint == MemoryHint::Auto && size < (1ULL << 20));
+    bool hostVisible = (hint == MemoryHint::HostVisible) || (hint == MemoryHint::Auto && size < (1ULL << 20));
 
     VkBufferCreateInfo bci{};
     bci.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -450,16 +428,10 @@ inline uint64_t createBuffer(
 
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, buf, &req);
-
-    VkMemoryPropertyFlags props = hostVisible ?
-        (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) :
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VkMemoryPropertyFlags props = hostVisible ? (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
     uint32_t memType = findMemoryType(req.memoryTypeBits, props);
-    if (memType == ~0u) {
-        vkDestroyBuffer(rtx().device, buf, nullptr);
-        return 0;
-    }
+    if (memType == ~0u) { vkDestroyBuffer(rtx().device, buf, nullptr); return 0; }
 
     VkMemoryAllocateFlagsInfo flags{};
     flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
@@ -472,10 +444,7 @@ inline uint64_t createBuffer(
     mai.memoryTypeIndex = memType;
 
     VkDeviceMemory mem = VK_NULL_HANDLE;
-    if (vkAllocateMemory(rtx().device, &mai, nullptr, &mem) != VK_SUCCESS) {
-        vkDestroyBuffer(rtx().device, buf, nullptr);
-        return 0;
-    }
+    if (vkAllocateMemory(rtx().device, &mai, nullptr, &mem) != VK_SUCCESS) { vkDestroyBuffer(rtx().device, buf, nullptr); return 0; }
 
     vkBindBufferMemory(rtx().device, buf, mem, 0);
 
@@ -485,9 +454,7 @@ inline uint64_t createBuffer(
     VkDeviceAddress addr = ext().vkGetBufferDeviceAddress(rtx().device, &addrInfo);
 
     void* mapped = nullptr;
-    if (hostVisible) {
-        vkMapMemory(rtx().device, mem, 0, size, 0, &mapped);
-    }
+    if (hostVisible) { vkMapMemory(rtx().device, mem, 0, size, 0, &mapped); }
 
     uint64_t handle = rtx().next_buffer_handle++;
     rtx().buffers.emplace(handle, RTX::BufferInfo{buf, mem, size, addr, mapped, usage, std::string(tag)});
@@ -499,7 +466,6 @@ inline void destroy(uint64_t handle) noexcept {
     std::lock_guard<std::mutex> lock(rtx().buffer_mutex);
     auto it = rtx().buffers.find(handle);
     if (it == rtx().buffers.end()) return;
-
     auto& b = it->second;
     if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
     vkDestroyBuffer(rtx().device, b.buffer, nullptr);
@@ -542,8 +508,7 @@ inline std::pair<VkBuffer, VkDeviceMemory> uploadToBuffer(
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, staging, &req);
 
-    uint32_t memType = findMemoryType(req.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    uint32_t memType = findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     VkMemoryAllocateInfo mai{};
     mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -577,11 +542,9 @@ inline VRAMReality measureReality() noexcept {
     VRAMReality r{};
     VkPhysicalDeviceMemoryProperties2 props2{};
     props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
-
     VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
     budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
     props2.pNext = &budget;
-
     vkGetPhysicalDeviceMemoryProperties2(rtx().physical, &props2);
 
     for (uint32_t i = 0; i < props2.memoryProperties.memoryHeapCount; ++i) {
@@ -591,8 +554,7 @@ inline VRAMReality measureReality() noexcept {
         }
     }
 
-    r.usable = r.total > (r.driver_footprint + r.safety_margin) ?
-               r.total - r.driver_footprint - r.safety_margin : 0;
+    r.usable = r.total > (r.driver_footprint + r.safety_margin) ? r.total - r.driver_footprint - r.safety_margin : 0;
     r.remaining = r.usable;
     return r;
 }
@@ -631,7 +593,6 @@ inline void cleanup() noexcept {
     for (auto v : views) vkDestroyImageView(rtx().device, v, nullptr);
     views.clear();
     images.clear();
-
     if (swapchain.valid()) {
         vkDestroySwapchainKHR(rtx().device, swapchain, nullptr);
         swapchain.value = VK_NULL_HANDLE;
@@ -646,14 +607,9 @@ inline void recreate(int w, int h) noexcept {
     VkSurfaceCapabilitiesKHR caps{};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rtx().physical, rtx().surface, &caps);
 
-    if (caps.currentExtent.width == 0 || caps.currentExtent.height == 0) {
-        minimized = true;
-        return;
-    }
+    if (caps.currentExtent.width == 0 || caps.currentExtent.height == 0) { minimized = true; return; }
 
-    extent = (caps.currentExtent.width != UINT32_MAX) ?
-             caps.currentExtent :
-             VkExtent2D{static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+    extent = (caps.currentExtent.width != UINT32_MAX) ? caps.currentExtent : VkExtent2D{static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
 
     uint32_t formatCount = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(rtx().physical, rtx().surface, &formatCount, nullptr);
@@ -710,14 +666,6 @@ inline void recreate(int w, int h) noexcept {
     minimized = false;
 }
 
-inline void create(SDL_Window* window, int w, int h) noexcept {
-    rtx().window = window;
-    recreate(w, h);
-}
-
-inline VkSwapchainKHR get() noexcept                { return swapchain; }
-inline VkExtent2D     getExtent() noexcept          { return extent; }
-
 inline void updateRefreshEstimate(double t) noexcept {
     if (lastPresentTime_s > 0.0) {
         double dt = t - lastPresentTime_s;
@@ -726,7 +674,14 @@ inline void updateRefreshEstimate(double t) noexcept {
     lastPresentTime_s = t;
 }
 
-inline double getSmoothedRefresh() noexcept { return smoothedRefresh_s; }
+inline void   create(SDL_Window* window, int w, int h) noexcept { 
+	rtx().window = window; 
+	recreate(w, h); 
+}
+
+inline        VkSwapchainKHR get()                noexcept { return swapchain; }
+inline        VkExtent2D     getExtent()          noexcept { return extent; }
+inline double                getSmoothedRefresh() noexcept { return smoothedRefresh_s; }
 
 } // namespace Swapchain
 
@@ -736,37 +691,27 @@ inline double getSmoothedRefresh() noexcept { return smoothedRefresh_s; }
 inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
     rtx().instance = createVulkanInstance();
     if (!rtx().instance) return false;
-
-    if (SDL_Vulkan_CreateSurface(window, rtx().instance, nullptr, &rtx().surface) == 0) {
-        return false;
-    }
-
+    if (SDL_Vulkan_CreateSurface(window, rtx().instance, nullptr, &rtx().surface) == 0) { return false; }
     createLogicalDeviceAndSelectGPU(rtx().instance, rtx().surface);
-
     if (!rtx().device) return false;
-
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolInfo.queueFamilyIndex = rtx().graphics_family;
-
     vkCreateCommandPool(rtx().device, &poolInfo, nullptr, &rtx().transient_pool);
     Swapchain::create(window, width, height);
-
     return true;
 }
 
 inline void cleanupRTX() noexcept {
     vkDeviceWaitIdle(rtx().device);
     Swapchain::cleanup();
-
-    for (auto& [h, b] : rtx().buffers) {
-        if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
+    for (auto& [h, b] : rtx().buffers) { 
+		if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
         vkDestroyBuffer(rtx().device, b.buffer, nullptr);
         vkFreeMemory(rtx().device, b.memory, nullptr);
     }
     rtx().buffers.clear();
-
     if (rtx().transient_pool) vkDestroyCommandPool(rtx().device, rtx().transient_pool, nullptr);
     if (rtx().device)         vkDestroyDevice(rtx().device, nullptr);
     if (rtx().surface)        vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);

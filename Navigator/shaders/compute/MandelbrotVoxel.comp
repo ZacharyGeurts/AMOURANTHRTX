@@ -1,0 +1,338 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+layout(push_constant) uniform PushConstants {
+    float totalTime;
+    // You can later add: vec2 mouseDelta, vec2 mousePos, etc.
+} pc;
+
+#define DIAMOND
+// #define COLOR_DARK
+// #define COLOR_ALBEDO_ONLY
+// #define COLOR_IRIDESCENT_SHIFT
+
+// ────────────────────────────────────────────────
+//   CAMERA & ORBIT CONTROLS (greatly improved)
+// ────────────────────────────────────────────────
+#define ORBIT_RADIUS              2.20
+#define ORBIT_RADIUS_MIN          2.20
+#define ORBIT_RADIUS_MAX          2.20
+
+#define AUTO_ORBIT_HORIZONTAL_SPD   0.185
+#define AUTO_ORBIT_VERTICAL_SPD     0.138
+#define AUTO_VERTICAL_BOB_AMP       0.18
+#define AUTO_VERTICAL_BOB_FREQ      0.24
+
+#define YAW_SENSITIVITY             1.6     // if you later add mouse control
+#define PITCH_SENSITIVITY           1.4
+#define DISTANCE_LERP_SPEED         3.2
+
+#define FOV_DEG                     60.0
+#define SAFETY_MARGIN               0.24
+#define MAX_MARCH_STEPS             240
+#define MAX_ITER                    420u
+#define BAILOUT                     16.0
+#define EPS                         0.00035
+#define FAR                         45.0
+#define STEP_MULTIPLIER             1.0
+
+// ────────────────────────────────────────────────
+//   MATERIAL / SHADING TUNING
+// ────────────────────────────────────────────────
+#define TRANSMISSION_STRENGTH       0.3
+#define EMISSION_WEIGHT             0.2
+#define THIN_FILM_STRENGTH          0.75
+#define HAZE_STRENGTH               0.18
+#define AO_STRENGTH                 0.68
+#define RIM_STRENGTH                0.08
+#define RIM_POWER                   1.8
+#define SPEC_POWER                  0.02
+#define SPEC_INTENSITY              0.02
+#define CONTRAST                    1.0
+#define BRIGHTNESS                  0.2
+#define GAMMA                       1.0
+#define SATURATION                  0.0
+
+// ────────────────────────────────────────────────
+//   SUN / LIGHTING SETTINGS
+// ────────────────────────────────────────────────
+#define SUN_DIRECTION        normalize(vec3(1.2, 1.6, 0.9))
+#define SUN_COLOR            vec3(1.22, 1.05, 0.92)
+#define SUN_INTENSITY        1.45
+#define SUN_SPECULAR_POWER   48.0
+#define SUN_SPECULAR_MUL     0.55
+#define SUN_RIM_MUL          0.90
+#define SUN_SHADOW_SOFTNESS  0.35
+
+// ────────────────────────────────────────────────
+//   Material style indices (0–15)
+// ────────────────────────────────────────────────
+#define STYLE_HOLO_ORB          0
+#define STYLE_RED_DIAMOND_GLOW  1
+#define STYLE_IRIDESCENT_CRYST  2
+#define STYLE_FROSTED_GLASS     3
+#define STYLE_CLEAR_DIAMOND     4
+#define STYLE_RAINBOW_ORB_A     5
+#define STYLE_RAINBOW_ORB_B     6
+#define STYLE_RAINBOW_ORB_C     7
+#define STYLE_RAINBOW_ORB_D     8
+#define STYLE_RAINBOW_ORB_E     9
+#define STYLE_TEXTURED_ORB_A    10
+#define STYLE_TEXTURED_ORB_B    11
+#define STYLE_TEXTURED_GLASS_A  12
+#define STYLE_TEXTURED_GLASS_B  13
+#define STYLE_OCEAN_WATER       14
+#define STYLE_PRINCESS_GLOW     15
+
+// ────────────────────────────────────────────────
+//   Focus point – sweet spot of Mandelbulb detail
+// ────────────────────────────────────────────────
+const vec3 FOCUS_CENTER = vec3(-0.745, 0.113, 0.06);
+
+// ────────────────────────────────────────────────
+//   Mandelbulb power-8 DE + orbit trap
+// ────────────────────────────────────────────────
+float mandelbulbDE(vec3 pos, out float trap) {
+    vec3 z = pos;
+    float dr = 1.0;
+    float r  = 0.0;
+    trap = 1e10;
+
+    for (uint i = 0u; i < MAX_ITER; ++i) {
+        r = length(z);
+        if (r > BAILOUT) break;
+
+        float theta = acos(z.z / max(r, 1e-6));
+        float phi   = atan(z.y, z.x);
+        dr = pow(r, 7.0) * 8.0 * dr + 1.0;
+
+        float zr = pow(r, 8.0);
+        theta *= 8.0;
+        phi   *= 8.0;
+
+        z = zr * vec3(sin(theta)*cos(phi), sin(phi)*sin(theta), cos(theta)) + pos;
+
+        trap = min(trap, dot(z, z));
+    }
+
+    return 0.5 * log(r + 1e-6) * r / dr;
+}
+
+// ────────────────────────────────────────────────
+//   Raymarch → returns distance & trap
+// ────────────────────────────────────────────────
+vec2 raymarch(vec3 ro, vec3 rd) {
+    float t = 0.0;
+    float trap = 0.0;
+
+    for (int i = 0; i < MAX_MARCH_STEPS; ++i) {
+        vec3 p = ro + t * rd;
+        float dist;
+        dist = mandelbulbDE(p, trap);
+
+        if (dist < EPS) return vec2(t, trap);
+        if (t > FAR) break;
+        t += dist * STEP_MULTIPLIER;
+    }
+    return vec2(-1.0, trap);
+}
+
+// ────────────────────────────────────────────────
+//   Tetrahedron normal
+// ────────────────────────────────────────────────
+vec3 calcNormal(vec3 p) {
+    vec2 e = vec2(1.0, -1.0) * 0.57735 * 0.0006;
+    float trapDummy;
+    return normalize(
+        e.xyy * mandelbulbDE(p + e.xyy, trapDummy) +
+        e.yyx * mandelbulbDE(p + e.yyx, trapDummy) +
+        e.yxy * mandelbulbDE(p + e.yxy, trapDummy) +
+        e.xxx * mandelbulbDE(p + e.xxx, trapDummy)
+    );
+}
+
+// ────────────────────────────────────────────────
+//   Material / shading (unchanged)
+// ────────────────────────────────────────────────
+vec3 getTranslucentColor(int style, float trap, float time, vec3 normal, vec3 viewDir) {
+    float detail = 1.0 - smoothstep(0.0, 12.0, sqrt(trap));
+
+    vec3 baseAlbedo = vec3(0.94, 0.96, 0.98);
+
+    if      (style == STYLE_HOLO_ORB)           baseAlbedo = vec3(0.92, 0.96, 1.00);
+    else if (style == STYLE_RED_DIAMOND_GLOW)   baseAlbedo = vec3(0.98, 0.14, 0.15);
+    else if (style == STYLE_IRIDESCENT_CRYST)   baseAlbedo = vec3(0.98, 0.98, 0.99);
+    else if (style == STYLE_FROSTED_GLASS)      baseAlbedo = vec3(0.97, 0.98, 0.99);
+    else if (style == STYLE_CLEAR_DIAMOND)      baseAlbedo = vec3(0.96, 0.97, 0.99);
+    else if (style >= STYLE_RAINBOW_ORB_A && style <= STYLE_RAINBOW_ORB_E)
+                                                baseAlbedo = vec3(0.93, 0.95, 1.00);
+    else if (style == STYLE_OCEAN_WATER)        baseAlbedo = vec3(0.04, 0.12, 0.28);
+    else if (style == STYLE_PRINCESS_GLOW)      baseAlbedo = vec3(0.85, 0.72, 0.88);
+
+    vec3 col;
+
+    #ifdef COLOR_DIAMOND
+        float hue = fract(time * 0.08 + float(style) * 0.137);
+        col = 0.5 + 0.5 * cos(6.283185 * (hue + vec3(0.0, 0.333, 0.667)));
+        col *= baseAlbedo * 1.3;
+    #elif defined(COLOR_DARK)
+        vec3 marbleBlack = vec3(0.018, 0.018, 0.020);
+        vec3 vein = vec3(0.09, 0.10, 0.11) * (0.25 + 0.75 * detail * 0.7);
+        vein *= (0.6 + 0.4 * sin(trap * 80.0 + time * 0.15));
+        float grain = 0.5 + 0.5 * sin(trap * 180.0 + time * 0.55 + float(style) * 18.0);
+        grain = smoothstep(0.46, 0.54, grain) * 0.035;
+
+        col = marbleBlack;
+        col += vein * 0.38;
+        col += vec3(grain * 0.5);
+        float deepShadow = detail * 0.08 * (0.4 + 0.6 * sin(time * 0.22 + trap * 6.0));
+        col += vec3(0.03, 0.015, 0.01) * deepShadow * 0.5;
+
+        float fresnel = pow(1.0 - max(0.0, dot(normal, -viewDir)), 5.8);
+        col += vec3(0.82, 0.84, 0.88) * fresnel * 0.65;
+        col = clamp(col, 0.0, 0.45);
+        col = pow(col, vec3(1.15));
+    #elif defined(COLOR_TINTED)
+        vec3 tint = 0.8 + 0.35 * cos(6.283185 * (fract(float(style) * 0.141 + 0.618) + vec3(0.0, 0.333, 0.667)));
+        col = baseAlbedo * tint * (1.0 + detail * 0.6);
+    #elif defined(COLOR_ALBEDO_ONLY)
+        col = baseAlbedo;
+    #elif defined(COLOR_IRIDESCENT_SHIFT)
+        float shift = sin(time * 0.15 + float(style) * 2.1) * 0.5 + 0.5;
+        col = baseAlbedo * (0.8 + 0.4 * cos(6.283185 * shift + vec3(0.0, 2.1, 4.2)));
+    #else
+        col = baseAlbedo;
+    #endif
+
+    float trans = TRANSMISSION_STRENGTH * (0.6 + 0.4 * detail);
+    col *= 0.4 + trans * 0.6;
+
+    float emiss = EMISSION_WEIGHT;
+    if (style == STYLE_RED_DIAMOND_GLOW || style == STYLE_HOLO_ORB ||
+        (style >= STYLE_RAINBOW_ORB_A && style <= STYLE_RAINBOW_ORB_E)) {
+        emiss *= 1.4 + sin(time * 1.2 + float(style)) * 0.3;
+    }
+    col += vec3(0.8, 0.9, 1.2) * emiss * detail * 0.7;
+
+    // Sun lighting
+    float sunDot = max(0.0, dot(normal, SUN_DIRECTION));
+    col *= 0.18 + sunDot * SUN_INTENSITY * SUN_COLOR;
+
+    vec3 reflectDir = reflect(-SUN_DIRECTION, normal);
+    float sunSpec = pow(max(0.0, dot(reflectDir, -viewDir)), SUN_SPECULAR_POWER);
+    col += sunSpec * SUN_COLOR * SUN_SPECULAR_MUL * SUN_INTENSITY;
+
+    float rim = pow(1.0 - max(0.0, dot(normal, -viewDir)), RIM_POWER);
+    col += rim * SUN_COLOR * SUN_RIM_MUL * SUN_INTENSITY * (0.5 + 0.5 * sunDot);
+
+    float shadow = smoothstep(0.0, SUN_SHADOW_SOFTNESS, sunDot);
+    col *= 0.45 + 0.55 * shadow;
+
+    col *= AO_STRENGTH + (1.0 - AO_STRENGTH) * (1.0 - smoothstep(0.0, 10.0, trap));
+
+    col = pow(col, vec3(GAMMA));
+    col = (col - 0.5) * CONTRAST + 0.5;
+    col *= BRIGHTNESS;
+    col = mix(vec3(dot(col, vec3(0.299,0.587,0.114))), col, SATURATION);
+
+    return clamp(col, 0.0, 1.0);
+}
+
+void main() {
+    ivec2 px   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(outputImage);
+    if (any(greaterThanEqual(px, size))) return;
+
+    vec2 uv = (vec2(px) + 0.5) / vec2(size) - 0.5;
+    uv.x *= float(size.x) / float(size.y);
+
+    float t = pc.totalTime;
+
+    // ────────────────────────────────
+    //   Improved orbiting camera
+    // ────────────────────────────────
+
+    // Base horizontal orbit (smooth constant motion)
+    float azimuth   = t * AUTO_ORBIT_HORIZONTAL_SPD;
+
+    // Vertical bobbing – slower and gentler
+    float elevation = sin(t * AUTO_ORBIT_VERTICAL_SPD) * AUTO_VERTICAL_BOB_AMP;
+
+    // You can later replace / add:
+    // azimuth   += pc.mouseDelta.x * YAW_SENSITIVITY;
+    // elevation += pc.mouseDelta.y * PITCH_SENSITIVITY;
+
+    elevation = clamp(elevation, -1.4, 1.4);
+
+    // Spherical → cartesian
+    vec3 orbitOffset = vec3(
+        cos(elevation) * cos(azimuth),
+        sin(elevation),
+        cos(elevation) * sin(azimuth)
+    ) * ORBIT_RADIUS;
+
+    vec3 ro = FOCUS_CENTER + orbitOffset;
+
+    // Gentle dynamic radius breathing (optional – comment out if unwanted)
+    float radiusMod = 1.0 + 0.08 * sin(t * 0.17 + 1.618);
+    ro = FOCUS_CENTER + normalize(ro - FOCUS_CENTER) * (ORBIT_RADIUS * radiusMod);
+
+    // Safety – prevent camera going inside the surface
+    float trapDummy;
+    float dist = mandelbulbDE(ro, trapDummy);
+    if (dist < SAFETY_MARGIN) {
+        vec3 pushDir = normalize(ro - FOCUS_CENTER);
+        ro += pushDir * (SAFETY_MARGIN - dist + 0.04);
+    }
+
+    // Look-at target with subtle breathing
+    vec3 target = FOCUS_CENTER + vec3(
+        0.0,
+        0.012 * sin(t * 0.09 + 2.3),
+        0.0
+    );
+
+    vec3 camDir = normalize(target - ro);
+
+    // Build orthonormal basis (avoid gimbal lock issues)
+    vec3 worldUp   = vec3(0,1,0);
+    vec3 camRight  = normalize(cross(camDir, worldUp));
+    vec3 camUp     = cross(camDir, camRight);   // corrected up vector
+
+    float fovFac = tan(radians(FOV_DEG) * 0.5);
+    vec3 rd = normalize(
+        camRight * uv.x * fovFac +
+        camUp    * uv.y * fovFac +
+        camDir
+    );
+
+    vec2 res = raymarch(ro, rd);
+
+    vec3 color;
+    if (res.x > 0.0) {
+        vec3 pos = ro + res.x * rd;
+        vec3 nor = calcNormal(pos);
+
+        float selector = fract(res.y * 0.071 + 0.618) * 16.0;
+        int style = int(floor(selector));
+
+        color = getTranslucentColor(style, res.y, t, nor, rd);
+
+        float transGlow = TRANSMISSION_STRENGTH * (1.0 - smoothstep(0.0, 8.0, res.y));
+        color += vec3(0.9, 0.95, 1.1) * transGlow * 0.4;
+    } else {
+        float nebula = 0.5 + 0.5 * sin(rd.y * 2.8 + t * 0.025);
+        vec3 bg = vec3(0.008, 0.012, 0.022) * (0.7 + nebula * 0.3);
+        float sunBg = pow(max(0.0, dot(rd, SUN_DIRECTION)), 32.0) * 0.25;
+        bg += SUN_COLOR * sunBg * 0.6;
+        color = bg;
+    }
+
+    color *= 0.92 + 0.08 * exp(-0.045 * res.x);
+
+    imageStore(outputImage, px, vec4(color, 1.0));
+}

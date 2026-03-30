@@ -77,14 +77,14 @@ namespace Options::Camera
     inline bool      EnableCameraShake        = true;
     inline float     ShakeTraumaDecay         = 0.78f;
 
-	inline float OrthoZoom     = 1.0f;                 // Base zoom factor (1.0 = normal scale)
-    inline float MinOrthoZoom  = 0.25f;                // Widest view (max zoom out)
-    inline float MaxOrthoZoom  = 8.0f;                 // Tightest view (max zoom in)
+    inline float     OrthoZoom                = 1.0f;                  // Base zoom factor (1.0 = normal scale)
+    inline float     MinOrthoZoom             = 0.25f;                 // Widest view (max zoom out)
+    inline float     MaxOrthoZoom             = 8.0f;                  // Tightest view (max zoom in)
 
     // Depth-of-field parameters (used when EnableDoF = true)
-    inline float Aperture      = 2.8f;                 // f-stop value (lower = shallower DoF)
-    inline float FocusDistance = 3.5f;                 // Distance to sharp focus plane (meters)
-    inline bool  EnableDoF     = false;                // Master DoF toggle (GPU expensive)
+    inline float     Aperture                 = 2.8f;                  // f-stop value (lower = shallower DoF)
+    inline float     FocusDistance            = 3.5f;                  // Distance to sharp focus plane (meters)
+    inline bool      EnableDoF                = false;                 // Master DoF toggle (GPU expensive)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,11 +101,12 @@ namespace Options::Rendering
         HardwareRayTracing      = 4,
         ProgressivePathTracing  = 5
     };
-	inline RenderTechnique CurrentTechnique = RenderTechnique::PureRaymarching;
 
-	inline bool     EnableAdaptiveResolution     = true;  // predictive sub super render scaling
-    inline float    MinResolutionScale           = 0.2f;  // 320x200 - just let adaptive have all the sub space
-    inline float    MaxResolutionScale           = 1.2f;  // 1.0 is native screen. We can go super or force sub (1.2, 0.8, etc)
+    inline RenderTechnique CurrentTechnique      = RenderTechnique::PureRaymarching;
+
+    inline bool     EnableAdaptiveResolution     = true;
+    inline float    MinResolutionScale           = 0.2f;
+    inline float    MaxResolutionScale           = 1.2f;
     inline bool     AutoFallbackOnLowFPS         = false;
 
     inline float    RaymarchMaxDistance          = 120.0f;
@@ -146,13 +147,7 @@ namespace Options::SDL3
     inline constexpr int     AudioFrequency     = 48000;
     inline constexpr int     AudioChannels      = 8; // 7.1
 
-	// You can preload 16 wav mp3 or whatever, only because that says 16 up there. 17...
-	// #include SDL3.hpp and INPUT.playSound("assets/audio/splash.wav", "play");
-	// If you did not preload, we will load, play, and return the file number.
-	// If you play more than "16" then the first then second so on files get replaced.
-	// Explore your Navigator/engine/SDL3.hpp file sometime, and see the wiki.
-	// https://github.com/ZacharyGeurts/AMOURANTHRTX/wiki/SDL3
-	
+    // Preloaded audio files (expand as needed)
     inline const std::vector<std::string> PreloadedAudioFiles = {
         "assets/audio/splash.wav"
     };
@@ -211,90 +206,147 @@ namespace Options::LivingWorld
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//    INPUT BITFLAGS — MUST MATCH SHADER PushConstants::controllerInput
-//    These are the ONLY input signals the raymarch shader receives from the CPU.
-//    Updated every frame in dispatch_canvas() based on keyboard/gamepad state.
+// INPUT BITFLAGS — MUST MATCH SHADER PushConstants::controllerInput
+// These are the ONLY input signals the shaders can receive from the CPU.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Input::Flags
 {
-    constexpr uint32_t FORWARD       = 1u << 0;     // Primary forward movement (W / left stick up)
-    constexpr uint32_t BACKWARD      = 1u << 1;     // Primary backward movement (S)
-    constexpr uint32_t LEFT          = 1u << 2;     // Strafe left (A)
-    constexpr uint32_t RIGHT         = 1u << 3;     // Strafe right (D)
+    // ================================================================
+    // Movement (WASD + left analog stick)
+    // ================================================================
+    constexpr uint32_t MOVE_FORWARD  = 1u << 0;
+    constexpr uint32_t MOVE_BACKWARD = 1u << 1;
+    constexpr uint32_t MOVE_LEFT     = 1u << 2;
+    constexpr uint32_t MOVE_RIGHT    = 1u << 3;
 
-    constexpr uint32_t SPRINT        = 1u << 4;     // Speed boost modifier
-    constexpr uint32_t CROUCH        = 1u << 5;     // Lower stance / reduced height
-    constexpr uint32_t JUMP          = 1u << 6;     // Vertical impulse (if physics enabled)
-    constexpr uint32_t INTERACT      = 1u << 7;     // Context-sensitive action (doors, items, NPCs)
+    // ================================================================
+    // ALL major gamepad buttons (SDL3 SDL_GAMEPAD_BUTTON_*)
+    // Full support for Valve/Steam Deck, Xbox Elite, PS5 DualSense Edge, etc.
+    // ================================================================
+    constexpr uint32_t GAMEPAD_SOUTH         = 1u << 4;   // A (Xbox) / X (PS) / B (Switch)
+    constexpr uint32_t GAMEPAD_EAST          = 1u << 5;   // B (Xbox) / Circle (PS)
+    constexpr uint32_t GAMEPAD_WEST          = 1u << 6;   // X (Xbox) / Square (PS)
+    constexpr uint32_t GAMEPAD_NORTH         = 1u << 7;   // Y (Xbox) / Triangle (PS)
 
-    constexpr uint32_t SHOOT         = 1u << 8;     // Primary fire / attack
-    constexpr uint32_t AIM           = 1u << 9;     // Aim down sights / zoom
-    constexpr uint32_t RELOAD        = 1u << 10;    // Reload weapon
-    constexpr uint32_t USE           = 1u << 11;    // Secondary interaction/tool
+    constexpr uint32_t GAMEPAD_BACK          = 1u << 8;   // View / Select / Share
+    constexpr uint32_t GAMEPAD_GUIDE         = 1u << 9;   // Steam / Xbox / PS logo button
+    constexpr uint32_t GAMEPAD_START         = 1u << 10;  // Menu / Options / Start
 
-    constexpr uint32_t MOUSE_LEFT    = 1u << 16;    // Left mouse button
-    constexpr uint32_t MOUSE_RIGHT   = 1u << 17;    // Right mouse button
-    constexpr uint32_t MOUSE_MIDDLE  = 1u << 18;    // Middle mouse button / wheel click
+    constexpr uint32_t GAMEPAD_LEFT_STICK    = 1u << 11;  // L3 (left stick click)
+    constexpr uint32_t GAMEPAD_RIGHT_STICK   = 1u << 12;  // R3 (right stick click)
 
-    constexpr uint32_t ACTION_1      = 1u << 20;    // Extra ability / item 1
-    constexpr uint32_t ACTION_2      = 1u << 21;    // Extra ability / item 2
-    constexpr uint32_t ACTION_3      = 1u << 22;
-    constexpr uint32_t ACTION_4      = 1u << 23;
+    constexpr uint32_t GAMEPAD_LEFT_SHOULDER = 1u << 13;  // LB / L1
+    constexpr uint32_t GAMEPAD_RIGHT_SHOULDER= 1u << 14;  // RB / R1
 
-    constexpr uint32_t DEBUG_TOGGLE  = 1u << 30;    // Debug overlay / mode toggle (rarely shader relevant)
+    constexpr uint32_t GAMEPAD_DPAD_UP       = 1u << 15;
+    constexpr uint32_t GAMEPAD_DPAD_DOWN     = 1u << 16;
+    constexpr uint32_t GAMEPAD_DPAD_LEFT     = 1u << 17;
+    constexpr uint32_t GAMEPAD_DPAD_RIGHT    = 1u << 18;
+
+    // Rear grip / paddle buttons (L4/L5, R4/R5) — explicitly supported
+    constexpr uint32_t GAMEPAD_LEFT_PADDLE1  = 1u << 19;  // Upper/primary left paddle (L4)
+    constexpr uint32_t GAMEPAD_LEFT_PADDLE2  = 1u << 20;  // Lower/secondary left paddle (L5)
+    constexpr uint32_t GAMEPAD_RIGHT_PADDLE1 = 1u << 21;  // Upper/primary right paddle (R4)
+    constexpr uint32_t GAMEPAD_RIGHT_PADDLE2 = 1u << 22;  // Lower/secondary right paddle (R5)
+
+    constexpr uint32_t GAMEPAD_MISC1         = 1u << 23;  // Share / Capture button
+    constexpr uint32_t GAMEPAD_TOUCHPAD      = 1u << 24;  // PS touchpad click
+
+    // ================================================================
+    // Mouse buttons
+    // ================================================================
+    constexpr uint32_t MOUSE_LEFT    = 1u << 25;
+    constexpr uint32_t MOUSE_RIGHT   = 1u << 26;
+    constexpr uint32_t MOUSE_MIDDLE  = 1u << 27;
+
+    // ================================================================
+    // Common keyboard scancodes (SDL_SCANCODE_*)
+    // ================================================================
+    constexpr uint32_t KEY_ESCAPE    = 1u << 28;
+    constexpr uint32_t KEY_RETURN    = 1u << 29;   // Enter
+    constexpr uint32_t KEY_SPACE     = 1u << 30;
+    constexpr uint32_t KEY_TAB       = 1u << 31;   // Last bit in uint32_t
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//    GAMEPAD LAYOUT REFERENCE — with cool emoji prompts for clarity
-//    Face buttons + shoulders/triggers/sticks — pick your platform flavor!
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ← West  East →
+// ← West  East → TODO: Valve R4 R5 etc.
 // [LT]            [RT]
 // [LB]            [RB]
 //    ◀️○▶️   🟡Y △
 // 💠        🔵X □ ○🔴B                     
 //    🔘○🔘   🟢A ×
 //    L3 R3
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Input — Default Bindings & Sensitivities (remappable)
-// ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Input
 {
-    // Keyboard movement & actions (real scancodes)
-    inline constexpr SDL_Scancode MoveForward  = SDL_SCANCODE_W;
-    inline constexpr SDL_Scancode MoveBackward = SDL_SCANCODE_S;
-    inline constexpr SDL_Scancode MoveLeft     = SDL_SCANCODE_A;
-    inline constexpr SDL_Scancode MoveRight    = SDL_SCANCODE_D;
-    inline constexpr SDL_Scancode Sprint       = SDL_SCANCODE_LSHIFT;
-    inline constexpr SDL_Scancode Crouch       = SDL_SCANCODE_LCTRL;
-    inline constexpr SDL_Scancode Jump         = SDL_SCANCODE_SPACE;
-    inline constexpr SDL_Scancode Interact     = SDL_SCANCODE_E;
-    inline constexpr SDL_Scancode Reload       = SDL_SCANCODE_R;
-    inline constexpr SDL_Scancode Use          = SDL_SCANCODE_F;
+    // ================================================================
+    // Keyboard bindings (real SDL_Scancode)
+    // ================================================================
+    inline constexpr SDL_Scancode MoveForward   = SDL_SCANCODE_W;
+    inline constexpr SDL_Scancode MoveBackward  = SDL_SCANCODE_S;
+    inline constexpr SDL_Scancode MoveLeft      = SDL_SCANCODE_A;
+    inline constexpr SDL_Scancode MoveRight     = SDL_SCANCODE_D;
 
-    // Mouse actions — NOT scancodes! These are handled separately via SDL_GetMouseState()
-    // We use constexpr int here just as markers / labels (not actual scancodes)
-    inline constexpr int MouseShoot            = SDL_BUTTON_LEFT;   // 1
-    inline constexpr int MouseAim              = SDL_BUTTON_RIGHT;  // 3
-    inline constexpr int MouseMiddle           = SDL_BUTTON_MIDDLE; // 2
+    inline constexpr SDL_Scancode Jump          = SDL_SCANCODE_SPACE;
+    inline constexpr SDL_Scancode Crouch        = SDL_SCANCODE_LCTRL;
+    inline constexpr SDL_Scancode Sprint        = SDL_SCANCODE_LSHIFT;
+    inline constexpr SDL_Scancode Interact      = SDL_SCANCODE_E;
+    inline constexpr SDL_Scancode Reload        = SDL_SCANCODE_R;
+    inline constexpr SDL_Scancode Use           = SDL_SCANCODE_F;
 
-    // Gamepad defaults
-    inline constexpr SDL_GamepadButton GP_Jump     = SDL_GAMEPAD_BUTTON_SOUTH;
-    inline constexpr SDL_GamepadButton GP_Interact = SDL_GAMEPAD_BUTTON_WEST;
-    inline constexpr SDL_GamepadButton GP_Shoot    = SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
-    inline constexpr SDL_GamepadButton GP_Crouch   = SDL_GAMEPAD_BUTTON_EAST;
-    inline constexpr SDL_GamepadButton GP_Sprint   = SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+    // Extra common keys
+    inline constexpr SDL_Scancode Escape        = SDL_SCANCODE_ESCAPE;
+    inline constexpr SDL_Scancode Tab           = SDL_SCANCODE_TAB;
+    inline constexpr SDL_Scancode Return        = SDL_SCANCODE_RETURN;
 
-    // Sensitivities & deadzones
-	inline bool   MovementSpeed                 = 1.0;
-    inline bool   InvertMouseY                  = false;
-    inline float  MouseSensitivity              = 0.090f;
+    // ================================================================
+    // Mouse buttons (NOT scancodes — handled via SDL_GetMouseState)
+    // ================================================================
+    inline constexpr int MousePrimary   = SDL_BUTTON_LEFT;    // Usually fire / attack
+    inline constexpr int MouseSecondary = SDL_BUTTON_RIGHT;   // Usually aim / alternate
+    inline constexpr int MouseMiddle    = SDL_BUTTON_MIDDLE;  // Middle click
 
-    inline bool   InvertControllerY             = false;
-    inline float  ControllerLookSensitivity     = 1.85f;
-    inline float  ControllerMoveSensitivity     = 1.00f;
-    inline float  ControllerDeadzone            = 0.135f;
-    inline float  ControllerTriggerThreshold    = 0.25f;
-}
+    // ================================================================
+    // Gamepad / Controller bindings (SDL_GamepadButton)
+    // Full support for Valve (Steam Deck), Xbox Elite, PS5 Edge, etc.
+    // ================================================================
+    inline constexpr SDL_GamepadButton GP_South         = SDL_GAMEPAD_BUTTON_SOUTH;      // A / X / B
+    inline constexpr SDL_GamepadButton GP_East          = SDL_GAMEPAD_BUTTON_EAST;       // B / Circle
+    inline constexpr SDL_GamepadButton GP_West          = SDL_GAMEPAD_BUTTON_WEST;       // X / Square
+    inline constexpr SDL_GamepadButton GP_North         = SDL_GAMEPAD_BUTTON_NORTH;      // Y / Triangle
+
+    inline constexpr SDL_GamepadButton GP_Back          = SDL_GAMEPAD_BUTTON_BACK;       // View / Select
+    inline constexpr SDL_GamepadButton GP_Guide         = SDL_GAMEPAD_BUTTON_GUIDE;      // Steam / Xbox / PS logo
+    inline constexpr SDL_GamepadButton GP_Start         = SDL_GAMEPAD_BUTTON_START;      // Menu / Options
+
+    inline constexpr SDL_GamepadButton GP_LeftStick     = SDL_GAMEPAD_BUTTON_LEFT_STICK; // L3
+    inline constexpr SDL_GamepadButton GP_RightStick    = SDL_GAMEPAD_BUTTON_RIGHT_STICK;// R3
+
+    inline constexpr SDL_GamepadButton GP_LeftShoulder  = SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;  // LB / L1
+    inline constexpr SDL_GamepadButton GP_RightShoulder = SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER; // RB / R1
+
+    inline constexpr SDL_GamepadButton GP_DPad_Up       = SDL_GAMEPAD_BUTTON_DPAD_UP;
+    inline constexpr SDL_GamepadButton GP_DPad_Down     = SDL_GAMEPAD_BUTTON_DPAD_DOWN;
+    inline constexpr SDL_GamepadButton GP_DPad_Left     = SDL_GAMEPAD_BUTTON_DPAD_LEFT;
+    inline constexpr SDL_GamepadButton GP_DPad_Right    = SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
+
+    // Rear grip / paddle buttons (L4/L5, R4/R5) — explicitly supported
+    inline constexpr SDL_GamepadButton GP_LeftPaddle1   = SDL_GAMEPAD_BUTTON_LEFT_PADDLE1;  // Upper left paddle (L4)
+    inline constexpr SDL_GamepadButton GP_LeftPaddle2   = SDL_GAMEPAD_BUTTON_LEFT_PADDLE2;  // Lower left paddle (L5)
+    inline constexpr SDL_GamepadButton GP_RightPaddle1  = SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1; // Upper right paddle (R4)
+    inline constexpr SDL_GamepadButton GP_RightPaddle2  = SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2; // Lower right paddle (R5)
+
+    inline constexpr SDL_GamepadButton GP_Misc1         = SDL_GAMEPAD_BUTTON_MISC1;         // Share / Capture button
+    inline constexpr SDL_GamepadButton GP_Touchpad      = SDL_GAMEPAD_BUTTON_TOUCHPAD;      // PS touchpad click
+
+    // ================================================================
+    // Input sensitivities & deadzones
+    // ================================================================
+    inline float MovementSpeed               = 1.0f;
+    inline bool  InvertMouseY                = false;
+    inline float MouseSensitivity            = 0.090f;
+
+    inline bool  InvertControllerY           = false;
+    inline float ControllerLookSensitivity   = 1.85f;
+    inline float ControllerMoveSensitivity   = 1.00f;
+    inline float ControllerDeadzone          = 0.135f;
+    inline float ControllerTriggerThreshold  = 0.25f;
+};
