@@ -25,7 +25,7 @@ We permit hot swapping shaders in, so now you have a full engine of whatever you
 We pride ourselves with having files under 1000 lines in length.  
 Even Grok "Fast" can return full entire files in one shot.  
 
-Compiling creates one file. Navigator.exe which runs your assets.  
+Compiling creates one file. AMOURANTHRTX.exe which runs your assets.  
 Our toolchain will assist with compiling your shaders and cross compiling.  
 Updates require replacing that one file.  
 assets/shaders/compute/CANVAS.spv will generally be interchangeable between earlier and later versions.  
@@ -35,8 +35,8 @@ The gource video where the top down coder runs around, is me.
 The code tends to steer toward getting shorter rather than longer, and there should be an eventual stopping point for the core components.  
 
 GLSL builds CANVAS .comp to .spv.
-If you have a Navigator and an spv file you can run many simple programs.  
-If a demo gives you a problem, you can try another Navigator version to play it.  
+If you have an AMOURANTHRTX and an spv file you can run many simple programs.  
+If a demo gives you a problem, you can try another Navigator or AMOURANTHRTX version to play it.  
 
 We are not minimalist. We added every feature from every forum, efficently.  
 How efficently? Secure zero cost computing.  
