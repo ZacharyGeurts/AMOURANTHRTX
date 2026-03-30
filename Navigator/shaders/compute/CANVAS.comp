@@ -257,6 +257,9 @@ Hit map(vec3 pos) {
     float skinD  = 1e10;
     float shirtD = 1e10;
     float denimD = 1e10;
+    float hatD   = 1e10;
+    float hairD  = 1e10;
+    float heelD  = 1e10;
 
     // ── Head & Neck (skin) ──────────────────────────────────────────────────
     vec3 headP = p - vec3(0.0, 1.78 + jump*0.2 + HEAD_Y_OFFSET, 0.0);
@@ -273,7 +276,7 @@ Hit map(vec3 pos) {
     torsoP.y += breath * 0.4;
     shirtD = min(shirtD, sdEllipsoid(torsoP, vec3(0.38, 0.58, 0.28)));
 
-    // V-neck carve-out (expose skin on upper chest / cleavage)
+    // V-neck carve-out
     float vneckDepth = 0.28;
     float vneckWidth  = 0.42;
     vec3 vneckP = p - vec3(0.0, 1.38 + jump*0.1 + breath*0.3, 0.18);
@@ -477,14 +480,14 @@ Hit map(vec3 pos) {
     // ── Legs ────────────────────────────────────────────────────────────────
     float legSway = sin(pc.totalTime * 1.2 + jump * 4.0) * 0.08;
 
-    // LEFT LEG ───────────────────────────────────────────────────────────────
+    // LEFT LEG
     vec3 thighL_pos = vec3(-0.18, 0.55 + jump * 0.05, 0.0);
     vec3 thighL = p - thighL_pos; thighL.xz *= rot2(legSway);
 
     float thighBaseL = sdCapsule(thighL, vec3(0,0.4,0), vec3(0,-LEG_LENGTH+0.3,0), THIGH_RADIUS);
     denimD = min(denimD, thighBaseL);
 
-    // LEFT quad bulge → shirt
+    // LEFT quad bulge
     vec3 quadBulgeL = p - (thighL_pos + vec3(0.0,0.15,0.04));
     quadBulgeL.xz *= rot2(legSway);
     float quadL = sdEllipsoid(quadBulgeL, vec3(THIGH_RADIUS+QUAD_BULGE,0.22,THIGH_RADIUS+0.02));
@@ -500,14 +503,14 @@ Hit map(vec3 pos) {
     vec3 ankleL = p - vec3(-0.18, 0.55-LEG_LENGTH-0.55+jump*0.12, 0.0);
     skinD = min(skinD, sdCapsule(ankleL, vec3(0,0.1,0), vec3(0,-0.15,0), ANKLE_TAPER));
 
-    // RIGHT LEG ──────────────────────────────────────────────────────────────
+    // RIGHT LEG
     vec3 thighR_pos = vec3(0.18, 0.55 + jump * 0.05, 0.0);
     vec3 thighR = p - thighR_pos; thighR.xz *= rot2(-legSway);
 
     float thighBaseR = sdCapsule(thighR, vec3(0,0.4,0), vec3(0,-LEG_LENGTH+0.3,0), THIGH_RADIUS);
     denimD = min(denimD, thighBaseR);
 
-    // RIGHT quad bulge → shirt
+    // RIGHT quad bulge
     vec3 quadBulgeR = p - (thighR_pos + vec3(0.0,0.15,0.04));
     quadBulgeR.xz *= rot2(-legSway);
     float quadR = sdEllipsoid(quadBulgeR, vec3(THIGH_RADIUS+QUAD_BULGE,0.22,THIGH_RADIUS+0.02));
@@ -536,9 +539,9 @@ Hit map(vec3 pos) {
     skinD = min(skinD, sdEllipsoid(footR, vec3(0.1,0.04,FOOT_LENGTH)));
 
     // ── Heels ───────────────────────────────────────────────────────────────
-    float heelD = 1e10;
     vec3 heelL_pos = vec3(-0.18, 0.55-LEG_LENGTH-0.6+jump*0.15, -HEEL_HEIGHT*0.5);
     heelD = min(heelD, sdCapsule(p - heelL_pos, vec3(0,0,0), vec3(0,-HEEL_HEIGHT,0), 0.06));
+
     vec3 heelR_pos = vec3(0.18, 0.55-LEG_LENGTH-0.6+jump*0.15, -HEEL_HEIGHT*0.5);
     heelD = min(heelD, sdCapsule(p - heelR_pos, vec3(0,0,0), vec3(0,-HEEL_HEIGHT,0), 0.06));
 
@@ -549,7 +552,6 @@ Hit map(vec3 pos) {
     shirtD = min(shirtD, sdEllipsoid(clothingP, vec3(0.46,0.42,0.38)));
 
     // ── Hat ─────────────────────────────────────────────────────────────────
-    float hatD = 1e10;
     vec3 hatCenter = vec3(HAT_X_OFFSET, HAT_Y_OFFSET + jump*0.12 + breath*0.08, HAT_Z_OFFSET);
     vec3 hatP = p - hatCenter;
     hatP.xz *= rot2(headTilt * HAT_TILT_FACTOR);
@@ -572,7 +574,6 @@ Hit map(vec3 pos) {
     hatD += wear * 0.7;
 
     // ── Hair ────────────────────────────────────────────────────────────────
-    float hairD = 1e10;
     vec3 hairP = p - vec3(0.0, HAIR_BASE_Y + jump*0.2, HAIR_Z_OFFSET);
     hairP.xz *= rot2(headTilt * 1.0);
 
