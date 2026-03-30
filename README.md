@@ -5,9 +5,10 @@
 [Visuals Collection on X](https://x.com/ZacharyGeurts/status/2026807886580417013)  
 
 3D Mandelbulb Diamond Demo   
-<img width="820" height="2160" alt="image" src="https://github.com/user-attachments/assets/0f506617-19ba-4f59-bd3f-88995462200a" />
+<img width="820" height="2160" alt="image" src="https://github.com/user-attachments/assets/f680f3d7-7f65-4641-87ec-3ab4f6ce9ee3" />
 
 Mandel Spire - This is our Frosted Demo. [GLM](https://github.com/g-truc/glm) is Marvel copyrighted Magneto.    
+Adaptive resolution down to 320x200 and over 4K. Tested on Wine and Linux 4070ti.  
 <img width="820" height="2160" alt="image" src="https://github.com/user-attachments/assets/3c915450-a7cc-43e8-9664-c6894f33e161" />  
 [Windows Download](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/3D%20Frosted%20Windows.zip)  
 [Linux Download](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/3D%20Frosted%20Linux.zip)  
