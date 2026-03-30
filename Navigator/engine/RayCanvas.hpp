@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// AMOURANTH RTX Engine — RayCanvas (HYBRID: raymarched compute + full hardware RT with SBT)
+// AMOURANTH RTX Engine — RayCanvas (HYBRID: raymarched compute + full hardware RT with SBT + RTXGI)
 // (C) 2025-2026 by Zachary Robert Geurts <gzac5314@gmail.com>
 // Dual licensed: GPL v3 or commercial
 // AMOURANTH FOREVER 💖
@@ -68,6 +68,7 @@ public:
         vkGetPhysicalDeviceProperties(rtx().physical, &props);
         timestampPeriodNs_ = props.limits.timestampPeriod;
 
+        // Initialize pipelines (compute + ray tracing)
         Pipeline::create_pipeline_layout();
         Pipeline::create_canvas_pipeline();
 
@@ -82,7 +83,7 @@ public:
 
         lastAdaptiveAdjustTime_ = TotalTime::get().seconds();
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Initialized hybrid renderer — {}x{} render target ready (SBT + ray tracing ready when TLAS + shaders provided)", 
+        LOG_SUCCESS_CAT("RAYCANVAS", "Initialized hybrid renderer — {}x{} render target ready (compute + hardware RT + RTXGI ready)", 
                         render_width_, render_height_);
     }
 
@@ -97,14 +98,25 @@ public:
             tlas_ = VK_NULL_HANDLE;
         }
 
-        if (timestampQueryPool_ != VK_NULL_HANDLE) vkDestroyQueryPool(rtx().device, timestampQueryPool_, nullptr);
-        if (descriptorSet_ != VK_NULL_HANDLE)      vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
-        if (descriptorPool_ != VK_NULL_HANDLE)     vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
+        if (timestampQueryPool_ != VK_NULL_HANDLE) {
+            vkDestroyQueryPool(rtx().device, timestampQueryPool_, nullptr);
+            timestampQueryPool_ = VK_NULL_HANDLE;
+        }
+
+        if (descriptorSet_ != VK_NULL_HANDLE) {
+            vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
+            descriptorSet_ = VK_NULL_HANDLE;
+        }
+
+        if (descriptorPool_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
+            descriptorPool_ = VK_NULL_HANDLE;
+        }
 
         destroyHDRResources();
         Memory::destroy(materialsHandle_);
 
-        LOG_SUCCESS_CAT("RAYCANVAS", "Hybrid renderer destroyed (compute + RT + SBT cleaned up)");
+        LOG_SUCCESS_CAT("RAYCANVAS", "Hybrid renderer destroyed (compute + RT + SBT + RTXGI cleaned up)");
     }
 
     bool maybeUpdateCanvas(bool isRunning) noexcept {
@@ -137,47 +149,62 @@ public:
             if (ev.type == SDL_EVENT_KEY_DOWN) {
                 bool altPressed = (ev.key.mod & SDL_KMOD_ALT) != 0;
 
-                // Fullscreen (F8, F11, or Alt+Enter)
+                // Fullscreen toggles
                 if (ev.key.scancode == SDL_SCANCODE_F11 ||
                     (ev.key.scancode == SDL_SCANCODE_RETURN && altPressed) ||
                     ev.key.scancode == SDL_SCANCODE_F8) {
                     fullscreen_toggle = true;
                 }
 
+                // F1 - Adaptive Resolution
                 if (ev.key.scancode == SDL_SCANCODE_F1) {
                     toggleAdaptiveResolution();
                     needsRecreate_ = true;
                 }
+
+                // F2 - Hardware Ray Tracing
                 if (ev.key.scancode == SDL_SCANCODE_F2) {
                     toggleRayTracing();
                     needsRecreate_ = true;
                 }
+
+                // F3 - RTXGI (Global Illumination)
                 if (ev.key.scancode == SDL_SCANCODE_F3) {
                     toggleRTXGI();
                     needsRecreate_ = true;
                 }
+
+                // F4 - Accumulation
                 if (ev.key.scancode == SDL_SCANCODE_F4) {
                     toggleAccumulation();
                     needsRecreate_ = true;
                 }
+
+                // F5 - Tonemapping
                 if (ev.key.scancode == SDL_SCANCODE_F5) {
                     toggleTonemapping();
                 }
+
+                // F6 - Bloom
                 if (ev.key.scancode == SDL_SCANCODE_F6) {
                     toggleBloom();
                 }
+
+                // F7 - Camera Reset
                 if (ev.key.scancode == SDL_SCANCODE_F7) {
                     resetCamera();
                 }
             }
         }
 
-        if (fullscreen_toggle) toggleFullscreen();
+        if (fullscreen_toggle) {
+            toggleFullscreen();
+        }
 
         if (quit) {
             destroyed_ = true;
             LOG_INFO_CAT("RAYCANVAS", "Quit signal received");
-            return isRunning;
+            return false;
         }
 
         bool nowMinimized = (currentW <= 0 || currentH <= 0);
@@ -194,7 +221,9 @@ public:
             return isRunning;
         }
 
-        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) return isRunning;
+        if (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_) {
+            return isRunning;
+        }
 
         if (firstFrame_) {
             TotalTime::get().seal();
@@ -207,9 +236,10 @@ public:
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
 
-        // Acquire swapchain image
+        // Acquire next swapchain image
         uint32_t imageIndex = 0;
         VkFence fence = VK_NULL_HANDLE;
+
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         vkCreateFence(rtx().device, &fci, nullptr, &fence);
@@ -256,11 +286,13 @@ public:
         postComputeBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
+
         endSubmitAndWait(cmd);
 
         // GPU timing
-        uint64_t timestamps[2]{};
-        if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
+        uint64_t timestamps[2] = {};
+        if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), 
+                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
             double gpuTimeMs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs_ / 1000000.0;
             double alpha = (gpuTimeMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
             smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
@@ -278,6 +310,7 @@ public:
 
         VkImage swapImg = Swapchain::images[imageIndex];
 
+        // Prepare swapchain image for writing
         VkImageMemoryBarrier swapBarrier{};
         swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -287,10 +320,12 @@ public:
         swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdPipelineBarrier(blitCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
+        // Clear swapchain to black
         VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
         VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(blitCmd, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &range);
 
+        // Blit with vertical flip
         VkExtent2D swapExtent = Swapchain::getExtent();
 
         VkImageBlit flipBlit{};
@@ -301,9 +336,12 @@ public:
         flipBlit.dstOffsets[0] = { 0, static_cast<int32_t>(swapExtent.height), 0 };
         flipBlit.dstOffsets[1] = { static_cast<int32_t>(swapExtent.width), 0, 1 };
 
-        vkCmdBlitImage(blitCmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &flipBlit, VK_FILTER_LINEAR);
+        vkCmdBlitImage(blitCmd, 
+                       hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+                       1, &flipBlit, VK_FILTER_LINEAR);
 
+        // Prepare swapchain for presentation
         VkImageMemoryBarrier presentBarrier{};
         presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -314,6 +352,7 @@ public:
         presentBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         vkCmdPipelineBarrier(blitCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+
         endSubmitAndWait(blitCmd);
 
         // Present
@@ -358,15 +397,15 @@ public:
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
                           "              RayCanvas Status  •  t+{:.4}s   (HYBRID RTX)\n"
-                          "  FPS:            {}     (avg frame {} µs)\n"
-                          "  Refresh Rate:   {} Hz\n"
+                          "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
+                          "  Refresh Rate:   {:.1f} Hz\n"
                           "  Window:         {} x {}\n"
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
-                          "  GPU load:       {:.3f}%   (smoothed {:.3f} ms)\n"
+                          "  GPU load:       {:.2f}%   (smoothed {:.3f} ms)\n"
                           "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
-                          "  Advanced:       HardwareRayTracing {}  RTXReflections {}  RTXGI {}\n"
-                          "  VRAM:           {:.3f} MB used / {:.3f} MB total ({:.3f}% free)\n"
+                          "  Advanced:       HardwareRayTracing {}  RTXGI {}\n"
+                          "  VRAM:           {:.2f} MB used / {:.2f} MB total ({:.1f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
                           now, avgFps, avgDt_us, measuredRefreshRateHz_,
@@ -376,10 +415,10 @@ public:
                           Options::Rendering::EnableAccumulation ? "💖" : "❌",
                           scaleFactor > 1.0 ? "💖" : "❌",
                           Options::Rendering::EnableHardwareRayTracing ? "💖" : "❌",
-                          Options::Rendering::EnableRTXReflections ? "💖" : "❌",
-                          Options::Rendering::EnableRTXGI ? "💖" : "❌",                          
+                          Options::Rendering::EnableRTXGI ? "💖" : "❌",
                           usedMB, totalMB, freePercent,
                           frameCount_);
+
             lastFpsLog_ = now;
             frameCount_ = 0;
         }
