@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# linux.sh — AMOURANTH RTX — WATER TEMPLE EDITION — FIXED FOREVER
-# No loops. No bullshit. Builds clean every time.
+# linux.sh — AMOURANTHRTX — WATER TEMPLE EDITION
 # =============================================================================
 
 set -euo pipefail
@@ -33,7 +32,7 @@ banner() {
     echo -e "${GLOW}  ██║  ██║   ██║   ██╔╝ ██╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗${X}"
     echo -e "${PEARL}  ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝${X}"
     echo
-    echo -e "${GLOW}                AMOURANTH RTX — AQUA TEMPLE — $(date '+%B %d, %Y')${X}"
+    echo -e "${GLOW}                AMOURANTHRTX — AQUA TEMPLE — $(date '+%B %d, %Y')${X}"
     echo
 }
 
@@ -57,10 +56,10 @@ show_help() {
   ./linux.sh clean            → rm -rf ALL build folders
 
   Binary paths:
-    Linux debug:   build/bin/Linux/Navigator
-    Linux release: build-release/bin/Linux/Navigator
-    Windows:       build-windows/bin/Windows/Navigator.exe
-    Web:           build-web/bin/Web/Navigator.html
+    Linux debug:   build/bin/Linux/AMOURANTHRTX
+    Linux release: build-release/bin/Linux/AMOURANTHRTX
+    Windows:       build-windows/bin/Windows/AMOURANTHRTX.exe
+    Web:           build-web/bin/Web/AMOURANTHRTX.html
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║           THE TIDE FLOWS THROUGH DIMENSIONS — LOVE IS CROSS-PLATFORM         ║
@@ -84,14 +83,14 @@ for arg in "$@"; do
 done
 
 if [[ "$TARGET" == "windows" ]]; then
-    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Windows/Navigator.exe"
-    SOURCE_BINARY="./bin/Windows/Navigator.exe"
+    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Windows/AMOURANTHRTX.exe"
+    SOURCE_BINARY="./bin/Windows/AMOURANTHRTX.exe"
 elif [[ "$TARGET" == "web" ]]; then
-    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Web/Navigator.html"
-    SOURCE_BINARY="./bin/Web/Navigator.html"
+    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Web/AMOURANTHRTX.html"
+    SOURCE_BINARY="./bin/Web/AMOURANTHRTX.html"
 else
-    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Linux/Navigator"
-    SOURCE_BINARY="./bin/Linux/Navigator"
+    FINAL_BINARY="$PROJECT_ROOT/$BUILD_SUBDIR/bin/Linux/AMOURANTHRTX"
+    SOURCE_BINARY="./bin/Linux/AMOURANTHRTX"
 fi
 
 clean_all() {
@@ -193,7 +192,7 @@ if [[ "$ACTION" == "run" ]]; then
         fi
     elif [[ "$TARGET" == "web" ]]; then
         echo -e "${TURQ}        LAUNCHING LOCAL WEB SERVER — OPEN IN CHROME/EDGE${X}"
-        echo -e "${AQUA}        http://localhost:8000/Navigator.html${X}"
+        echo -e "${AQUA}        http://localhost:8000/AMOURANTHRTX.html${X}"
         python3 -m http.server 8000 --directory "$BUILD_SUBDIR/bin/Web"
     elif [[ "$LAUNCH_MODE" == "gdb" ]]; then
         echo -e "${WAVE}        DESCENDING WITH GDB — MAY YOUR BREAKPOINTS BE BUBBLES${X}"
@@ -207,11 +206,11 @@ fi
 banner
 echo
 echo -e "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
-echo -e "${AQUA}        ~${TURQ}~${WAVE}~${GLOW}~${FOAM}~${PEARL}~ ${TARGET^^} ${BUILD_VARIANT^^} BUILD COMPLETE — NAVIGATOR SWIMS ETERNAL ~${PEARL}~${FOAM}~${GLOW}~${WAVE}~${TURQ}~${AQUA}~${X}"
+echo -e "${AQUA}        ~${TURQ}~${WAVE}~${GLOW}~${FOAM}~${PEARL}~ ${TARGET^^} ${BUILD_VARIANT^^} BUILD COMPLETE ~${PEARL}~${FOAM}~${GLOW}~${WAVE}~${TURQ}~${AQUA}~${X}"
 echo -e "${DEEP}        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${X}"
 echo
 echo -e "        ${W}Current Realm:${X} ${GLOW}$TARGET ${BUILD_VARIANT^^}${X}"
 echo -e "        ${W}Binary Location:${X} ${GLOW}$FINAL_BINARY${X}"
 echo -e "        ${W}Dive Command:${X}   ${AQUA}./linux.sh${TARGET:+$TARGET}${BUILD_VARIANT:+$BUILD_VARIANT} run${X}"
 echo
-echo -e "${GLOW}        AQUAMARINE PHOTONS ARE ETERNAL — THE TIDE IS LOVE — GROK FIXED IT${X}"
+echo -e "${GLOW}         — THE TIDE IS LOVE — ${X}"
