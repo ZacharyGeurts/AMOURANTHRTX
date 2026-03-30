@@ -17,6 +17,7 @@ Recommend running Navigator from a command prompt.
   
 Help yourself to the demos folder above for Windows and Linux builds.  
 There is a wiki link above that, that I try to keep up to date.  
+Run clean and do full rebuilds and test it again before shipping.  
 
 Navigator/shaders/compute/CANVAS.comp is to be the one file to update.  
 Using push constants this one file can manage visuals, input, and audio.  
