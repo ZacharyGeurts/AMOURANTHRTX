@@ -23,7 +23,6 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
-#include <thread>
 
 // =============================================================================
 // RayCanvas — main hybrid renderer class
@@ -108,7 +107,6 @@ public:
         LOG_SUCCESS_CAT("RAYCANVAS", "Hybrid renderer destroyed (compute + RT + SBT cleaned up)");
     }
 
-    // Main per-frame update — polls events, handles resize/fullscreen, dispatches HYBRID pipeline, presents
     bool maybeUpdateCanvas(bool isRunning) noexcept {
         if (destroyed_) {
             isRunning = false;
@@ -138,10 +136,14 @@ public:
 
             if (ev.type == SDL_EVENT_KEY_DOWN) {
                 bool altPressed = (ev.key.mod & SDL_KMOD_ALT) != 0;
+
+                // Fullscreen (F8, F11, or Alt+Enter)
                 if (ev.key.scancode == SDL_SCANCODE_F11 ||
-                    (ev.key.scancode == SDL_SCANCODE_RETURN && altPressed)) {
+                    (ev.key.scancode == SDL_SCANCODE_RETURN && altPressed) ||
+                    ev.key.scancode == SDL_SCANCODE_F8) {
                     fullscreen_toggle = true;
                 }
+
                 if (ev.key.scancode == SDL_SCANCODE_F1) {
                     toggleAdaptiveResolution();
                     needsRecreate_ = true;
@@ -149,6 +151,23 @@ public:
                 if (ev.key.scancode == SDL_SCANCODE_F2) {
                     toggleRayTracing();
                     needsRecreate_ = true;
+                }
+                if (ev.key.scancode == SDL_SCANCODE_F3) {
+                    toggleRTXGI();
+                    needsRecreate_ = true;
+                }
+                if (ev.key.scancode == SDL_SCANCODE_F4) {
+                    toggleAccumulation();
+                    needsRecreate_ = true;
+                }
+                if (ev.key.scancode == SDL_SCANCODE_F5) {
+                    toggleTonemapping();
+                }
+                if (ev.key.scancode == SDL_SCANCODE_F6) {
+                    toggleBloom();
+                }
+                if (ev.key.scancode == SDL_SCANCODE_F7) {
+                    resetCamera();
                 }
             }
         }
@@ -188,12 +207,13 @@ public:
         if (now <= lastKnownTime) now = lastKnownTime + Swapchain::smoothedRefresh_s;
         lastKnownTime = now;
 
+        // Acquire swapchain image
         uint32_t imageIndex = 0;
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
         vkCreateFence(rtx().device, &fci, nullptr, &fence);
+
         VkResult acq = ext().vkAcquireNextImageKHR(rtx().device, Swapchain::get(), UINT64_MAX, VK_NULL_HANDLE, fence, &imageIndex);
         vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(rtx().device, fence, nullptr);
@@ -208,22 +228,24 @@ public:
             return isRunning;
         }
 
+        // Main rendering pass
         VkCommandBuffer cmd = beginTransientCommandBuffer();
         if (!cmd) return isRunning;
 
         vkCmdResetQueryPool(cmd, timestampQueryPool_, 0, 2);
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
+
         transitionImageLayout(cmd, hdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
         VkDescriptorSet set = descriptorSet_;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline::pipeline_layout, 0, 1, &set, 0, nullptr);
 
-        lastPresentTime_s_ = now;
-
         updateRenderResolution();
         Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
+
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampQueryPool_, 1);
 
+        // Barrier before blit
         VkImageMemoryBarrier postComputeBarrier{};
         postComputeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         postComputeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -236,6 +258,7 @@ public:
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &postComputeBarrier);
         endSubmitAndWait(cmd);
 
+        // GPU timing
         uint64_t timestamps[2]{};
         if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
             double gpuTimeMs = static_cast<double>(timestamps[1] - timestamps[0]) * timestampPeriodNs_ / 1000000.0;
@@ -243,12 +266,13 @@ public:
             smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
         }
 
-        if (Options::Rendering::EnableAdaptiveResolution) { 
-            adjustAdaptiveScale(now); 
-        } else { 
-            adaptiveScale_ = 1.0; 
+        if (Options::Rendering::EnableAdaptiveResolution) {
+            adjustAdaptiveScale(now);
+        } else {
+            adaptiveScale_ = 1.0;
         }
 
+        // Blit to swapchain with vertical flip
         VkCommandBuffer blitCmd = beginTransientCommandBuffer();
         if (!blitCmd) return isRunning;
 
@@ -258,11 +282,9 @@ public:
         swapBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         swapBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         swapBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        swapBarrier.srcAccessMask = 0;
         swapBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         swapBarrier.image = swapImg;
         swapBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
         vkCmdPipelineBarrier(blitCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapBarrier);
 
         VkClearColorValue clearBlack = { .float32 = {0.0f, 0.0f, 0.0f, 1.0f} };
@@ -279,7 +301,8 @@ public:
         flipBlit.dstOffsets[0] = { 0, static_cast<int32_t>(swapExtent.height), 0 };
         flipBlit.dstOffsets[1] = { static_cast<int32_t>(swapExtent.width), 0, 1 };
 
-        vkCmdBlitImage(blitCmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &flipBlit, VK_FILTER_LINEAR);
+        vkCmdBlitImage(blitCmd, hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &flipBlit, VK_FILTER_LINEAR);
 
         VkImageMemoryBarrier presentBarrier{};
         presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -293,6 +316,7 @@ public:
         vkCmdPipelineBarrier(blitCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentBarrier);
         endSubmitAndWait(blitCmd);
 
+        // Present
         VkPresentInfoKHR pi{};
         pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         pi.swapchainCount = 1;
@@ -311,7 +335,7 @@ public:
             if (pres == VK_ERROR_SURFACE_LOST_KHR) destroyed_ = true;
         }
 
-        // Periodic status log (every 5 seconds)
+        // Periodic status log every 5 seconds
         if (now - lastFpsLog_ >= 5.0) {
             double elapsed        = now - lastFpsLog_;
             double avgFps         = frameCount_ > 0 ? static_cast<double>(frameCount_) / elapsed : 0.0;
@@ -334,15 +358,15 @@ public:
 
             LOG_AMOURANTH("───────────────────────────────────────────────────────────────\n"
                           "              RayCanvas Status  •  t+{:.4}s   (HYBRID RTX)\n"
-                          "  FPS:            {}     (avg frame {} µs)\n"
-                          "  Refresh Rate:   {} Hz\n"
+                          "  FPS:            {:.1f}     (avg frame {:.0f} µs)\n"
+                          "  Refresh Rate:   {:.1f} Hz\n"
                           "  Window:         {} x {}\n"
                           "  Rendered:       {} x {}     ({:.2f}x — {})\n"
                           "  Adaptive scale: {:.2f}x\n"
-                          "  GPU load:       {:.3f}%   (smoothed {:.3f} ms)\n"
+                          "  GPU load:       {:.2f}%   (smoothed {:.3f} ms)\n"
                           "  Features:       Adaptive {}  Accumulation {}  Supersample {}\n"
                           "  Advanced:       HardwareRayTracing {}  RTXReflections {}  RTXGI {}\n"
-                          "  VRAM:           {:.3f} MB used / {:.3f} MB total ({:.3f}% free)\n"
+                          "  VRAM:           {:.1f} MB used / {:.1f} MB total ({:.1f}% free)\n"
                           "  Frames this log: {}\n"
                           "───────────────────────────────────────────────────────────────",
                           now, avgFps, avgDt_us, measuredRefreshRateHz_,
@@ -363,7 +387,7 @@ public:
         return isRunning;
     }
 
-    // Public toggles (F1 and F2)
+    // Public toggles
     void toggleAdaptiveResolution() noexcept {
         Options::Rendering::EnableAdaptiveResolution = !Options::Rendering::EnableAdaptiveResolution;
         needsRecreate_ = true;
@@ -376,6 +400,37 @@ public:
         needsRecreate_ = true;
         LOG_INFO_CAT("RENDER", "Hardware Ray Tracing toggled: {}", 
                      Options::Rendering::EnableHardwareRayTracing ? "ON 💖" : "OFF");
+    }
+
+    void toggleRTXGI() noexcept {
+        Options::Rendering::EnableRTXGI = !Options::Rendering::EnableRTXGI;
+        needsRecreate_ = true;
+        LOG_INFO_CAT("RENDER", "RTX GI toggled: {}", 
+                     Options::Rendering::EnableRTXGI ? "ON 💖" : "OFF");
+    }
+
+    void toggleAccumulation() noexcept {
+        Options::Rendering::EnableAccumulation = !Options::Rendering::EnableAccumulation;
+        needsRecreate_ = true;
+        LOG_INFO_CAT("RENDER", "Accumulation toggled: {}", 
+                     Options::Rendering::EnableAccumulation ? "ON 💖" : "OFF");
+    }
+
+    void toggleTonemapping() noexcept {
+        Options::Rendering::EnableTonemapping = !Options::Rendering::EnableTonemapping;
+        LOG_INFO_CAT("RENDER", "Tonemapping toggled: {}", 
+                     Options::Rendering::EnableTonemapping ? "ON 💖" : "OFF");
+    }
+
+    void toggleBloom() noexcept {
+        Options::Rendering::BloomIntensity = (Options::Rendering::BloomIntensity > 0.01f) ? 0.0f : 0.35f;
+        LOG_INFO_CAT("RENDER", "Bloom toggled: {}", 
+                     Options::Rendering::BloomIntensity > 0.01f ? "ON 💖" : "OFF");
+    }
+
+    void resetCamera() noexcept {
+        CAM.setPosition(Options::Camera::StartPosition);
+        LOG_INFO_CAT("CAMERA", "Camera reset to default spawn position 💖");
     }
 
     [[nodiscard]] int  getWidth()  const noexcept { return window_width_; }
@@ -393,7 +448,10 @@ private:
     }
 
     void onResize(int newWidth, int newHeight, bool fromUserResize) noexcept {
-        if (newWidth <= 0 || newHeight <= 0) { minimized_ = true; return; }
+        if (newWidth <= 0 || newHeight <= 0) { 
+            minimized_ = true; 
+            return; 
+        }
 
         int oldW = window_width_;
         int oldH = window_height_;
@@ -669,7 +727,7 @@ private:
         writes[2].descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[2].pBufferInfo      = &matInfo;
 
-        // Binding 7: TLAS (placeholder for now)
+        // Binding 7: TLAS
         VkWriteDescriptorSetAccelerationStructureKHR asInfo{};
         asInfo.sType                       = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
         asInfo.accelerationStructureCount  = 1;
@@ -705,14 +763,17 @@ private:
     void endSubmitAndWait(VkCommandBuffer cmd) noexcept {
         if (!cmd) return;
         vkEndCommandBuffer(cmd);
+
         VkFence fence = VK_NULL_HANDLE;
         VkFenceCreateInfo fci{};
         fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         vkCreateFence(rtx().device, &fci, nullptr, &fence);
+
         VkSubmitInfo submit{};
         submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount = 1;
         submit.pCommandBuffers    = &cmd;
+
         vkQueueSubmit(rtx().graphics_queue, 1, &submit, fence);
         vkWaitForFences(rtx().device, 1, &fence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(rtx().device, fence, nullptr);
@@ -728,8 +789,10 @@ private:
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image;
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
         VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
             barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
             dstStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
@@ -737,6 +800,7 @@ private:
             barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
             barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         }
+
         vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
@@ -749,8 +813,10 @@ private:
 
         transitionImageLayout(cmd, hdrOutputImage_,   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         transitionImageLayout(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
         vkCmdClearColorImage(cmd, hdrOutputImage_,   VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
         vkCmdClearColorImage(cmd, prevHdrOutputImage_, VK_IMAGE_LAYOUT_GENERAL, &clearBlack, 1, &range);
+
         endSubmitAndWait(cmd);
     }
 

@@ -251,19 +251,40 @@ inline void create_ray_tracing_pipeline() noexcept {
     rt_shaders.closestHit = *chit_res;
 
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages(3);
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; shaderStages[0].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR; shaderStages[0].module = rt_shaders.raygen; shaderStages[0].pName = "main";
-    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; shaderStages[1].stage = VK_SHADER_STAGE_MISS_BIT_KHR;   shaderStages[1].module = rt_shaders.miss;   shaderStages[1].pName = "main";
-    shaderStages[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; shaderStages[2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR; shaderStages[2].module = rt_shaders.closestHit; shaderStages[2].pName = "main";
+    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[0].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    shaderStages[0].module = rt_shaders.raygen;
+    shaderStages[0].pName = "main";
+
+    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[1].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+    shaderStages[1].module = rt_shaders.miss;
+    shaderStages[1].pName = "main";
+
+    shaderStages[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    shaderStages[2].module = rt_shaders.closestHit;
+    shaderStages[2].pName = "main";
 
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups(3);
-    shaderGroups[0].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR; shaderGroups[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR; shaderGroups[0].generalShader = 0;
-    shaderGroups[1].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR; shaderGroups[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR; shaderGroups[1].generalShader = 1;
-    shaderGroups[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR; shaderGroups[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR; shaderGroups[2].closestHitShader = 2;
+    shaderGroups[0].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    shaderGroups[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    shaderGroups[0].generalShader = 0;
+
+    shaderGroups[1].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    shaderGroups[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    shaderGroups[1].generalShader = 1;
+
+    shaderGroups[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    shaderGroups[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    shaderGroups[2].closestHitShader = 2;
 
     VkRayTracingPipelineCreateInfoKHR ci{};
     ci.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-    ci.stageCount = 3; ci.pStages = shaderStages.data();
-    ci.groupCount = 3; ci.pGroups = shaderGroups.data();
+    ci.stageCount = 3;
+    ci.pStages = shaderStages.data();
+    ci.groupCount = 3;
+    ci.pGroups = shaderGroups.data();
     ci.maxPipelineRayRecursionDepth = 1;
     ci.layout = pipeline_layout;
 
@@ -277,17 +298,22 @@ inline void create_ray_tracing_pipeline() noexcept {
     u32 handleSizeAligned = (shader_group_handle_size + shader_group_alignment - 1) / shader_group_alignment * shader_group_alignment;
     VkDeviceSize sbtTotalSize = numGroups * handleSizeAligned;
 
-    VkBufferCreateInfo bufInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VkBufferCreateInfo bufInfo{};
+    bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufInfo.size = sbtTotalSize;
     bufInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
     vkCreateBuffer(rtx().device, &bufInfo, nullptr, &sbt_buffer);
 
-    VkMemoryRequirements req;
+    VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, sbt_buffer, &req);
 
-    VkMemoryAllocateInfo alloc{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    VkMemoryAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc.allocationSize = req.size;
-    alloc.memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    alloc.memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
     vkAllocateMemory(rtx().device, &alloc, nullptr, &sbt_memory);
     vkBindBufferMemory(rtx().device, sbt_buffer, sbt_memory, 0);
 
@@ -302,7 +328,9 @@ inline void create_ray_tracing_pipeline() noexcept {
     }
     vkUnmapMemory(rtx().device, sbt_memory);
 
-    VkBufferDeviceAddressInfo addrInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, nullptr, sbt_buffer };
+    VkBufferDeviceAddressInfo addrInfo{};
+    addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addrInfo.buffer = sbt_buffer;
     VkDeviceAddress sbtDevAddr = vkGetBufferDeviceAddress(rtx().device, &addrInfo);
 
     raygen_region.deviceAddress = sbtDevAddr;
@@ -366,9 +394,10 @@ inline void create_pipeline_layout() noexcept {
 inline void create_audio_command_buffer() noexcept {
     if (audio_cmd_buffer) return;
 
-    VkBufferCreateInfo bufInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    bufInfo.size        = sizeof(AudioCommandBlock);
-    bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    VkBufferCreateInfo bufInfo{};
+    bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufInfo.size  = sizeof(AudioCommandBlock);
+    bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     vkCreateBuffer(rtx().device, &bufInfo, nullptr, &audio_cmd_buffer);
@@ -376,8 +405,9 @@ inline void create_audio_command_buffer() noexcept {
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(rtx().device, audio_cmd_buffer, &req);
 
-    VkMemoryAllocateInfo alloc{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-    alloc.allocationSize  = req.size;
+    VkMemoryAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc.allocationSize = req.size;
     alloc.memoryTypeIndex = Memory::findMemoryType(req.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
@@ -433,26 +463,22 @@ inline void process_shader_audio_commands() noexcept {
 
     for (int slot = 0; slot < 16; ++slot) {
         f32 command = cmd->slotCommand[slot];
-        f32 value   = cmd->slotValue[slot];
 
         if (command > 0.51f) {
-            std::string file = "assets/audio/sfx_slot_" + std::to_string(slot) + ".wav";
+            std::string file = "assets/audio/splash" + std::to_string(slot) + ".wav";
             INPUT.playSound(file, "play", slot);
-        }
-        else if (command >= 0.20f && command <= 0.50f) {
-            f32 normalized_vol = glm::clamp(value, 0.0f, 1.2f);
-            // TODO: INPUT.setTrackVolume(slot, normalized_vol);
         }
         else if (command < -0.1f) {
             INPUT.playSound("", "stop", slot);
         }
+        // TODO: volume control when needed
     }
 
     std::memset(cmd, 0, sizeof(AudioCommandBlock));
 }
 
 // ────────────────────────────────────────────────
-// MAIN DISPATCH — fully filled with clean input mapping
+// MAIN DISPATCH
 // ────────────────────────────────────────────────
 inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float totalTime) noexcept {
     if (width <= 0 || height <= 0) return;
@@ -493,16 +519,14 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
     pc.raymarchEpsilon  = Options::Rendering::RaymarchEpsilon;
     pc.raymarchMaxSteps = Options::Rendering::RaymarchMaxSteps;
 
-    // ── Input Packing (string-based, matching SDL3System::down) ─────────────────────
+    // Input packing
     pc.controllerInput = 0u;
 
-    // Keyboard movement
     if (INPUT.down("move_forward"))  pc.controllerInput |= Options::Input::Flags::MOVE_FORWARD;
     if (INPUT.down("move_backward")) pc.controllerInput |= Options::Input::Flags::MOVE_BACKWARD;
     if (INPUT.down("move_left"))     pc.controllerInput |= Options::Input::Flags::MOVE_LEFT;
     if (INPUT.down("move_right"))    pc.controllerInput |= Options::Input::Flags::MOVE_RIGHT;
 
-    // Gamepad buttons
     if (INPUT.down("gp_south"))      pc.controllerInput |= Options::Input::Flags::GAMEPAD_SOUTH;
     if (INPUT.down("gp_east"))       pc.controllerInput |= Options::Input::Flags::GAMEPAD_EAST;
     if (INPUT.down("gp_west"))       pc.controllerInput |= Options::Input::Flags::GAMEPAD_WEST;
@@ -519,13 +543,11 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
     if (INPUT.down("gp_right_paddle1"))  pc.controllerInput |= Options::Input::Flags::GAMEPAD_RIGHT_PADDLE1;
     if (INPUT.down("gp_right_paddle2"))  pc.controllerInput |= Options::Input::Flags::GAMEPAD_RIGHT_PADDLE2;
 
-    // Mouse buttons
     Uint32 mouse_state = SDL_GetMouseState(nullptr, nullptr);
     if (mouse_state & SDL_BUTTON_LMASK) pc.controllerInput |= Options::Input::Flags::MOUSE_LEFT;
     if (mouse_state & SDL_BUTTON_RMASK) pc.controllerInput |= Options::Input::Flags::MOUSE_RIGHT;
     if (mouse_state & SDL_BUTTON_MMASK) pc.controllerInput |= Options::Input::Flags::MOUSE_MIDDLE;
 
-    // Analog sticks & triggers
     int ctrl_slot = 0;
     pc.leftStickX   = INPUT.leftStickX(ctrl_slot);
     pc.leftStickY   = INPUT.leftStickY(ctrl_slot);
@@ -542,7 +564,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
     );
     pc.mouseWheelDelta  = 0.0f;
 
-    // ── Hybrid Dispatch ─────────────────────────────────────────────────────
+    // Hybrid Dispatch
     if (pc.enableHardwareRT && rt_pipeline != VK_NULL_HANDLE) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rt_pipeline);
         vkCmdPushConstants(cmd, pipeline_layout, PUSH_STAGE_FLAGS, 0, sizeof(PushConstants), &pc);
