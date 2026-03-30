@@ -8,7 +8,7 @@
 <img width="820" alt="Mandelbub" src="https://github.com/user-attachments/assets/ecb84a68-7ba8-4c2e-aebb-4dc6ea06a7e5" />  
 
 Mandel Spire - This is our Frosted Demo. [GLM](https://github.com/g-truc/glm) is Marvel copyrighted Magneto.    
-<img width="820" alt="Mandelbulb" src="https://pbs.twimg.com/media/HEUf1AUWwAEkB5T?format=jpg&name=4096x4096" />  
+<img width="820" height="2160" alt="image" src="https://github.com/user-attachments/assets/3c915450-a7cc-43e8-9664-c6894f33e161" />
 [Windows Download](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Windows%203D%20Frosted.zip)  
 [Linux Download](https://github.com/ZacharyGeurts/AMOURANTHRTX/blob/main/demos/Linux%203D%20Frosted.zip)  
 <img width="820" alt="image" src="https://github.com/user-attachments/assets/8c482464-b5d3-454e-90fc-0b132321afe9" />  
