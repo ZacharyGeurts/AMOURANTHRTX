@@ -22,5 +22,12 @@ else
   git commit -m "${1:-AMOURANTHRTX: AmmoOS layout, single CANVAS shader, data assets}"
 fi
 
+if ! gh auth status -h github.com &>/dev/null; then
+  echo "GitHub CLI not logged in. Run: gh auth login -h github.com -p https -w"
+  echo "Then: gh auth setup-git"
+  exit 1
+fi
+gh auth setup-git -h github.com 2>/dev/null || true
+
 echo "Pushing to $REMOTE/$BRANCH ..."
 git push -u "$REMOTE" "$BRANCH"
