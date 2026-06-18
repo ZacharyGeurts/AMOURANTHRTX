@@ -113,13 +113,13 @@ endforeach()
 set(ASSETS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set(ASSETS_DST "${BIN_DIR}/assets")
 
-# SG subsystem layout — AmmoOS (windowing + core), DOS, data (registry/icons/journals)
-set(SG_AMMOOS_DIR      "${CMAKE_CURRENT_SOURCE_DIR}/SG/AmmoOS")
-set(SG_AMMOOS_CORE     "${SG_AMMOOS_DIR}/core")
-set(SG_AMMOOS_WINDOWING "${SG_AMMOOS_DIR}/windowing")
-set(SG_DOS_DIR         "${CMAKE_CURRENT_SOURCE_DIR}/SG/dos")
-set(SG_DATA_DIR        "${CMAKE_CURRENT_SOURCE_DIR}/SG/data")
-set(SG_INCLUDE_DIRS    ${SG_AMMOOS_DIR} ${SG_AMMOOS_CORE} ${SG_AMMOOS_WINDOWING} ${SG_DOS_DIR} ${SG_DATA_DIR})
+# AmmoOS subsystem — windowing + core, DOS shell, field data (registry/VFS/FAT)
+set(AMMOOS_DIR         "${CMAKE_CURRENT_SOURCE_DIR}/AmmoOS")
+set(AMMOOS_CORE        "${AMMOOS_DIR}/core")
+set(AMMOOS_WINDOWING   "${AMMOOS_DIR}/windowing")
+set(DOS_DIR            "${CMAKE_CURRENT_SOURCE_DIR}/dos")
+set(FIELD_DATA_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/data")
+set(SG_INCLUDE_DIRS    ${AMMOOS_DIR} ${AMMOOS_CORE} ${AMMOOS_WINDOWING} ${DOS_DIR} ${FIELD_DATA_DIR})
 if(EXISTS "${ASSETS_SRC}")
     add_custom_command(OUTPUT "${ASSETS_DST}/.copied"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${ASSETS_SRC}" "${ASSETS_DST}"
@@ -299,7 +299,7 @@ if(FIELD_DOS_EMBED_HD AND NOT BUILD_FOR_WEB)
         COMMENT "Link dos_slice.bin as rodata"
         VERBATIM)
     list(APPEND ALL_SOURCES
-        "${SG_DOS_DIR}/FieldDosEmbed.cpp"
+        "${DOS_DIR}/FieldDosEmbed.cpp"
         "${DOS_EMBED_OBJ}")
 endif()
 
@@ -308,7 +308,7 @@ function(field_embed_dos target)
         return()
     endif()
     target_sources(${target} PRIVATE
-        "${SG_DOS_DIR}/FieldDosEmbed.cpp"
+        "${DOS_DIR}/FieldDosEmbed.cpp"
         "${DOS_EMBED_OBJ}")
     target_compile_definitions(${target} PRIVATE
         FIELD_DOS_EMBED_HD=1 FIELD_DOS_EMBED_LINKED=1)

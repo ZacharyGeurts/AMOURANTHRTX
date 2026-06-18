@@ -19,7 +19,7 @@ git add -A
 if git diff --cached --quiet; then
   echo "Nothing to commit."
 else
-  git commit -m "${1:-AMOURANTHRTX: SG/AmmoOS layout, single CANVAS shader, data assets}"
+  git commit -m "${1:-AMOURANTHRTX: AmmoOS layout, single CANVAS shader, data assets}"
 fi
 
 echo "Pushing to $REMOTE/$BRANCH ..."
