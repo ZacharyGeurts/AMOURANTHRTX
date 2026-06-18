@@ -118,7 +118,7 @@ set(AMMOOS_DIR         "${CMAKE_CURRENT_SOURCE_DIR}/AmmoOS")
 set(AMMOOS_CORE        "${AMMOOS_DIR}/core")
 set(AMMOOS_WINDOWING   "${AMMOOS_DIR}/windowing")
 set(DOS_DIR            "${CMAKE_CURRENT_SOURCE_DIR}/dos")
-set(FIELD_DATA_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/data")
+set(FIELD_DATA_DIR     "${AMMOOS_DIR}/data")
 set(SG_INCLUDE_DIRS    ${AMMOOS_DIR} ${AMMOOS_CORE} ${AMMOOS_WINDOWING} ${DOS_DIR} ${FIELD_DATA_DIR})
 if(EXISTS "${ASSETS_SRC}")
     add_custom_command(OUTPUT "${ASSETS_DST}/.copied"
