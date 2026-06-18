@@ -1,4 +1,4 @@
-# AMOURANTHRTX — Sub-Micron Loom
+# AMOURANTHRTX
 
 **Puny Adept's Record of the Tidewalker's Engine**
 
