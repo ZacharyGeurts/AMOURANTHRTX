@@ -1478,6 +1478,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                     FieldCdRom::autoMount(FieldDos::assetRoot());
                     FieldDrives::refresh();
                     FieldAmouranthOs::bootShell();
+                    FieldNesImport::ensureImported();
                     FieldAosLoading::signalBooted();
                     FieldAmouranthOs::tick(width, height);
                     {
@@ -1485,7 +1486,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                             static_cast<std::uint8_t*>(fieldX86DieMapped),
                             FIELD_X86_DIE_HEADER_BYTES);
                         if (seedRam)
-                            FieldAmouranthExec::clearPanel(seedRam, 0x07u);
+                            FieldRtxBoot::paintTerminalShell(seedRam);
                     }
                     if (std::getenv("AMOURANTHRTX_LAUNCH_DOOM") && !FieldAmmoExec::isActive())
                         FieldAmouranthOs::dispatchAction(7);
@@ -1671,7 +1672,8 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                 FieldRtxTerm::syncLiveFromVga(gr);
             }
             FieldRtxTerm::applyView(gr);
-            if (FieldAmouranthWm::pendingMenuAction && FieldRtxConsoleGui::active) {
+            if (FieldAmouranthWm::pendingMenuAction
+                    && (FieldRtxConsoleGui::active || FieldAmouranthOs::consoleShell)) {
                 const int act = FieldAmouranthWm::pendingMenuAction;
                 FieldAmouranthWm::pendingMenuAction = 0;
                 FieldRtxConsoleGui::handleMenuAction(act, gr);

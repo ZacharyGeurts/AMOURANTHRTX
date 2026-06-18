@@ -197,6 +197,15 @@ inline void launchNesGui(std::uint8_t* ram) noexcept {
         return;
     }
     FieldNes::open(ram, path.c_str());
+    if (!FieldNes::active) {
+        FieldWinApp::reset();
+        FieldWinApp::begin(ram, " AmmoNES ", false, " Esc quit | NES IMPORT for ROMs ");
+        const FieldWinFrame::Layout& L = FieldWinApp::layout;
+        FieldRtxGui::text(ram, L.clientR0, L.clientC0 + 2,
+            " ROM load failed — run NES IMPORT or check C:\\NES\\",
+            FieldRtxGui::ATTR_EDITOR, L.clientCols - 4);
+        FieldNes::active = true;
+    }
 }
 
 inline void launchDoom(void* mapped, std::size_t ramByteOffset, std::uint8_t* ram) noexcept {

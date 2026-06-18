@@ -143,6 +143,10 @@ inline void requestDismiss() noexcept {
 inline void tick() noexcept;  // defined below
 
 inline bool begin(SDL_Window* parent) noexcept {
+    // Console-shell boots straight into GPU WM + terminal — no SDL popup card.
+    (void)parent;
+    return false;
+
     if (Options::SDL3::HeadlessMode || !parent) return false;
     if (active_) return true;
 

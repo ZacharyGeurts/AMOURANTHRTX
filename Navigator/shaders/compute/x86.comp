@@ -2915,7 +2915,7 @@ DoomViewport doomViewportMap(vec2 pix, vec2 img) {
     float titleH = 0.0;
     uint aosBits = field.data_bus[42];
     if (aosChromeActive() && (aosBits & (1u << 25u)) == 0u)
-        titleH = 22.0 * max(img.x / 1920.0, 0.65);
+        titleH = 32.0 * max(img.x / 1920.0, 0.75) * 1.35;
     vec2 p0 = winP0 + vec2(0.0, titleH);
     vec2 p1 = winP1 - vec2(0.0, hudH);
     v.p0 = p0;
@@ -3133,16 +3133,19 @@ float dosHudIconDrive(vec2 uv, vec2 origin) {
 }
 
 vec3 dosStatusHudColor(vec2 uv, vec2 winSize, float hudH, ThemePal th) {
+    float uiSc = max(winSize.x / 1920.0, 0.75) * 1.35;
+    float footY0 = winSize.y - hudH;
+    float localY = uv.y - footY0;
     vec3 topCol = vec3(0.86, 0.86, 0.88);
     vec3 botCol = vec3(0.74, 0.74, 0.78);
-    vec3 col = mix(topCol, botCol, clamp(uv.y / max(hudH, 1.0), 0.0, 1.0));
-    float edge = smoothstep(0.0, 1.2, hudH - uv.y);
+    vec3 col = mix(topCol, botCol, clamp(localY / max(hudH, 1.0), 0.0, 1.0));
+    float edge = smoothstep(0.0, 1.2, hudH - localY);
     col *= 1.0 - edge * 0.06;
 
-    vec2 cell = vec2(7.0, 12.0);
-    float rowY = hudH * 0.5 - 6.0;
-    float ink = dosHudRamStr(uv, 8.0, rowY, cell, AOS_FOOTER_RAM + 1u, AOS_FOOTER_LEN);
-    float inkB = dosHudRamStrBorder(uv, 8.0, rowY, cell, AOS_FOOTER_RAM + 1u, AOS_FOOTER_LEN);
+    vec2 cell = vec2(7.0, 12.0) * uiSc;
+    float rowY = footY0 + hudH * 0.5 - 6.0 * uiSc;
+    float ink = dosHudRamStr(uv, 10.0 * uiSc, rowY, cell, AOS_FOOTER_RAM + 1u, AOS_FOOTER_LEN);
+    float inkB = dosHudRamStrBorder(uv, 10.0 * uiSc, rowY, cell, AOS_FOOTER_RAM + 1u, AOS_FOOTER_LEN);
     return mixHudInk(col, ink, inkB, vec3(0.08, 0.08, 0.10));
 }
 
@@ -3382,7 +3385,7 @@ float rtxWmTitleH(vec2 img) {
     if (!aosChromeActive()) return 0.0;
     bool consoleShell = (aosBits & (1u << 29u)) != 0u;
     if ((aosBits & (1u << 25u)) != 0u && !consoleShell) return 0.0;
-    return 22.0 * max(img.x / 1920.0, 0.65);
+    return 32.0 * max(img.x / 1920.0, 0.75) * 1.35;
 }
 
 vec3 rtxWmBtn(vec2 uv, float x0, float y0, float sz, uint iconSlot, uint matIdx, bool hov) {
@@ -3405,9 +3408,77 @@ float rtxWmMenuDrop(vec2 winLocal, float x0, float y0, float rowH, int row,
         c0, c1, c2, c3, c4, c5, 32u, 32u);
 }
 
+vec3 rtxWmMenuDropdown(vec2 winLocal, vec2 winSize, float titleH, ThemePal th) {
+    uint wmPack = field.data_bus[52];
+    uint openMenu = (wmPack >> 8u) & 7u;
+    if (openMenu == 0u) return vec3(-1.0);
+    float uiSc = max(winSize.x / 1920.0, 0.75) * 1.35;
+    vec2 cell = vec2(8.0, 14.0) * uiSc;
+    float menuX0 = 10.0 * uiSc;
+    float menuX1 = 60.0 * uiSc;
+    float menuX2 = 110.0 * uiSc;
+    float menuX3 = 160.0 * uiSc;
+    float dropH = 28.0 * uiSc;
+    float dx = (openMenu == 1u) ? menuX0 : ((openMenu == 2u) ? menuX1 : ((openMenu == 3u) ? menuX2 : menuX3));
+    int nRows = 3;
+    if (openMenu == 3u) nRows = 4;
+    if (openMenu == 4u) nRows = 2;
+    float dropW = 196.0 * uiSc;
+    if (winLocal.y < titleH || winLocal.y >= titleH + dropH * float(nRows)
+            || winLocal.x < dx - 4.0 * uiSc || winLocal.x >= dx + dropW)
+        return vec3(-1.0);
+    vec3 drop = mix(th.panel * 0.62, th.accent * 0.18 + th.panel * 0.42, 0.55);
+    float edge = min(min(winLocal.x - (dx - 4.0 * uiSc), dx + dropW - winLocal.x),
+                     min(winLocal.y - titleH, titleH + dropH * float(nRows) - winLocal.y));
+    drop = mix(drop, th.accent * 0.28 + th.title * 0.12, smoothstep(0.0, 2.5 * uiSc, edge));
+    uint hoverRow = (wmPack >> 11u) & 0xFu;
+    if (hoverRow < uint(nRows)) {
+        float hy0 = titleH + dropH * float(hoverRow);
+        if (winLocal.y >= hy0 && winLocal.y < hy0 + dropH)
+            drop = mix(drop, th.accent * 0.32 + th.gemTint * 0.18, 0.72);
+    }
+    float dInk = 0.0;
+    if (openMenu == 1u) {
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 78u, 101u, 119u, 32u, 83u, 101u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 83u, 97u, 118u, 101u, 32u, 76u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 2, cell, 69u, 120u, 105u, 116u, 32u, 32u));
+    } else if (openMenu == 2u) {
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 67u, 111u, 112u, 121u, 32u, 32u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 67u, 108u, 101u, 97u, 114u, 32u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 2, cell, 83u, 101u, 108u, 101u, 99u, 116u));
+    } else if (openMenu == 3u) {
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 83u, 99u, 114u, 111u, 108u, 108u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 83u, 99u, 114u, 111u, 108u, 108u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 2, cell, 76u, 111u, 103u, 32u, 80u, 97u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 3, cell, 84u, 104u, 101u, 109u, 101u, 115u));
+    } else if (openMenu == 4u) {
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 72u, 101u, 108u, 112u, 32u, 84u));
+        dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 65u, 98u, 111u, 117u, 116u, 32u));
+    }
+    float dBorder = 0.0;
+    if (openMenu == 1u) {
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 78u, 101u, 119u, 32u, 83u, 101u, 32u, 32u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 83u, 97u, 118u, 101u, 32u, 76u, 32u, 32u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 2.0 + 5.0, cell, 69u, 120u, 105u, 116u, 32u, 32u, 32u, 32u));
+    } else if (openMenu == 2u) {
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 67u, 111u, 112u, 121u, 32u, 32u, 32u, 32u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 67u, 108u, 101u, 97u, 114u, 32u, 32u, 32u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 2.0 + 5.0, cell, 83u, 101u, 108u, 101u, 99u, 116u, 32u, 32u));
+    } else if (openMenu == 3u) {
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 83u, 99u, 114u, 111u, 108u, 108u, 32u, 32u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 83u, 99u, 114u, 111u, 108u, 108u, 32u, 32u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 2.0 + 5.0, cell, 76u, 111u, 103u, 32u, 80u, 97u, 110u, 101u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 3.0 + 5.0, cell, 84u, 104u, 101u, 109u, 101u, 115u, 32u, 32u));
+    } else if (openMenu == 4u) {
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 72u, 101u, 108u, 112u, 32u, 84u, 111u, 112u));
+        dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 65u, 98u, 111u, 117u, 116u, 32u, 32u, 32u));
+    }
+    return mixHudInk(drop, dInk, dBorder, th.title * 1.15);
+}
+
 vec3 rtxWmTitleBar(vec2 winLocal, vec2 winSize, float titleH, ThemePal th) {
     float t = field.sealed_time;
-    float uiSc = max(winSize.x / 1920.0, 0.65);
+    float uiSc = max(winSize.x / 1920.0, 0.75) * 1.35;
     vec2 muv = vec2(winLocal.x / max(winSize.x, 1.0), winLocal.y / max(titleH, 1.0));
     vec3 base = aosMaterialTint(muv, AOS_MAT_TITLE, th.void_, th, t);
     base += th.accent * 0.05 * sin(winLocal.x * 0.03 + t * 1.4);
@@ -3420,6 +3491,8 @@ vec3 rtxWmTitleBar(vec2 winLocal, vec2 winSize, float titleH, ThemePal th) {
     float menuX1 = 60.0 * uiSc;
     float menuX2 = 110.0 * uiSc;
     float menuX3 = 160.0 * uiSc;
+    uint wmPack = field.data_bus[52];
+    uint openMenu = (wmPack >> 8u) & 7u;
     ink = max(ink, dosHudRun(winLocal, menuX0, rowY, cell, 70u, 105u, 108u, 101u, 32u, 32u, 32u, 32u));
     inkB = max(inkB, dosHudRunBorder(winLocal, menuX0, rowY, cell, 70u, 105u, 108u, 101u, 32u, 32u, 32u, 32u));
     ink = max(ink, dosHudRun(winLocal, menuX1, rowY, cell, 69u, 100u, 105u, 116u, 32u, 32u, 32u, 32u));
@@ -3428,55 +3501,14 @@ vec3 rtxWmTitleBar(vec2 winLocal, vec2 winSize, float titleH, ThemePal th) {
     inkB = max(inkB, dosHudRunBorder(winLocal, menuX2, rowY, cell, 86u, 105u, 101u, 119u, 32u, 32u, 32u, 32u));
     ink = max(ink, dosHudRun(winLocal, menuX3, rowY, cell, 72u, 101u, 108u, 112u, 32u, 32u, 32u, 32u));
     inkB = max(inkB, dosHudRunBorder(winLocal, menuX3, rowY, cell, 72u, 101u, 108u, 112u, 32u, 32u, 32u, 32u));
-    uint wmPack = field.data_bus[52];
-    uint openMenu = (wmPack >> 8u) & 7u;
-    float dropH = 24.0 * uiSc;
-    if (openMenu > 0u && winLocal.y >= titleH) {
-        float dx = (openMenu == 1u) ? menuX0 : ((openMenu == 2u) ? menuX1 : ((openMenu == 3u) ? menuX2 : menuX3));
-        int nRows = 3;
-        if (openMenu == 3u) nRows = 4;
-        if (openMenu == 4u) nRows = 2;
-        if (winLocal.y < titleH + dropH * float(nRows) && winLocal.x >= dx - 4.0 && winLocal.x < dx + 196.0) {
-            vec3 drop = mix(th.panel * 0.55, th.accent * 0.22 + th.panel * 0.35, 0.5);
-            float dInk = 0.0;
-            if (openMenu == 1u) {
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 78u, 101u, 119u, 32u, 83u, 101u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 83u, 97u, 118u, 101u, 32u, 76u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 2, cell, 69u, 120u, 105u, 116u, 32u, 32u));
-            } else if (openMenu == 2u) {
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 67u, 111u, 112u, 121u, 32u, 32u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 67u, 108u, 101u, 97u, 114u, 32u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 2, cell, 83u, 101u, 108u, 101u, 99u, 116u));
-            } else if (openMenu == 3u) {
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 83u, 99u, 114u, 111u, 108u, 108u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 83u, 99u, 114u, 111u, 108u, 108u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 2, cell, 76u, 111u, 103u, 32u, 80u, 97u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 3, cell, 84u, 104u, 101u, 109u, 101u, 115u));
-            } else if (openMenu == 4u) {
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 0, cell, 72u, 101u, 108u, 112u, 32u, 84u));
-                dInk = max(dInk, rtxWmMenuDrop(winLocal, dx, titleH, dropH, 1, cell, 65u, 98u, 111u, 117u, 116u, 32u));
-            }
-            float dBorder = 0.0;
-            if (openMenu == 1u) {
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 78u, 101u, 119u, 32u, 83u, 101u, 32u, 32u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 83u, 97u, 118u, 101u, 32u, 76u, 32u, 32u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 2.0 + 5.0, cell, 69u, 120u, 105u, 116u, 32u, 32u, 32u, 32u));
-            } else if (openMenu == 2u) {
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 67u, 111u, 112u, 121u, 32u, 32u, 32u, 32u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 67u, 108u, 101u, 97u, 114u, 32u, 32u, 32u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 2.0 + 5.0, cell, 83u, 101u, 108u, 101u, 99u, 116u, 32u, 32u));
-            } else if (openMenu == 3u) {
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 83u, 99u, 114u, 111u, 108u, 108u, 32u, 32u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 83u, 99u, 114u, 111u, 108u, 108u, 32u, 32u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 2.0 + 5.0, cell, 76u, 111u, 103u, 32u, 80u, 97u, 110u, 101u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 3.0 + 5.0, cell, 84u, 104u, 101u, 109u, 101u, 115u, 32u, 32u));
-            } else if (openMenu == 4u) {
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 0.0 + 5.0, cell, 72u, 101u, 108u, 112u, 32u, 84u, 111u, 112u));
-                dBorder = max(dBorder, dosHudRunBorder(winLocal, dx, titleH + dropH * 1.0 + 5.0, cell, 65u, 98u, 111u, 117u, 116u, 32u, 32u, 32u));
-            }
-            return mixHudInk(drop, dInk, dBorder, th.title * 1.15);
-        }
-    }
+    if (openMenu == 1u && winLocal.x >= menuX0 - 2.0 * uiSc && winLocal.x < menuX0 + 46.0 * uiSc)
+        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+    if (openMenu == 2u && winLocal.x >= menuX1 - 2.0 * uiSc && winLocal.x < menuX1 + 46.0 * uiSc)
+        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+    if (openMenu == 3u && winLocal.x >= menuX2 - 2.0 * uiSc && winLocal.x < menuX2 + 46.0 * uiSc)
+        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+    if (openMenu == 4u && winLocal.x >= menuX3 - 2.0 * uiSc && winLocal.x < menuX3 + 46.0 * uiSc)
+        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
     uint titleTab = (field.data_bus[54] >> 24u) & 0xFFu;
     float titleX = 220.0 * uiSc;
     if (titleTab < 255u) {
@@ -3573,6 +3605,10 @@ vec3 rtxDosViewportColor(vec2 pix, vec2 img, ThemePal th) {
     bool aosWm = aosChromeActive();
     if (aosWm && titleH > 0.0 && winLocal.y < titleH)
         return rtxWmTitleBar(winLocal, winSize, titleH, th);
+    if (aosWm && titleH > 0.0) {
+        vec3 menuDrop = rtxWmMenuDropdown(winLocal, winSize, titleH, th);
+        if (menuDrop.x >= 0.0) return menuDrop;
+    }
     if (aosWm) {
         vec3 grip = rtxWmResizeGrip(winLocal, winSize, titleH, hudH, th);
         if (grip.x >= 0.0) return grip;

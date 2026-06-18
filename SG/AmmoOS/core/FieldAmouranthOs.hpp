@@ -227,13 +227,15 @@ inline void hideDosPanel() noexcept {
             FieldDosViewport::panelStretch = true;
             Options::Canvas::DosPanelStretch = true;
             Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
+            infoPanelVisible = false;
+            FieldAmouranthInfo::visible = false;
         } else {
             FieldDosViewport::panelStretch = false;
             Options::Canvas::DosPanelStretch = false;
             Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
+            infoPanelVisible = true;
+            FieldAmouranthInfo::visible = true;
         }
-        infoPanelVisible = true;
-        FieldAmouranthInfo::visible = true;
     } else if (!panelVisible) {
         infoPanelVisible = true;
         FieldAmouranthInfo::visible = true;
@@ -345,9 +347,18 @@ inline Program& openNewWindow(AppId app) noexcept {
     pr.running = true;
     pr.minimized = false;
     programs.push_back(pr);
-    placeNewWindow(programs.back());
+    if (consoleShell) {
+        FieldDosViewport::panelStretch = true;
+        Options::Canvas::DosPanelStretch = true;
+        Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
+        FieldDosViewport::panelOx = 0.f;
+        FieldDosViewport::panelOy = 0.f;
+        FieldDosViewport::panelPositioned = true;
+    } else {
+        placeNewWindow(programs.back());
+        applyProgramPanel(programs.back());
+    }
     focusProgram(programs.back().id, false);
-    applyProgramPanel(programs.back());
     panelVisible = true;
     infoPanelVisible = false;
     FieldAmouranthInfo::visible = false;

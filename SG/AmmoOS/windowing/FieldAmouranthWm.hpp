@@ -39,10 +39,10 @@ namespace FieldAmouranthWm {
 inline float wmUiScale() noexcept {
     const float ref = FieldAmouranthOs::winW > 0
         ? static_cast<float>(FieldAmouranthOs::winW) / 1920.f : 1.f;
-    return std::max(ref, 0.65f);
+    return std::max(ref, 0.75f) * 1.35f;
 }
 
-constexpr float TITLE_H    = 22.f;
+constexpr float TITLE_H    = 32.f;
 constexpr float BTN_W      = 30.f;
 constexpr float GRIP       = 4.f;
 constexpr float MIN_PW     = 420.f;
@@ -99,7 +99,7 @@ inline SurfaceSlot surfaces[MAX_SURFACES]{};
 /* Match CANVAS.comp rtxWmTitleH / rtxWmBtn / rtxWmResizeGrip (fixed grip + btn sizes). */
 inline float shaderTitleH() noexcept {
     const float refW = FieldDosViewport::winW > 0.f ? FieldDosViewport::winW : 1920.f;
-    return TITLE_H * std::max(refW / 1920.f, 0.65f);
+    return TITLE_H * std::max(refW / 1920.f, 0.75f) * 1.35f;
 }
 
 inline float scaledTitleH() noexcept {
@@ -175,7 +175,7 @@ inline int menuItemAction(OpenMenu m, int idx) noexcept {
 }
 
 inline float scaledMenuDropH() noexcept {
-    return 24.f * wmUiScale();
+    return 28.f * wmUiScale();
 }
 
 inline FieldDosViewport::Rect windowRect() noexcept {
@@ -275,25 +275,26 @@ inline ChromeHit hitTest(float mx, float my) noexcept {
     if (left)   return ChromeHit::ResizeW;
     if (right)  return ChromeHit::ResizeE;
 
-    if (my < tb) {
-        const float btnW = scaledMenuBtnW();
-        const float dropH = scaledMenuDropH();
-        if (openMenu != OpenMenu::None) {
-            const int mIdx = static_cast<int>(openMenu) - 1;
-            const float dx0 = menuBtnX0(win, mIdx);
-            const float dy0 = tb;
-            const float dx1 = dx0 + 196.f * wmUiScale();
-            const int nItems = menuItemCount(openMenu);
-            const float dy1 = dy0 + dropH * static_cast<float>(nItems);
-            if (mx >= dx0 && mx < dx1 && my >= dy0 && my < dy1) {
-                const int item = static_cast<int>((my - dy0) / dropH);
-                if (item >= 0 && item < nItems) {
-                    menuItemHover = item;
-                    return static_cast<ChromeHit>(
-                        static_cast<int>(ChromeHit::MenuItem0) + item);
-                }
+    const float btnW = scaledMenuBtnW();
+    const float dropH = scaledMenuDropH();
+    if (openMenu != OpenMenu::None) {
+        const int mIdx = static_cast<int>(openMenu) - 1;
+        const float dx0 = menuBtnX0(win, mIdx);
+        const float dy0 = tb;
+        const float dx1 = dx0 + 196.f * wmUiScale();
+        const int nItems = menuItemCount(openMenu);
+        const float dy1 = dy0 + dropH * static_cast<float>(nItems);
+        if (mx >= dx0 - 4.f * wmUiScale() && mx < dx1 && my >= dy0 && my < dy1) {
+            const int item = static_cast<int>((my - dy0) / dropH);
+            if (item >= 0 && item < nItems) {
+                menuItemHover = item;
+                return static_cast<ChromeHit>(
+                    static_cast<int>(ChromeHit::MenuItem0) + item);
             }
         }
+    }
+
+    if (my < tb) {
         for (int i = 0; i < 4; ++i) {
             const float x0 = menuBtnX0(win, i);
             if (mx >= x0 && mx < x0 + btnW) {
