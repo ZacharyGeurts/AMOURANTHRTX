@@ -1,0 +1,647 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
+
+layout(push_constant) uniform Push {
+    float totalTime;
+} pc;
+
+// ───────────────────────────────────────────────
+// Helpers
+// ───────────────────────────────────────────────
+#define PI     3.14159265358979323846
+#define TAU    6.28318530717958647692
+#define EPS    0.0008
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float hash13(vec3 p3) {
+    p3 = fract(p3 * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p); f = f*f*(3.0-2.0*f);
+    return mix(mix(hash12(i+vec2(0,0)), hash12(i+vec2(1,0)), f.x),
+               mix(hash12(i+vec2(0,1)), hash12(i+vec2(1,1)), f.x), f.y);
+}
+
+float noise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p); f = f*f*(3.0-2.0*f);
+    return mix(mix(mix(hash13(i+vec3(0,0,0)), hash13(i+vec3(1,0,0)), f.x),
+                   mix(hash13(i+vec3(0,1,0)), hash13(i+vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash13(i+vec3(0,0,1)), hash13(i+vec3(1,0,1)), f.x),
+                   mix(hash13(i+vec3(0,1,1)), hash13(i+vec3(1,1,1)), f.x), f.y), f.z);
+}
+
+float fbm(vec2 p, int oct) {
+    float f = 0.0, a = 0.5;
+    for (int i = 0; i < oct; ++i) {
+        f += a * noise(p);
+        p *= 2.03;
+        a *= 0.49;
+    }
+    return f;
+}
+
+float fbm3(vec3 p, int oct) {
+    float f = 0.0, a = 0.5;
+    for (int i = 0; i < oct; ++i) {
+        f += a * noise3(p);
+        p *= 2.03;
+        a *= 0.49;
+    }
+    return f;
+}
+
+vec3 neon_glow(vec3 col, float intensity) {
+    return col + pow(max(col, vec3(0.0)), vec3(2.2)) * intensity * 0.25;
+}
+
+vec3 bloom(vec3 col, float str) {
+    return col + pow(col, vec3(3.0)) * str * 0.15;
+}
+
+// ───────────────────────────────────────────────
+// Scene control — all full-res, consistent style
+// ───────────────────────────────────────────────
+#define SCENE_COUNT 19
+#define SCENE_DURATION 10.0
+#define CROSSFADE_TIME 1.5          // slightly longer fade to reduce perceived jank
+
+int currentScene(float t) { return int(floor(t / SCENE_DURATION)) % SCENE_COUNT; }
+float sceneMix(float t) {
+    float phase = mod(t, SCENE_DURATION);
+    // Softer ease-in-out to mask detail/brightness jumps
+    float x = smoothstep(0.0, 1.0, (phase - (SCENE_DURATION - CROSSFADE_TIME)) / CROSSFADE_TIME);
+    return x * x * (3.0 - 2.0 * x);  // smooth hermite interpolation
+}
+
+// ───────────────────────────────────────────────
+// 0. Sacred plasma with cross halo (full-res)
+// ───────────────────────────────────────────────
+vec3 fx0_god(vec2 uv, float t) {
+    vec2 p = uv * vec2(1.8, 1.2) + vec2(t*0.3, sin(t*0.5)*0.2);
+    float plasma = sin(p.x*10.0 + t*2.5)*0.5 + sin(p.y*12.0 + t*2.0)*0.5;
+    plasma += sin((p.x + p.y)*15.0 + t*4.0)*0.3;
+    plasma += sin((p.x - p.y)*18.0 + t*3.5)*0.3;
+    plasma = fract(plasma * 0.6 + 0.5);
+    
+    vec3 col = mix(vec3(0.1,0.3,0.8), vec3(0.9,0.7,0.2), plasma);
+    col = mix(col, vec3(0.8,0.4,0.1), smoothstep(0.45,0.55,plasma)*0.6);
+    
+    float cross_h = smoothstep(0.02, 0.01, abs(uv.x)) * smoothstep(0.3, 0.28, abs(uv.y));
+    float cross_v = smoothstep(0.02, 0.01, abs(uv.y)) * smoothstep(0.15, 0.13, abs(uv.x));
+    float cross = max(cross_h, cross_v);
+    col += vec3(1.0,0.95,0.8) * cross * 0.8;
+    
+    float halo = pow(1.0 - length(uv * vec2(1.0,0.8)), 3.0) * 0.7;
+    col += vec3(0.9,0.8,0.5) * halo;
+    
+    float scan = fract(uv.y * 6.0 + t*1.0);
+    scan = smoothstep(0.0,0.03,scan) - smoothstep(0.97,1.0,scan);
+    col += vec3(0.7,0.5,0.3) * scan * 0.4;
+    
+    col *= 0.05;
+    return neon_glow(col * 0.85, 0.7);
+}
+
+// ───────────────────────────────────────────────
+// 1. RTX God: Volumetric divine rays, nebula halo
+// ───────────────────────────────────────────────
+vec3 fx1_rtx_god(vec2 uv, float t) {
+    vec2 p = uv * 1.5;
+    float r = length(p);
+    float a = atan(p.y, p.x) + t * 0.2;
+    
+    vec3 ro = vec3(0.0, 0.0, t * 0.8);
+    vec3 rd = normalize(vec3(p, 1.5));
+    
+    float neb = fbm(p * 2.0 + vec2(t*0.5, t*0.8), 8) * 0.7;
+    neb += fbm(p * 5.0 + vec2(sin(t*1.2)*0.3, t*1.5), 6) * 0.3;
+    vec3 nebula = mix(vec3(0.05,0.1,0.5), vec3(0.9,0.6,0.2), pow(neb, 2.5));
+    nebula += vec3(1.0,0.9,0.6) * pow(neb, 7.0) * 1.5;
+    
+    float ray_density = 0.0;
+    for (float i = 0.0; i < 5.0; i++) {
+        vec3 q = ro + rd * (1.0 + i * 0.5);
+        ray_density += noise3(q * 0.5 + vec3(t*0.3, t*0.4, t*0.2)) * 0.2;
+    }
+    vec3 rays = vec3(1.0,0.95,0.7) * pow(ray_density, 3.0) * exp(-r * 2.0);
+    
+    float cross = exp(-abs(uv.x)*10.0) + exp(-abs(uv.y)*10.0);
+    rays += vec3(0.8,0.6,0.3) * cross * 0.5 * (1.0 + sin(t*4.0)*0.3);
+    
+    vec3 col = nebula + rays * 1.2;
+    col += pow(1.0 - r, 5.0) * vec3(1.0,0.9,0.7) * 1.5;
+    
+    col *= 0.05;
+    return neon_glow(col, 1.4) * 1.1;
+}
+
+// ───────────────────────────────────────────────
+// 2. Green wave bars scrolling in night sky
+// ───────────────────────────────────────────────
+vec3 fx2_wave_bars(vec2 uv, float t) {
+    float wave_offset = sin(uv.x * 10.0 + t * 1.8) * 0.08 + sin(t * 0.5) * 0.1;
+    float y = uv.y + wave_offset;
+    float bar_pos = y * 7.0 + t * 3.0 + sin(uv.x * 5.0 + t) * 0.5;
+    float bar = sin(bar_pos) * 0.5 + 0.5;
+    bar = smoothstep(0.35, 0.65, bar);
+    vec3 col = mix(vec3(0.0,0.05,0.0), vec3(0.1,0.8,0.3), bar);
+    col += vec3(0.2,1.0,0.4) * smoothstep(0.45,0.55,bar) * 1.0;
+    
+    float night = smoothstep(0.5, -0.5, uv.y) * 0.8;
+    col *= night;
+    float stars = step(0.98, hash12(uv*200.0 + t*0.1)) * 0.3;
+    col += vec3(0.1,0.2,0.1) * stars;
+    
+    col *= 0.05;
+    return neon_glow(col, 0.6);
+}
+
+// ───────────────────────────────────────────────
+// 3. Volumetric green wave bars with night glow, emerald embers
+// ───────────────────────────────────────────────
+vec3 fx3_rtx_wave_bars(vec2 uv, float t) {
+    float tt = t * 1.6;
+    vec2 p = uv * vec2(1.0, 3.5) + vec2(sin(tt*0.3)*0.15, tt*0.7 + sin(tt*0.4)*0.2);
+    float n = fbm(p * 3.0, 7) * 0.6 + fbm(p * 7.0 + vec2(tt*0.8, tt*1.2), 5) * 0.4;
+    n = pow(n, 2.0);
+    vec3 base = mix(vec3(0.05,0.3,0.1), vec3(0.1,0.9,0.4), n);
+    
+    float vol = 0.0;
+    for (float i = 0.0; i < 5.0; i++) {
+        vec3 q = vec3(p, i * 0.25) + vec3(tt * 0.15, 0.0, tt * 0.25);
+        vol += fbm3(q * 1.8, 5) * (1.0 - i*0.15);
+    }
+    base += vec3(0.2,1.0,0.5) * vol * 0.7;
+    
+    vec2 refl = reflect(normalize(vec2(uv.x, 1.0)), normalize(vec2(sin(tt*0.5), cos(tt*0.5))));
+    float refl_n = fbm(refl * 4.0 + tt*0.4, 4) * 0.35;
+    base += vec3(0.05,0.3,0.1) * refl_n;
+    
+    float embers = step(0.93, hash12(p*400.0 + tt*35.0)) * 1.2;
+    base += vec3(0.3,1.0,0.6) * embers;
+    
+    float mask = smoothstep(0.0, 0.25, abs(uv.y + sin(uv.x*2.5 + tt)*0.12));
+    base *= mask;
+    base *= 0.05;
+    return neon_glow(base, 1.4) * 1.0;
+}
+
+// ───────────────────────────────────────────────
+// 4. Green aurora waves over night stars
+// ───────────────────────────────────────────────
+vec3 fx4_aurora_stars(vec2 uv, float t) {
+    vec3 col = vec3(0.0);
+    
+    for (float layer = 1.0; layer < 6.0; layer += 1.0) {
+        vec2 p = uv * (layer * 1.4 + 0.4);
+        float rot = t * (0.08 + layer * 0.015) + layer * 1.0;
+        p *= mat2(cos(rot), -sin(rot), sin(rot), cos(rot));
+        p.x += t * 0.2 / layer;
+        vec2 cell = floor(p * 20.0);
+        float star = step(0.95 - layer*0.02, hash12(cell + layer*9.0));
+        col += vec3(0.1,0.3,0.2) * star * (1.0 / layer) * 1.0;
+    }
+    
+    float aurora = sin(uv.y * 4.0 + t * 1.2 + sin(uv.x * 3.0 + t * 0.8)*0.5) * 0.4 + 0.5;
+    aurora *= smoothstep(0.2, 0.8, abs(uv.y - 0.5));
+    col += vec3(0.05,0.6,0.2) * aurora * 1.2;
+    
+    float bg = exp(-length(uv) * 0.5) * 0.2;
+    col += vec3(0.0,0.05,0.01) * bg;
+    
+    col *= 0.05;
+    return neon_glow(col * 1.0, 0.4);
+}
+
+// ───────────────────────────────────────────────
+// 5. Volumetric green nebula waves, twinkling emerald stars in night void
+// ───────────────────────────────────────────────
+vec3 fx5_rtx_aurora_stars(vec2 uv, float t) {
+    vec3 ro = vec3(sin(t*0.12)*0.3, cos(t*0.2)*0.2, t * 1.0);
+    vec3 rd = normalize(vec3(uv.x * 1.4, uv.y * 0.8, 1.2));
+    
+    vec3 col = vec3(0.0);
+    float depth = 0.0;
+    
+    vec2 nuv = uv * 0.5 + vec2(t*0.02, sin(t*0.05)*0.03);
+    float neb = fbm(nuv * 0.8 + vec2(t*0.04,0.0), 9);
+    neb += fbm(nuv * 3.0 + vec2(0.0, t*0.08), 7) * 0.45;
+    vec3 nebula = mix(vec3(0.0,0.02,0.0), vec3(0.1,0.5,0.2), pow(neb, 2.0));
+    nebula += vec3(0.2,0.8,0.3) * pow(neb, 5.5) * 0.7;
+    col += nebula * 0.9;
+    
+    for (float i = 1.0; i <= 10.0; i += 1.0) {
+        float z = 12.0 / i;
+        vec2 p = (uv * z + vec2(sin(t*0.25 + i*1.5)*0.1, cos(t*0.3 + i*2.0)*0.08));
+        vec2 cell = floor(p * (18.0 + i*3.0));
+        float h = hash12(cell + i*31.0);
+        float star = smoothstep(0.94, 0.985, h);
+        star *= pow(1.0 - depth, 1.8);
+        float twinkle = 0.8 + 0.2 * sin(t * 18.0 + h*90.0 + i*4.0);
+        vec3 starCol = mix(vec3(0.1,0.4,0.2), vec3(0.2,0.8,0.4), sin(t*0.7 + i + h*30.0)*0.5+0.5);
+        col += starCol * star * twinkle * (1.0 / i) * 1.2;
+        depth += star * 0.25;
+    }
+    
+    float ray = pow(max(0.0, dot(rd, normalize(vec3(0.6,0.7,1.0)))), 35.0);
+    col += vec3(0.1,0.4,0.2) * ray * 0.6 * (1.0 - depth*0.5);
+    
+    col.g += 0.01 * length(uv * vec2(1.0,0.6));
+    
+    col *= 0.05;
+    return neon_glow(col, 1.0) * 0.9;
+}
+
+// ───────────────────────────────────────────────
+// 6. Green plasma waves rising in night forest
+// ───────────────────────────────────────────────
+vec3 fx6_plasma_waves(vec2 uv, float t) {
+    uv.y = 1.0 - uv.y;
+    float base = smoothstep(0.0, 0.15, uv.y);
+    float flicker = sin(t * 25.0 + uv.x * 45.0) * 0.08 + 0.85;
+    vec2 p = uv * vec2(1.2, 2.0) + vec2(0.0, t * 1.5 + sin(t*0.4)*0.3);
+    float f = noise(p * 4.0) * 0.55 + noise(p * 10.0 + t * 3.0) * 0.45;
+    f = smoothstep(0.1, 0.7, f);
+    vec3 col = mix(vec3(0.05,0.4,0.1), vec3(0.1,0.8,0.3), f);
+    col *= flicker * 0.9 * base;
+    
+    float logs = sin(uv.y * 15.0 + t * 0.4 + sin(uv.x * 5.0)) * 0.15 + 0.5;
+    col *= smoothstep(0.25, 0.6, logs) * 0.7 + 0.25;
+    
+    col *= 0.05;
+    return neon_glow(col, 0.7);
+}
+
+// ───────────────────────────────────────────────
+// 7. Volumetric green wave flames, night embers glowing emerald
+// ───────────────────────────────────────────────
+vec3 fx7_rtx_plasma_waves(vec2 uv, float t) {
+    uv.y = 1.0 - uv.y;
+    float base = smoothstep(0.0, 0.2, uv.y);
+    float tt = t * 2.0;
+    vec2 p = (uv - vec2(0.0, 0.6)) * vec2(1.0, 4.0) + vec2(sin(tt*0.4)*0.1, tt * 1.5 + sin(tt*0.6)*0.15);
+    float f = fbm(p * 3.0 + vec2(tt*0.7,0), 8) * 0.65 + fbm(p * 7.5 + vec2(0,tt*1.2), 6) * 0.35;
+    f = smoothstep(0.0, 0.8, f);
+    vec3 col = mix(vec3(0.0,0.2,0.05), mix(vec3(0.05,0.5,0.1), vec3(0.1,0.9,0.4), f), f);
+    
+    float smoke = 0.0;
+    for (float i = 0.0; i < 4.0; i++) {
+        vec3 q = vec3(p, i*0.3) + vec3(tt*0.08, tt*0.15, 0.0);
+        smoke += fbm3(q * 1.2, 5) * (0.4 - i*0.08);
+    }
+    col += vec3(0.05,0.15,0.05) * smoke * 0.5;
+    
+    float embers = step(0.92, hash12(p*600.0 + tt*45.0)) * 1.2;
+    col += vec3(0.2,1.0,0.5) * embers * 1.4;
+    
+    vec2 distort = vec2(noise(p*1.5 + tt), noise(p*1.5 + tt + 50.0)) * 0.04 * uv.y;
+    col += vec3(0.1,0.3,0.1) * length(distort) * 0.4;
+    
+    col *= base;
+    col *= 0.05;
+    return neon_glow(col * 1.0, 1.0);
+}
+
+// ───────────────────────────────────────────────
+// 8. Green wave hills under night sky
+// ───────────────────────────────────────────────
+vec3 fx8_wave_hills(vec2 uv, float t) {
+    vec2 p = uv * 3.5 + vec2(t*0.3, sin(t*0.5)*0.15);
+    float n = noise(p * 3.5) * 0.55 + noise(p * 9.0 + t*1.5) * 0.45;
+    vec3 col = mix(vec3(0.05,0.2,0.05), vec3(0.1,0.5,0.1), n);
+    col += vec3(0.1,0.6,0.2) * pow(n, 2.5) * 0.4;
+    
+    float cracks = sin(n * 15.0 + t * 1.2) * 0.4 + 0.5;
+    col *= smoothstep(0.35, 0.55, cracks) * 0.6 + 0.35;
+    
+    float night = smoothstep(-0.2, 0.8, uv.y) * 0.7;
+    col *= night;
+    
+    col *= 0.05;
+    return neon_glow(col * 0.8, 0.5);
+}
+
+// ───────────────────────────────────────────────
+// 9. Volumetric green wave landscapes, night magma in emerald tones
+// ───────────────────────────────────────────────
+vec3 fx9_rtx_wave_hills(vec2 uv, float t) {
+    vec2 p = uv * 4.0;
+    float tt = t * 0.4;
+    float n = fbm(p + vec2(tt*0.25, sin(tt*0.6)*0.15), 9) * 0.75;
+    n += fbm(p * 4.0 + vec2(0, tt*1.0), 7) * 0.25;
+    vec3 crust = vec3(0.05,0.15,0.05) + vec3(0.1,0.4,0.1) * n * 0.7;
+    
+    float magma = 0.0;
+    for (float i = 0.0; i < 5.0; i++) {
+        vec3 q = vec3(p, i*0.15) + vec3(sin(tt + i*1.5), cos(tt + i*2.0), tt*0.3);
+        magma += pow(0.5 + 0.5 * sin(n * 25.0 + tt * 6.0 + i), 3.0) * (1.0 - i*0.1);
+    }
+    crust += vec3(0.1,0.6,0.2) * magma * 1.0;
+    
+    float waves = pow(0.8 + 0.2 * sin(n * 10.0 + tt * 2.0), 2.0) * (1.0 + cos(tt*4.0)*0.2);
+    crust += vec3(0.2,0.8,0.3) * waves * 0.6;
+    
+    crust *= 0.05;
+    return neon_glow(crust, 1.4) * 0.9;
+}
+
+// ───────────────────────────────────────────────
+// 10. Green wave grid rotating in night void
+// ───────────────────────────────────────────────
+vec3 fx10_wave_grid(vec2 uv, float t) {
+    float zoom = 1.0 + sin(t*0.5)*0.25;
+    float angle = t * 0.7;
+    vec2 p = uv * zoom;
+    p *= mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
+    p += vec2(sin(t*0.8)*0.15, cos(t*0.7)*0.15);
+    float grid = mod(floor(p.x*8.0) + floor(p.y*8.0), 2.0);
+    vec3 col = mix(vec3(0.0,0.05,0.0), vec3(0.05,0.4,0.1), grid);
+    
+    float wave = sin(p.x*20.0 + t*4.0) * cos(p.y*15.0 + t*3.0) * 0.25;
+    col += vec3(0.1,0.6,0.2) * wave * 0.8;
+    
+    col *= 0.05;
+    return neon_glow(col, 0.6);
+}
+
+// ───────────────────────────────────────────────
+// 11. Twisted volumetric green waves in starry night
+// ───────────────────────────────────────────────
+vec3 fx11_rtx_wave_grid(vec2 uv, float t) {
+    float tt = t * 0.6;
+    vec2 p = uv * 1.5;
+    float distort = sin(length(p)*8.0 + tt*3.5) * 0.2;
+    p += vec2(distort * sin(tt*0.5), distort * cos(tt*0.5));
+    float n = fbm(p*1.8 + tt*0.4, 8) + fbm(p*4.5 + tt*1.2, 6)*0.4;
+    vec3 col = mix(vec3(0.0,0.1,0.0), vec3(0.1,0.7,0.3), pow(n*1.0, 1.8));
+    col += vec3(0.2,0.9,0.4) * pow(n, 4.5) * 1.4;
+    
+    float twist = 0.0;
+    for (float i = 0.0; i < 6.0; i++) {
+        vec3 q = vec3(p * (1.0 + i*0.15), tt + i*0.5);
+        twist += fbm3(q * 1.2, 5) * (0.7 - i*0.08);
+    }
+    col += vec3(0.05,0.3,0.1) * twist * 0.6;
+    
+    col *= 0.05;
+    return neon_glow(col, 1.3);
+}
+
+// ───────────────────────────────────────────────
+// 12. Green wave tunnel through night
+// ───────────────────────────────────────────────
+vec3 fx12_wave_tunnel(vec2 uv, float t) {
+    float r = length(uv);
+    float a = atan(uv.y, uv.x);
+    float tun = 1.0 / (r + 0.04 + sin(a*5.0 + t*3.5)*0.08);
+    float grid = sin(tun*8.0 + t*2.5)*0.4 + 0.5;
+    vec3 col = vec3(0.05,0.4,0.1) * grid;
+    col += vec3(0.1,0.7,0.3) * smoothstep(0.4,0.7,tun);
+    
+    float bands = fract(a / PI * 2.5 + t * 0.4 + sin(tun * 2.0));
+    col += vec3(0.05,0.3,0.1) * smoothstep(0.0,0.01,bands) * 0.4;
+    
+    col *= 0.05;
+    return neon_glow(col * 0.8, 0.4);
+}
+
+// ───────────────────────────────────────────────
+// 13. Volumetric green wave fog, night particles in emerald
+// ───────────────────────────────────────────────
+vec3 fx13_rtx_wave_tunnel(vec2 uv, float t) {
+    float tt = t * 1.0;
+    float r = length(uv);
+    float a = atan(uv.y, uv.x) + tt * 0.25;
+    float tun = 1.0 / (r + 0.08);
+    vec2 p = vec2(a / PI, tun);
+    float n = fbm(p * 3.5 + vec2(tt*0.3, tt*0.5), 8);
+    vec3 wall = mix(vec3(0.0,0.1,0.0), vec3(0.1,0.6,0.2), pow(n, 1.8));
+    
+    float fog = 0.0;
+    for (float i = 0.0; i < 7.0; i++) {
+        vec3 q = vec3(a, tun * (1.0 + i*0.12), tt + i*0.4);
+        fog += fbm3(q * 1.0, 6) * (0.9 - i*0.1);
+    }
+    wall += vec3(0.05,0.2,0.05) * fog * 0.8;
+    
+    float parts = step(0.9, hash12(p*300.0 + tt*25.0)) * 1.0;
+    wall += vec3(0.2,0.8,0.3) * parts;
+    
+    wall *= exp(-tun * 0.4);
+    wall *= 0.05;
+    return neon_glow(wall, 1.2) * 1.0;
+}
+
+// ───────────────────────────────────────────────
+// 14. Green night waves rippling
+// ───────────────────────────────────────────────
+vec3 fx14_night_waves(vec2 uv, float t) {
+    vec2 p = uv * 2.5;
+    float ripple = sin(p.x * 6.0 + t * 3.5) * 0.04 + sin(p.y * 5.0 + t * 3.0) * 0.04;
+    p.y += ripple;
+    float wave = sin(p.y * 8.0 + t * 4.0) * 0.4 + 0.5;
+    vec3 col = mix(vec3(0.0,0.1,0.0), vec3(0.05,0.4,0.1), wave);
+    
+    float refl = smoothstep(0.5, 0.3, uv.y) * sin(p.x * 10.0 + t * 1.5) * 0.25;
+    col += vec3(0.1,0.3,0.1) * refl;
+    
+    col *= 0.05;
+    return neon_glow(col, 0.5);
+}
+
+// ───────────────────────────────────────────────
+// 15. Green caustics waves in night, foam emerald
+// ───────────────────────────────────────────────
+vec3 fx15_rtx_night_waves(vec2 uv, float t) {
+    float tt = t * 1.3;
+    vec2 p = uv * 2.0 + vec2(tt*0.15, tt*0.25);
+    float n = fbm(p * 1.5, 9) * 0.55 + fbm(p * 4.5 + tt*0.7, 7) * 0.45;
+    vec3 base = mix(vec3(0.0,0.05,0.0), vec3(0.05,0.3,0.05), pow(n, 1.2));
+    
+    float caust = 0.0;
+    for (float i = 0.0; i < 6.0; i++) {
+        vec3 q = vec3(p, i*0.2) + vec3(sin(tt + i*1.2), cos(tt + i*1.5), tt*0.4);
+        caust += abs(sin(fbm3(q * 2.5, 5) * 8.0)) * (0.9 - i*0.12);
+    }
+    base += vec3(0.1,0.5,0.2) * caust * 0.8;
+    
+    float foam = pow(n, 3.5) * step(0.65, n) * (1.0 + sin(tt*4.0)*0.15);
+    base += vec3(0.2,0.8,0.3) * foam * 0.6;
+    
+    base += vec3(0.05,0.2,0.05) * exp(-abs(uv.y) * 1.5) * 0.4;
+    
+    base *= 0.05;
+    return neon_glow(base, 1.2);
+}
+
+// ───────────────────────────────────────────────
+// 16. Green wave flares in night
+// ───────────────────────────────────────────────
+vec3 fx16_wave_flares(vec2 uv, float t) {
+    vec2 light = vec2(sin(t*0.7)*0.4, cos(t*0.9)*0.25);
+    vec2 to_light = light - uv;
+    float dist = length(to_light);
+    float flare = 1.0 / (1.0 + dist*dist*15.0);
+    vec3 col = vec3(0.1,0.6,0.2) * flare * 1.8;
+    
+    for (float i = 1.0; i < 5.0; i++) {
+        vec2 ghost = uv + to_light * i * 0.25;
+        float g_dist = length(ghost);
+        col += vec3(0.05 - i*0.01, 0.4, 0.1 + i*0.05) * (1.0 / (1.0 + g_dist*8.0)) * 0.4;
+    }
+    
+    float star = abs(sin(atan(to_light.y, to_light.x) * 3.0 + t*2.0)) * flare * 0.7;
+    col += vec3(0.2,0.8,0.3) * star;
+    
+    col *= 0.05;
+    return neon_glow(col, 0.4);
+}
+
+// ───────────────────────────────────────────────
+// 17. Physically-based green wave blooms in night, chromatic green
+// ───────────────────────────────────────────────
+vec3 fx17_rtx_wave_flares(vec2 uv, float t) {
+    vec2 light = vec2(sin(t*0.5)*0.3, cos(t*0.6)*0.2);
+    vec2 to_light = light - uv;
+    float dist = length(to_light);
+    vec3 col = vec3(0.0);
+    
+    float bloom_main = pow(1.0 / (1.0 + dist*dist*12.0), 1.2);
+    col += vec3(0.1,0.7,0.3) * bloom_main * 2.5;
+    
+    for (float i = 1.0; i < 7.0; i++) {
+        vec2 ghost = uv + to_light * i * 0.2 + vec2(sin(t + i*0.5)*0.008, cos(t + i)*0.008);
+        float g_dist = length(ghost);
+        float g_bloom = pow(1.0 / (1.0 + g_dist*6.0), 1.8);
+        vec3 chroma = vec3(g_bloom * 0.9, g_bloom * 1.0, g_bloom * 0.95);
+        col += chroma * (0.7 - i*0.08);
+    }
+    
+    float angle = atan(to_light.y, to_light.x) + sin(t*1.5)*0.2;
+    float star = 0.0;
+    for (float j = 0.0; j < 5.0; j++) {
+        star += abs(sin(angle + j * PI / 2.5 + t*0.5)) * bloom_main * 0.5;
+    }
+    col += vec3(0.2,0.9,0.4) * star;
+    
+    float haze = fbm(uv * 1.5 + t*0.15, 5) * exp(-dist * 1.2) * 0.3;
+    col += vec3(0.05,0.2,0.05) * haze;
+    
+    col *= 0.05;
+    return neon_glow(col, 1.4) * 1.1;
+}
+
+// ───────────────────────────────────────────────
+// 18. Green wave mandelbrot zoom in night palette
+// ───────────────────────────────────────────────
+vec3 fx18_wave_fractal(vec2 uv, float t) {
+    vec2 c = uv * (1.2 + sin(t*0.25)*0.4) + vec2(sin(t*0.3)*0.15, cos(t*0.4)*0.15);
+    vec2 z = vec2(0.0);
+    int iter = 0;
+    const int max_iter = 25;
+    for (int i = 0; i < max_iter; i++) {
+        z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
+        if (length(z) > 2.0) break;
+        iter++;
+    }
+    float frac = float(iter) / float(max_iter);
+    vec3 col = mix(vec3(0.0,0.05,0.0), vec3(0.05,0.4,0.1), sin(frac * 8.0 + t*1.5)*0.4 + 0.5);
+    
+    col.rgb = col.gbr * sin(t*1.5) + col.brg * cos(t*1.5);
+    
+    col *= 0.05;
+    return neon_glow(col, 0.3);
+}
+
+// ───────────────────────────────────────────────
+// Main — added subtle transition grain to smooth jank
+// ───────────────────────────────────────────────
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 res = imageSize(hdrImage);
+    if (any(greaterThanEqual(pix, res))) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(res) * 2.0 - 1.0;
+    uv.x *= float(res.x) / float(res.y);
+
+    float t = pc.totalTime;
+    float sceneTime = mod(t, SCENE_DURATION * float(SCENE_COUNT));
+    int idx = int(floor(sceneTime / SCENE_DURATION));
+    float fade = sceneMix(t);
+
+    vec3 a = vec3(0.0), b = vec3(0.0);
+    float localT = mod(t, SCENE_DURATION);
+
+    if      (idx == 0)  a = fx0_god(uv, localT);
+    else if (idx == 1)  a = fx1_rtx_god(uv, localT);
+    else if (idx == 2)  a = fx2_wave_bars(uv, localT);
+    else if (idx == 3)  a = fx3_rtx_wave_bars(uv, localT);
+    else if (idx == 4)  a = fx4_aurora_stars(uv, localT);
+    else if (idx == 5)  a = fx5_rtx_aurora_stars(uv, localT);
+    else if (idx == 6)  a = fx6_plasma_waves(uv, localT);
+    else if (idx == 7)  a = fx7_rtx_plasma_waves(uv, localT);
+    else if (idx == 8)  a = fx8_wave_hills(uv, localT);
+    else if (idx == 9)  a = fx9_rtx_wave_hills(uv, localT);
+    else if (idx == 10) a = fx10_wave_grid(uv, localT);
+    else if (idx == 11) a = fx11_rtx_wave_grid(uv, localT);
+    else if (idx == 12) a = fx12_wave_tunnel(uv, localT);
+    else if (idx == 13) a = fx13_rtx_wave_tunnel(uv, localT);
+    else if (idx == 14) a = fx14_night_waves(uv, localT);
+    else if (idx == 15) a = fx15_rtx_night_waves(uv, localT);
+    else if (idx == 16) a = fx16_wave_flares(uv, localT);
+    else if (idx == 17) a = fx17_rtx_wave_flares(uv, localT);
+    else if (idx == 18) a = fx18_wave_fractal(uv, localT);
+
+    int nidx = (idx + 1) % SCENE_COUNT;
+    if      (nidx == 0)  b = fx0_god(uv, localT);
+    else if (nidx == 1)  b = fx1_rtx_god(uv, localT);
+    else if (nidx == 2)  b = fx2_wave_bars(uv, localT);
+    else if (nidx == 3)  b = fx3_rtx_wave_bars(uv, localT);
+    else if (nidx == 4)  b = fx4_aurora_stars(uv, localT);
+    else if (nidx == 5)  b = fx5_rtx_aurora_stars(uv, localT);
+    else if (nidx == 6)  b = fx6_plasma_waves(uv, localT);
+    else if (nidx == 7)  b = fx7_rtx_plasma_waves(uv, localT);
+    else if (nidx == 8)  b = fx8_wave_hills(uv, localT);
+    else if (nidx == 9)  b = fx9_rtx_wave_hills(uv, localT);
+    else if (nidx == 10) b = fx10_wave_grid(uv, localT);
+    else if (nidx == 11) b = fx11_rtx_wave_grid(uv, localT);
+    else if (nidx == 12) b = fx12_wave_tunnel(uv, localT);
+    else if (nidx == 13) b = fx13_rtx_wave_tunnel(uv, localT);
+    else if (nidx == 14) b = fx14_night_waves(uv, localT);
+    else if (nidx == 15) b = fx15_rtx_night_waves(uv, localT);
+    else if (nidx == 16) b = fx16_wave_flares(uv, localT);
+    else if (nidx == 17) b = fx17_rtx_wave_flares(uv, localT);
+    else if (nidx == 18) b = fx18_wave_fractal(uv, localT);
+
+    vec3 finalColor = mix(a, b, fade);
+
+    // Add micro-grain during transition to mask detail/brightness jumps
+    float grain = (hash12(uv * 237.0 + t * 17.0) - 0.5) * 0.015;
+    finalColor += vec3(grain);
+
+    // Post-processing — very dark & subtle
+    finalColor = pow(max(finalColor, vec3(0.0)), vec3(1.05));
+    finalColor += bloom(finalColor, 0.03);
+    finalColor += vec3(0.0, 0.005, 0.0);
+    float vig = 1.0 - dot(uv, uv) * 0.18;
+    finalColor *= vig * 1.02;
+
+    // Master dimmer ~15% brightness
+    finalColor *= 0.15;
+
+    imageStore(hdrImage, pix, vec4(finalColor, 1.0));
+}

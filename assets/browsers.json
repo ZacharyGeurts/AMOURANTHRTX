@@ -1,0 +1,15 @@
+{
+  "generated": true,
+  "default_id": "firefox",
+  "default_binary": "/usr/bin/firefox",
+  "browsers": [
+    {
+      "id": "firefox",
+      "label": "Firefox",
+      "binary": "/usr/bin/firefox",
+      "argv0": "firefox",
+      "version": "Mozilla Firefox 151.0.4",
+      "default": true
+    }
+  ]
+}

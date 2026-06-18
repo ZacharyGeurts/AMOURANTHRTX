@@ -1,0 +1,417 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+layout(set = 0, binding = 6, std430) buffer AudioCommands {
+    float slotCommand[16];
+    float slotValue[16];
+    float reserved[16];
+} audio;
+
+layout(push_constant) uniform PushConstants {
+    float       time;                       // total engine time (seconds)
+    uint        frameSeed;                  // per-frame RNG seed
+
+    vec3        cameraPos;                  float pad0;
+    vec4        cameraQuat;                 // xyzw orientation quaternion
+    float       cameraFovDeg;               // vertical FOV in degrees
+    float       aspectRatio;                // width / height
+    float       nearPlane;
+    float       farPlane;
+
+    // Post-process controls
+    float       exposure;
+    float       vignetteStrength;
+    float       bloomThreshold;
+    float       bloomIntensity;
+    uint        tonemapMode;
+    float       contrast;
+    float       saturation;
+    float       gamma;
+
+    // Environment
+    vec3        sunDir;                     float sunIntensity;
+    vec3        moonDir;                    float moonIntensity;
+    vec3        windDir;                    float windStrength;
+    float       fogDensity;
+    float       dayNightFactor;
+    float       cloudCoverage;
+
+    // Raymarching quality (unused)
+    float       raymarchMaxDist;
+    float       raymarchEpsilon;
+    uint        raymarchMaxSteps;
+
+    // Full input state
+    uint        controllerInput;
+    float       leftStickX;                 float leftStickY;
+    float       rightStickX;                float rightStickY;
+    float       leftTrigger;                float rightTrigger;
+
+    vec2        mouseDelta;
+    vec2        mouseNormalized;
+    float       mouseWheelDelta;
+
+    float       pad1[3];
+} pc;
+
+// Audio
+#define AUDIO_CMD_PLAY   0.8
+#define AUDIO_CMD_STOP   -0.5
+
+// GAME CONSTANTS
+#define PADDLE_WIDTH        0.18
+#define PADDLE_HEIGHT       0.018
+#define PADDLE_Y            0.08
+
+#define BALL_RADIUS         0.008
+#define BALL_BASE_SPEED     0.0075
+
+#define BRICK_ROWS          8
+#define BRICK_COLS          14
+#define BRICK_HEIGHT        0.028
+#define BRICK_GAP           0.004
+#define BRICK_TOP_MARGIN    0.12
+
+#define ACCUM_BLEND         0.84
+
+// Input bitflags
+#define INPUT_LEFT          (1u << 2)
+#define INPUT_RIGHT         (1u << 3)
+#define INPUT_SHOOT         (1u << 8)
+#define INPUT_SPACE         (1u << 9)
+#define INPUT_ESCAPE        (1u << 10)
+
+// State row (bottom line)
+#define STATE_ROW(h)        ((h) - 1)
+
+// HELPERS
+float hash11(float p) {
+    p = fract(p * 0.1031);
+    p *= p + 33.33;
+    return fract(2.0 * p * p);
+}
+
+vec3 brickColor(int row) {
+    float t = float(row) / float(BRICK_ROWS - 1);
+         if (row < 2) return vec3(1.00, 0.32, 0.42);
+    else if (row < 4) return mix(vec3(1.00, 0.32, 0.42), vec3(1.00, 0.92, 0.32), t * 3.0);
+    else if (row < 6) return vec3(1.00, 0.92, 0.32);
+    else              return vec3(0.22, 0.82, 1.00);
+}
+
+bool rectHit(vec2 point, vec2 center, vec2 halfSize) {
+    vec2 d = abs(point - center) - halfSize;
+    return max(d.x, d.y) < 0.0;
+}
+
+// State access
+vec4 loadState(ivec2 coord) {
+    return imageLoad(outputImage, coord);
+}
+
+void storeStateVec2(int slotX, vec2 v) {
+    imageStore(outputImage, ivec2(slotX, STATE_ROW(imageSize(outputImage).y)), vec4(v, 0.0, 0.0));
+}
+
+void storeStateFloat(int slotX, float f) {
+    imageStore(outputImage, ivec2(slotX, STATE_ROW(imageSize(outputImage).y)), vec4(f, 0.0, 0.0, 0.0));
+}
+
+vec2 loadStateVec2(int slotX) {
+    return loadState(ivec2(slotX, STATE_ROW(imageSize(outputImage).y))).xy;
+}
+
+float loadStateFloat(int slotX) {
+    return loadState(ivec2(slotX, STATE_ROW(imageSize(outputImage).y))).x;
+}
+
+// MAIN
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = vec2(pix) / vec2(dim);
+    int stateRow = STATE_ROW(dim.y);
+    bool isStateRow = (pix.y == stateRow);
+
+    // Load persistent state
+    vec2  ballPos = loadStateVec2(0);
+    vec2  ballVel = loadStateVec2(1);
+    float paddleX = loadStateFloat(2);
+    float startTime = loadStateFloat(4);
+    float introPlayed = loadStateFloat(5);
+    float score = loadStateFloat(6);               // NEW: score state slot
+
+    // Reset / init logic (full reset vs ball-lost reset)
+    bool fullReset = false;
+    fullReset = fullReset || ((pc.controllerInput & INPUT_ESCAPE) != 0u);
+    fullReset = fullReset || (pc.leftTrigger > 0.98 && pc.rightTrigger > 0.98);
+    fullReset = fullReset || (startTime <= 0.0);            // first frame / uninitialized
+
+    bool ballLost = (ballPos.y < -0.25);
+
+    if (isStateRow && (fullReset || ballLost)) {
+        ballPos = vec2(0.5, 0.35);
+        ballVel = vec2(0.0, 0.0);  // will be launched on input
+        paddleX = 0.5;
+
+        if (fullReset) {
+            startTime = pc.time;
+            introPlayed = 0.0;
+            score = 0.0;
+
+            // Reset bricks (all bits on = bricks present)
+            for (int r = 0; r < BRICK_ROWS; ++r) {
+                uint full = (1u << BRICK_COLS) - 1u;
+                imageStore(outputImage, ivec2(3 + r, stateRow), vec4(uintBitsToFloat(full), 0.0, 0.0, 0.0));
+            }
+        }
+        // ballLost keeps existing bricks + score (classic Breakout behavior)
+
+        // Stop any lingering audio
+        audio.slotCommand[0] = AUDIO_CMD_STOP;
+        audio.slotCommand[1] = AUDIO_CMD_STOP;
+    }
+
+    // Paddle movement (clean input priority: stick > dpad > mouse)
+    float paddleDelta = pc.leftStickX * 2.2;
+
+    if ((pc.controllerInput & INPUT_LEFT)  != 0u) paddleDelta -= 1.6;
+    if ((pc.controllerInput & INPUT_RIGHT) != 0u) paddleDelta += 1.6;
+
+    // Only use mouse if no stick/dpad input detected
+    if (abs(paddleDelta) < 0.08) {
+        paddleDelta = (pc.mouseNormalized.x - 0.5) * 3.8;
+    }
+
+    paddleX += paddleDelta * 0.016;
+    paddleX = clamp(paddleX, PADDLE_WIDTH * 0.5, 1.0 - PADDLE_WIDTH * 0.5);
+
+    // Launch conditions
+    bool launchInput = false;
+    launchInput = launchInput || ((pc.controllerInput & INPUT_SHOOT) != 0u);
+    launchInput = launchInput || ((pc.controllerInput & INPUT_SPACE) != 0u);
+    launchInput = launchInput || (pc.leftTrigger  > 0.35);
+    launchInput = launchInput || (pc.rightTrigger > 0.35);
+
+    // Physics update — only on narrow stripe + state row (single-threaded simulation)
+    if (pix.x < 8 || isStateRow) {
+        vec2 nextPos = ballPos + ballVel;
+
+        // Wall bounces
+        if (nextPos.x <= BALL_RADIUS)           { nextPos.x = BALL_RADIUS;           ballVel.x *= -1.02; }
+        if (nextPos.x >= 1.0 - BALL_RADIUS)     { nextPos.x = 1.0 - BALL_RADIUS;     ballVel.x *= -1.02; }
+        if (nextPos.y >= 1.0 - BALL_RADIUS)     { nextPos.y = 1.0 - BALL_RADIUS;     ballVel.y *= -1.02; }
+
+        // Paddle collision
+        vec2 padCenter = vec2(paddleX, PADDLE_Y);
+        vec2 padHalf   = vec2(PADDLE_WIDTH * 0.5, PADDLE_HEIGHT * 0.5);
+
+        if (rectHit(nextPos, padCenter, padHalf)) {
+            ballVel.y = abs(ballVel.y) * 1.06;
+            float hitFrac = (nextPos.x - paddleX) / (PADDLE_WIDTH * 0.5);
+            hitFrac = clamp(hitFrac, -1.0, 1.0);
+            ballVel.x += hitFrac * 1.1 + pc.rightStickX * 0.8;
+            ballVel = normalize(ballVel) * BALL_BASE_SPEED * 1.04;
+
+            // Prevent sticking
+            nextPos.y = padCenter.y + padHalf.y + BALL_RADIUS + 0.002;
+        }
+
+        // Brick collision
+        int hitRow = -1;
+        int hitCol = -1;
+
+        float brickWidthUnit  = 1.0 / float(BRICK_COLS + 1);
+        float brickFullHeight = BRICK_HEIGHT + BRICK_GAP;
+        float bricksTopY      = 1.0 - BRICK_TOP_MARGIN;
+
+        if (nextPos.y <= bricksTopY && nextPos.y > bricksTopY - float(BRICK_ROWS) * brickFullHeight) {
+            hitRow = int(floor((bricksTopY - nextPos.y) / brickFullHeight));
+            float leftEdge = (1.0 - float(BRICK_COLS) * brickWidthUnit) * 0.5;
+            float brickFullWidth = brickWidthUnit + BRICK_GAP;
+
+            hitCol = int(floor((nextPos.x - leftEdge) / brickFullWidth));
+
+            if (hitRow >= 0 && hitRow < BRICK_ROWS && hitCol >= 0 && hitCol < BRICK_COLS) {
+                uint brickMask = floatBitsToUint(loadState(ivec2(3 + hitRow, stateRow)).x);
+                uint brickBit  = 1u << uint(hitCol);
+
+                if ((brickMask & brickBit) != 0u) {
+                    // Destroy brick
+                    brickMask &= ~brickBit;
+                    imageStore(outputImage, ivec2(3 + hitRow, stateRow),
+                               vec4(uintBitsToFloat(brickMask), 0.0, 0.0, 0.0));
+
+                    // Bounce
+                    vec2 brickCenter = vec2(
+                        leftEdge + (float(hitCol) + 0.5) * brickWidthUnit + BRICK_GAP * 0.5,
+                        bricksTopY - (float(hitRow) + 0.5) * brickFullHeight
+                    );
+
+                    vec2 delta = nextPos - brickCenter;
+                    if (abs(delta.y) > abs(delta.x))
+                        ballVel.y *= -1.04;
+                    else
+                        ballVel.x *= -1.04;
+
+                    // Hit sound + score (only once per frame from state row)
+                    if (isStateRow) {
+                        audio.slotCommand[1] = AUDIO_CMD_PLAY;
+                        audio.slotValue[1]   = 0.7 + fract(pc.time * 17.1) * 0.3;
+
+                        // Atari-style scoring per row
+                        float points = (hitRow < 2) ? 7.0 :
+                                       (hitRow < 4) ? 5.0 :
+                                       (hitRow < 6) ? 3.0 : 1.0;
+                        score += points;
+                    }
+                }
+            }
+        }
+
+        ballPos = nextPos;
+
+        // Auto-launch when ball is resting near paddle
+        if (launchInput && length(ballVel) < 0.001 && ballPos.y < 0.42) {
+            vec2 dir = normalize(vec2(pc.rightStickX * 0.9 + 0.12 * sign(pc.rightStickX + 0.01), 1.0));
+            ballVel = dir * BALL_BASE_SPEED;
+
+            if (isStateRow) {
+                audio.slotCommand[1] = AUDIO_CMD_PLAY;
+                audio.slotValue[1]   = 1.1;
+            }
+        }
+    }
+
+    // Save updated state (only state row writes)
+    if (isStateRow) {
+        if (pix.x == 0) imageStore(outputImage, pix, vec4(ballPos, 0.0, 0.0));
+        if (pix.x == 1) imageStore(outputImage, pix, vec4(ballVel, 0.0, 0.0));
+        if (pix.x == 2) imageStore(outputImage, pix, vec4(paddleX, 0.0, 0.0, 0.0));
+        if (pix.x == 4) imageStore(outputImage, pix, vec4(startTime, 0.0, 0.0, 0.0));
+        if (pix.x == 5) imageStore(outputImage, pix, vec4(introPlayed, 0.0, 0.0, 0.0));
+        if (pix.x == 6) imageStore(outputImage, pix, vec4(score, 0.0, 0.0, 0.0));   // NEW: persist score
+
+        // One-time intro sound after ~5 seconds
+        float elapsed = pc.time - startTime;
+        if (introPlayed < 0.5 && elapsed >= 5.0 && elapsed < 5.016) {
+            audio.slotCommand[0] = AUDIO_CMD_PLAY;
+            audio.slotValue[0]   = 1.0;
+            introPlayed = 1.0;
+        }
+    }
+
+    if (isStateRow) return; // state row doesn't render
+
+    // ────────────────────────────────────────────────────────────────
+    // RENDER
+    // ────────────────────────────────────────────────────────────────
+    vec3 color = vec3(0.006, 0.012, 0.038);
+
+    // Bricks
+    for (int r = 0; r < BRICK_ROWS; ++r) {
+        uint mask = floatBitsToUint(loadState(ivec2(3 + r, stateRow)).x);
+        for (int c = 0; c < BRICK_COLS; ++c) {
+            if ((mask & (1u << uint(c))) == 0u) continue;
+
+            float bw  = 1.0 / float(BRICK_COLS + 1);
+            float bx  = (1.0 - float(BRICK_COLS) * bw) * 0.5 + (float(c) + 0.5) * bw + BRICK_GAP * 0.5;
+            float by  = 1.0 - BRICK_TOP_MARGIN - (float(r) + 0.5) * (BRICK_HEIGHT + BRICK_GAP);
+
+            vec2 center   = vec2(bx, by);
+            vec2 halfSize = vec2(bw * 0.5, BRICK_HEIGHT * 0.5);
+
+            if (rectHit(uv, center, halfSize)) {
+                vec3 bc = brickColor(r);
+                color = bc * 0.94;
+                vec2 local = (uv - center) / halfSize;
+                float shine = 1.0 - smoothstep(0.0, 1.0, length(local));
+                color += bc * 0.38 * shine;
+            }
+        }
+    }
+
+    // Paddle
+    vec2 padCenter = vec2(paddleX, PADDLE_Y);
+    vec2 padHalf   = vec2(PADDLE_WIDTH * 0.5, PADDLE_HEIGHT * 0.5);
+    if (rectHit(uv, padCenter, padHalf)) {
+        color = vec3(0.94, 0.97, 1.00) * 0.96;
+    }
+
+    // Ball
+    float ballDist = length(uv - ballPos) - BALL_RADIUS;
+    float ballMask = smoothstep(0.0, -0.004, ballDist);
+    vec3 ballCol = vec3(1.00, 0.97, 0.68);
+    color = mix(color, ballCol, ballMask);
+
+    float glow = smoothstep(0.07, 0.0, length(uv - ballPos));
+    color += ballCol * glow * 1.1;
+
+    // ────────────────────────────────────────────────────────────────
+    // SCORE HUD – Atari-style 3×5 block font (5 digits, golden yellow)
+    // ────────────────────────────────────────────────────────────────
+    uint digitMasks[10] = uint[10](
+        31599u,  // 0
+         8786u,  // 1
+        29671u,  // 2
+        29647u,  // 3
+        23497u,  // 4
+        31183u,  // 5
+        31215u,  // 6
+        29257u,  // 7
+        31727u,  // 8
+        31695u   // 9
+    );
+
+    vec2 hudPos = vec2(0.02, 0.93);
+    float digitScale = 0.022;
+    float digitW = 3.0 * digitScale;
+    float digitH = 5.0 * digitScale;
+    float gap = digitScale * 0.8;
+    int numDigits = 5;
+
+    for (int d = 0; d < numDigits; ++d) {
+        float power = pow(10.0, float(numDigits - 1 - d));
+        int digit = int(floor(score / power)) % 10;
+
+        vec2 digPos = hudPos + vec2(float(d) * (digitW + gap), 0.0);
+        vec2 local = (uv - digPos) / vec2(digitW, digitH);
+
+        if (local.x >= 0.0 && local.x < 1.0 && local.y >= 0.0 && local.y < 1.0) {
+            int px = int(floor(local.x * 3.0));
+            int py = 4 - int(floor(local.y * 5.0));   // py = 0 at top of digit
+            if (px >= 0 && px < 3 && py >= 0 && py < 5) {
+                uint mask = digitMasks[digit];
+                int bitIndex = py * 3 + px;
+                if ((mask & (1u << uint(bitIndex))) != 0u) {
+                    color = vec3(0.98, 0.85, 0.15);   // classic Atari golden yellow
+                }
+            }
+        }
+    }
+
+    // Post-process
+    color *= pow(2.0, pc.exposure);
+    color = pow(color, vec3(1.0 / pc.gamma));
+    color = (color - 0.5) * pc.contrast + 0.5;
+    float lum = dot(color, vec3(0.299, 0.587, 0.114));
+    color = mix(vec3(lum), color, pc.saturation);
+
+    // Vignette
+    float vig = 1.0 - pc.vignetteStrength * length(uv - 0.5) * 2.3;
+    color *= vig;
+
+    // Accumulation (smooth motion)
+    vec4 prev = imageLoad(outputImage, pix);
+    vec4 finalColor = mix(prev, vec4(color, 1.0), ACCUM_BLEND);
+
+    finalColor *= 0.08;
+
+    imageStore(outputImage, pix, finalColor);
+}

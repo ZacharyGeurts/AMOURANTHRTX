@@ -1,0 +1,382 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// AMOURANTH RTX – Fu Guardian Shi Shi (Chinese Guardian Lion Statue)
+// Highly complex carved stone form – no person, no humanoid, no clothing
+// Layered asymmetric blocks, erosion, pedestal base – museum spotlight lit
+// Night Chinese courtyard atmosphere preserved
+// =============================================================================
+
+// ── TUNABLE COLORS / MATERIALS ──────────────────────────────────────────────
+#define STONE_BASE                  vec3(0.78, 0.74, 0.70)   // warm ancient limestone
+#define STONE_SUBSURFACE            vec3(0.40, 0.25, 0.18)
+#define STONE_TEXTURE_AMP           0.12
+
+#define RIM_COLOR                   vec3(1.00, 0.94, 0.90)
+#define RIM_INTENSITY               2.4
+
+// ── Camera & Animation ──────────────────────────────────────────────────────
+#define CAMERA_ORBIT_DISTANCE       4.2
+#define CAMERA_ORBIT_HEIGHT         1.6
+#define CAMERA_ORBIT_SPEED          0.4
+#define CAMERA_FOV                  72.0
+#define CAMERA_LOOK_Y_OFFSET        -0.15
+
+#define GLOBAL_SCALE                1.32
+#define WOBBLE_FREQ                 1.8
+#define WOBBLE_AMP                  0.16
+#define GRAVITY_DAMP                0.92
+#define BREATH_SPEED                0.75
+#define BREATH_AMP                  0.116
+#define HEAD_TILT_FREQ              0.42
+#define HEAD_TILT_AMP               0.09
+#define TAIL_SWAY_FREQ              0.58
+#define TAIL_SWAY_AMP               1.0
+
+// ── Sizes & Positions ───────────────────────────────────────────────────────
+#define SHISHI_HEIGHT               2.8
+#define SHISHI_WIDTH                1.2
+#define SHISHI_DEPTH                1.5
+#define STOOP_WIDTH                 3.2
+#define STOOP_HEIGHT                0.40
+
+// Body parts sizes and positions (relative)
+#define BODY_SIZE                   vec3(0.8, 1.0, 1.2)
+#define BODY_POS                    vec3(0.0, 1.0, 0.0)
+
+#define HEAD_SIZE                   vec3(0.6, 0.7, 0.6)
+#define HEAD_POS                    vec3(0.0, 2.2, -0.3)
+
+#define MANE_AMP                    0.3
+#define MANE_FREQ                   12.0
+
+#define LEG_FRONT_SIZE              vec3(0.3, 0.8, 0.3)
+#define LEG_FRONT_POS_L             vec3(0.4, 0.5, -0.4)
+#define LEG_FRONT_POS_R             vec3(-0.4, 0.5, -0.4)
+
+#define LEG_BACK_SIZE               vec3(0.35, 0.7, 0.35)
+#define LEG_BACK_POS_L              vec3(0.45, 0.4, 0.6)
+#define LEG_BACK_POS_R              vec3(-0.45, 0.4, 0.6)
+
+#define PAW_BALL_RADIUS             0.25
+#define PAW_BALL_POS                vec3(0.4, 0.2, -0.8)
+
+#define TAIL_LENGTH                 1.0
+#define TAIL_RADIUS                 0.15
+#define TAIL_POS                    vec3(0.0, 0.8, 1.0)
+#define TAIL_CURVE                  0.5
+
+#define MOUTH_OPEN_DEPTH            0.2
+#define EYE_SIZE                    vec3(0.1, 0.1, 0.05)
+#define EYE_POS_L                   vec3(0.2, 2.3, -0.6)
+#define EYE_POS_R                   vec3(-0.2, 2.3, -0.6)
+
+#define EROSION_AMP                 0.08
+#define EROSION_FREQ                18.0
+#define EROSION_SPEED               0.3
+
+// ── Materials ───────────────────────────────────────────────────────────────
+const int MAT_STONE     = 1;
+
+// =============================================================================
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+layout(push_constant) uniform Push {
+    float totalTime;
+} pc;
+
+// ── Helper functions ────────────────────────────────────────────────────────
+mat3 rotX(float a) { float c=cos(a), s=sin(a); return mat3(1,0,0, 0,c,-s, 0,s,c); }
+mat3 rotY(float a) { float c=cos(a), s=sin(a); return mat3(c,0,s, 0,1,0, -s,0,c); }
+mat3 rotZ(float a) { float c=cos(a), s=sin(a); return mat3(c,-s,0, s,c,0, 0,0,1); }
+mat2 rot2(float a) { float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+
+float sdBox(vec3 p, vec3 b) {
+    vec3 q = abs(p) - b;
+    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+float sdSphere(vec3 p, float r) { return length(p) - r; }
+
+float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
+    vec3 pa = p - a;
+    vec3 ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h) - r;
+}
+
+float sdEllipsoid(vec3 p, vec3 r) {
+    float k0 = length(p / r);
+    float k1 = length(p / (r * r));
+    return k0 * (k0 - 1.0) / k1;
+}
+
+float sdCylinder(vec3 p, float r, float h) {
+    vec2 d = vec2(length(p.xz) - r, abs(p.y) - h);
+    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+
+float dot2(vec2 v) { return dot(v, v); }
+
+float sdCappedCone(vec3 p, float h, float r1, float r2) {
+    vec2 q = vec2(length(p.xz), p.y);
+    vec2 k1 = vec2(r2, h);
+    vec2 k2 = vec2(r2 - r1, 2.0 * h);
+    vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? r1 : r2), abs(q.y) - h);
+    vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot2(k2), 0.0, 1.0);
+    float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+    return s * sqrt(min(dot2(ca), dot2(cb)));
+}
+
+float noise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    float a = fract(sin(dot(i, vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float b = fract(sin(dot(i + vec3(1, 0, 0), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float c = fract(sin(dot(i + vec3(0, 1, 0), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float d = fract(sin(dot(i + vec3(1, 1, 0), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float e = fract(sin(dot(i + vec3(0, 0, 1), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float f_ = fract(sin(dot(i + vec3(1, 0, 1), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float g = fract(sin(dot(i + vec3(0, 1, 1), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float h = fract(sin(dot(i + vec3(1, 1, 1), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    a = mix(a, b, f.x);
+    c = mix(c, d, f.x);
+    e = mix(e, f_, f.x);
+    g = mix(g, h, f.x);
+    a = mix(a, c, f.y);
+    e = mix(e, g, f.y);
+    return mix(a, e, f.z);
+}
+
+// ── Hit struct ──────────────────────────────────────────────────────────────
+struct Hit {
+    float d;
+    int mat;
+};
+
+Hit opUnion(Hit a, Hit b) {
+    if (a.d < b.d) return a;
+    return b;
+}
+
+Hit opSubtract(Hit a, Hit b) {
+    if (-b.d > a.d) {
+        Hit res = b;
+        res.d = -b.d;
+        return res;
+    }
+    return a;
+}
+
+// ── Smooth min for blending ─────────────────────────────────────────────────
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+Hit opSmoothUnion(Hit a, Hit b, float k) {
+    float d = smin(a.d, b.d, k);
+    float m = mix(float(a.mat), float(b.mat), step(b.d, a.d));
+    return Hit(d, int(m));
+}
+
+// ── Wobble offset (repurposed from original) ────────────────────────────────
+float wobbleOffset() {
+    float t = pc.totalTime * WOBBLE_FREQ;
+    float cycle = sin(t) * 0.5 + 0.5;
+    float vel = cos(t) * WOBBLE_FREQ;
+    return cycle * WOBBLE_AMP * (1.0 - exp(-abs(vel) * GRAVITY_DAMP));
+}
+
+float breathOffset() {
+    return sin(pc.totalTime * BREATH_SPEED) * BREATH_AMP;
+}
+
+float headTilt() {
+    return sin(pc.totalTime * HEAD_TILT_FREQ) * HEAD_TILT_AMP;
+}
+
+float tailSway() {
+    return sin(pc.totalTime * TAIL_SWAY_FREQ) * TAIL_SWAY_AMP;
+}
+
+// ── Map – complex Fu Guardian Shi Shi on stoop ──────────────────────────────
+Hit map(vec3 pos) {
+    vec3 p = pos / GLOBAL_SCALE;
+    float wobble = wobbleOffset();
+    float breath = breathOffset();
+    float tilt = headTilt();
+    float sway = tailSway();
+    p.y += wobble * 0.06;
+
+    float stoneD = 1e10;
+
+    // ── Body ────────────────────────────────────────────────────────────────
+    vec3 bodyP = p - BODY_POS - vec3(0.0, breath * 0.05, 0.0);
+    stoneD = min(stoneD, sdEllipsoid(bodyP, BODY_SIZE));
+
+    // ── Head ────────────────────────────────────────────────────────────────
+    vec3 headP = p - HEAD_POS - vec3(0.0, breath * 0.02, 0.0);
+    headP *= rotY(tilt * 0.2); // Slight tilt
+    stoneD = smin(stoneD, sdEllipsoid(headP, HEAD_SIZE), 0.15);
+
+    // Mane (noisy protrusions)
+    float mane = noise3(headP * MANE_FREQ) * MANE_AMP;
+    stoneD -= mane * smoothstep(0.4, 0.8, length(headP.xz / HEAD_SIZE.xz));
+
+    // ── Legs (front) ────────────────────────────────────────────────────────
+    vec3 legFL = p - LEG_FRONT_POS_L;
+    stoneD = smin(stoneD, sdCapsule(legFL, vec3(0,0.5,0), vec3(0,-0.5,0), LEG_FRONT_SIZE.x), 0.1);
+
+    vec3 legFR = p - LEG_FRONT_POS_R;
+    stoneD = smin(stoneD, sdCapsule(legFR, vec3(0,0.5,0), vec3(0,-0.5,0), LEG_FRONT_SIZE.x), 0.1);
+
+    // ── Legs (back) ─────────────────────────────────────────────────────────
+    vec3 legBL = p - LEG_BACK_POS_L;
+    stoneD = smin(stoneD, sdCapsule(legBL, vec3(0,0.5,0), vec3(0,-0.5,0), LEG_BACK_SIZE.x), 0.1);
+
+    vec3 legBR = p - LEG_BACK_POS_R;
+    stoneD = smin(stoneD, sdCapsule(legBR, vec3(0,0.5,0), vec3(0,-0.5,0), LEG_BACK_SIZE.x), 0.1);
+
+    // ── Paw ball (under one front paw, asymmetric) ──────────────────────────
+    vec3 ballP = p - PAW_BALL_POS;
+    stoneD = smin(stoneD, sdSphere(ballP, PAW_BALL_RADIUS), 0.05);
+
+    // ── Tail ────────────────────────────────────────────────────────────────
+    vec3 tailP = p - TAIL_POS;
+    tailP.x += sway * TAIL_CURVE * tailP.y;
+    stoneD = smin(stoneD, sdCappedCone(tailP, TAIL_LENGTH, TAIL_RADIUS * 1.2, TAIL_RADIUS * 0.5), 0.1);
+
+    // ── Facial features ─────────────────────────────────────────────────────
+    // Mouth open (subtract)
+    vec3 mouthP = headP - vec3(0.0, -0.2, -0.4);
+    float mouth = sdBox(mouthP, vec3(0.4, 0.15, MOUTH_OPEN_DEPTH));
+    stoneD = max(stoneD, -mouth); // Carve out
+
+    // Eyes (protruding)
+    vec3 eyeLP = p - EYE_POS_L;
+    stoneD = smin(stoneD, sdEllipsoid(eyeLP, EYE_SIZE), 0.05);
+
+    vec3 eyeRP = p - EYE_POS_R;
+    stoneD = smin(stoneD, sdEllipsoid(eyeRP, EYE_SIZE), 0.05);
+
+    // ── Eroded / weathered details ──────────────────────────────────────────
+    float erosion = noise3(p * EROSION_FREQ + vec3(0.0, pc.totalTime * EROSION_SPEED, 0.0)) * EROSION_AMP;
+    stoneD += erosion;
+
+    // ── Wide stoop / pedestal base ──────────────────────────────────────────
+    vec3 stoopP = p - vec3(0.0, STOOP_HEIGHT / 2.0 + wobble * 0.04, 0.0);
+    float stoopD = sdBox(stoopP, vec3(STOOP_WIDTH / 2.0, STOOP_HEIGHT / 2.0, STOOP_WIDTH / 2.0));
+    stoneD = min(stoneD, stoopD);
+
+    // ── Final union ─────────────────────────────────────────────────────────
+    Hit res;
+    res.d = stoneD;
+    res.mat = MAT_STONE;
+
+    res.d *= GLOBAL_SCALE;
+    return res;
+}
+
+// ── Normal ──────────────────────────────────────────────────────────────────
+vec3 getNormal(vec3 p) {
+    vec2 e = vec2(0.0008, 0.0);
+    vec3 n = normalize(vec3(
+        map(p + e.xyy).d - map(p - e.xyy).d,
+        map(p + e.yxy).d - map(p - e.yxy).d,
+        map(p + e.yyx).d - map(p - e.yyx).d
+    ));
+
+    // Subtle stone surface bump
+    float micro = noise3(p * 35.0) * 0.08;
+    n += micro * n;
+    n = normalize(n);
+
+    return n;
+}
+
+// ── Raymarch ────────────────────────────────────────────────────────────────
+float rayMarch(vec3 ro, vec3 rd, out int matID) {
+    float t = 0.0;
+    matID = 0;
+    for (int i = 0; i < 120; i++) {
+        vec3 p = ro + rd * t;
+        Hit hit = map(p);
+        t += hit.d;
+        if (t > 100.0 || abs(hit.d) < 0.0008) {
+            matID = hit.mat;
+            break;
+        }
+    }
+    return t;
+}
+
+// ── Tonemap ─────────────────────────────────────────────────────────────────
+vec3 tonemap(vec3 c) {
+    c = c / (c + 1.0);
+    c = pow(c, vec3(1.0/2.2));
+    return clamp(c * 1.15 - 0.075, 0.0, 1.0);
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
+    uv.x *= float(dim.x) / float(dim.y);
+
+    float camA = pc.totalTime * CAMERA_ORBIT_SPEED;
+    vec3 ro = vec3(sin(camA) * CAMERA_ORBIT_DISTANCE, CAMERA_ORBIT_HEIGHT + sin(pc.totalTime * 0.9) * 0.06, cos(camA) * CAMERA_ORBIT_DISTANCE);
+    vec3 ta = vec3(0.0, 1.5 + CAMERA_LOOK_Y_OFFSET, 0.0);
+    vec3 ww = normalize(ta - ro);
+    vec3 uu = normalize(cross(ww, vec3(0,1,0)));
+    vec3 vv = cross(uu, ww);
+    float fovRad = radians(CAMERA_FOV);
+    vec3 rd = normalize(uv.x * uu + uv.y * vv + (2.0 / tan(fovRad / 2.0)) * ww);
+
+    int matID;
+    float t = rayMarch(ro, rd, matID);
+
+    vec3 col = vec3(0.06, 0.04, 0.14);
+    float sky = 0.5 + 0.5 * uv.y;
+    col = mix(vec3(0.18, 0.12, 0.32), vec3(0.45, 0.32, 0.58), sky);
+    col += vec3(1.0, 0.92, 0.85) * pow(1.0 - length(uv * vec2(1.3, 0.9)), 5.0) * 0.45;
+
+    if (t < 100.0) {
+        vec3 p = ro + rd * t;
+        vec3 n = getNormal(p);
+
+        vec3 light = normalize(vec3(1.2, 1.4, 1.1));
+        float diff = max(0.0, dot(n, light));
+        float rim   = pow(1.0 - max(0.0, dot(n, -rd)), 3.4);
+        float backRim = pow(1.0 - max(0.0, dot(n, rd)), 4.2);
+
+        vec3 albedo = STONE_BASE * (0.92 + noise3(p * 35.0) * STONE_TEXTURE_AMP);
+        float rough = 0.65;
+        float spec  = 0.35;
+
+        vec3 lighting = albedo * (0.25 + 0.9 * diff);
+        lighting += RIM_COLOR * rim * RIM_INTENSITY;
+
+        float sss = max(0.0, 0.6 - diff) * (albedo.r + albedo.g + albedo.b) / 3.0;
+        lighting += STONE_SUBSURFACE * sss * 1.8;
+
+        vec3 h = normalize(light - rd);
+        float specTerm = pow(max(0.0, dot(n, h)), 32.0);
+        lighting += vec3(1.0) * specTerm * spec * rim;
+
+        col = lighting;
+    }
+
+    float vig = 1.0 - dot(uv, uv) * 0.3;
+    col *= vig;
+
+    col = tonemap(col);
+
+    imageStore(outputImage, pix, vec4(col, 1.0));
+}

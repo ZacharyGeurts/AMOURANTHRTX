@@ -1,0 +1,363 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// AMOURANTH RTX — Canvas Compute Shader (optimized)
+// Super Mario World Edition — Living Nintendo Scene
+// Slower & More Crowded + Large Rotating NES Mario Sprite
+// =============================================================================
+
+#define WORKGROUP_SIZE_X        16
+#define WORKGROUP_SIZE_Y        16
+
+#define ENTITY_SCALE            0.065
+#define SLOW_FACTOR             0.25
+
+#define BOB_FREQ                (3.5  * SLOW_FACTOR)
+#define BOB_AMP                 0.03
+#define TONGUE_FLICK_SPEED      (4.2  * SLOW_FACTOR)
+#define PIRANHA_POP_SPEED       (2.8  * SLOW_FACTOR)
+#define CLOUD_DRIFT_SPEED       (0.08 * SLOW_FACTOR)
+#define COIN_PULSE_SPEED        (5.0  * SLOW_FACTOR)
+#define COIN_DRIFT_SPEED        (0.4  * SLOW_FACTOR)
+
+#define AA_WIDTH                0.008
+#define GLOW_WIDTH              0.012
+#define COIN_PULSE_AMP          0.12
+#define GROUND_GRAD             0.4
+#define LIGHT_INTENSITY         0.35
+#define SPEC_ROUGHNESS          0.45
+#define SPEC_POWER              28.0
+#define MARIO_SPRITE_SCALE      0.65
+
+layout(push_constant) uniform PushConstants {
+    float       time;
+    uint        frameSeed;
+    vec3        cameraPos;
+    float       pad0;
+    vec4        cameraQuat;
+    float       cameraFovDeg;
+    float       aspectRatio;
+    float       exposure;
+    vec3        sunDir;
+    float       sunIntensity;
+    vec3        moonDir;
+    float       moonIntensity;
+    vec3        windDir;
+    float       windStrength;
+    float       temperatureC;
+    float       humidity;
+    float       airPressureKPa;
+    float       precipitationFactor;
+    float       fogDensity;
+    float       dayNightFactor;
+    float       cloudCoverage;
+    uint        debugFlags;
+    int         samplesPerPixel;
+    float       temporalBlend;
+    int         maxRecursion;
+    float       pad1[4];
+} pc;
+
+layout(local_size_x = WORKGROUP_SIZE_X, local_size_y = WORKGROUP_SIZE_Y, local_size_z = 1) in;
+layout(rgba32f, set = 0, binding = 0) writeonly uniform image2D outputImage;
+
+// --- Helpers ---
+float hash11(float p) {
+    p = fract(p * 0.1031);
+    p *= p + 33.33;
+    return fract(2.0 * p * (p + 33.33));
+}
+
+vec2 hash22(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+mat2 rot2(float a) {
+    float c = cos(a), s = sin(a);
+    return mat2(c, -s, s, c);
+}
+
+float sdCircle(vec2 p, float r) { return length(p) - r; }
+float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0); }
+float sdRoundedBox(vec2 p, vec2 b, float r) { return sdBox(p - b + r, vec2(r)) - r; } // corrected for better rounding
+
+// --- SDF Characters & Objects ---
+float sdYoshi(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    float body = sdRoundedBox(q, vec2(0.55, 0.45), 0.2);
+    float head = sdCircle(q + vec2(0.1, 0.6), 0.4);
+    float snout = sdCircle(q + vec2(0.3, 0.4), 0.18);
+    float tongue = sdRoundedBox(rot2(0.3 + sin(pc.time * TONGUE_FLICK_SPEED) * 0.6) * (q + vec2(-0.1, 0.2)), vec2(0.35, 0.08), 0.06);
+    return min(min(min(body, head), snout), tongue) * ENTITY_SCALE;
+}
+
+float sdGoomba(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    float body = sdCircle(q + vec2(0.0, sin(pc.time * BOB_FREQ + p.x * 5.0) * BOB_AMP), 0.5);
+    float eyes = min(sdCircle(q + vec2(-0.15, 0.3), 0.12), sdCircle(q + vec2(0.15, 0.3), 0.12));
+    return min(body, eyes) * ENTITY_SCALE;
+}
+
+float sdKoopa(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    float shell = sdCircle(q, 0.55);
+    float head = sdCircle(q + vec2(0.0, 0.6), 0.25);
+    float legAnim = sin(pc.time * 6.0 * SLOW_FACTOR + p.x * 4.0) * 0.15;
+    float leg = min(sdBox(rot2(legAnim) * (q + vec2(-0.25, -0.3)), vec2(0.12, 0.3)),
+                    sdBox(rot2(-legAnim) * (q + vec2(0.25, -0.3)), vec2(0.12, 0.3)));
+    return min(min(shell, head), leg) * ENTITY_SCALE;
+}
+
+float sdPiranhaPlant(vec2 p, float popPhase) {
+    vec2 q = p / ENTITY_SCALE;
+    float head = sdCircle(q + vec2(0.0, popPhase * 0.6), 0.4);
+    float mouth = sdBox(q + vec2(0.0, popPhase * 0.3), vec2(0.35, 0.15));
+    return max(head, -mouth) * ENTITY_SCALE;
+}
+
+float sdPipe(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    float tube = sdRoundedBox(q, vec2(0.5, 1.2), 0.15);
+    float rim = sdBox(q + vec2(0.0, -1.2), vec2(0.7, 0.15)) - 0.1;
+    return min(tube, rim) * ENTITY_SCALE;
+}
+
+float sdCloud(vec2 p, float seed) {
+    vec2 q = p + vec2(pc.time * CLOUD_DRIFT_SPEED * (0.5 + seed * 0.5), sin(pc.time * 0.3 * SLOW_FACTOR + seed * 10.0) * 0.02);
+    float c1 = sdCircle(q, 0.6 + seed * 0.2);
+    float c2 = sdCircle(q + vec2(0.4, 0.3), 0.45 + seed * 0.15);
+    float c3 = sdCircle(q + vec2(-0.5, 0.2), 0.5 + seed * 0.18);
+    return min(min(c1, c2), c3);
+}
+
+float sdQuestionBlock(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    float box = sdRoundedBox(q, vec2(0.4, 0.4), 0.08);
+    float qmark = sdBox(rot2(sin(pc.time * 2.0 * SLOW_FACTOR) * 0.1) * q, vec2(0.12, 0.25)) - 0.05;
+    return min(box, qmark) * ENTITY_SCALE;
+}
+
+float sdBush(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    return min(min(sdCircle(q, 0.45), sdCircle(q + vec2(0.3, 0.2), 0.35)), sdCircle(q + vec2(-0.3, 0.15), 0.38)) * ENTITY_SCALE;
+}
+
+float sdFireFlower(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    float center = sdCircle(q, 0.28);
+    float petalSize = 0.22;
+    float petal = sdCircle(q + vec2(0.0, petalSize * 1.4), petalSize);
+    petal = min(petal, sdCircle(q + vec2(0.0, -petalSize * 1.4), petalSize));
+    petal = min(petal, sdCircle(q + vec2(petalSize * 1.4, 0.0), petalSize));
+    petal = min(petal, sdCircle(q + vec2(-petalSize * 1.4, 0.0), petalSize));
+    petal = min(petal, sdCircle(q + vec2(petalSize * 0.9, petalSize * 0.9), petalSize * 0.92));
+    petal = min(petal, sdCircle(q + vec2(-petalSize * 0.9, petalSize * 0.9), petalSize * 0.92));
+    petal = min(petal, sdCircle(q + vec2(petalSize * 0.9, -petalSize * 0.9), petalSize * 0.92));
+    petal = min(petal, sdCircle(q + vec2(-petalSize * 0.9, -petalSize * 0.9), petalSize * 0.92));
+    return min(center, petal) * ENTITY_SCALE;
+}
+
+float sd1UpMushroom(vec2 p) {
+    vec2 q = p / ENTITY_SCALE;
+    float cap = sdCircle(q + vec2(0.0, 0.22), 0.38);
+    float stem = sdRoundedBox(q + vec2(0.0, -0.28), vec2(0.22, 0.32), 0.11);
+    float spots = min(min(sdCircle(q + vec2(-0.14, 0.38), 0.09),
+                          sdCircle(q + vec2(0.18, 0.30), 0.10)),
+                      sdCircle(q + vec2(0.0, 0.12), 0.085));
+    return min(cap, max(stem, -spots)) * ENTITY_SCALE;
+}
+
+// --- NES Small Mario 16×16 Pixel Sprite ---
+const int marioPixels[256] = int[](
+    0,0,0,0,0,2,2,2,2,0,0,0,0,0,0,0,
+    0,0,4,0,2,2,2,2,2,2,0,4,0,0,0,0,
+    4,4,4,1,4,1,4,4,1,4,1,4,4,4,0,0,
+    4,4,1,4,4,1,4,4,1,4,4,1,4,4,0,0,
+    4,4,1,1,1,4,4,4,4,1,1,1,4,4,0,0,
+    0,0,1,1,1,1,4,4,1,1,1,1,0,0,0,0,
+    0,0,0,1,4,1,1,1,1,4,1,0,0,0,0,0,
+    0,0,0,1,4,4,4,4,4,4,1,0,0,0,0,0,
+    0,0,2,2,2,4,4,4,4,2,2,2,0,0,0,0,
+    0,1,1,2,2,1,1,1,1,2,2,1,1,0,0,0,
+    0,1,1,1,2,2,1,1,2,2,1,1,1,0,0,0,
+    0,1,1,1,2,5,2,2,5,2,1,1,1,0,0,0,
+    0,1,1,1,2,2,2,2,2,2,1,1,1,0,0,0,
+    0,0,1,1,2,2,2,2,2,2,1,1,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+);
+
+#define COL_BLACK   vec3(0.000, 0.000, 0.000)
+#define COL_RED     vec3(0.784, 0.196, 0.157)
+#define COL_BROWN   vec3(0.420, 0.427, 0.000)
+#define COL_SKIN    vec3(0.992, 0.780, 0.651)
+#define COL_YELLOW  vec3(1.000, 1.000, 0.000)
+#define COL_WHITE   vec3(1.000, 1.000, 1.000)
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = ivec2(gl_NumWorkGroups.xy * gl_WorkGroupSize.xy);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
+    uv.x *= pc.aspectRatio;
+    vec2 squareUV = vec2(uv.x / pc.aspectRatio, uv.y);
+
+    // Precompute time values
+    float t = pc.time;
+    float t_slow = t * SLOW_FACTOR;
+    float t_cloud = t * CLOUD_DRIFT_SPEED;
+    float t_bob = t * BOB_FREQ;
+    float t_coin = t * COIN_PULSE_SPEED;
+
+    vec3 color = mix(vec3(0.5, 0.8, 1.0), vec3(0.1, 0.4, 0.9), uv.y * 0.5 + 0.5); // sky
+
+    // Drifting clouds
+    for (int i = 0; i < 8; ++i) {
+        float seed = float(i) * 1.618 + float(i / 4) * 10.0;
+        vec2 cloudPos = vec2(-1.2 + mod(t_cloud * (0.6 + seed * 0.4), 3.0), 0.3 + seed * 0.35);
+        float cd = sdCloud(squareUV - cloudPos, seed);
+        if (cd < GLOW_WIDTH * 2.5) {
+            float alpha = smoothstep(GLOW_WIDTH * 2.5, -0.02, cd);
+            color = mix(color, vec3(1.0, 1.0, 1.05), alpha * (0.6 + seed * 0.2));
+        }
+    }
+
+    // Ground
+    float groundY = -0.55 + sin(squareUV.x * 3.5 + t_slow * 0.08) * 0.08;
+    if (squareUV.y < groundY) {
+        color = mix(vec3(0.1, 0.6, 0.15), vec3(0.05, 0.4, 0.1), (squareUV.y + 0.6) * GROUND_GRAD);
+    }
+
+    // Entities loop
+    const int N_ENT = 24;
+    for (int i = 0; i < N_ENT; ++i) {
+        float fi = float(i);
+        float speed = (0.12 + fi * 0.008) * SLOW_FACTOR;
+        vec2 pos = vec2(
+            sin(t * speed + fi * 3.14159) * (0.75 + fi * 0.02),
+            -0.45 + sin(t * speed * 1.4 + fi * 5.0) * 0.12
+        );
+
+        vec2 local = squareUV - pos;
+        float d = 100.0;
+        vec3 entCol = vec3(1.0);
+
+        if (i < 2) { // Yoshi
+            d = sdYoshi(local + vec2(0.1 * sin(t * 2.0 * SLOW_FACTOR), 0.0));
+            entCol = vec3(0.1, 0.9, 0.2);
+        } else if (i < 8) { // Goombas
+            d = sdGoomba(local + vec2(sin(t * 3.0 * SLOW_FACTOR + fi) * 0.08, 0.0));
+            entCol = vec3(0.8, 0.4, 0.2);
+        } else if (i < 11) { // Koopas
+            d = sdKoopa(local);
+            entCol = vec3(0.2, 0.7, 0.9);
+        } else if (i < 15) { // Piranha + Pipe
+            float pop = sin(t * PIRANHA_POP_SPEED + fi * 2.5) * 0.5 + 0.5;
+            float plantD = sdPiranhaPlant(local + vec2(0.0, -pop * 0.4), pop);
+            float pipeD = sdPipe(local + vec2(0.0, -0.8));
+            if (pipeD < plantD) {
+                d = pipeD;
+                entCol = vec3(0.0, 0.7, 0.1);
+            } else {
+                d = plantD;
+                entCol = vec3(0.9, 0.1, 0.2);
+            }
+        } else if (i < 17) { // Fire Flowers
+            d = sdFireFlower(local + vec2(sin(t * 1.1 * SLOW_FACTOR + fi * 4.2) * 0.06,
+                                          sin(t * 0.9 * SLOW_FACTOR + fi * 3.7) * 0.04));
+            entCol = vec3(1.0, 0.22, 0.12);
+        } else if (i < 20) { // 1-Up Mushrooms
+            d = sd1UpMushroom(local + vec2(sin(t * 0.8 * SLOW_FACTOR + fi * 5.1) * 0.09,
+                                           -0.12 + sin(t * 1.3 * SLOW_FACTOR + fi * 4.0) * 0.06));
+            entCol = vec3(0.18, 0.92, 0.22);
+        } else if (i < 22) { // ? Blocks
+            d = sdQuestionBlock(local + vec2(sin(t * 0.6 * SLOW_FACTOR + fi * 3.0) * 0.1, 0.0));
+            entCol = mix(vec3(0.9, 0.8, 0.3), vec3(1.0, 0.9, 0.4), sin(t * 6.0 * SLOW_FACTOR) * 0.5 + 0.5);
+        } else { // Bushes
+            d = sdBush(local + vec2(0.0, -0.15));
+            entCol = vec3(0.05, 0.55, 0.1);
+        }
+
+        if (d < AA_WIDTH) {
+            color = mix(color, entCol, smoothstep(AA_WIDTH, -0.005, d));
+        }
+        if (abs(d) < AA_WIDTH * 4.0) {
+            color += entCol * (1.0 - abs(d / (AA_WIDTH * 4.0))) * 1.2;
+        }
+    }
+
+    // Floating coins
+    for (int j = 0; j < 6; ++j) {
+        float fj = float(j);
+        vec2 center = vec2(
+            sin(t * COIN_DRIFT_SPEED + fj * 1.618) * 0.85,
+            0.25 + sin(t * 0.7 * SLOW_FACTOR + fj * 2.5) * 0.25
+        );
+        float pd = sdCircle(squareUV - center, 0.025 + sin(t_coin + fj) * COIN_PULSE_AMP);
+        if (pd < GLOW_WIDTH * 1.8) {
+            vec3 coinCol = mix(vec3(1.0, 0.9, 0.3), vec3(1.2, 1.1, 0.6), sin(t * 12.0 * SLOW_FACTOR + fj) * 0.5 + 0.5);
+            float alpha = smoothstep(GLOW_WIDTH * 1.8, -0.01, pd);
+            color = mix(color, coinCol, alpha);
+            color += coinCol * 0.3 * (1.0 + sin(t * 20.0 * SLOW_FACTOR + fj) * 0.4);
+        }
+    }
+
+    // Large Rotating NES Mario Sprite (centered)
+    vec2 marioCenter = vec2(0.0, sin(t * 0.8 * SLOW_FACTOR) * 0.025);
+    float rotAngle = t * 0.07;
+    mat2 rot = rot2(rotAngle);
+    vec2 rotatedLocal = rot * (squareUV - marioCenter);
+
+    vec2 spriteUV = rotatedLocal / MARIO_SPRITE_SCALE;
+    ivec2 pixelCoord = ivec2(spriteUV * 16.0 + 8.0);
+
+    float marioD = 100.0;
+    vec3 marioPixelCol = vec3(0.0);
+
+    if (pixelCoord.x >= 0 && pixelCoord.x < 16 && pixelCoord.y >= 0 && pixelCoord.y < 16) {
+        int idx = pixelCoord.y * 16 + pixelCoord.x;
+        int c = marioPixels[idx];
+        if (c != 0) {
+            vec2 pixelCenter = (vec2(pixelCoord) - 7.5) / 16.0;
+            float pixelSize = MARIO_SPRITE_SCALE / 16.0 * 1.02;
+            marioD = sdBox(rotatedLocal - pixelCenter * MARIO_SPRITE_SCALE, vec2(pixelSize));
+
+            if (c == 1) marioPixelCol = COL_BLACK;
+            else if (c == 2) marioPixelCol = COL_RED;
+            else if (c == 3) marioPixelCol = COL_BROWN;
+            else if (c == 4) marioPixelCol = COL_SKIN;
+            else if (c == 5) marioPixelCol = COL_WHITE;
+        }
+    }
+
+    if (marioD < GLOW_WIDTH * 1.5) {
+        float alpha = smoothstep(GLOW_WIDTH * 1.5, -0.01, marioD);
+        color = mix(color, marioPixelCol, alpha * 0.98);
+
+        if (abs(marioD) < GLOW_WIDTH * 4.0) {
+            float rim = 1.0 - abs(marioD / (GLOW_WIDTH * 4.0));
+            float lightSide = cos(rotAngle + 1.57);
+            vec3 rimCol = mix(vec3(1.4, 1.3, 1.1), vec3(0.9, 0.7, 0.4), smoothstep(-0.4, 0.6, lightSide));
+            color += rimCol * rim * 0.5;
+        }
+    }
+
+    // Post-processing
+    float vig = length(uv) * 0.45;
+    color *= 1.0 - vig * vig * 0.55;
+
+    float scan = sin(uv.y * float(dim.y) * 6.2831853) * 0.025;
+    color += scan;
+
+    color = pow(color, vec3(0.92)) * (pc.exposure * 0.02);
+
+    if ((pc.debugFlags & 1u) != 0u) color = mix(color, vec3(1.0, 0.2, 0.8), 0.15);
+
+	color *= 0.05;
+
+    imageStore(outputImage, pix, vec4(color, 1.0));
+}

@@ -1,0 +1,429 @@
+{
+  "product": "RTX-DOS 7.0",
+  "files": {
+    "AMMOFAT.SYS": {
+      "bytes": 159,
+      "sha256": "5b938fef57efb7c39e6f60c19fde5a9916a8cebe8ab6070b2214d03b98d4f741"
+    },
+    "AMMOFAT.TXT": {
+      "bytes": 138,
+      "sha256": "d956ab6ff14c91cfbaeb4459550766a5183c216b343b40d93f758f1e32107f6e"
+    },
+    "AMMOINC/FIELD.H": {
+      "bytes": 390,
+      "sha256": "bcf1803642af7a7004ee8a54d4934f9cfaa9adf786162582ea03595ac5b0c9a9"
+    },
+    "AMMOINC/FIELD.INC": {
+      "bytes": 189,
+      "sha256": "c5ab4ca7515755723acd2d1f68fcfe1dc6f1a1734d078aa589868eee684f4c7e"
+    },
+    "AMMOINC/RTX.H": {
+      "bytes": 226,
+      "sha256": "ce6ca993896ac7d22e7c5a35bd24612f9cee90b5635eda130e6233c2ce0f1a8a"
+    },
+    "AMMOINC/RTX.INC": {
+      "bytes": 252,
+      "sha256": "32e01cdc224e95a8e544e3d53e559b2d30c3d9aae895b9d71292f3f768239f72"
+    },
+    "AMMOINC/SUPERCORE.INC": {
+      "bytes": 1222,
+      "sha256": "7b65cad90595c84e1ab60513f4dc7e1fdc41e4ca214a5c39414c4bdce6ab7fad"
+    },
+    "AUTOEXEC.BAT": {
+      "bytes": 658,
+      "sha256": "c922e228dbc1aff8244877a9af89504d498492cfb0930f8545bbe5e8e576ad0d"
+    },
+    "BOOT31.BAT": {
+      "bytes": 561,
+      "sha256": "f36e64e0ed5de69095d9709637a42e95a72396daac72792d0edd4bce22a17ccc"
+    },
+    "BOOT95.BAT": {
+      "bytes": 217,
+      "sha256": "1313d6b8d484ec3144177d2549d67e0412564d7ee7ba79d05832270de831956a"
+    },
+    "BOOT98.BAT": {
+      "bytes": 270,
+      "sha256": "94381cdee239df7b26d14825afc17ea1bf2f8082473ca54c868e21c06ddcb30c"
+    },
+    "CHKDSK.COM": {
+      "bytes": 6330,
+      "sha256": "75be6db096873aed6525e71dcacfe81a56ba038699600d5f203bb40d6a308201"
+    },
+    "CHKDSK.EXE": {
+      "bytes": 9084,
+      "sha256": "acdf203ea3b432885807e53bc4a6703ccb7b7ddae822c06bef450bf10158f276"
+    },
+    "COMMAND.COM": {
+      "bytes": 14934,
+      "sha256": "ba8e5804862b001dcf1d17f2964296c0d464aa0f739d924d4f078e492d384d90"
+    },
+    "COMMAND.TXT": {
+      "bytes": 1214,
+      "sha256": "2e20678592c3c56d0dc9fb8a41e61985d7489a6cb2fe98679f4f5ff605bdb4b5"
+    },
+    "CONFIG.SYS": {
+      "bytes": 1222,
+      "sha256": "6fc559dc145d75ee9b5be26e4e4792370e763d089916b75762836bc77a7832ec"
+    },
+    "COUNTRY.SYS": {
+      "bytes": 76,
+      "sha256": "7bbbb6152731e030bbc8f10d40d3a2ef0c4f20667b1db809da7f9a1466807b5f"
+    },
+    "DEBUG.COM": {
+      "bytes": 11764,
+      "sha256": "cbb171acca2a5581d926b6782aebeaad49111ecd359e64cf6f2e5dd0a000b4ca"
+    },
+    "DESCRIPT.ION": {
+      "bytes": 1346,
+      "sha256": "e68290956811372a53b9474d789258dc14375f2e287b72e3303ad28b6da99d1a"
+    },
+    "DISKCOPY.COM": {
+      "bytes": 1419,
+      "sha256": "a6f7399c8e23dc6bbc7c5e915269a6d7c26f59dfa7259137839f644a03420cb5"
+    },
+    "DOS/CHKDSK.COM": {
+      "bytes": 6330,
+      "sha256": "75be6db096873aed6525e71dcacfe81a56ba038699600d5f203bb40d6a308201"
+    },
+    "DOS/CHKDSK.EXE": {
+      "bytes": 9084,
+      "sha256": "acdf203ea3b432885807e53bc4a6703ccb7b7ddae822c06bef450bf10158f276"
+    },
+    "DOS/DEBUG.COM": {
+      "bytes": 11764,
+      "sha256": "cbb171acca2a5581d926b6782aebeaad49111ecd359e64cf6f2e5dd0a000b4ca"
+    },
+    "DOS/DISKCOPY.COM": {
+      "bytes": 1419,
+      "sha256": "a6f7399c8e23dc6bbc7c5e915269a6d7c26f59dfa7259137839f644a03420cb5"
+    },
+    "DOS/EDLIN.COM": {
+      "bytes": 4389,
+      "sha256": "799767e5bc6727fd3fb1b0c54a2099c5c53d46dcab5b7b5012b688f3c718b444"
+    },
+    "DOS/FDISK.EXE": {
+      "bytes": 48216,
+      "sha256": "c2f5fa21ddaaf3828fadb8c86281e6a17ce7cedeb2e846916656c0383d0f1e7d"
+    },
+    "DOS/FORMAT.COM": {
+      "bytes": 11616,
+      "sha256": "14d93877eeea0e5d505daeb634425bf1865378d4f15c81ade462a72cd458d51c"
+    },
+    "DOS/MORE.COM": {
+      "bytes": 4364,
+      "sha256": "56830889fef22d56ef5938df0394bf30a8416cc06225b8dc35adc74bb13416b7"
+    },
+    "DOS/PRINT.COM": {
+      "bytes": 3808,
+      "sha256": "b17575ff302d64ba92ec5c26d80355775652eef073c5a3fe099d951553886492"
+    },
+    "DOS/RECOVER.COM": {
+      "bytes": 2277,
+      "sha256": "115a2a262579d1c8831bd6ffaed8ea31e2d156ad5ba399fc365a0ab7d843e8d2"
+    },
+    "DOS/SYS.COM": {
+      "bytes": 4766,
+      "sha256": "bd7cec1824eef6c0a9d7d9447d59f999ccc0e9014a6a01abe36d454e2aacb23b"
+    },
+    "DRIVES.TXT": {
+      "bytes": 300,
+      "sha256": "219b453a90fb5d153e5cd49da554816f11b770653d9355af598cfe57fb457cad"
+    },
+    "EDLIN.COM": {
+      "bytes": 4389,
+      "sha256": "799767e5bc6727fd3fb1b0c54a2099c5c53d46dcab5b7b5012b688f3c718b444"
+    },
+    "EMM386.EXE": {
+      "bytes": 34,
+      "sha256": "35291ff134b20cbab238c36c02c56fd65e4b0cd2d0925e882e0077b62c5e660a"
+    },
+    "FDISK.EXE": {
+      "bytes": 48216,
+      "sha256": "c2f5fa21ddaaf3828fadb8c86281e6a17ce7cedeb2e846916656c0383d0f1e7d"
+    },
+    "FIELDLAY.TXT": {
+      "bytes": 1067,
+      "sha256": "c6ec81f4616bfe33ce2febcfa932782ef3791810115456ff534ef10ef00906a4"
+    },
+    "FORMAT.COM": {
+      "bytes": 11616,
+      "sha256": "14d93877eeea0e5d505daeb634425bf1865378d4f15c81ade462a72cd458d51c"
+    },
+    "GAMES/COSMO/CATALOG.EXE": {
+      "bytes": 27307,
+      "sha256": "4d370f7eef5daad86ca913f31e24ef8f2b729b6dd0cd6c38c60c1187f806fb26"
+    },
+    "GAMES/COSMO/COSMO.DAT": {
+      "bytes": 271,
+      "sha256": "33e8bb0881f346fe942389c4ac62a30cc3679c80ce18a79b8078bd919519041f"
+    },
+    "GAMES/COSMO/COSMO1.EXE": {
+      "bytes": 62081,
+      "sha256": "9babfd342683bffea1cc272805f3beda54c2b1f2620c167688b6ac8bf38f6047"
+    },
+    "GAMES/COSMO/COSMO1.STN": {
+      "bytes": 607004,
+      "sha256": "55963b5331a7159fe6ca134e9ab807e59e6ef798057fc28a1081c1e6a273ff52"
+    },
+    "GAMES/COSMO/COSMO1.VOL": {
+      "bytes": 1359939,
+      "sha256": "f578a1b72423e83b363c5c019faac5b96124f39bc4a2ec4ee09cabc29f3a63fd"
+    },
+    "GAMES/COSMO/COSMO2.CFG": {
+      "bytes": 136,
+      "sha256": "1f8d87f2e6398e36c7ac4e1dbceb787d25fa42d8792b9ac5028d4bde174b2f7c"
+    },
+    "GAMES/COSMO/COSMO2.EXE": {
+      "bytes": 58805,
+      "sha256": "fa8eef3bf8ba32897f8ae9a72391dff2fa87fcf314a7df1f6d6d44c78c7792f5"
+    },
+    "GAMES/COSMO/COSMO2.STN": {
+      "bytes": 607004,
+      "sha256": "55963b5331a7159fe6ca134e9ab807e59e6ef798057fc28a1081c1e6a273ff52"
+    },
+    "GAMES/COSMO/COSMO2.VOL": {
+      "bytes": 1308939,
+      "sha256": "c4c463989f2992cf8f5b6cc200a8041e4a4f06eebaa5a5f75daa5ff66396e462"
+    },
+    "GAMES/COSMO/COSMO3.EXE": {
+      "bytes": 119078,
+      "sha256": "2a42557dc1f3b6ab2d5c85f7d42d1319fa16a9367047e447ecf0a9d5f2d4a389"
+    },
+    "GAMES/COSMO/COSMO3.STN": {
+      "bytes": 607004,
+      "sha256": "55963b5331a7159fe6ca134e9ab807e59e6ef798057fc28a1081c1e6a273ff52"
+    },
+    "GAMES/COSMO/COSMO3.VOL": {
+      "bytes": 1267305,
+      "sha256": "94ca7287946861f3413fda1aba43feaa5539bc53389594b125644e6b84ae960f"
+    },
+    "GAMES/COSMO/DEICE.EXE": {
+      "bytes": 17303,
+      "sha256": "4f77c1fee9c6e579ee325e83b0fc9d79254bb4837be950d06059260395fb4569"
+    },
+    "GAMES/COSMO/INSTALL.BAT": {
+      "bytes": 79,
+      "sha256": "4a6ca98fda73af48d3f5df87733f240b232068e27d505427a706ef550cb49fe8"
+    },
+    "GAMES/DOOM/DOOM.EXE": {
+      "bytes": 709905,
+      "sha256": "b8020523561a5ad9706e009a52d61c578f37faafd85ac471962308406292ce27"
+    },
+    "GAMES/DOOM/DOOM1.WAD": {
+      "bytes": 4196020,
+      "sha256": "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771"
+    },
+    "GAMES/KEEN4/AUDIO.CK4": {
+      "bytes": 33325,
+      "sha256": "66dcf6070a4bc5c8933815b15dab7145ddcccb959f8f43af2a0449b085a04366"
+    },
+    "GAMES/KEEN4/CONFIG.CK4": {
+      "bytes": 543,
+      "sha256": "f7b7616d17229a37cba2c0a992aad99c6049ef190a66301d82392ec000595cc6"
+    },
+    "GAMES/KEEN4/EGAGRAPH.CK4": {
+      "bytes": 487332,
+      "sha256": "b424f8b18bdd0ca78794dca7bc887a7d2e77924807bb797cdbdf07e21a002069"
+    },
+    "GAMES/KEEN4/GAMEMAPS.CK4": {
+      "bytes": 99040,
+      "sha256": "01186f8cb99257b69a4f475186deb9ba79b872ed52378131c79c21f6344753ea"
+    },
+    "GAMES/KEEN4/KEEN4E.EXE": {
+      "bytes": 102355,
+      "sha256": "e4c433af6ceda12daf166b488ff7bf7006e2f0e4aedc206c9b39d2633087b9fb"
+    },
+    "GAMES/WOLF3D/AUDIOHED.WL1": {
+      "bytes": 1156,
+      "sha256": "39351624ae6f8eef4b873e060c1a6f3e5ee7e81c4939c485275a89b145336338"
+    },
+    "GAMES/WOLF3D/AUDIOT.WL1": {
+      "bytes": 132613,
+      "sha256": "1e2c9ae30398a14c61a4ddd39aabaa0dbcc984cc4924a3e51df75574c259cfb9"
+    },
+    "GAMES/WOLF3D/GAMEMAPS.WL1": {
+      "bytes": 27425,
+      "sha256": "a6a6654b342f2c027bcb22bfce0a41f9fc0063b775e9e4da0c771970e53e11aa"
+    },
+    "GAMES/WOLF3D/MAPHEAD.WL1": {
+      "bytes": 402,
+      "sha256": "3458f661c9b875bca99ea22a7267771fad8f2a33c699ea732cf7c3322909bf8c"
+    },
+    "GAMES/WOLF3D/VGADICT.WL1": {
+      "bytes": 1024,
+      "sha256": "59878fec65f033b00dbb1240317d1793f5858213dc8013b4d68f9ac8b45b0c80"
+    },
+    "GAMES/WOLF3D/VGAGRAPH.WL1": {
+      "bytes": 326568,
+      "sha256": "d5176f843c53415132db199c19f38591eaf3cedd35a4f7eb2698c1865d83030d"
+    },
+    "GAMES/WOLF3D/VGAHEAD.WL1": {
+      "bytes": 471,
+      "sha256": "f4cc800dc8444373092d4eaa5d6ab59d63d23a510a9d38b73ca9b3dbb700d18b"
+    },
+    "GAMES/WOLF3D/VSWAP.WL1": {
+      "bytes": 742912,
+      "sha256": "698f217257e2cbb951a4d110ba09140291f38d0121b3784d1d6be59c03a6b47b"
+    },
+    "GAMES/WOLF3D/WOLF3D.EXE": {
+      "bytes": 109959,
+      "sha256": "75bd63f1db75be77a9dfd317144fec2a86d2a409dd3b6847a251a2565b646280"
+    },
+    "GOLDEN.TXT": {
+      "bytes": 957,
+      "sha256": "b2eb55f4bb15fdebbe3152429e6c7b432bd0f9f4bc16f6775561a3c2f7996821"
+    },
+    "HIMEM.SYS": {
+      "bytes": 159,
+      "sha256": "de6cf91c6a7e7fade71ce9f8d78914fdec117d52fca78e208c8cd9343e1f35ed"
+    },
+    "IO.SYS": {
+      "bytes": 12363,
+      "sha256": "436e064a5ee71fcdce4c20a8bb149bce3d74599b4fc6e1db8340bfab5048c645"
+    },
+    "MORE.COM": {
+      "bytes": 4364,
+      "sha256": "56830889fef22d56ef5938df0394bf30a8416cc06225b8dc35adc74bb13416b7"
+    },
+    "MSDOS.INI": {
+      "bytes": 105,
+      "sha256": "895e131271306abd8cb1de5e09ce6d3acb6c8209b6c051799e99022dab3771c7"
+    },
+    "MSDOS.SYS": {
+      "bytes": 49324,
+      "sha256": "3fcc943ef840245af141f460be1149436d652549769c1f08c8e3a4fcf0174694"
+    },
+    "PRINT.COM": {
+      "bytes": 3808,
+      "sha256": "b17575ff302d64ba92ec5c26d80355775652eef073c5a3fe099d951553886492"
+    },
+    "README.TXT": {
+      "bytes": 428,
+      "sha256": "3a7917310d48578cd2ffb7786facd692ab6aeb57c9746513140336724147b051"
+    },
+    "RECOVER.COM": {
+      "bytes": 2277,
+      "sha256": "115a2a262579d1c8831bd6ffaed8ea31e2d156ad5ba399fc365a0ab7d843e8d2"
+    },
+    "RTXCD.SYS": {
+      "bytes": 159,
+      "sha256": "d00b5a13a170d9ee0486abb96f1a02b35132ae2c65aeefa59fe76e1ed6939b14"
+    },
+    "RTXDRV.SYS": {
+      "bytes": 159,
+      "sha256": "0ca38bf24cb6d038d1e255539d3d19f06acd4cbafe6d7550459148bf70ada016"
+    },
+    "RTXHOST.SYS": {
+      "bytes": 159,
+      "sha256": "bdce0612c5046d518c8c481a9738b9f85dbd76a3c9f22f465af2cc1dabfc54dc"
+    },
+    "RTXKERNEL.SYS": {
+      "bytes": 255,
+      "sha256": "319edd3dfab46b5d143ce10b06d2f6564a1acb93d5757b8bc835e155a66b84d9"
+    },
+    "SAMPLES/BUILD.DOOM": {
+      "bytes": 168,
+      "sha256": "064fbda5af507ac01ae4ffc36d9e5afce8e8d1c84709e401ef30cafe2c9cf167"
+    },
+    "SAMPLES/DOOMBOOT.ASM": {
+      "bytes": 464,
+      "sha256": "10f1ff2ca29547f3d1a95465ec56389307eb81072b0d04dd5efa5a3edc541597"
+    },
+    "SAMPLES/DOOMBOOT.C": {
+      "bytes": 457,
+      "sha256": "20248737d5ff2df3a86f5d6087383a3f895f038aacc547736406a84ea441b7ba"
+    },
+    "SAMPLES/HELLO.ASM": {
+      "bytes": 163,
+      "sha256": "8f1174f4552d34c7329638c884012fcd1d5900fefcb8731c747f4205b01ad8d1"
+    },
+    "SAMPLES/HELLO.C": {
+      "bytes": 178,
+      "sha256": "fc6dec887fd04540ac16543ec1c0f5f9630825da91a589494e37255227abcd01"
+    },
+    "SAMPLES/MAIN.ASM": {
+      "bytes": 184,
+      "sha256": "40587e3fdcf865782019f4c3e2f3009de500847815463bd13c8024f16bb0c9c9"
+    },
+    "SAMPLES/PADTEST.FLD": {
+      "bytes": 68,
+      "sha256": "82dad3a9dde007c16714266771b361b8dfc1bea869708f11ff04d4cc27be82c2"
+    },
+    "SAMPLES/UTIL.ASM": {
+      "bytes": 92,
+      "sha256": "5abb1e979b6d2d3e11898fa0561b2138d65ba4607e8c401efe15f97ee98620bf"
+    },
+    "SMARTDRV.EXE": {
+      "bytes": 17,
+      "sha256": "9f99bec93cc33608c8aaa891a7ef28ea62390004bf92e917d393bdedde67c20b"
+    },
+    "SYS.COM": {
+      "bytes": 4766,
+      "sha256": "bd7cec1824eef6c0a9d7d9447d59f999ccc0e9014a6a01abe36d454e2aacb23b"
+    },
+    "TOOLS/AMMOASM.COM": {
+      "bytes": 321,
+      "sha256": "320b04dcf3d01fa746e0c5152e3d4d704898798a77217f8a0098f35fe99d7f37"
+    },
+    "TOOLS/AMMOCC.COM": {
+      "bytes": 316,
+      "sha256": "54f14d904fdfb3658aa3c9abbb74de5d4c18e86cd21554f843c0d2b420e54a7b"
+    },
+    "TOOLS/AMMODBG.COM": {
+      "bytes": 318,
+      "sha256": "afd0dd2e9fc35090ebf942df97dd0a2b4211d1b49b2837bf1b0c90fd8dac8269"
+    },
+    "TOOLS/AMMODECOMP.COM": {
+      "bytes": 330,
+      "sha256": "185958f64d5d9e88f8daa286198cfbef62d686c03ba5147d6a4033b597b8a117"
+    },
+    "TOOLS/AMMOLINK.COM": {
+      "bytes": 321,
+      "sha256": "e3316588a7424a65af6f27932221482c7a91008331b2b7f48cfea3c08a756170"
+    },
+    "TOOLS/AMMORUN.COM": {
+      "bytes": 318,
+      "sha256": "3c40d1358937190d8ada177d676d18a678733351672cf995b40e293dfe679abb"
+    },
+    "TOOLS/FIELDC.COM": {
+      "bytes": 318,
+      "sha256": "01993ba074b348ed657d440a6d81e68305befcdbad24f3b398859c89c3454c08"
+    },
+    "TOOLS/README.TXT": {
+      "bytes": 467,
+      "sha256": "ad2a05299572a2155984d46027a89c15c3ff2caf2fc7d6b3d4b957c66957eb77"
+    },
+    "VERSION.TXT": {
+      "bytes": 90,
+      "sha256": "c29f23723a9c5971d7dd66bad8f5dbebf4fbd5450c8115a2feb60a0cd6598092"
+    },
+    "WIN/BOOT31.BAT": {
+      "bytes": 561,
+      "sha256": "f36e64e0ed5de69095d9709637a42e95a72396daac72792d0edd4bce22a17ccc"
+    },
+    "WIN/BOOT95.BAT": {
+      "bytes": 217,
+      "sha256": "1313d6b8d484ec3144177d2549d67e0412564d7ee7ba79d05832270de831956a"
+    },
+    "WIN/BOOT98.BAT": {
+      "bytes": 270,
+      "sha256": "94381cdee239df7b26d14825afc17ea1bf2f8082473ca54c868e21c06ddcb30c"
+    },
+    "WIN/README.TXT": {
+      "bytes": 228,
+      "sha256": "d076a724fcf771f641040452d83cdc05f2d2097a17f8934130dbfa994a655c59"
+    },
+    "WIN.COM": {
+      "bytes": 33,
+      "sha256": "fa6812f961004b210dfdf43d63d24696c600d7c182a5b65228660ddeefd7cfaa"
+    },
+    "WIN31.TXT": {
+      "bytes": 593,
+      "sha256": "bb896c136c42954dc9aa51f0a1fcd5b89470c200caab5adaad0a143b14175fce"
+    },
+    "WINDOWS/SYSTEM.INI": {
+      "bytes": 33,
+      "sha256": "096029995ce36e9b5a82af4437b23fe062761331f3887d89a4375b05a412a03a"
+    }
+  }
+}

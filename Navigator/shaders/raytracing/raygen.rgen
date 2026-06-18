@@ -1,0 +1,83 @@
+// filename: raygen.rgen
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+layout(location = 0) rayPayloadEXT vec3 hitColor;
+
+// Full descriptor layout (set = 0) bindings 0-10 — EXACT match to host CanvasBindings.
+// Types: storage images for 0/1/8/9/10, storage buffers 2/3/4/5/6 (reserved dummies included),
+// accel for 7. Accountant(2)/fields(8-10) used for thermo tint; reserved 3/5 are minimal valid.
+layout(set = 0, binding = 0, rgba32f) writeonly uniform image2D outputImage;
+layout(set = 0, binding = 1, rgba32f) readonly  uniform image2D prevImage;
+
+layout(set = 0, binding = 2) readonly buffer ThermoAccountant {
+    float entropyThisFrame;
+    float avgBoundaryThermo;
+    float prevMaintCost;
+    float freeEnergyIncome;
+    uint  steps;
+} thermoAccountant;
+
+// Reserved dummies (bindings 3/5) for exact host layout match (STORAGE_BUFFER); unused in RT path.
+layout(set = 0, binding = 3) buffer Reserved3 {
+    float data[];
+} res3;
+
+layout(set = 0, binding = 4) readonly buffer Materials {
+    vec4 colors[];
+} materials;
+
+layout(set = 0, binding = 5) buffer Reserved5 {
+    float data[];
+} res5;
+
+layout(set = 0, binding = 6) buffer AudioCommands {
+    float slotCommand[16];
+    float slotValue[16];
+    float reserved[16];
+} audioCmds;
+
+layout(set = 0, binding = 7) uniform accelerationStructureEXT topLevelAS;
+
+layout(set = 0, binding = 8, rgba32f) uniform image2D fieldPhi;
+layout(set = 0, binding = 9, rgba32f) uniform image2D fieldThermo;
+layout(set = 0, binding = 10, rgba32f) uniform image2D fieldFlow;
+
+void main() {
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    const vec2 uv = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    vec2 d = uv * 2.0 - 1.0;
+    d.x *= (float(gl_LaunchSizeEXT.x) / float(gl_LaunchSizeEXT.y));  // aspect
+
+    vec3 origin    = vec3(0.0, 1.0, 5.0);
+    vec3 direction = normalize(vec3(d.x, -d.y, -1.8));  // simple perspective
+
+    traceRayEXT(
+        topLevelAS,                // acceleration structure (now correctly at binding 7)
+        gl_RayFlagsOpaqueEXT,      // ray flags
+        0xff,                      // cull mask
+        0,                         // sbt raygen offset
+        1,                         // sbt stride (bytes per record)
+        0,                         // miss index
+        origin,
+        0.001,                     // tmin
+        direction,
+        1000.0,                    // tmax
+        0                          // payload location
+    );
+
+    vec3 color = hitColor;
+
+    // Thermo modulation (RT path): accountant (b2) + fieldThermo (b9) for boundary + local pixel heat tint.
+    // (Uses both thermoAccountant and fieldThermo image as in SDF canvas shading/march.)
+    float bThermo = clamp(thermoAccountant.avgBoundaryThermo, 0.0, 1.0);
+    float localHeat = imageLoad(fieldThermo, ivec2(gl_LaunchIDEXT.xy)).r;
+    float heat = clamp(bThermo * 0.7 + localHeat * 0.5, 0.0, 1.2);
+    color = mix(color, color + vec3(0.35, 0.12, 0.04) * heat, 0.3 * heat);
+
+    // very basic tonemap + gamma
+    color = color / (color + 1.0);
+    color = pow(color, vec3(1.0/2.2));
+
+    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(color, 1.0));
+}

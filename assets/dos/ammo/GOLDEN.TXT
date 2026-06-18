@@ -1,0 +1,25 @@
+RTX-AMMOS DOS 7.0 — GOLDEN ERA MAN+MACHINE
+==========================================
+
+Human intent meets silicon on the Vulkan Field Die.
+Zachary Geurts MCSE+I — forever place for retro lovers and future builders.
+
+WHAT YOU HAVE
+  GPU-native x86 shell (no host CPU required for daily DOS)
+  AMMOFAT VFS with DESCRIPT.ION metadata + colorful DIR
+  Deep MZ/PE throttle — old games at perfect speed
+  Drive rack A/C/D/E — floppy, FAT16, MSCDEX, host bridge
+  AmouranthOS desktop — Start menu, Field Commander, AmmoCode IDE
+  DevKit: AMMOASM AMMOCC AMMOLINK AMMODECOMP BUILD AMMORUN AMMODBG
+
+QUICK START
+  HELP          Full command reference
+  COMMAND /?    Detailed help per command
+  DIR /V        Color listing + descriptions + URLs
+  GPU           RTX engine status
+  THROTTLE      Automagic speed control
+  DRIVES        Drive rack summary
+  MOUNT CD      ISO9660 from incoming/cd/
+  AMOURANTHOS   RTX window manager desktop
+
+AMOURANTH FOREVER

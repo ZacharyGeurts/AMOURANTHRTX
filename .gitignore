@@ -1,0 +1,45 @@
+# Build artifacts and temps (cleaned for robustness, Desktop/SG focus)
+build/
+build-release/
+build-windows/
+build-web/
+CMakeCache.txt
+CMakeFiles/
+*.cmake
+compile_commands.json
+.shader_hash_cache
+
+# Python caches (non-disk)
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor junk
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+amouranth_engine.log
+grok_report.pdf
+
+# Runtime data (keep structure, not live journals)
+assets/data/journals/*
+!assets/data/journals/.gitkeep
+
+# DOS images — generated locally by scripts/install_dos.py (MS-DOS MIT, see linux.sh dos)
+assets/dos/rtx_dos_hd.img
+assets/dos/rtx_dos720.img
+assets/dos/msdos-base/
+assets/dos/.install_stamp
+assets/dos/install_manifest.json
+!assets/wads/*.wad
+!demos/*.zip
+!assets/audio/*
+!assets/wallpapers/*
+!assets/textures/*
+!media/*

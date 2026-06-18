@@ -1,0 +1,45 @@
+AmmoText for RTX-DOS 7.0
+==========================
+
+AmmoText is the Golden Era Notepad for AmouranthOS.
+Spellcheck, syntax colors, and RTX themes work across all DOS panels.
+
+FILE MENU
+  New        Clear document
+  Open       Load text from C: AMMOFAT
+  Save       Write current file
+  Save As    Save under a new name
+  Exit       Close AmmoText
+
+EDIT MENU
+  Cut / Copy / Paste   Line clipboard
+  Find / Find Next     Search forward
+  Replace            Find then edit manually
+  Go To Line         Jump to line number
+  Select All         Move to top
+  Time/Date          Insert timestamp at cursor
+
+FORMAT MENU
+  Word Wrap          Toggle soft wrap (display)
+  Spellcheck         Mark unknown words in red
+
+VIEW MENU
+  Status Bar         Line, column, spell status
+  Themes             RTX Aqua, Golden Era, Rose, etc.
+
+HELP MENU
+  Help Topics        This file (C:\AMMOTEXT.HLP)
+  About AmmoText     Version and credits
+
+KEYBOARD
+  F1   Help    F2 Save    F3 Open    F7 Spell
+  F10  Menu    Tab indent    Esc exit
+
+THEMES
+  View-Themes or THEMES command changes colors for
+  AmmoText, Registry Editor, Device Manager, and shell GUIs.
+  Theme choice syncs to the GPU window manager bus.
+
+SPELLCHECK
+  Uses an embedded dictionary plus RTX/DOS terms.
+  Unknown words highlight while Spellcheck is on.

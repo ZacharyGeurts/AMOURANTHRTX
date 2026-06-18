@@ -1,0 +1,144 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D hdrImage;
+
+layout(push_constant) uniform Push {
+    float totalTime;
+} pc;
+
+// ────────────────────────────────────────────────
+//   Timing & Animation
+// ────────────────────────────────────────────────
+#define CYCLE_DURATION      28.0      // longer cycles = more breathing room
+#define PAN_FRACTION        0.22
+#define ZOOM_FRACTION       (1.0 - PAN_FRACTION)
+#define START_ZOOM          3.0
+#define MAX_ZOOM_EXP        26.0      // deeper than before
+#define PRECISION_SAFETY    1.8e-6
+
+#define BASE_ITER           512u
+#define MAX_ITER            8192u     // increased for deep zooms
+#define ESCAPE_RADIUS       256.0     // higher = better distance estimate
+
+// ────────────────────────────────────────────────
+//   Famous + deep Mandelbrot locations
+// ────────────────────────────────────────────────
+const vec2 locations[] = vec2[](
+    vec2(-0.745429,     0.113010),    // Seahorse Valley (classic)
+    vec2(-0.7463,       0.1102),
+    vec2(-0.7746806106269039, 0.12486676606681),
+    vec2(-0.72689,      0.188887),    // Triple spiral
+    vec2(-1.769383,     0.004237),    // Mini-brot on antenna
+    vec2(-1.7685,       0.005),
+    vec2(-1.62917,     -0.0203968),
+    vec2(-1.47711,      0.003322),
+    vec2(-1.4011,       0.0),
+    vec2( 0.33800,     -0.57500),
+    vec2(-0.1568447,    1.032293),
+    vec2(-0.170337,    -1.06506),
+    vec2(-0.803858445641739763560, 0.178068463458909115289)  // deep spiral
+);
+
+const uint NUM_LOCATIONS = locations.length();
+
+vec3 getTint(uint idx) {
+    float h = fract(float(idx) * 0.137 + 0.6180339887);
+    return 0.55 + 0.45 * cos(6.283185 * vec3(h, h + 0.31, h + 0.67));
+}
+
+// ────────────────────────────────────────────────
+//   Smooth Mandelbrot with adaptive iterations
+// ────────────────────────────────────────────────
+vec3 mandelbrot(vec2 c, float zoom) {
+    uint maxIter = uint(clamp(BASE_ITER * (1.0 + log(1.0 / zoom) * 0.8), 
+                              float(BASE_ITER), float(MAX_ITER)));
+
+    vec2 z = vec2(0.0);
+    uint i = 0u;
+
+    for (; i < maxIter; ++i) {
+        float x2 = z.x * z.x;
+        float y2 = z.y * z.y;
+
+        if (x2 + y2 > ESCAPE_RADIUS) {
+            break;
+        }
+
+        z = vec2(x2 - y2, 2.0 * z.x * z.y) + c;
+    }
+
+    if (i == maxIter) {
+        return vec3(0.003, 0.005, 0.012);   // deep black inside set
+    }
+
+    // Smooth coloring (continuous iteration count)
+    float len2 = z.x * z.x + z.y * z.y;
+    float mu = float(i) + 1.0 - log(log(len2)) / log(2.0);
+
+    // Beautiful continuous palette
+    float t = mu * 0.018 + pc.totalTime * 0.07;
+    vec3 col = 0.5 + 0.5 * cos(6.283185 * (vec3(0.0, 0.1, 0.2) + t * vec3(1.0, 1.1, 0.9)));
+
+    col = pow(col, vec3(0.95)) * 1.45;   // slight contrast boost
+
+    return col;
+}
+
+void main() {
+    ivec2 px   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(hdrImage);
+    if (any(greaterThanEqual(px, size))) return;
+
+    vec2 uv = (vec2(px) + 0.5) / vec2(size) * 2.0 - 1.0;
+    uv.x *= float(size.x) / float(size.y);
+
+    float now      = pc.totalTime;
+    float cyclePos = mod(now, CYCLE_DURATION);
+    uint  locIdx   = uint(floor(now / CYCLE_DURATION)) % NUM_LOCATIONS;
+
+    vec2  target   = locations[locIdx];
+    vec3  tint     = getTint(locIdx);
+
+    float phase    = cyclePos / CYCLE_DURATION;
+
+    vec2  center;
+    float zoom;
+
+    if (phase < PAN_FRACTION) {
+        // Smooth pan to new location
+        float t = smoothstep(0.0, 1.0, phase / PAN_FRACTION);
+        center = mix(vec2(0.0), target, t);
+        zoom   = START_ZOOM;
+    } else {
+        // Continuous zoom-in
+        float zPhase = (phase - PAN_FRACTION) / ZOOM_FRACTION;
+        float expZoom = zPhase * MAX_ZOOM_EXP;
+        zoom = START_ZOOM * exp2(-expZoom);
+
+        // Reset before double precision collapses
+        if (zoom < PRECISION_SAFETY) {
+            locIdx = (locIdx + 1u) % NUM_LOCATIONS;
+            center = locations[locIdx];
+            zoom   = START_ZOOM * 1.8;
+        } else {
+            center = target;
+        }
+    }
+
+    vec2 coord = center + uv * zoom;
+
+    vec3 color = mandelbrot(coord, zoom);
+
+    // Location tint + gentle effects
+    color *= mix(vec3(1.0), tint * 1.35, 0.55);
+    color *= 1.0 - length(uv) * 0.18;                    // soft vignette
+    color += 0.028 * sin(now * 0.45 + float(locIdx)) * tint; // subtle breathing
+
+    // Final gamma & exposure
+    color = pow(color, vec3(0.92));
+
+    imageStore(hdrImage, px, vec4(color, 1.0));
+}

@@ -1,0 +1,317 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// PUSH CONSTANT – must be declared here for Vulkan
+layout(push_constant) uniform Push {
+    float time;     // seconds – must be pushed from host via vkCmdPushConstants
+} pc;
+
+// =============================================================================
+// MIA MAKES MUSIC – Piano Keyboard + Orbiting Birthstones
+// Wide piano with keys, floating notes, 12 birthstones circling
+// Floor = northern lights (with tuning defines & reduced brightness)
+// =============================================================================
+
+// ────────────────────────────────────────────────
+// TUNING DEFINES
+// ────────────────────────────────────────────────
+#define GLOBAL_SCALE              5.0
+
+#define PIANO_WIDTH_SCALE         6.0 * GLOBAL_SCALE
+#define PIANO_HEIGHT_SCALE        3.00 * GLOBAL_SCALE
+#define PIANO_SCALE               0.38 * GLOBAL_SCALE
+#define ASPECT_ZOOM               1.45
+
+#define BIRTHSTONE_COUNT          12
+#define ORBIT_RADIUS_BASE         GLOBAL_SCALE
+#define ORBIT_SPEED_BASE          0.015
+#define ORBIT_HEIGHT_AMP          0.6  * GLOBAL_SCALE
+#define BIRTHSTONE_BASE_SIZE      0.12 * GLOBAL_SCALE
+
+#define NOTE_COUNT                4
+#define NOTE_SIZE                 0.04 * GLOBAL_SCALE
+#define NOTE_ORBIT_SPEED          1.2
+#define NOTE_RADIUS_X             0.4  * GLOBAL_SCALE
+#define NOTE_RADIUS_Y             0.3  * GLOBAL_SCALE
+#define NOTE_RADIUS_Z             0.25 * GLOBAL_SCALE
+
+#define ROT_Y_SPEED               1.009
+#define ROT_X_SPEED               1.006
+#define TILT_X_AMP                1.18
+#define TILT_Y_AMP                1.10
+#define PULSE_SPEED               0.8
+#define PULSE_OFFSET              3.14
+
+#define KEYS_VISIBLE_COUNT        7.5
+#define WHITE_RAISE               0.060
+#define BLACK_DROP                -0.040
+#define KEY_BEVEL                 0.035
+#define KEY_EDGE_SOFT             0.04
+
+#define OPAL_BASE                 vec3(0.97, 0.95, 0.99)
+#define BLACK_TINT                vec3(0.18, 0.16, 0.22)
+#define PIANO_IOR                 1.46
+#define THIN_FILM_STR             1.55
+#define FILM_SPEED                1.4
+#define FILM_FREQ                 65.0
+#define SUB_GLOW                  0.45
+#define SPEC_BASE                 90.0
+#define SPEC_SCALE                550.0
+
+#define SCINT_AMP                 0.75
+#define SCINT_SPEED               2.2
+#define SCINT_FREQ                22.0
+#define GEM_NOTE_BOOST            1.5
+
+#define LIGHT_DIR                 normalize(vec3(0.75, 1.0, 1.4))
+#define AMBIENT                   vec3(0.10, 0.11, 0.18)
+#define DIFF_MULT                 2.5
+#define SPEC_MULT                 3.4
+#define BOUNCE_MULT               1.8
+#define FILM_MULT                 1.7
+#define SCINT_MULT                1.2
+#define RIM_VIG                   1.1
+#define SCREEN_VIG                0.55
+#define CHROMA_AB                 0.6
+
+// ────────────────────────────────────────────────
+// Northern Lights tuning defines
+// ────────────────────────────────────────────────
+#define NL_BRIGHTNESS             0.50          // global multiplier – was ~1.0 before, now halved
+#define NL_BASE_DARK              vec3(0.004, 0.008, 0.018)
+#define NL_HORIZON_GLOW_INT       0.50          // reduced from 1.2
+#define NL_RIPPLE_INT             0.08          // reduced from 0.15
+#define NL_BAND1_INT              0.90          // was 0.9
+#define NL_BAND2_INT              0.70          // was 0.7
+#define NL_BAND3_INT              0.55          // was 0.55
+#define NL_GREEN                  vec3(0.02, 0.85, 0.55)
+#define NL_CYAN                   vec3(0.40, 0.95, 0.88)
+#define NL_PURPLE                 vec3(0.75, 0.35, 0.98)
+#define NL_HORIZON_GLOW_COL       vec3(0.12, 0.45, 0.38)
+#define NL_RIPPLE_COL             vec3(0.08, 0.22, 0.35)
+
+// ────────────────────────────────────────────────
+// Birthstone data
+// ────────────────────────────────────────────────
+struct Birthstone {
+    vec3  color;
+    float ior;
+    float dispHint;
+};
+
+Birthstone getBirthstone(int idx) {
+    Birthstone b;
+    if      (idx == 0) { b.color = vec3(0.82,0.08,0.06); b.ior=1.74; b.dispHint=0.022; }
+    else if (idx == 1) { b.color = vec3(0.58,0.22,0.88); b.ior=1.54; b.dispHint=0.013; }
+    else if (idx == 2) { b.color = vec3(0.48,0.82,1.00); b.ior=1.57; b.dispHint=0.014; }
+    else if (idx == 3) { b.color = vec3(1.08,1.08,1.12); b.ior=2.42; b.dispHint=0.044; }
+    else if (idx == 4) { b.color = vec3(0.06,0.62,0.18); b.ior=1.57; b.dispHint=0.014; }
+    else if (idx == 5) { b.color = vec3(0.99,0.97,0.93); b.ior=1.53; b.dispHint=0.0;  }
+    else if (idx == 6) { b.color = vec3(0.90,0.09,0.13); b.ior=1.76; b.dispHint=0.018; }
+    else if (idx == 7) { b.color = vec3(0.72,0.98,0.32); b.ior=1.65; b.dispHint=0.020; }
+    else if (idx == 8) { b.color = vec3(0.08,0.18,0.82); b.ior=1.76; b.dispHint=0.018; }
+    else if (idx == 9) { b.color = vec3(0.94,0.88,0.97); b.ior=1.45; b.dispHint=0.008; }
+    else if (idx ==10) { b.color = vec3(1.00,0.68,0.18); b.ior=1.61; b.dispHint=0.014; }
+    else               { b.color = vec3(0.15,0.72,0.78); b.ior=1.61; b.dispHint=0.0;  }
+    return b;
+}
+
+// ────────────────────────────────────────────────
+// SDFs
+// ────────────────────────────────────────────────
+float sdf_piano(vec3 p) {
+    vec3 q = abs(p);
+    float slab = max(max(q.x - 1.55 * PIANO_WIDTH_SCALE,
+                         q.y - 0.48 * PIANO_HEIGHT_SCALE),
+                     q.z - 0.18);
+
+    float keyPos = p.x * KEYS_VISIBLE_COUNT;
+    float keyId  = floor(keyPos);
+    float frac   = fract(keyPos);
+
+    bool isBlack = (mod(keyId + 0.5, 7.0) > 0.6 && mod(keyId + 0.5, 7.0) < 3.4) ||
+                   (mod(keyId + 0.5, 7.0) > 4.1 && mod(keyId + 0.5, 7.0) < 6.0);
+
+    float h = isBlack ? BLACK_DROP : WHITE_RAISE;
+    float bevel = smoothstep(KEY_EDGE_SOFT, 0.0, min(frac, 1.0 - frac)) * KEY_BEVEL;
+    float key = abs(p.z - h) - 0.12 + bevel;
+
+    return max(slab, key);
+}
+
+float sdf_note(vec3 p, float seed) {
+    float ph = pc.time * NOTE_ORBIT_SPEED + seed * 6.283185;
+    vec3 off = vec3(sin(ph) * NOTE_RADIUS_X,
+                    cos(ph * 1.35 + seed * 1.3) * NOTE_RADIUS_Y,
+                    sin(ph * 0.8 + seed * 2.1) * NOTE_RADIUS_Z);
+    return length(p - off) - NOTE_SIZE;
+}
+
+float sdf_birthstone(vec3 p, int idx) {
+    Birthstone bs = getBirthstone(idx);
+    float r = length(p);
+    float freq = 12.0 + bs.dispHint * 40.0;
+    float ang = atan(p.y, p.x);
+    float pert = sin(ang * freq + pc.time * 2.0 + float(idx) * 1.618) * 0.08;
+    return r - BIRTHSTONE_BASE_SIZE * (1.0 + pert);
+}
+
+// ────────────────────────────────────────────────
+// Northern Lights floor
+// ────────────────────────────────────────────────
+vec3 northernLights(vec2 uv) {
+    vec2 p = uv * 2.0 - 1.0;
+    p.x *= 1.6; // wider horizontal spread
+
+    float t = pc.time * 0.14;
+    vec3 col = NL_BASE_DARK;
+
+    // Main aurora bands
+    float band1 = sin(p.x * 2.2 + t * 1.1 + sin(t * 0.4) * 1.8) * 0.5 + 0.5;
+    band1 *= smoothstep(0.0, 0.7, 1.0 - abs(p.y * 1.4));
+    col += NL_GREEN * band1 * NL_BAND1_INT * NL_BRIGHTNESS * (0.6 + 0.4 * sin(t * 1.7));
+
+    float band2 = sin(p.x * 3.1 - t * 0.9 + cos(t * 0.7) * 2.2) * 0.5 + 0.5;
+    band2 *= smoothstep(0.0, 0.65, 1.0 - abs(p.y * 1.2 + 0.15));
+    col += NL_CYAN * band2 * NL_BAND2_INT * NL_BRIGHTNESS * (0.5 + 0.5 * sin(t * 2.3 + 1.4));
+
+    float band3 = sin(p.x * 4.8 + t * 1.6 + sin(t * 1.1) * 1.5) * 0.5 + 0.5;
+    band3 *= smoothstep(0.0, 0.8, 1.0 - abs(p.y * 1.6 - 0.25));
+    col += NL_PURPLE * band3 * NL_BAND3_INT * NL_BRIGHTNESS * (0.4 + 0.6 * cos(t * 1.9 + 2.8));
+
+    // Soft glow near horizon
+    float glow = smoothstep(0.92, 0.0, abs(p.y + 0.18)) * 0.8;
+    col += NL_HORIZON_GLOW_COL * glow * NL_HORIZON_GLOW_INT * NL_BRIGHTNESS;
+
+    // Subtle moving ripples
+    float ripple = sin(p.x * 18.0 + t * 5.5) * sin(p.y * 22.0 + t * 3.2) * 0.5 + 0.5;
+    col += NL_RIPPLE_COL * ripple * NL_RIPPLE_INT * glow * NL_BRIGHTNESS;
+
+    return col;
+}
+
+// Rotation
+mat3 rotY(float a) { float c=cos(a), s=sin(a); return mat3(c,0,s, 0,1,0, -s,0,c); }
+mat3 rotX(float a) { float c=cos(a), s=sin(a); return mat3(1,0,0, 0,c,-s, 0,s,c); }
+
+// ────────────────────────────────────────────────
+// Main
+// ────────────────────────────────────────────────
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = vec2(pix) / vec2(dim);
+    vec3 color = northernLights(uv);
+
+    vec2 asp = vec2(dim.x / float(dim.y), 1.0);
+    vec2 cen = (uv - 0.5) * asp * ASPECT_ZOOM;
+    vec3 pos = vec3(cen, 0.0);
+
+    float ay = pc.time * ROT_Y_SPEED + 2.718;
+    float ax = sin(pc.time * ROT_X_SPEED + 1.57) * TILT_X_AMP + sin(pc.time * 0.3) * TILT_Y_AMP;
+    mat3 rot  = rotY(ay) * rotX(ax);
+    mat3 irot = transpose(rot);
+
+    vec3 po = rot * pos / PIANO_SCALE;
+
+    // Distances
+    float dp = sdf_piano(po);
+
+    float dn = 1e6;
+    for (float i = 0.0; i < float(NOTE_COUNT); ++i) {
+        dn = min(dn, sdf_note(po * 1.8, i * 6.283185));
+    }
+
+    float dg = 1e6;
+    for (int i = 0; i < BIRTHSTONE_COUNT; ++i) {
+        float ang = pc.time * (ORBIT_SPEED_BASE + float(i) * 0.004) + float(i) * 0.5236;
+        float rad = ORBIT_RADIUS_BASE + sin(pc.time * 0.2 + float(i)) * 0.3;
+        float ht  = sin(pc.time * 0.15 + float(i) * 1.2) * ORBIT_HEIGHT_AMP;
+        vec3 off  = vec3(cos(ang) * rad, ht, sin(ang) * rad);
+        dg = min(dg, sdf_birthstone(po - off, i));
+    }
+
+    float d = min(dp, min(dn, dg));
+
+    if (d < 0.038 * GLOBAL_SCALE) {
+        vec3 eps = vec3(0.012 * GLOBAL_SCALE, 0.0, 0.012 * GLOBAL_SCALE);
+
+        vec3 n = normalize(vec3(
+            sdf_piano(po + eps.xyy) - sdf_piano(po - eps.xyy),
+            sdf_piano(po + eps.yxy) - sdf_piano(po - eps.yxy),
+            sdf_piano(po + eps.yyx) - sdf_piano(po - eps.yyx)
+        ) + vec3(1e-6));
+
+        vec3 V = normalize(irot * vec3(0,0,-1));
+        vec3 L = normalize(irot * LIGHT_DIR);
+        vec3 H = normalize(L + V);
+
+        float NoV = max(0.0, dot(n, V));
+        float NoL = max(0.0, dot(n, L));
+        float NoH = max(0.0, dot(n, H));
+
+        float F0  = pow((1.0 - PIANO_IOR) / (1.0 + PIANO_IOR), 2.0);
+        float fres = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0);
+
+        // Key material
+        float kp = po.x * KEYS_VISIBLE_COUNT;
+        bool bk = (mod(floor(kp + 0.5) + 0.5, 7.0) > 0.6 && mod(floor(kp + 0.5) + 0.5, 7.0) < 3.4) ||
+                  (mod(floor(kp + 0.5) + 0.5, 7.0) > 4.1 && mod(floor(kp + 0.5) + 0.5, 7.0) < 6.0);
+        vec3 base = bk ? BLACK_TINT : OPAL_BASE;
+        float pul = 0.5 + 0.5 * sin(pc.time * PULSE_SPEED + kp * PULSE_OFFSET);
+        vec3 tint = base * (1.0 + (bk ? 0.0 : SUB_GLOW * pul));
+
+        vec3 diff  = tint * (NoL * 0.0004 + AMBIENT * 1.65);
+        float spow = SPEC_BASE + SPEC_SCALE * fres;
+        float spec = pow(NoH, spow) * fres * SPEC_MULT;
+
+        float intr = pow(max(0.0, dot(-L, n)), 2.8) * 1.0;
+        vec3 bnc   = tint * intr * BOUNCE_MULT * (0.65 + fres);
+
+        float fp = length(cen) * FILM_FREQ + pc.time * FILM_SPEED + po.x * 12.0 + po.y * 8.0;
+        float f  = sin(fp) * 0.5 + 0.5;
+        vec3 playCol = 0.5 + 0.5 * cos(pc.time * 0.9 + vec3(0.1,2.3,4.4) + f * 6.283185 * 1.2);
+        vec3 film = playCol * THIN_FILM_STR * fres * (1.2 + NoV * 1.5);
+
+        float sc = pow(0.5 + 0.5 * sin(pc.time * SCINT_SPEED + length(cen) * SCINT_FREQ + po.z * 10.0), 4.0);
+        sc *= SCINT_AMP * fres * (1.0 + (d < 0.02 * GLOBAL_SCALE ? GEM_NOTE_BOOST : 0.0));
+
+        // Birthstone extra fire
+        vec3 extra = vec3(0.0);
+        if (dg < dp && dg < dn) {
+            int ci = 0; float md = 1e6;
+            for (int j = 0; j < BIRTHSTONE_COUNT; ++j) {
+                float angj = pc.time * (ORBIT_SPEED_BASE + float(j)*0.004) + float(j)*0.5236;
+                float radj = ORBIT_RADIUS_BASE + sin(pc.time*0.2 + float(j))*0.3;
+                float htj  = sin(pc.time*0.15 + float(j)*1.2) * ORBIT_HEIGHT_AMP;
+                vec3 offj  = vec3(cos(angj)*radj, htj, sin(angj)*radj);
+                float dj   = length(po - offj);
+                if (dj < md) { md = dj; ci = j; }
+            }
+            Birthstone bs = getBirthstone(ci);
+            extra = bs.color * sc * bs.dispHint * 3.0;
+        }
+
+        color += diff  * DIFF_MULT;
+        color += vec3(spec) * SPEC_MULT;
+        color += bnc   * BOUNCE_MULT;
+        color += film  * FILM_MULT;
+        color += tint  * sc * SCINT_MULT;
+        color += extra;
+
+        color += vec3(0.03, -0.015, -0.025) * fres * CHROMA_AB;
+
+        float vig = 1.0 - length(cen) * RIM_VIG;
+        color *= 0.85 + 0.4 * vig;
+    }
+
+    float ovig = 1.0 - dot(cen, cen) * SCREEN_VIG;
+    color *= ovig;
+
+    imageStore(outputImage, pix, vec4(color, 1.0));
+}

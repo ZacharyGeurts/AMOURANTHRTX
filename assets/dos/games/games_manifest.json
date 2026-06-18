@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "games": [
+    {
+      "id": "wolf3d",
+      "title": "Wolfenstein 3D",
+      "zip": "WOLF3D.ZIP",
+      "exe": null,
+      "dos_path": "C:\\GAMES\\WOLF3D\\WOLF3D.ZIP",
+      "files": [
+        "WOLF3D.ZIP"
+      ],
+      "extract_hint": "AMMOZIP C:\\GAMES\\WOLF3D\\WOLF3D.ZIP"
+    },
+    {
+      "id": "cosmo",
+      "title": "Cosmo's Cosmic Adventure",
+      "zip": "COSMO.ZIP",
+      "exe": null,
+      "dos_path": "C:\\GAMES\\COSMO\\COSMO.ZIP",
+      "files": [
+        "COSMO.ZIP"
+      ],
+      "extract_hint": "AMMOZIP C:\\GAMES\\COSMO\\COSMO.ZIP"
+    }
+  ]
+}

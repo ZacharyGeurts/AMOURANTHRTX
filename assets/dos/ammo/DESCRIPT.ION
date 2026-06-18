@@ -1,0 +1,26 @@
+COMMAND.COM  RTX-AMMOS DOS 7 shell — GPU Field Die interactive monster
+RTXKERNEL.SYS Supercore INT 2Fh field mux L0-L9 — RTX-DOS forever
+AMMOFAT.SYS   GPU-native FAT16 + HD mirror hot set layer
+FIELDLAY.TXT  Field layer map — viewport FAT MSCDEX rack
+GOLDEN.TXT    Golden Era Man+Machine manifesto — Zachary Geurts MCSE+I
+IO.SYS        RTX-DOS 7.0 boot IO — MS-DOS MIT lineage
+MSDOS.SYS     RTX-DOS 7.0 kernel — version 7.0 psycho historic
+HIMEM.SYS     XMS extended memory manager — 4GB profile
+CONFIG.SYS    Boot menu RTX-DOS Win31 Win95 Win98
+AUTOEXEC.BAT  PATH RTX welcome AMMOFAT layer handoff
+VERSION.TXT   RTX-AMMOS build stamp and lineage
+README.TXT    Getting started — HELP GPU THROTTLE DIR
+CHKDSK.COM    FAT16 volume check — AMMOFAT field layer
+DEBUG.COM     Real-mode debugger — MS-DOS MIT tools
+WIN.COM       Windows 3.1 launcher stub
+BOOT31.BAT    Windows 3.1 boot sequence
+BOOT95.BAT    Windows 95 boot placeholder
+BOOT98.BAT    Windows 98 boot placeholder
+FDISK.EXE     RTX partition tool — 2GB RTXDOS
+FORMAT.COM    FAT16 formatter — OEM RTXDOS70
+SYS.COM       System transfer utility
+SMARTDRV.EXE  Disk cache — quiet mode in AUTOEXEC
+EMM386.EXE    Expanded memory manager
+DRIVES.TXT    Field drive rack reference card
+AMMOFAT.TXT   AMMOFAT layer documentation
+WIN31.TXT     Windows 3.1 staging checklist

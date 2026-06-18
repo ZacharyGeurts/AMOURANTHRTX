@@ -1,0 +1,13 @@
+// filename: anyhit.rahit
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+layout(location = 0) rayPayloadEXT vec3 hitColor;
+
+// No resource declarations here (minimal). If wired into SBT later, add only layout-permitted ones
+// for any-hit stage (typically TLAS@7). Full bindings (incl. reserved dummies, accountant b2, fieldThermo b9, accel@7 w/ ext) declared in CANVAS.comp + raygen for exact host match.
+
+void main() {
+    // For this minimal example we don't do alpha testing → just accept
+    // You can add discard; here for alpha-tested geometry later
+}

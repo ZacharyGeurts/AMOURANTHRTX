@@ -1,0 +1,207 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(push_constant) uniform Push {
+    float time;
+} pc;
+
+// =============================================================================
+// MIA MAKES MUSIC – Spherical Gem/Crystal Edition (Zoom reversed)
+// Zoom now pulled back (wider view) instead of zoomed in
+// Brightness remains halved, gentle orbit + subtle bob unchanged
+// Northern lights aurora background (dimmed)
+// =============================================================================
+
+struct Gem {
+    vec3  color;
+    float ior;
+    float sparkleAmp;
+};
+
+Gem getGem(int idx) {
+    Gem g;
+    int type = idx % 6;
+    if      (type == 0) { g.color = vec3(1.12,1.08,1.15); g.ior=2.42; g.sparkleAmp=2.2; }
+    else if (type == 1) { g.color = vec3(0.95,1.05,1.15); g.ior=1.77; g.sparkleAmp=1.6; }
+    else if (type == 2) { g.color = vec3(0.60,1.10,0.95); g.ior=1.76; g.sparkleAmp=1.7; }
+    else if (type == 3) { g.color = vec3(1.05,0.85,1.25); g.ior=1.80; g.sparkleAmp=2.4; }
+    else if (type == 4) { g.color = vec3(1.10,1.10,1.00); g.ior=1.54; g.sparkleAmp=1.4; }
+    else                { g.color = vec3(0.90,1.15,1.25); g.ior=1.65; g.sparkleAmp=1.9; }
+    return g;
+}
+
+// ────────────────────────────────────────────────
+// SDFs – all spherical variations
+// ────────────────────────────────────────────────
+float sdf_sphere(vec3 p, vec3 center, float radius) {
+    return length(p - center) - radius;
+}
+
+float sdf_wobbly_sphere(vec3 p, vec3 center, float radius, float seed) {
+    float deform = 0.05 * sin(length(p - center) * 28.0 + pc.time * 6.2 + seed * 13.7);
+    return length(p - center) - radius * (1.0 + deform);
+}
+
+float sdf_ellipsoid(vec3 p, vec3 center, vec3 radii) {
+    vec3 q = p - center;
+    vec3 qr = q / radii;
+    return (length(qr) - 1.0) * min(min(radii.x, radii.y), radii.z);
+}
+
+// ────────────────────────────────────────────────
+// Northern Lights – sweeping rainbow aurora (dimmed)
+// ────────────────────────────────────────────────
+vec3 northernLights(vec2 uv) {
+    vec2 p = uv * 2.0 - 1.0;
+    p.x *= 1.8;
+
+    float t = pc.time * 0.11;
+    vec3 col = vec3(0.001, 0.002, 0.006);
+
+    for (float i = 0.0; i < 5.0; i += 1.0) {
+        float freq  = 1.8 + i * 0.7;
+        float speed = 0.9 + i * 0.25;
+        float phase = t * speed + i * 2.1;
+        float height = i * 0.18 - 0.4;
+
+        float wave = sin(p.x * freq + phase + sin(t * 0.4 + i) * 2.5) * 0.5 + 0.5;
+        float mask = smoothstep(0.0, 0.75, 1.0 - abs(p.y * 1.35 + height));
+
+        vec3 hue = 0.5 + 0.5 * cos(t * 0.3 + i * 1.4 + vec3(0.0, 2.0, 4.0) + wave * 3.14);
+        col += hue * wave * mask * (0.45 + 0.35 * sin(t * 1.2 + i * 3.7)) * 0.35;
+    }
+
+    float horizon = smoothstep(0.95, 0.0, abs(p.y + 0.22)) * 0.75;
+    col += vec3(0.15, 0.45, 0.55) * horizon * 0.45;
+
+    float noise = fract(sin(dot(uv * 18.0 + t * 0.3, vec2(12.9898, 78.233))) * 43758.5453);
+    col += vec3(0.03, 0.06, 0.10) * noise * 0.075 * horizon;
+
+    return col;
+}
+
+// ────────────────────────────────────────────────
+// Rotations
+// ────────────────────────────────────────────────
+mat3 rotY(float a) { float c=cos(a), s=sin(a); return mat3(c,0,s, 0,1,0, -s,0,c); }
+mat3 rotX(float a) { float c=cos(a), s=sin(a); return mat3(1,0,0, 0,c,-s, 0,s,c); }
+
+// ────────────────────────────────────────────────
+// Main
+// ────────────────────────────────────────────────
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = vec2(pix) / vec2(dim);
+    vec3 bg = northernLights(uv);
+    vec3 color = bg;
+
+    vec2 asp = vec2(float(dim.x) / float(dim.y), 1.0);
+    vec2 cen = (uv - 0.5) * asp * 0.8;  // pulled back / zoomed out (was 3.2 → now 0.8)
+
+    // Gentle camera orbit + subtle vertical bob
+    float camAngle = pc.time * 0.08 + 1.618;
+    float camHeight = sin(pc.time * 0.12) * 0.35;
+    vec3 ro = vec3(cos(camAngle) * 5.2, camHeight + 0.8, sin(camAngle) * 5.2);
+    vec3 target = vec3(0.0, 0.2, 0.0);
+    vec3 forward = normalize(target - ro);
+    vec3 right   = normalize(cross(vec3(0,1,0), forward));
+    vec3 up      = cross(forward, right);
+
+    vec3 rd = normalize(forward + cen.x * right + cen.y * up);
+
+    float t = 0.0;
+    const float maxDist = 30.0;
+    const int maxSteps = 140;
+    vec3 hitPos = vec3(0.0);
+    int hitType = -1;  // 0 = orbiting gems, 1 = floating notes
+
+    for (int i = 0; i < maxSteps; ++i) {
+        vec3 p = ro + rd * t;
+
+        // Orbiting gem cluster
+        float dMain = 1e6;
+        for (int j = 0; j < 90; ++j) {
+            float a = pc.time * 0.28 + float(j) * 0.0698;
+            float r = 1.8 + sin(pc.time * 0.4 + float(j)) * 0.35;
+            float h = sin(pc.time * 0.25 + float(j) * 2.1) * 0.7;
+            vec3 center = vec3(cos(a) * r, h, sin(a) * r);
+            float ds = sdf_wobbly_sphere(p, center, 0.11 + sin(float(j) + pc.time * 1.3) * 0.02, float(j));
+            dMain = min(dMain, ds);
+        }
+
+        // Floating crystal notes
+        float dNotes = 1e6;
+        for (int k = 0; k < 35; ++k) {
+            float ph = pc.time * 1.15 + float(k) * 0.179;
+            vec3 off = vec3(sin(ph) * 2.2,
+                            cos(ph * 1.4 + float(k) * 3.7) * 1.1 + sin(pc.time * 0.8 + float(k)) * 0.3,
+                            sin(ph * 0.9 + float(k) * 5.2) * 1.8);
+            float ds = sdf_ellipsoid(p, off, vec3(0.18, 0.14, 0.22));
+            dNotes = min(dNotes, ds);
+        }
+
+        float d = min(dMain, dNotes);
+
+        if (d < 0.004) {
+            hitPos = p;
+            hitType = (d == dMain) ? 0 : 1;
+            break;
+        }
+
+        t += d * 0.82;
+        if (t > maxDist) break;
+    }
+
+    if (hitType >= 0) {
+        vec3 p = hitPos;
+        vec3 n = normalize(p);
+
+        vec3 V = -rd;
+        vec3 L = normalize(vec3(1.0, 1.4, 1.6));
+        vec3 H = normalize(L + V);
+
+        float NoV = max(0.0, dot(n, V));
+        float NoL = max(0.0, dot(n, L));
+        float NoH = max(0.0, dot(n, H));
+
+        float ior = 1.72 + sin(pc.time * 0.4 + length(p) * 3.0) * 0.12;
+        float F0 = pow((1.0 - ior) / (1.0 + ior), 2.0);
+        float fres = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0);
+
+        Gem g = getGem(int(floor(length(p) * 8.0 + pc.time * 1.2)) % 6);
+
+        vec3 albedo = g.color * (0.95 + 0.25 * sin(pc.time * 2.8 + length(p) * 14.0));
+        float roughness = 0.03 + g.sparkleAmp * 0.025;
+
+        vec3 diff = albedo * (NoL * 0.005 + vec3(0.08,0.09,0.15) * 0.7);
+
+        float specPower = 220.0 / (roughness + 0.01);
+        float spec = pow(NoH, specPower) * fres * 2.6;
+
+        float scint = pow(0.5 + 0.5 * sin(pc.time * 7.2 + dot(n, vec3(1.0)) * 28.0 + length(p) * 40.0), 7.0);
+        scint *= g.sparkleAmp * fres * 1.3;
+
+        vec3 disp = vec3(
+            fres * (0.6 + 0.4 * sin(pc.time * 1.3 + dot(n, vec3(1,2,3)) * 9.0)),
+            fres * (0.6 + 0.4 * sin(pc.time * 1.3 + dot(n, vec3(2,1,4)) * 9.0 + 2.1)),
+            fres * (0.6 + 0.4 * sin(pc.time * 1.3 + dot(n, vec3(3,4,1)) * 9.0 + 4.2))
+        ) * 0.45;
+
+        vec3 emission = albedo * 0.35 * (hitType == 1 ? 1.6 : 0.8) * 0.5;
+
+        vec3 final = diff * 2.6 + vec3(spec) * 5.8 + scint * albedo * 3.2 + disp + emission;
+
+        color = mix(color, final * 0.5, 0.94);
+    }
+
+    float vig = 1.0 - dot(cen, cen) * 1.2;  // adjusted vignette for wider view
+    color *= 0.80 + 0.40 * vig;
+
+    imageStore(outputImage, pix, vec4(color, 1.0));
+}

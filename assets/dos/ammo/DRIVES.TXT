@@ -1,0 +1,9 @@
+RTX-AMMOS Field Drive Rack
+==========================
+A: floppy RTXBOOT (RTXDRV.SYS)
+B: reserved
+C: RTXDOS fixed disk (AMMOFAT.SYS)
+D: CD-ROM ISO9660 (RTXCD.SYS + MSCDEX)
+E: host bridge - drop files in assets/dos/incoming/host/
+
+Shell: DRIVES | DIR A: | CD D: | MOUNT CD | TYPE FIELDLAY.TXT

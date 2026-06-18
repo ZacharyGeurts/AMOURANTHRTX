@@ -1,0 +1,19 @@
+RTX-AMMOS Field Layer Stack (GPU-only Field Die)
+================================================
+L0 RAM      Supercore mux (RTXKERNEL.SYS) + XMS (HIMEM.SYS) + floppy A: (RTXDRV.SYS)
+L1 VGA      IBM VGA + VESA viewport (RTXVGA.SYS)
+L2 FAT      GPU-native FAT16+ C: RTXDOS (AMMOFAT.SYS)
+L3 DRIVES   Field drive rack A/B/C/D/E summary (shell DRIVES)
+L4 VIEWPORT DOS font scale + scanlines (GPU panel)
+L5 AUDIO    SB16/OPL/GUS audio rack (RTXSB.SYS)
+L6 MSCDEX   CD-ROM redirector drive D: (RTXCD.SYS /D:RTXCD001)
+L7 IO       Host bridge E: incoming (RTXHOST.SYS)
+L8 BIOS     RTX char IOCTL bridge (RTXAPI.SYS, optional)
+
+Drive letters: A=floppy B=reserved C=RTXDOS D=CD E=host bridge
+Boot order (CONFIG.SYS [COMMON]):
+  RTXKERNEL.SYS -> HIMEM.SYS -> RTXDRV.SYS -> RTXCD.SYS -> AMMOFAT.SYS -> RTXHOST.SYS -> EMM386.EXE
+AUTOEXEC: MSCDEX /D:RTXCD001 /L:D | PATH includes C:\TOOLS
+Shell: VER FIELD DRIVES AMMOFAT MSCDEX TOOLS DRIVERS HELP
+DevKit: C:\TOOLS\AMMOASM AMMOCC AMMOLINK AMMORUN AMMODBG
+Includes: C:\AMMOINC (RTX.INC RTX.H) | Samples: C:\SAMPLES

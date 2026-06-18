@@ -1,0 +1,352 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// AMOURANTH RTX Birthstone Gemstone Showcase – Pure Faceted Gems 2026
+// 12 physically-inspired faceted birthstones with unique cuts
+// Realistic gem IORs, dispersion hint, fire, scintillation
+// Distant sun (10× farther) + moon + time-of-day cycle
+// AMOURANTH FOREVER 💖
+// =============================================================================
+
+// ────────────────────────────────────────────────
+// Push constants
+// ────────────────────────────────────────────────
+layout(push_constant) uniform Push {
+    float totalTime;     // in seconds
+    uint  frameSeed;
+} pc;
+
+// ────────────────────────────────────────────────
+// Grid layout (3 rows × 4 columns)
+// ────────────────────────────────────────────────
+#define GRID_COLS               4
+#define GRID_ROWS               3
+
+// ────────────────────────────────────────────────
+// Table / environment
+// ────────────────────────────────────────────────
+#define TABLE_SPEED             0.02
+#define TABLE_SPARKLE_COUNT     2
+#define TABLE_SPARKLE_SIZE      0.0055
+#define TABLE_SPARKLE_INTENSITY 0.02
+#define ROYAL_BLACK_BASE        vec3(0.007, 0.004, 0.011)
+
+// ────────────────────────────────────────────────
+// Gem geometry & faceting base
+// ────────────────────────────────────────────────
+#define GEM_RADIUS              0.42
+#define FACET_ANGULAR_STEPS_BASE  6.0
+#define FACET_SHARPNESS_BASE      5.6
+#define FACET_DEPTH_BASE          0.355
+
+// ────────────────────────────────────────────────
+// Rotation speeds
+// ────────────────────────────────────────────────
+#define ROT_SPEED_X             0.032
+#define ROT_SPEED_Y             0.038
+#define ROT_SPEED_Z             0.031
+
+// ────────────────────────────────────────────────
+// Time-of-day & celestial lighting
+// ────────────────────────────────────────────────
+#define TOD_CYCLE_DURATION      60.0
+#define SUN_DISTANCE            15000.0
+#define MOON_DISTANCE           180.0
+#define SUN_INTENSITY_DAY       0.01
+#define SUN_INTENSITY_DAWN_DUSK 0.70
+#define MOON_INTENSITY          0.18
+#define AMBIENT_DAY             vec3(0.14,0.16,0.22)
+#define AMBIENT_NIGHT           vec3(0.03,0.04,0.08)
+
+// ────────────────────────────────────────────────
+// Gem material base (OpenPBR / realistic gem inspired)
+// ────────────────────────────────────────────────
+#define CRYSTAL_ROUGHNESS       0.006
+#define GEM_SPECULAR_F0         0.36     // ~F0 for typical gem IOR ~1.6–1.8
+#define GEM_IOR_BASE            1.62
+#define CRYSTAL_TRANSMISSION    0.94
+#define THIN_FILM_STRENGTH      0.45
+#define THIN_FILM_THICKNESS_NM  420.0
+#define GEM_EMISSION            0.0      // most gems are non-emissive
+#define FIRE_BOOST              1.35     // exaggerated dispersion/fire for demo
+#define SCINTILLATION           0.9
+
+#define POST_TINT_STRENGTH_MAX  0.0
+#define POST_TINT_STRENGTH_MIN  0.0
+
+// ────────────────────────────────────────────────
+// Per-birthstone data – physically inspired IOR & cut personality
+// ────────────────────────────────────────────────
+struct Birthstone {
+    vec3  color;              // body/tint color
+    float ior;                // refractive index (realistic range ~1.54–1.98)
+    float dispersionHint;     // fake dispersion strength
+    float facetStepsMul;
+    float facetDepthMul;
+    float facetSharpnessMul;
+    float facetNoiseAmp;
+    float facetRadialBias;
+};
+
+Birthstone getBirthstone(int month) {
+    Birthstone b;
+    if      (month == 0) { // January – Garnet
+        b.color = vec3(0.82, 0.08, 0.06);   b.ior = 1.74;  b.dispersionHint = 0.022;
+        b.facetStepsMul = 0.75; b.facetDepthMul = 1.20; b.facetSharpnessMul = 1.10;
+        b.facetNoiseAmp = 0.15; b.facetRadialBias = 0.4;
+    }
+    else if (month == 1) { // February – Amethyst
+        b.color = vec3(0.58, 0.22, 0.88);   b.ior = 1.54;  b.dispersionHint = 0.013;
+        b.facetStepsMul = 1.40; b.facetDepthMul = 0.80; b.facetSharpnessMul = 1.35;
+        b.facetNoiseAmp = 0.04; b.facetRadialBias = -0.3;
+    }
+    else if (month == 2) { // March – Aquamarine
+        b.color = vec3(0.48, 0.82, 1.00);   b.ior = 1.57;  b.dispersionHint = 0.014;
+        b.facetStepsMul = 0.95; b.facetDepthMul = 0.95; b.facetSharpnessMul = 0.90;
+        b.facetNoiseAmp = 0.09; b.facetRadialBias = 0.0;
+    }
+    else if (month == 3) { // April – Diamond
+        b.color = vec3(1.08, 1.08, 1.12);   b.ior = 2.42;  b.dispersionHint = 0.044;
+        b.facetStepsMul = 1.80; b.facetDepthMul = 1.45; b.facetSharpnessMul = 1.60;
+        b.facetNoiseAmp = 0.02; b.facetRadialBias = 0.6;
+    }
+    else if (month == 4) { // May – Emerald
+        b.color = vec3(0.06, 0.62, 0.18);   b.ior = 1.57;  b.dispersionHint = 0.014;
+        b.facetStepsMul = 0.65; b.facetDepthMul = 0.70; b.facetSharpnessMul = 0.85;
+        b.facetNoiseAmp = 0.18; b.facetRadialBias = -0.5;
+    }
+    else if (month == 5) { // June – Pearl
+        b.color = vec3(0.99, 0.97, 0.93);   b.ior = 1.53;  b.dispersionHint = 0.0;
+        b.facetStepsMul = 0.20; b.facetDepthMul = 0.25; b.facetSharpnessMul = 0.40;
+        b.facetNoiseAmp = 0.30; b.facetRadialBias = 0.0;
+    }
+    else if (month == 6) { // July – Ruby
+        b.color = vec3(0.90, 0.09, 0.13);   b.ior = 1.76;  b.dispersionHint = 0.018;
+        b.facetStepsMul = 1.55; b.facetDepthMul = 1.15; b.facetSharpnessMul = 1.25;
+        b.facetNoiseAmp = 0.07; b.facetRadialBias = 0.35;
+    }
+    else if (month == 7) { // August – Peridot
+        b.color = vec3(0.72, 0.98, 0.32);   b.ior = 1.65;  b.dispersionHint = 0.020;
+        b.facetStepsMul = 1.15; b.facetDepthMul = 1.05; b.facetSharpnessMul = 1.05;
+        b.facetNoiseAmp = 0.11; b.facetRadialBias = 0.15;
+    }
+    else if (month == 8) { // September – Sapphire
+        b.color = vec3(0.08, 0.18, 0.82);   b.ior = 1.76;  b.dispersionHint = 0.018;
+        b.facetStepsMul = 1.65; b.facetDepthMul = 0.90; b.facetSharpnessMul = 1.40;
+        b.facetNoiseAmp = 0.05; b.facetRadialBias = -0.2;
+    }
+    else if (month == 9) { // October – Opal
+        b.color = vec3(0.94, 0.88, 0.97);   b.ior = 1.45;  b.dispersionHint = 0.008;
+        b.facetStepsMul = 2.10; b.facetDepthMul = 0.65; b.facetSharpnessMul = 0.75;
+        b.facetNoiseAmp = 0.38; b.facetRadialBias = 0.0;
+    }
+    else if (month ==10) { // November – Topaz
+        b.color = vec3(1.00, 0.68, 0.18);   b.ior = 1.61;  b.dispersionHint = 0.014;
+        b.facetStepsMul = 1.05; b.facetDepthMul = 1.30; b.facetSharpnessMul = 1.00;
+        b.facetNoiseAmp = 0.12; b.facetRadialBias = 0.25;
+    }
+    else               { // December – Turquoise
+        b.color = vec3(0.15, 0.72, 0.78);   b.ior = 1.61;  b.dispersionHint = 0.0;
+        b.facetStepsMul = 0.45; b.facetDepthMul = 0.40; b.facetSharpnessMul = 0.55;
+        b.facetNoiseAmp = 0.25; b.facetRadialBias = -0.4;
+    }
+    return b;
+}
+
+// ────────────────────────────────────────────────
+// Hash
+// ────────────────────────────────────────────────
+uint hash(uint x) {
+    x ^= x >> 16;
+    x *= 0x85ebca6bU;
+    x ^= x >> 13;
+    x *= 0xc2b2ae35U;
+    x ^= x >> 16;
+    return x;
+}
+
+// ────────────────────────────────────────────────
+// Royal black marble table
+// ────────────────────────────────────────────────
+vec3 royalBlackMarbleTable(vec2 uv, float time) {
+    vec2 tUV = uv + vec2(sin(time * TABLE_SPEED * 0.45) * 0.032, cos(time * TABLE_SPEED * 0.65) * 0.028);
+
+    vec3 col = ROYAL_BLACK_BASE;
+
+    float vein = float(hash(uint(tUV.x * 120.0 + tUV.y * 1100.0 + time * 12.0))) / 4294967295.0;
+    col += vec3(0.032, 0.022, 0.042) * smoothstep(0.38, 0.72, vein) * 0.28;
+
+    for (int i = 0; i < TABLE_SPARKLE_COUNT; ++i) {
+        uint seed = hash(uint(i) + 111u);
+        vec2 pos = vec2(fract(float(seed) * 0.141 + time * 0.045), fract(float(seed) * 0.226 + time * 0.075));
+        float dist = length(tUV - pos);
+        float sparkle = smoothstep(TABLE_SPARKLE_SIZE, TABLE_SPARKLE_SIZE * 0.16, dist);
+        sparkle *= 0.35 + 0.65 * sin(time * 20.0 + float(seed) * 16.0);
+        col += vec3(1.02, 0.99, 1.04) * sparkle * TABLE_SPARKLE_INTENSITY * 0.7;
+    }
+
+    return col;
+}
+
+// ────────────────────────────────────────────────
+// 3×3 rotation matrix (Z-Y-X order)
+// ────────────────────────────────────────────────
+mat3 rotationMatrix(vec3 angles) {
+    vec3 c = cos(angles);
+    vec3 s = sin(angles);
+
+    mat3 rx = mat3(1.0, 0.0, 0.0,  0.0, c.x, -s.x,  0.0, s.x,  c.x);
+    mat3 ry = mat3(c.y, 0.0, s.y,  0.0, 1.0, 0.0,  -s.y,0.0,  c.y);
+    mat3 rz = mat3(c.z,-s.z, 0.0,  s.z, c.z, 0.0,  0.0, 0.0,  1.0);
+
+    return rz * ry * rx;
+}
+
+// ────────────────────────────────────────────────
+// Signed distance to rotated sphere
+// ────────────────────────────────────────────────
+float sdSphere(vec3 p, float r) {
+    return length(p) - r;
+}
+
+// ────────────────────────────────────────────────
+// Main compute shader
+// ────────────────────────────────────────────────
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = vec2(pix) / vec2(dim);
+    vec3 col = royalBlackMarbleTable(uv, pc.totalTime);
+
+    float cellW = 1.0 / float(GRID_COLS);
+    float cellH = 1.0 / float(GRID_ROWS);
+
+    int colIdx = int(uv.x / cellW);
+    int rowIdx = int((1.0 - uv.y) / cellH);
+
+    if (colIdx >= 0 && colIdx < GRID_COLS && rowIdx >= 0 && rowIdx < GRID_ROWS) {
+        int month = rowIdx * GRID_COLS + colIdx;
+        Birthstone b = getBirthstone(month);
+
+        vec2 cellUV = fract(uv / vec2(cellW, cellH));
+        vec3 p_local = vec3(cellUV - 0.5, 0.0) * 1.1;  // slight scale to better fill cell
+
+        float seed = float(month) * 1.618 + 7.3;
+        vec3 rotations = vec3(
+            pc.totalTime * ROT_SPEED_X + seed * 0.42,
+            pc.totalTime * ROT_SPEED_Y + seed * 1.15,
+            pc.totalTime * ROT_SPEED_Z + seed * 2.4
+        );
+
+        mat3 rotMat = rotationMatrix(rotations);
+        vec3 p_rot = rotMat * p_local;
+
+        float d = sdSphere(p_rot, GEM_RADIUS);
+
+        if (d < 0.0) {
+            // View-space position for texturing & rim lighting
+            vec3 viewP = rotMat * vec3(cellUV - 0.5, 0.0);
+            float radialDist = length(viewP.xy);
+            float radial     = atan(viewP.y, viewP.x);
+
+            // ─── Time of day ───────────────────────────────────────
+            float tod = mod(pc.totalTime / TOD_CYCLE_DURATION, 1.0);
+            float sunAngle = tod * 6.28318 - 1.57;
+            vec3 sunDir  = normalize(vec3(cos(sunAngle)*0.4, sin(sunAngle), sin(sunAngle)*0.6));
+            vec3 moonDir = -sunDir;
+
+            float sunHeight = sunDir.y;
+            float dayness   = smoothstep(-0.3, 0.4, sunHeight);
+            float nightness = smoothstep(0.1, -0.4, sunHeight);
+
+            vec3 sunColor = mix(vec3(1.00,0.92,0.80), vec3(1.00,0.70,0.50), smoothstep(0.0,0.6,sunHeight));
+            sunColor = mix(sunColor, vec3(0.90,0.50,0.30), smoothstep(-0.2,0.0,sunHeight));
+
+            float sunIntensity = mix(SUN_INTENSITY_DAY, SUN_INTENSITY_DAWN_DUSK, abs(sunHeight - 0.7));
+            sunIntensity *= dayness;
+
+            vec3 moonColor = vec3(0.92, 0.96, 1.00);
+            float moonIntensity = MOON_INTENSITY * nightness * (0.5 + 0.5 * sin(pc.totalTime * 0.07));
+
+            vec3 ambient = mix(AMBIENT_DAY, AMBIENT_NIGHT, nightness);
+
+            // ─── Faceting (normal perturbation) ────────────────────
+            float facetSteps   = FACET_ANGULAR_STEPS_BASE * b.facetStepsMul;
+            float facetSharp   = FACET_SHARPNESS_BASE    * b.facetSharpnessMul;
+            float facetDepth   = FACET_DEPTH_BASE        * b.facetDepthMul;
+
+            float freq = facetSteps + b.facetRadialBias * 18.0 * (radialDist - 0.5);
+            float facetN = sin(radial * freq + pc.totalTime * 4.8 + float(month) * 7.1);
+            facetN += b.facetNoiseAmp * (
+                sin(radial * freq * 2.7 + pc.totalTime * 9.3) +
+                sin(radial * freq * 4.1 + pc.totalTime * 13.7)
+            );
+
+            float depthMod = facetDepth * (0.5 + 0.5 * sin(radial * freq * 1.618 + float(month) * 11.0));
+
+            vec2 facetOffset = vec2(facetN, facetN * 1.4) * depthMod;
+
+            // Base normal — slightly domed toward viewer
+            vec3 normal = normalize(vec3(viewP.xy * 1.18, 0.45));
+            normal.xy += facetOffset * 1.4;
+            normal = normalize(normal);
+
+            vec3 viewDir = normalize(vec3(0.0, 0.0, -1.0));
+            float rim = 1.0 - max(0.0, dot(normal, viewDir));
+            rim = pow(rim, 2.4) * 1.05;
+
+            // ─── Lighting ──────────────────────────────────────────
+            float sunNdotL  = max(0.0, dot(normal, sunDir));
+            float moonNdotL = max(0.0, dot(normal, moonDir));
+
+            vec3 lightAcc = sunColor * sunNdotL  * sunIntensity +
+                            moonColor * moonNdotL * moonIntensity +
+                            ambient;
+
+            // Base gem color with subtle radial falloff
+            vec3 baseCol = b.color * (0.88 + 0.24 * (1.0 - radialDist));
+
+            // ─── Specular + fake dispersion/fire ───────────────────
+            vec3 halfV = normalize(sunDir + viewDir);
+            float specPower = 180.0 + facetSharp * 320.0;
+            float spec = pow(max(0.0, dot(normal, halfV)), specPower) * GEM_SPECULAR_F0;
+
+            vec3 fire = vec3(
+                sin(radial * 18.0 + pc.totalTime * 1.2 + 0.0) * 0.5 + 0.5,
+                sin(radial * 18.0 + pc.totalTime * 1.2 + 2.1) * 0.5 + 0.5,
+                sin(radial * 18.0 + pc.totalTime * 1.2 + 4.2) * 0.5 + 0.5
+            );
+            fire = pow(fire, vec3(3.2)) * b.dispersionHint * FIRE_BOOST * (1.0 + rim * 2.0);
+
+            vec3 specular = b.color * spec * (1.6 + facetSharp * 0.7) + fire * SCINTILLATION;
+
+            // ─── Final composition ─────────────────────────────────
+            col += baseCol * lightAcc * 2.1;
+            col += specular * sunIntensity * 1.8;
+            col += baseCol * rim * lightAcc * 1.4;
+
+            // Thin-film hint (stronger on opal)
+            float tf = sin(radialDist * 30.0 + pc.totalTime * 0.7 + float(month) * 4.1) * 0.5 + 0.5;
+            vec3 thinFilm = vec3(0.4,0.7,1.2) * tf * THIN_FILM_STRENGTH * (1.0 - radialDist);
+            col += thinFilm * (b.ior - 1.4) * 2.5;
+
+            // Gentle post-tint reinforcement
+            float postStrength = mix(POST_TINT_STRENGTH_MAX, POST_TINT_STRENGTH_MIN, sin(pc.totalTime * 0.14 + float(month) * 1.4)*0.5+0.5);
+            vec3 tint = b.color * postStrength * 0.7;
+            col = mix(col, col + tint * rim * 1.8, 0.55);
+
+            // Subtle vignette per gem
+            vec2 vig = (cellUV - 0.5) * 2.0;
+            col *= (1.0 - dot(vig, vig) * 0.35);
+        }
+    }
+
+    imageStore(outputImage, pix, vec4(col, 1.0));
+}

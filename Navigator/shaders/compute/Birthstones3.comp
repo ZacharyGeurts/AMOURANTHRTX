@@ -1,0 +1,357 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// Birthstone Showcase 2026 – Pure Wisp Lighting (static, no pulsing)
+// Only soft glowing wisps illuminate the scene – no pulsing, no breathing
+// =============================================================================
+
+layout(push_constant) uniform PushConstants {
+    float       time;
+    uint        frameSeed;
+
+    vec3        cameraPos;          float pad0;
+    vec4        cameraQuat;
+    float       cameraFovDeg;
+    float       aspectRatio;
+    float       exposure;
+
+    vec3        sunDir;             float sunIntensity;
+    vec3        moonDir;            float moonIntensity;
+
+    vec3        windDir;            float windStrength;
+    float       temperatureC;
+    float       humidity;
+    float       airPressureKPa;
+    float       precipitationFactor;
+
+    float       fogDensity;
+    float       dayNightFactor;
+    float       cloudCoverage;
+
+    uint        debugFlags;
+
+    float       raymarchMaxDist;
+    float       raymarchEpsilon;
+    uint        raymarchMaxSteps;
+
+    float       pad1[3];
+} pc;
+
+// ─── DIALS ──────────────────────────────────────────────────────────────────
+#define COLS                        4
+#define ROWS                        3
+#define NUM_WISPS                   2          // 2–4 recommended for soft glow
+
+#define GEM_BASE_SCALE              0.33
+#define ROT_SPEED_Y                 0.18
+#define ROT_SPEED_X                 0.18
+#define X_TILT_AMP                  0.18
+
+#define WISP_BASE_INTENSITY         1.28       // soft overall glow (increased slightly to compensate)
+#define WISP_COLOR                  vec3(0.96, 0.93, 1.00)  // fixed soft cool-white
+#define WISP_RADIUS                 0.45       // larger, diffuse glow
+#define WISP_MOTION_SPEED           0.2        // ← no motion / static positions
+#define WISP_DRIFT_RADIUS           0.0        // ← no drifting
+#define WISP_GEM_ILLUM              1.0
+#define WISP_GEM_SPEC               0.6
+#define WISP_FLOOR_REFLECTION       0.25
+
+#define FLOOR_BASE_COLOR            vec3(0.0, 0.0, 0.0)
+#define FLOOR_VEIN_COLOR            vec3(0.01, 0.01, 0.02)
+#define FLOOR_VEIN_STRENGTH         0.6        // reduced slightly since no pulsing
+#define FLOOR_ROUGH_GRAIN_AMP       0.0
+#define FLOOR_FRESNEL_F0            0.02
+#define FLOOR_FRESNEL_POWER         3.5
+#define FLOOR_NORMAL_BUMP_HEIGHT    0.0
+#define FLOOR_REFLECTION_STRENGTH   0.02
+
+#define GEM_DIFFUSE_BOOST           1.25
+#define GEM_SPECULAR_BOOST          1.9
+#define GEM_SSS_BOOST               1.45
+
+#define TONEMAP_DENOM               0.0
+#define TONEMAP_GAMMA               1.0
+
+// ─── Static glowing wisp (no pulse, no color shift, no motion) ─────────────
+struct Wisp {
+    vec3  pos;
+    vec3  color;
+    float radius;
+    float intensity;
+};
+
+Wisp getWisp(int i) {
+    Wisp w;
+
+    // Fixed positions — gentle arrangement, no time dependency
+    float angle = float(i) * 6.283185 / float(NUM_WISPS);
+    vec2 offset = vec2(cos(angle), sin(angle)) * 1.4;
+    w.pos = vec3(offset.x, 1.1 + 0.3 * float(i % 2), offset.y);
+
+    w.intensity = WISP_BASE_INTENSITY;
+    w.color     = WISP_COLOR;
+    w.radius    = WISP_RADIUS;
+
+    return w;
+}
+
+// ─── Stone properties ───────────────────────────────────────────────────────
+struct Stone {
+    vec3  tint;
+    float ior;
+    float subsurface;
+    float brilliance;
+};
+
+Stone getStone(int month) {
+    Stone s;
+    if      (month == 0)  { s.tint = vec3(0.84,0.07,0.04); s.ior=1.760; s.subsurface=0.06; s.brilliance=1.10; }
+    else if (month == 1)  { s.tint = vec3(0.56,0.20,0.90); s.ior=1.545; s.subsurface=0.05; s.brilliance=0.94; }
+    else if (month == 2)  { s.tint = vec3(0.50,0.84,1.00)*0.88; s.ior=1.575; s.subsurface=0.04; s.brilliance=1.05; }
+    else if (month == 3)  { s.tint = vec3(1.035,1.035,1.055); s.ior=2.417; s.subsurface=0.00; s.brilliance=1.48; }
+    else if (month == 4)  { s.tint = vec3(0.05,0.64,0.16)*0.90; s.ior=1.575; s.subsurface=0.12; s.brilliance=0.76; }
+    else if (month == 5)  { s.tint = vec3(0.995,0.98,0.96); s.ior=1.53; s.subsurface=0.18; s.brilliance=0.50; }
+    else if (month == 6)  { s.tint = vec3(0.92,0.08,0.11); s.ior=1.77; s.subsurface=0.05; s.brilliance=1.20; }
+    else if (month == 7)  { s.tint = vec3(0.74,0.99,0.30); s.ior=1.67; s.subsurface=0.07; s.brilliance=1.04; }
+    else if (month == 8)  { s.tint = vec3(0.07,0.16,0.84); s.ior=1.77; s.subsurface=0.04; s.brilliance=1.10; }
+    else if (month == 9)  { s.tint = vec3(0.96,0.90,0.98); s.ior=1.45; s.subsurface=0.22; s.brilliance=0.70; }
+    else if (month == 10) { s.tint = vec3(1.00,0.70,0.16); s.ior=1.62; s.subsurface=0.06; s.brilliance=0.96; }
+    else                  { s.tint = vec3(0.14,0.74,0.80); s.ior=1.61; s.subsurface=0.10; s.brilliance=0.60; }
+    return s;
+}
+
+// ─── Gem SDFs ───────────────────────────────────────────────────────────────
+float sdf_jan_garnet(vec3 p) {
+    vec2 q = abs(p.xy) - vec2(0.92, 0.92);
+    float cush = length(max(q,0.0)) + min(max(q.x,q.y),0.0) - 0.18;
+    return max(cush, abs(p.z) - 0.70);
+}
+
+float sdf_feb_amethyst(vec3 p) {
+    vec2 shifted = p.xy; shifted.y = abs(shifted.y - 0.1);
+    float r = length(shifted);
+    float shape = r - 0.9 * (1.0 + 0.25 * p.y);
+    return max(shape, abs(p.z) - 0.68);
+}
+
+float sdf_mar_aquamarine(vec3 p) {
+    vec3 q = abs(p);
+    float sq = max(q.x - 0.95, q.y - 0.95) - 0.02;
+    return max(sq, abs(q.z) - 0.70);
+}
+
+float sdf_apr_diamond(vec3 p) {
+    float r = length(p.xy);
+    float crown = p.z - 0.405 + r * 0.32;
+    float pav   = -p.z - 0.595 + r * 1.12;
+    return max(r - 1.0, max(crown, pav));
+}
+
+float sdf_may_emerald(vec3 p) {
+    vec3 q = abs(p);
+    float table = p.z - 0.30;
+    float step1 = max(max(q.x-1.55,q.y-0.96), q.z - 0.62);
+    float step2 = max(max(q.x-1.42,q.y-0.83), q.z - 0.50);
+    float depth = abs(q.z) - 0.68;
+    return max(table, max(step1, max(step2, depth))) + 0.035;
+}
+
+float sdf_jun_pearl(vec3 p) {
+    float dome = length(p) - 0.98;
+    float base = abs(p.z) - 0.10;
+    return max(dome, base) + 0.02 * abs(p.z);
+}
+
+float sdf_jul_ruby(vec3 p) {
+    vec2 q = abs(p.xy) - vec2(0.92, 0.92);
+    float cush = length(max(q,0.0)) + min(max(q.x,q.y),0.0) - 0.20;
+    return max(cush, abs(p.z) - 0.74);
+}
+
+float sdf_aug_peridot(vec3 p) {
+    float len = length(p.xy * vec2(1.6, 0.8));
+    float shape = len - 1.0;
+    return max(shape, abs(p.z) - 0.68);
+}
+
+float sdf_sep_sapphire(vec3 p) {
+    vec3 q = p; q.x *= 1.30;
+    float r = length(q.xy);
+    float crown = q.z - 0.36 + r * 0.39;
+    float pav   = -q.z - 0.64 + r * 0.92;
+    return max(r - 1.0, max(crown, pav));
+}
+
+float sdf_oct_opal(vec3 p) {
+    float dome = length(p) - 0.90;
+    float base = abs(p.z) - 0.08;
+    return max(dome, base);
+}
+
+float sdf_nov_topaz(vec3 p) {
+    vec3 q = abs(p);
+    float rect = max(q.x - 1.52, q.y - 0.94) - 0.08;
+    return max(rect, abs(q.z) - 0.70);
+}
+
+float sdf_dec_turquoise(vec3 p) {
+    float dome = length(p) - 0.94;
+    float base = abs(p.z) - 0.09;
+    return max(dome, base);
+}
+
+float gemSDF(vec3 p, int month) {
+    float scale = 1.0 + 0.015 * length(p);
+    if (month == 0) return sdf_jan_garnet(p)     * scale;
+    if (month == 1) return sdf_feb_amethyst(p)   * scale;
+    if (month == 2) return sdf_mar_aquamarine(p) * scale;
+    if (month == 3) return sdf_apr_diamond(p)    * scale;
+    if (month == 4) return sdf_may_emerald(p)    * scale;
+    if (month == 5) return sdf_jun_pearl(p)      * scale;
+    if (month == 6) return sdf_jul_ruby(p)       * scale;
+    if (month == 7) return sdf_aug_peridot(p)    * scale;
+    if (month == 8) return sdf_sep_sapphire(p)   * scale;
+    if (month == 9) return sdf_oct_opal(p)       * scale;
+    if (month ==10) return sdf_nov_topaz(p)      * scale;
+    return sdf_dec_turquoise(p)                  * scale;
+}
+
+// ─── Static black marble (no drift, no pulsing) ─────────────────────────────
+vec3 roughBlackMarble(vec2 uv) {
+    vec2 t = uv * vec2(2.1, 1.5);
+
+    vec3 col = FLOOR_BASE_COLOR;
+
+    // Simple static noise-based veins
+    float n = fract(sin(dot(t * 1.7, vec2(12.9898, 78.233))) * 43758.5453);
+    n = smoothstep(0.38, 0.62, n);
+
+    float detail = fract(sin(dot(t * 12.0, vec2(127.1, 311.7))) * 43758.5453);
+    detail = smoothstep(0.45, 0.55, detail) * 0.4;
+
+    col = mix(col, FLOOR_VEIN_COLOR, (n + detail) * FLOOR_VEIN_STRENGTH);
+
+    return col;
+}
+
+float marbleFresnel(vec3 N, vec3 V) {
+    float NoV = max(0.0, dot(N, V));
+    float F0 = FLOOR_FRESNEL_F0;
+    return F0 + (1.0 - F0) * pow(1.0 - NoV, FLOOR_FRESNEL_POWER);
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+mat3 rotY(float a) {
+    float c=cos(a), s=sin(a);
+    return mat3(c,0,s, 0,1,0, -s,0,c);
+}
+
+mat3 rotX(float a) {
+    float c=cos(a), s=sin(a);
+    return mat3(1,0,0, 0,c,-s, 0,s,c);
+}
+
+// ─── Main ───────────────────────────────────────────────────────────────────
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = vec2(pix) / vec2(dim);
+
+    vec3 color = roughBlackMarble(uv);
+
+    vec3 viewDir = normalize(vec3(uv * 2.0 - 1.0, -1.6));
+
+    vec2 nUv = uv * 22.0;
+    vec3 floorN = normalize(vec3(
+        roughBlackMarble(uv + vec2(0.005,0)).r - roughBlackMarble(uv - vec2(0.005,0)).r,
+        0.08,
+        roughBlackMarble(uv + vec2(0,0.005)).r - roughBlackMarble(uv - vec2(0,0.005)).r
+    ));
+
+    float floorFres = marbleFresnel(floorN, viewDir);
+    vec3 refl = vec3(0.0);
+
+    // Static wisp bounce on floor
+    for (int i = 0; i < NUM_WISPS; ++i) {
+        Wisp w = getWisp(i);
+        vec3 toWisp = w.pos - vec3(uv * 2.0 - 1.0, 0.0) * vec3(1.4, 1.4, 1.0);
+        float dist = length(toWisp);
+        float atten = w.intensity / (dist * dist + 0.4);
+        refl += w.color * atten * 0.12;
+    }
+
+    color += refl * floorFres * WISP_FLOOR_REFLECTION;
+
+    // ─── Gems ───────────────────────────────────────────────────────────────
+    float cw = 1.0 / float(COLS);
+    float ch = 1.0 / float(ROWS);
+
+    int cx = int(uv.x / cw);
+    int cy = int((1.0 - uv.y) / ch);
+
+    if (cx >= 0 && cx < COLS && cy >= 0 && cy < ROWS) {
+        int month = cy * COLS + cx;
+        Stone s = getStone(month);
+
+        vec2 cellUV = fract(uv / vec2(cw, ch)) - 0.5;
+        float angY = pc.time * ROT_SPEED_Y + float(month) * 2.4;
+        float angX = sin(pc.time * ROT_SPEED_X + float(month) * 1.3) * X_TILT_AMP;
+
+        mat3 rot = rotY(angY) * rotX(angX);
+        vec3 pos = rot * vec3(cellUV * 1.20, 0.0);
+
+        float d = gemSDF(pos / GEM_BASE_SCALE, month);
+
+        if (d < 0.018) {
+            vec3 eps = vec3(0.005, 0.0, 0.005);
+            vec3 nor = normalize(vec3(
+                gemSDF((pos + eps.xyy)/GEM_BASE_SCALE, month) - gemSDF((pos - eps.xyy)/GEM_BASE_SCALE, month),
+                gemSDF((pos + eps.yxy)/GEM_BASE_SCALE, month) - gemSDF((pos - eps.yxy)/GEM_BASE_SCALE, month),
+                gemSDF((pos + eps.yyx)/GEM_BASE_SCALE, month) - gemSDF((pos - eps.yyx)/GEM_BASE_SCALE, month)
+            ));
+
+            mat3 invRot = transpose(rot);
+            vec3 V = normalize(invRot * vec3(0,0,-1));
+
+            float NoV = max(0.0, dot(nor, V));
+
+            float F0  = pow((1.0 - s.ior)/(1.0 + s.ior), 2.0);
+            float fres = F0 + (1.0 - F0) * pow(1.0 - NoV, 5.0);
+
+            vec3 diffuse = vec3(0.0);
+            vec3 spec = vec3(0.0);
+
+            for (int i = 0; i < NUM_WISPS; ++i) {
+                Wisp w = getWisp(i);
+                vec3 worldPos = rot * vec3(cellUV * 1.20, 0.0) * GEM_BASE_SCALE + vec3(cx - 1.5, 0.0, cy - 0.5) * 0.8;
+                vec3 toWisp = w.pos - worldPos;
+                float dist = length(toWisp);
+                vec3 wL = normalize(toWisp);
+                float wNoL = max(0.0, dot(nor, wL));
+                float wAtten = w.intensity / (dist * dist + 0.8);
+                diffuse += s.tint * wNoL * wAtten * WISP_GEM_ILLUM;
+
+                vec3 H = normalize(wL + V);
+                float wNoH = max(0.0, dot(nor, H));
+                spec += vec3(pow(wNoH, 60.0)) * fres * wAtten * WISP_GEM_SPEC;
+            }
+
+            float sss = s.subsurface * (0.5 + 0.5 * NoV) * GEM_SSS_BOOST;
+
+            color += diffuse * GEM_DIFFUSE_BOOST;
+            color += spec * GEM_SPECULAR_BOOST;
+            color += s.tint * sss;
+        }
+    }
+
+    color = color / (1.0 + color * TONEMAP_DENOM);
+    color = pow(color, vec3(TONEMAP_GAMMA));
+
+    imageStore(outputImage, pix, vec4(color, 1.0));
+}

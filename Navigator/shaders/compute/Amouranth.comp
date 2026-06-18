@@ -1,0 +1,785 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+// =============================================================================
+// AMOURANTH RTX – denim jorts + vivid red-pink V-neck shirt, felt+leather cowboy hat
+// Full production version with integrated Fluid Dynamics + Tesla Valve field
+// Hair is now fluid-driven: organic advection, directional bias, realistic sway/jiggle
+// =============================================================================
+
+// ── TUNABLE COLORS / MATERIALS ──────────────────────────────────────────────
+#define SKIN_BASE                   vec3(1.00, 0.82, 0.68)
+#define SKIN_SUBSURFACE             vec3(0.50, 0.20, 0.10)
+#define SKIN_TEXTURE_AMP            0.08
+
+#define SHIRT_COLOR                 vec3(0.92, 0.18, 0.28)
+#define SHIRT_TEXTURE_AMP           1.40
+#define SHIRT_ROUGHNESS             0.8
+#define SHIRT_SPECULAR              0.0
+
+#define DENIM_COLOR                 vec3(0.18, 0.28, 0.48)
+#define DENIM_TEXTURE_AMP           1.40
+#define DENIM_ROUGHNESS             1.65
+#define DENIM_SPECULAR              0.0
+
+#define HAT_FELT_COLOR              vec3(0.28, 0.22, 0.18)
+#define HAT_LEATHER_BAND_COLOR      vec3(0.32, 0.18, 0.09)
+#define HAT_LEATHER_TINT            vec3(0.22, 0.10, 0.05) * 1.3
+#define HAT_FELT_ROUGHNESS          0.75
+#define HAT_LEATHER_ROUGHNESS       0.45
+#define HAT_WEAR_NOISE_AMP          0.018
+#define HAT_TILT_FACTOR             0.0
+
+#define HAIR_COLOR                  vec3(1.0, 0.0, 0.0)
+#define HAIR_WAVE_AMP               0.5
+#define HAIR_WAVE_SPEED             10.6
+#define HAIR_WAVE_FREQ_Y            6.5
+#define HAIR_WAVE_FREQ_Z            7.2
+
+#define STOCKING_COLOR              vec3(0.0, 0.0, 1.0)
+#define HEEL_COLOR                  vec3(0.85, 0.05, 0.05)
+
+#define RIM_COLOR                   vec3(1.00, 0.94, 0.90)
+#define RIM_INTENSITY               0.02
+
+// ── Camera & Animation ──────────────────────────────────────────────────────
+#define CAMERA_ORBIT_DISTANCE       4.2
+#define CAMERA_ORBIT_HEIGHT         1.6
+#define CAMERA_ORBIT_SPEED          0.4
+#define CAMERA_FOV                  72.0
+#define CAMERA_LOOK_Y_OFFSET        -0.15
+
+#define GLOBAL_SCALE                1.32
+#define JUMP_FREQ                   1.8
+#define JUMP_AMP                    0.16
+#define GRAVITY_DAMP                0.92
+#define BREATH_SPEED                0.75
+#define BREATH_AMP                  0.116
+#define HEAD_TILT_FREQ              0.42
+#define HEAD_TILT_AMP               0.09
+#define ARM_SWAY_FREQ               0.58
+#define ARM_SWAY_AMP                1.0
+#define BOOB_JIGGLE_FREQ            1.8
+#define BOOB_JIGGLE_AMP_LEFT        0.05
+#define BOOB_JIGGLE_AMP_RIGHT       0.05
+#define BOOB_JIGGLE_DAMP            0.01
+#define BOOB_JIGGLE_PHASE_DIFF      0.0
+
+// ── Sizes & Positions ───────────────────────────────────────────────────────
+#define BOOB_BASE_Y                 0.98
+#define BOOB_BASE_Z                 0.24
+#define BOOB_SEPARATION             0.16
+#define BOOB_RADIUS_LEFT            0.22
+#define BOOB_RADIUS_RIGHT           0.22
+
+#define HEAD_Y_OFFSET               -0.19
+#define HAT_X_OFFSET                0.0
+#define HAT_Y_OFFSET                1.6
+#define HAT_Z_OFFSET                0.0
+#define HAT_HEIGHT                  0.4
+#define HAT_RADIUS_TOP              0.3
+#define HAT_BRIM_WIDTH              0.08
+#define HAT_BRIM_THICKNESS          0.05
+
+#define HAIR_BASE_Y                 1.20
+#define HAIR_Z_OFFSET               -0.18
+#define HAIR_SCALE_X                0.33
+#define HAIR_SCALE_Y                0.86
+#define HAIR_SCALE_Z                0.35
+#define HAIR_COVER_HEAD_FACTOR      1.32
+#define HAIR_LENGTH_FACTOR          2.9
+
+#define SHOULDER_Y                  1.0
+#define SHOULDER_X_OFFSET           0.4875
+#define ARM_UPPER_LENGTH            0.32
+#define ARM_LOWER_LENGTH            0.32
+#define ARM_THICKNESS               0.1
+#define ELBOW_BEND_RELAX            0.25
+#define HAND_SCALE                  0.15
+
+#define FINGER_LENGTH               0.22
+#define THUMB_LENGTH                0.14
+#define FINGER_THICKNESS            0.022
+#define THUMB_THICKNESS             0.032
+
+#define FINGER_BASE_X_SCALE         1.05
+#define FINGER_BASE_Y_OFFSET        -0.05
+#define FINGER_BASE_Z_OFFSET        0.04
+#define FINGER_SPREAD_BASE          0.23
+
+#define THUMB_BASE_X_SCALE          0.0
+#define THUMB_BASE_Y_OFFSET         -0.05
+#define THUMB_BASE_Z_OFFSET         0.2
+
+#define THUMB_OPPOSITION_ANGLE_L    0.2
+#define THUMB_OPPOSITION_ANGLE_R    3.110
+
+#define THUMB_TWIST_ANGLE_L         0.0
+#define THUMB_TWIST_ANGLE_R         0.0
+
+#define FINGER_CURL_BASE_BASE       0.10
+#define FINGER_CURL_MID_BASE        0.28
+#define FINGER_CURL_TIP_BASE        0.22
+
+#define THUMB_CURL_BASE_BASE        0.35
+#define THUMB_CURL_MID_BASE         0.45
+#define THUMB_CURL_TIP_BASE         0.30
+
+#define FINGER_FAN_ANGLE_FACTOR     0.70
+
+#define HAND_OFFSET_L               vec3(-0.02, -0.04, 0.02)
+#define HAND_OFFSET_R               vec3( 0.02, -0.04, 0.02)
+
+#define HAND_YAW_L                  0.25
+#define HAND_YAW_R                 -0.25
+#define HAND_PITCH_L_BASE           -0.65
+#define HAND_PITCH_R_BASE           -0.65
+#define HAND_ROLL_L_BASE            0.45
+#define HAND_ROLL_R_BASE           -0.45
+
+#define ARM_RAISE_THRESHOLD         1.0
+#define ARM_RAISE_CURL_FACTOR       2.5
+#define ARM_RAISE_FAN_FACTOR        0.3
+#define ARM_RAISE_OPPOSITION_FACTOR 0.4
+#define ARM_RAISE_PITCH_ADJUST      -1.2
+#define ARM_RAISE_ROLL_TO_CAMERA    1.57
+
+#define LEG_LENGTH                  1.0
+#define THIGH_RADIUS                0.24
+#define CALF_RADIUS                 0.13
+#define QUAD_BULGE                  0.04
+#define ANKLE_TAPER                 0.06
+#define FOOT_LENGTH                 0.21
+#define HEEL_HEIGHT                 0.11
+
+#define ASS_CHEEK_RADIUS            0.30
+#define ASS_CHEEK_SEP               0.135
+#define ASS_Y_POS                   0.6
+#define ASS_Z_POS                   0.0
+
+// ── Materials ───────────────────────────────────────────────────────────────
+const int MAT_SKIN     = 1;
+const int MAT_HAIR     = 2;
+const int MAT_HAT      = 3;
+const int MAT_SHIRT    = 4;
+const int MAT_DENIM    = 5;
+const int MAT_STOCKING = 6;
+const int MAT_HEEL     = 7;
+
+// =============================================================================
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba32f) uniform image2D outputImage;
+
+layout(push_constant) uniform Push {
+    float totalTime;
+} pc;
+
+// ── Helper functions ────────────────────────────────────────────────────────
+mat3 rotX(float a) { float c=cos(a), s=sin(a); return mat3(1,0,0, 0,c,-s, 0,s,c); }
+mat3 rotY(float a) { float c=cos(a), s=sin(a); return mat3(c,0,s, 0,1,0, -s,0,c); }
+mat3 rotZ(float a) { float c=cos(a), s=sin(a); return mat3(c,-s,0, s,c,0, 0,0,1); }
+mat2 rot2(float a) { float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+
+float sdSphere(vec3 p, float r) { return length(p) - r; }
+
+float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
+    vec3 pa = p - a;
+    vec3 ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h) - r;
+}
+
+float sdEllipsoid(vec3 p, vec3 r) {
+    float k0 = length(p / r);
+    float k1 = length(p / (r * r));
+    return k0 * (k0 - 1.0) / k1;
+}
+
+float sdCylinder(vec3 p, float r, float h) {
+    vec2 d = vec2(length(p.xz) - r, abs(p.y) - h);
+    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+
+float dot2(vec2 v) { return dot(v, v); }
+
+float sdCappedCone(vec3 p, float h, float r1, float r2) {
+    vec2 q = vec2(length(p.xz), p.y);
+    vec2 k1 = vec2(r2, h);
+    vec2 k2 = vec2(r2 - r1, 2.0 * h);
+    vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? r1 : r2), abs(q.y) - h);
+    vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot2(k2), 0.0, 1.0);
+    float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+    return s * sqrt(min(dot2(ca), dot2(cb)));
+}
+
+float noise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    float a = fract(sin(dot(i, vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float b = fract(sin(dot(i + vec3(1, 0, 0), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float c = fract(sin(dot(i + vec3(0, 1, 0), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    float d = fract(sin(dot(i + vec3(1, 1, 0), vec3(12.9898, 78.233, 45.5432))) * 43758.5453);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// ── NEW: Fluid Field + Tesla Valve System (makes hair & motion nice) ───────
+vec2 fluidVelocity(vec3 p, float t) {
+    // Procedural velocity field with advection feel
+    float vx = sin(p.y * 2.3 + t * 1.7) * 0.6 + cos(p.z * 1.8 + t * 0.9) * 0.4;
+    float vy = cos(p.x * 2.1 + t * 1.2) * 0.5 + sin(p.z * 2.4 + t * 1.4) * 0.35;
+    return vec2(vx, vy);
+}
+
+float fluidDensity(vec3 p, float t) {
+    return 0.5 + 0.5 * noise3(p * 4.2 + vec3(0.0, t * 0.8, 0.0));
+}
+
+// Tesla valve directional bias (easy "downward/forward" flow, resistance + turbulence reverse)
+float teslaBias(vec3 p, vec2 vel, float t) {
+    vec3 gravityDir = vec3(0.0, -1.0, 0.0);
+    float alignment = dot(normalize(vec3(vel, 0.0)), gravityDir);
+    float baseResistance = (alignment > 0.0) ? 0.15 : 3.8; // low forward, high reverse
+    float turbulence = noise3(p * 7.0 + vec3(t * 1.5, 0.0, 0.0)) * 0.6;
+    return baseResistance * (1.0 + turbulence * 0.4);
+}
+
+// ── Hit struct ──────────────────────────────────────────────────────────────
+struct Hit {
+    float d;
+    int mat;
+};
+
+Hit opUnion(Hit a, Hit b) {
+    if (a.d < b.d) return a;
+    return b;
+}
+
+// ── Jump offset ─────────────────────────────────────────────────────────────
+float jumpOffset() {
+    float t = pc.totalTime * JUMP_FREQ;
+    float cycle = sin(t) * 0.5 + 0.5;
+    float vel = cos(t) * JUMP_FREQ;
+    return cycle * JUMP_AMP * (1.0 - exp(-abs(vel) * GRAVITY_DAMP));
+}
+
+// ── Map ─────────────────────────────────────────────────────────────────────
+Hit map(vec3 pos) {
+    vec3 p = pos / GLOBAL_SCALE;
+    float jump = jumpOffset();
+    p.y += jump * 0.6;
+
+    float breath = sin(pc.totalTime * BREATH_SPEED) * BREATH_AMP;
+    p.y += breath * 0.5;
+
+    float headTilt = sin(pc.totalTime * HEAD_TILT_FREQ + 1.2) * HEAD_TILT_AMP;
+
+    float skinD  = 1e10;
+    float shirtD = 1e10;
+    float denimD = 1e10;
+
+    // ── Head & Neck (skin) ──────────────────────────────────────────────────
+    vec3 headP = p - vec3(0.0, 1.78 + jump*0.2 + HEAD_Y_OFFSET, 0.0);
+    headP.xz *= rot2(headTilt);
+    skinD = min(skinD, sdSphere(headP, 0.34));
+
+    vec3 neckP = p - vec3(0.0, 1.42 + jump*0.15 + HEAD_Y_OFFSET, 0.0);
+    neckP.xz *= rot2(headTilt * 0.6);
+    neckP.y += 0.16;
+    skinD = min(skinD, sdCappedCone(neckP, 0.32, 0.105, 0.02625));
+
+    // ── Torso core (shirt) ──────────────────────────────────────────────────
+    vec3 torsoP = p - vec3(0.0, 1.05 + jump*0.1, 0.0);
+    torsoP.y += breath * 0.4;
+    shirtD = min(shirtD, sdEllipsoid(torsoP, vec3(0.38, 0.58, 0.28)));
+
+    // V-neck carve-out
+    float vneckDepth = 0.28;
+    float vneckWidth  = 0.42;
+    vec3 vneckP = p - vec3(0.0, 1.38 + jump*0.1 + breath*0.3, 0.18);
+    float vneck = sdEllipsoid(vneckP, vec3(vneckWidth, vneckDepth*1.4, 0.22));
+    vneck = max(vneck, p.y - (1.38 + vneckDepth));
+    shirtD = max(shirtD, -vneck);
+
+    // ── Boobs (shirt) with fluid-influenced jiggle ──────────────────────────
+    float jigT = pc.totalTime * BOOB_JIGGLE_FREQ + jump * 3.0;
+    vec2 fluidVel = fluidVelocity(vec3(0.0, BOOB_BASE_Y, BOOB_BASE_Z), pc.totalTime);
+    float fluidDens = fluidDensity(vec3(0.0, BOOB_BASE_Y, BOOB_BASE_Z), pc.totalTime);
+    float teslaResist = teslaBias(vec3(0.0, BOOB_BASE_Y, BOOB_BASE_Z), fluidVel, pc.totalTime);
+
+    float jigL = sin(jigT) * exp(-abs(sin(jigT*0.4))*BOOB_JIGGLE_DAMP) * BOOB_JIGGLE_AMP_LEFT * (1.0 + fluidDens * 0.3);
+    float jigR = sin(jigT + BOOB_JIGGLE_PHASE_DIFF) * exp(-abs(sin(jigT*0.4))*BOOB_JIGGLE_DAMP) * BOOB_JIGGLE_AMP_RIGHT * (1.0 + fluidDens * 0.3);
+
+    // Apply Tesla bias to jiggle amplitude (less upward bounce)
+    jigL *= (1.0 - teslaResist * 0.15);
+    jigR *= (1.0 - teslaResist * 0.15);
+
+    vec3 leftBoobP  = p - vec3(-BOOB_SEPARATION, BOOB_BASE_Y + jump*0.3 + breath*0.5, BOOB_BASE_Z);
+    leftBoobP  += vec3(0.05*jigL, -0.11*abs(jigL), 0.06*jigL);
+    shirtD = min(shirtD, sdSphere(leftBoobP, BOOB_RADIUS_LEFT));
+
+    vec3 rightBoobP = p - vec3(BOOB_SEPARATION, BOOB_BASE_Y + jump*0.3 + breath*0.5, BOOB_BASE_Z);
+    rightBoobP += vec3(-0.05*jigR, -0.11*abs(jigR), 0.06*jigR);
+    shirtD = min(shirtD, sdSphere(rightBoobP, BOOB_RADIUS_RIGHT));
+
+    // ── Arms (skin) ─────────────────────────────────────────────────────────
+    float armSwing = sin(pc.totalTime * ARM_SWAY_FREQ + jump * 2.0) * ARM_SWAY_AMP;
+    float armAngle = armSwing + ELBOW_BEND_RELAX;
+
+    vec3 shoulderL = vec3(-SHOULDER_X_OFFSET, SHOULDER_Y + jump*0.15, 0.02);
+    vec3 elbowL_target = shoulderL + vec3(-ARM_UPPER_LENGTH * cos(armAngle), -ARM_UPPER_LENGTH * sin(armAngle) - 0.12, 0.04);
+    vec3 elbowL = mix(elbowL_target, elbowL_target + vec3(0, -0.18, 0), 0.6);
+    vec3 wristL = elbowL + vec3(-ARM_LOWER_LENGTH * cos(armAngle*0.85), -ARM_LOWER_LENGTH * sin(armAngle*0.85) - 0.10, 0.03);
+
+    skinD = min(skinD, sdCapsule(p - shoulderL, vec3(0,0,0), elbowL - shoulderL, ARM_THICKNESS));
+    skinD = min(skinD, sdCapsule(p - elbowL,    vec3(0,0,0), wristL - elbowL,    ARM_THICKNESS * 0.90));
+
+    vec3 shoulderR = vec3(SHOULDER_X_OFFSET, SHOULDER_Y + jump*0.15, 0.02);
+    vec3 elbowR_target = shoulderR + vec3(ARM_UPPER_LENGTH * cos(armAngle), -ARM_UPPER_LENGTH * sin(armAngle) - 0.12, 0.04);
+    vec3 elbowR = mix(elbowR_target, elbowR_target + vec3(0, -0.18, 0), 0.6);
+    vec3 wristR = elbowR + vec3(ARM_LOWER_LENGTH * cos(armAngle*0.85), -ARM_LOWER_LENGTH * sin(armAngle*0.85) - 0.10, 0.03);
+
+    skinD = min(skinD, sdCapsule(p - shoulderR, vec3(0,0,0), elbowR - shoulderR, ARM_THICKNESS));
+    skinD = min(skinD, sdCapsule(p - elbowR,    vec3(0,0,0), wristR - elbowR,    ARM_THICKNESS * 0.90));
+
+    // ── Dynamic hand parameters ─────────────────────────────────────────────
+    float raiseFactorL = max(0.0, wristL.y - ARM_RAISE_THRESHOLD);
+    float raiseFactorR = max(0.0, wristR.y - ARM_RAISE_THRESHOLD);
+
+    float fingerSpreadL = FINGER_SPREAD_BASE + ARM_RAISE_FAN_FACTOR * raiseFactorL;
+    float fingerSpreadR = FINGER_SPREAD_BASE + ARM_RAISE_FAN_FACTOR * raiseFactorR;
+
+    float thumbOppositionL = THUMB_OPPOSITION_ANGLE_L + ARM_RAISE_OPPOSITION_FACTOR * raiseFactorL;
+    float thumbOppositionR = THUMB_OPPOSITION_ANGLE_R - ARM_RAISE_OPPOSITION_FACTOR * raiseFactorR;
+
+    float fingerCurlBaseL = FINGER_CURL_BASE_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorL;
+    float fingerCurlMidL = FINGER_CURL_MID_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorL;
+    float fingerCurlTipL = FINGER_CURL_TIP_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorL;
+
+    float fingerCurlBaseR = FINGER_CURL_BASE_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorR;
+    float fingerCurlMidR = FINGER_CURL_MID_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorR;
+    float fingerCurlTipR = FINGER_CURL_TIP_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorR;
+
+    float thumbCurlBaseL = THUMB_CURL_BASE_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorL;
+    float thumbCurlMidL = THUMB_CURL_MID_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorL;
+    float thumbCurlTipL = THUMB_CURL_TIP_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorL;
+
+    float thumbCurlBaseR = THUMB_CURL_BASE_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorR;
+    float thumbCurlMidR = THUMB_CURL_MID_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorR;
+    float thumbCurlTipR = THUMB_CURL_TIP_BASE + ARM_RAISE_CURL_FACTOR * raiseFactorR;
+
+    float handPitchL = HAND_PITCH_L_BASE + ARM_RAISE_PITCH_ADJUST * raiseFactorL;
+    float handPitchR = HAND_PITCH_R_BASE + ARM_RAISE_PITCH_ADJUST * raiseFactorR;
+
+    float handRollL = HAND_ROLL_L_BASE + ARM_RAISE_ROLL_TO_CAMERA * raiseFactorL;
+    float handRollR = HAND_ROLL_R_BASE - ARM_RAISE_ROLL_TO_CAMERA * raiseFactorR;
+
+    // ── LEFT HAND ───────────────────────────────────────────────────────────
+    vec3 palmPosL = wristL + HAND_OFFSET_L;
+    mat3 rotYawL   = rotY(HAND_YAW_L);
+    mat3 rotPitchL = rotX(handPitchL);
+    mat3 rotRollL  = rotZ(handRollL);
+    mat3 handBasisL = rotYawL * rotPitchL * rotRollL;
+
+    vec3 palmL = palmPosL;
+    skinD = min(skinD, sdEllipsoid(p - palmL, vec3(HAND_SCALE*0.82, HAND_SCALE*0.58, HAND_SCALE*0.50)));
+
+    for (int i = 0; i < 4; i++) {
+        float fi = float(i);
+        float spread = (fi - 1.5) * fingerSpreadL;
+        float fan_angle = spread * FINGER_FAN_ANGLE_FACTOR;
+        mat2 rot_fan = rot2(fan_angle);
+
+        vec3 base = palmL + handBasisL * vec3(
+            spread * HAND_SCALE * FINGER_BASE_X_SCALE,
+            HAND_SCALE * FINGER_BASE_Y_OFFSET,
+            HAND_SCALE * FINGER_BASE_Z_OFFSET
+        );
+
+        vec2 xz1 = rot_fan * vec2(0.0, FINGER_LENGTH*0.38);
+        vec3 joint1 = base + handBasisL * vec3(xz1.x, 0.0, xz1.y);
+
+        float curl1 = fingerCurlBaseL + fingerCurlMidL * (0.6 + 0.4*abs(spread));
+        vec2 xz2 = rot_fan * vec2(0.0, FINGER_LENGTH*0.34 * cos(curl1));
+        vec3 joint2 = joint1 + handBasisL * vec3(xz2.x, -FINGER_LENGTH*0.34 * sin(curl1), xz2.y);
+
+        float curl2 = fingerCurlBaseL + fingerCurlTipL * (0.7 + 0.3*abs(spread));
+        vec2 xz3 = rot_fan * vec2(0.0, FINGER_LENGTH*0.28 * cos(curl2));
+        vec3 tip = joint2 + handBasisL * vec3(xz3.x, -FINGER_LENGTH*0.28 * sin(curl2), xz3.y);
+
+        skinD = min(skinD, sdCapsule(p - base,   vec3(0), joint1 - base,   FINGER_THICKNESS));
+        skinD = min(skinD, sdCapsule(p - joint1, vec3(0), joint2 - joint1, FINGER_THICKNESS * 0.92));
+        skinD = min(skinD, sdCapsule(p - joint2, vec3(0), tip    - joint2, FINGER_THICKNESS * 0.84));
+    }
+
+    vec3 thumbBaseL = palmL + handBasisL * vec3(
+        THUMB_BASE_X_SCALE * HAND_SCALE,
+        HAND_SCALE * THUMB_BASE_Y_OFFSET,
+        HAND_SCALE * THUMB_BASE_Z_OFFSET
+    );
+
+    mat2 thumbOpposL = rot2(thumbOppositionL);
+    vec2 thumbXZ_L = thumbOpposL * vec2(THUMB_LENGTH*0.45, 0.0);
+
+    mat3 thumbTwistL = rotX(THUMB_TWIST_ANGLE_L);
+
+    vec3 thumbMidL = thumbBaseL + handBasisL * thumbTwistL * vec3(
+        thumbXZ_L.x,
+        -THUMB_LENGTH*0.45 * cos(thumbCurlBaseL),
+        thumbXZ_L.y + THUMB_LENGTH*0.45 * sin(thumbCurlBaseL)
+    );
+
+    vec3 thumbTipL = thumbMidL + handBasisL * thumbTwistL * vec3(
+        thumbXZ_L.x * 1.3,
+        -THUMB_LENGTH*0.55 * cos(thumbCurlMidL + thumbCurlBaseL*0.6),
+        thumbXZ_L.y * 1.3 + THUMB_LENGTH*0.55 * sin(thumbCurlMidL + thumbCurlBaseL*0.6)
+    );
+
+    skinD = min(skinD, sdCapsule(p - thumbBaseL, vec3(0), thumbMidL - thumbBaseL, THUMB_THICKNESS));
+    skinD = min(skinD, sdCapsule(p - thumbMidL,  vec3(0), thumbTipL - thumbMidL,  THUMB_THICKNESS * 0.88));
+
+    // ── RIGHT HAND ──────────────────────────────────────────────────────────
+    vec3 palmPosR = wristR + HAND_OFFSET_R;
+    mat3 rotYawR   = rotY(HAND_YAW_R);
+    mat3 rotPitchR = rotX(handPitchR);
+    mat3 rotRollR  = rotZ(handRollR);
+    mat3 handBasisR = rotYawR * rotPitchR * rotRollR;
+
+    vec3 palmR = palmPosR;
+    skinD = min(skinD, sdEllipsoid(p - palmR, vec3(HAND_SCALE*0.82, HAND_SCALE*0.58, HAND_SCALE*0.50)));
+
+    for (int i = 0; i < 4; i++) {
+        float fi = float(i);
+        float spread = (fi - 1.5) * -fingerSpreadR;
+        float fan_angle = spread * FINGER_FAN_ANGLE_FACTOR;
+        mat2 rot_fan = rot2(fan_angle);
+
+        vec3 base = palmR + handBasisR * vec3(
+            spread * HAND_SCALE * FINGER_BASE_X_SCALE,
+            HAND_SCALE * FINGER_BASE_Y_OFFSET,
+            HAND_SCALE * FINGER_BASE_Z_OFFSET
+        );
+
+        vec2 xz1 = rot_fan * vec2(0.0, FINGER_LENGTH*0.38);
+        vec3 joint1 = base + handBasisR * vec3(xz1.x, 0.0, xz1.y);
+
+        float curl1 = fingerCurlBaseR + fingerCurlMidR * (0.6 + 0.4*abs(spread));
+        vec2 xz2 = rot_fan * vec2(0.0, FINGER_LENGTH*0.34 * cos(curl1));
+        vec3 joint2 = joint1 + handBasisR * vec3(xz2.x, -FINGER_LENGTH*0.34 * sin(curl1), xz2.y);
+
+        float curl2 = fingerCurlBaseR + fingerCurlTipR * (0.7 + 0.3*abs(spread));
+        vec2 xz3 = rot_fan * vec2(0.0, FINGER_LENGTH*0.28 * cos(curl2));
+        vec3 tip = joint2 + handBasisR * vec3(xz3.x, -FINGER_LENGTH*0.28 * sin(curl2), xz3.y);
+
+        skinD = min(skinD, sdCapsule(p - base,   vec3(0), joint1 - base,   FINGER_THICKNESS));
+        skinD = min(skinD, sdCapsule(p - joint1, vec3(0), joint2 - joint1, FINGER_THICKNESS * 0.92));
+        skinD = min(skinD, sdCapsule(p - joint2, vec3(0), tip    - joint2, FINGER_THICKNESS * 0.84));
+    }
+
+    vec3 thumbBaseR = palmR + handBasisR * vec3(
+        -THUMB_BASE_X_SCALE * HAND_SCALE,
+        HAND_SCALE * THUMB_BASE_Y_OFFSET,
+        HAND_SCALE * THUMB_BASE_Z_OFFSET
+    );
+
+    mat2 thumbOpposR = rot2(thumbOppositionR);
+    vec2 thumbXZ_R = thumbOpposR * vec2(THUMB_LENGTH*0.45, 0.0);
+
+    mat3 thumbTwistR = rotX(THUMB_TWIST_ANGLE_R);
+
+    vec3 thumbMidR = thumbBaseR + handBasisR * thumbTwistR * vec3(
+        thumbXZ_R.x,
+        -THUMB_LENGTH*0.45 * cos(thumbCurlBaseR),
+        thumbXZ_R.y + THUMB_LENGTH*0.45 * sin(thumbCurlBaseR)
+    );
+
+    vec3 thumbTipR = thumbMidR + handBasisR * thumbTwistR * vec3(
+        thumbXZ_R.x * 1.3,
+        -THUMB_LENGTH*0.55 * cos(thumbCurlMidR + thumbCurlBaseR*0.6),
+        thumbXZ_R.y * 1.3 + THUMB_LENGTH*0.55 * sin(thumbCurlMidR + thumbCurlBaseR*0.6)
+    );
+
+    skinD = min(skinD, sdCapsule(p - thumbBaseR, vec3(0), thumbMidR - thumbBaseR, THUMB_THICKNESS));
+    skinD = min(skinD, sdCapsule(p - thumbMidR,  vec3(0), thumbTipR - thumbMidR,  THUMB_THICKNESS * 0.88));
+
+    // ── Legs ────────────────────────────────────────────────────────────────
+    float legSway = sin(pc.totalTime * 1.2 + jump * 4.0) * 0.08;
+
+    // LEFT LEG
+    vec3 thighL_pos = vec3(-0.18, 0.55 + jump * 0.05, 0.0);
+    vec3 thighL = p - thighL_pos; thighL.xz *= rot2(legSway);
+    float thighBaseL = sdCapsule(thighL, vec3(0,0.4,0), vec3(0,-LEG_LENGTH+0.3,0), THIGH_RADIUS);
+    denimD = min(denimD, thighBaseL);
+
+    vec3 quadBulgeL = p - (thighL_pos + vec3(0.0,0.15,0.04));
+    quadBulgeL.xz *= rot2(legSway);
+    float quadL = sdEllipsoid(quadBulgeL, vec3(THIGH_RADIUS+QUAD_BULGE,0.22,THIGH_RADIUS+0.02));
+    shirtD = min(shirtD, quadL);
+
+    vec3 calfL_pos = vec3(-0.18, 0.55-LEG_LENGTH+jump*0.1, 0.0);
+    vec3 calfL = p - calfL_pos; calfL.xz *= rot2(legSway*1.5);
+    float calfBaseL = sdCapsule(calfL, vec3(0,0.3,0), vec3(0,-0.6,0), CALF_RADIUS);
+    vec3 calfBulgeL = p - (calfL_pos + vec3(0.02,0.1,0.03)); calfBulgeL.xz *= rot2(legSway*1.5);
+    float calfBulgeL_val = sdEllipsoid(calfBulgeL, vec3(CALF_RADIUS+0.025,0.18,CALF_RADIUS+0.015));
+    skinD = min(skinD, min(calfBaseL, calfBulgeL_val));
+
+    vec3 ankleL = p - vec3(-0.18, 0.55-LEG_LENGTH-0.55+jump*0.12, 0.0);
+    skinD = min(skinD, sdCapsule(ankleL, vec3(0,0.1,0), vec3(0,-0.15,0), ANKLE_TAPER));
+
+    // RIGHT LEG
+    vec3 thighR_pos = vec3(0.18, 0.55 + jump * 0.05, 0.0);
+    vec3 thighR = p - thighR_pos; thighR.xz *= rot2(-legSway);
+    float thighBaseR = sdCapsule(thighR, vec3(0,0.4,0), vec3(0,-LEG_LENGTH+0.3,0), THIGH_RADIUS);
+    denimD = min(denimD, thighBaseR);
+
+    vec3 quadBulgeR = p - (thighR_pos + vec3(0.0,0.15,0.04));
+    quadBulgeR.xz *= rot2(-legSway);
+    float quadR = sdEllipsoid(quadBulgeR, vec3(THIGH_RADIUS+QUAD_BULGE,0.22,THIGH_RADIUS+0.02));
+    shirtD = min(shirtD, quadR);
+
+    vec3 calfR_pos = vec3(0.18, 0.55-LEG_LENGTH+jump*0.1, 0.0);
+    vec3 calfR = p - calfR_pos; calfR.xz *= rot2(-legSway*1.5);
+    float calfBaseR = sdCapsule(calfR, vec3(0,0.3,0), vec3(0,-0.6,0), CALF_RADIUS);
+    vec3 calfBulgeR = p - (calfR_pos + vec3(-0.02,0.1,0.03)); calfBulgeR.xz *= rot2(-legSway*1.5);
+    float calfBulgeR_val = sdEllipsoid(calfBulgeR, vec3(CALF_RADIUS+0.025,0.18,CALF_RADIUS+0.015));
+    skinD = min(skinD, min(calfBaseR, calfBulgeR_val));
+
+    vec3 ankleR = p - vec3(0.18, 0.55-LEG_LENGTH-0.55+jump*0.12, 0.0);
+    skinD = min(skinD, sdCapsule(ankleR, vec3(0,0.1,0), vec3(0,-0.15,0), ANKLE_TAPER));
+
+    // ── Butt (denim) ────────────────────────────────────────────────────────
+    vec3 assP = p - vec3(0.0, ASS_Y_POS + jump*0.08, ASS_Z_POS);
+    denimD = min(denimD, sdSphere(assP - vec3(-ASS_CHEEK_SEP,0,0), ASS_CHEEK_RADIUS));
+    denimD = min(denimD, sdSphere(assP - vec3( ASS_CHEEK_SEP,0,0), ASS_CHEEK_RADIUS));
+
+    // ── Feet ────────────────────────────────────────────────────────────────
+    vec3 footL = p - vec3(-0.18, 0.55-LEG_LENGTH-0.6+jump*0.15, 0.12);
+    skinD = min(skinD, sdEllipsoid(footL, vec3(0.1,0.04,FOOT_LENGTH)));
+
+    vec3 footR = p - vec3(0.18, 0.55-LEG_LENGTH-0.6+jump*0.15, 0.12);
+    skinD = min(skinD, sdEllipsoid(footR, vec3(0.1,0.04,FOOT_LENGTH)));
+
+    // ── Heels ───────────────────────────────────────────────────────────────
+    float heelD = 1e10;
+    vec3 heelL_pos = vec3(-0.18, 0.55-LEG_LENGTH-0.6+jump*0.15, -HEEL_HEIGHT*0.5);
+    heelD = min(heelD, sdCapsule(p - heelL_pos, vec3(0,0,0), vec3(0,-HEEL_HEIGHT,0), 0.06));
+    vec3 heelR_pos = vec3(0.18, 0.55-LEG_LENGTH-0.6+jump*0.15, -HEEL_HEIGHT*0.5);
+    heelD = min(heelD, sdCapsule(p - heelR_pos, vec3(0,0,0), vec3(0,-HEEL_HEIGHT,0), 0.06));
+
+    // ── Shirt clothing volume ───────────────────────────────────────────────
+    vec3 clothingP = p - vec3(0.0, 0.90 + jump*0.08 + breath*0.15, 0.0);
+    float dressTaper = smoothstep(0.78, 1.15, p.y);
+    clothingP.xz *= mix(vec2(1.0), vec2(0.68,0.78), dressTaper);
+    shirtD = min(shirtD, sdEllipsoid(clothingP, vec3(0.46,0.42,0.38)));
+
+    // ── Hat ─────────────────────────────────────────────────────────────────
+    float hatD = 1e10;
+    vec3 hatCenter = vec3(HAT_X_OFFSET, HAT_Y_OFFSET + jump*0.12 + breath*0.08, HAT_Z_OFFSET);
+    vec3 hatP = p - hatCenter;
+    hatP.xz *= rot2(headTilt * HAT_TILT_FACTOR);
+
+    float crownHeight = HAT_HEIGHT;
+    float crown = sdCylinder(hatP - vec3(0, crownHeight/2.0, 0), HAT_RADIUS_TOP, crownHeight/2.0);
+
+    vec3 brimP = hatP + vec3(0.0, -crownHeight/2.0 + HAT_BRIM_THICKNESS/2.0, 0.0);
+    float brim = sdEllipsoid(brimP, vec3(
+        HAT_RADIUS_TOP + HAT_BRIM_WIDTH * 1.8,
+        HAT_BRIM_THICKNESS,
+        HAT_RADIUS_TOP + HAT_BRIM_WIDTH * 1.8
+    ));
+
+    float brimCurve = 0.04 * smoothstep(0.6, 1.0, length(brimP.xz) / (HAT_RADIUS_TOP + HAT_BRIM_WIDTH));
+    brim -= brimCurve;
+
+    hatD = min(crown, brim);
+    float wear = noise3(hatP * 20.0 + vec3(0.0, pc.totalTime*0.25, 0.0)) * HAT_WEAR_NOISE_AMP;
+    hatD += wear * 0.7;
+
+    // ── HAIR (NOW FLUID-DRIVEN & TESLA-BIASED — MUCH NICER) ─────────────────
+    float hairD = 1e10;
+    vec3 hairP = p - vec3(0.0, HAIR_BASE_Y + jump*0.2, HAIR_Z_OFFSET);
+    hairP.xz *= rot2(headTilt * 1.0);
+
+    // Fluid field influence on hair
+    vec2 hairFluidVel = fluidVelocity(hairP, pc.totalTime);
+    float hairFluidDens = fluidDensity(hairP, pc.totalTime);
+    float hairTesla = teslaBias(hairP, hairFluidVel, pc.totalTime);
+
+    float topFlat = smoothstep(1.45, 1.75, hairP.y) * 0.65;
+    hairP.y *= mix(HAIR_COVER_HEAD_FACTOR * HAIR_LENGTH_FACTOR, 0.92, topFlat);
+
+    float waveStrength = smoothstep(1.2, 3.0, p.y) * HAIR_WAVE_AMP * 1.3 * (1.0 + hairFluidDens * 0.4);
+    waveStrength *= smoothstep(1.75, 1.45, p.y);
+
+    // Fluid advection + Tesla bias on waves
+    float waveAdvect = dot(hairFluidVel, vec2(1.0, 0.6)) * 0.8;
+    hairP.x += sin(p.y * HAIR_WAVE_FREQ_Y + pc.totalTime * HAIR_WAVE_SPEED + p.z * 2.0 + waveAdvect) * waveStrength * (1.0 - hairTesla * 0.3);
+    hairP.z += cos(p.y * HAIR_WAVE_FREQ_Z + pc.totalTime * HAIR_WAVE_SPEED * 1.15 + p.x * 1.8 + waveAdvect * 0.7) * waveStrength * 0.75 * (1.0 - hairTesla * 0.3);
+
+    hairD = min(hairD, sdEllipsoid(hairP, vec3(HAIR_SCALE_X * HAIR_COVER_HEAD_FACTOR,
+                                               HAIR_SCALE_Y * HAIR_LENGTH_FACTOR,
+                                               HAIR_SCALE_Z)));
+
+    // ── Final union ─────────────────────────────────────────────────────────
+    Hit res;
+    res.d = 1e10;
+    res.mat = MAT_SKIN;
+
+    res = opUnion(res, Hit(skinD,   MAT_SKIN));
+    res = opUnion(res, Hit(shirtD,  MAT_SHIRT));
+    res = opUnion(res, Hit(denimD,  MAT_DENIM));
+    res = opUnion(res, Hit(heelD,   MAT_HEEL));
+    res = opUnion(res, Hit(hatD,    MAT_HAT));
+    res = opUnion(res, Hit(hairD,   MAT_HAIR));
+
+    res.d *= GLOBAL_SCALE;
+    return res;
+}
+
+// ── Normal ──────────────────────────────────────────────────────────────────
+vec3 getNormal(vec3 p) {
+    vec2 e = vec2(0.0008, 0.0);
+    vec3 n = normalize(vec3(
+        map(p + e.xyy).d - map(p - e.xyy).d,
+        map(p + e.yxy).d - map(p - e.yxy).d,
+        map(p + e.yyx).d - map(p - e.yyx).d
+    ));
+
+    Hit hit = map(p);
+    if (hit.mat == MAT_HAIR) {
+        float micro = noise3(p * vec3(60,5,60) * 3.0 + vec3(0.0, pc.totalTime*0.8, 0.0)) * 0.2;
+        n += micro * n; n = normalize(n);
+    }
+    else if (hit.mat == MAT_HAT) {
+        float leatherN = noise3(p * 22.0 + vec3(pc.totalTime*0.4,0,0)) * 0.025;
+        n += leatherN * n; n = normalize(n);
+    }
+
+    return n;
+}
+
+// ── Raymarch ────────────────────────────────────────────────────────────────
+float rayMarch(vec3 ro, vec3 rd, out int matID) {
+    float t = 0.0;
+    matID = 0;
+    for (int i = 0; i < 120; i++) {
+        vec3 p = ro + rd * t;
+        Hit hit = map(p);
+        t += hit.d;
+        if (t > 100.0 || abs(hit.d) < 0.0008) {
+            matID = hit.mat;
+            break;
+        }
+    }
+    return t;
+}
+
+// ── Tonemap ─────────────────────────────────────────────────────────────────
+vec3 tonemap(vec3 c) {
+    c = c / (c + 1.0);
+    c = pow(c, vec3(1.0/2.2));
+    return clamp(c * 1.15 - 0.075, 0.0, 1.0);
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+void main() {
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = imageSize(outputImage);
+    if (any(greaterThanEqual(pix, dim))) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(dim) * 2.0 - 1.0;
+    uv.x *= float(dim.x) / float(dim.y);
+
+    float camA = pc.totalTime * CAMERA_ORBIT_SPEED;
+    vec3 ro = vec3(sin(camA)*CAMERA_ORBIT_DISTANCE, CAMERA_ORBIT_HEIGHT + sin(pc.totalTime*0.9)*0.06, cos(camA)*CAMERA_ORBIT_DISTANCE);
+    vec3 ta = vec3(0.0, 1.5, 0.0);
+    vec3 ww = normalize(ta - ro);
+    vec3 uu = normalize(cross(ww, vec3(0,1,0)));
+    vec3 vv = cross(uu, ww);
+    vec3 rd = normalize(uv.x*uu + uv.y*vv + 1.58*ww);
+
+    int matID;
+    float t = rayMarch(ro, rd, matID);
+
+    vec3 col = vec3(0.06, 0.04, 0.14);
+    float sky = 0.5 + 0.5*uv.y;
+    col = mix(vec3(0.18, 0.12, 0.32), vec3(0.45, 0.32, 0.58), sky);
+    col += vec3(1.0,0.92,0.85) * pow(1.0 - length(uv*vec2(1.3,0.9)), 5.0) * 0.45;
+
+    if (t < 100.0) {
+        vec3 p = ro + rd * t;
+        vec3 n = getNormal(p);
+
+        vec3 light = normalize(vec3(1.2, 1.4, 1.1));
+        float diff = max(0.0, dot(n, light));
+        float rim   = pow(1.0 - max(0.0, dot(n, -rd)), 3.4);
+        float backRim = pow(1.0 - max(0.0, dot(n, rd)), 4.2);
+
+        vec3 albedo;
+        float rough = 0.5;
+        float spec  = 0.5;
+
+        if (matID == MAT_HAT) {
+            float feltMask = smoothstep(0.0, 0.15, abs(p.y - HAT_Y_OFFSET - HAT_HEIGHT*0.5));
+            float bandMask = 1.0 - feltMask;
+
+            vec3 felt = HAT_FELT_COLOR * (0.88 + 0.12 * noise3(p*18.0));
+            vec3 leather = mix(HAT_LEATHER_BAND_COLOR, HAT_LEATHER_BAND_COLOR + HAT_LEATHER_TINT, noise3(p*45.0)*0.7);
+            albedo = mix(felt, leather, bandMask);
+
+            rough = mix(HAT_FELT_ROUGHNESS, HAT_LEATHER_ROUGHNESS, bandMask);
+            spec = 0.25;
+        }
+        else if (matID == MAT_HAIR) {
+            float strand = noise3(p * vec3(60,5,60) + vec3(0.0, pc.totalTime*0.6, 0.0)) * 0.03;
+            albedo = HAIR_COLOR * (0.6 + 0.4 * (1.0 - strand));
+        }
+        else if (matID == MAT_STOCKING) {
+            albedo = STOCKING_COLOR * (0.95 + 0.05*noise3(p*20.0));
+            rough = 0.35;
+        }
+        else if (matID == MAT_HEEL) {
+            albedo = HEEL_COLOR;
+            rough = 0.22;
+        }
+        else if (matID == MAT_SHIRT) {
+            float tex = noise3(p * vec3(8.0,4.0,8.0)) * SHIRT_TEXTURE_AMP;
+            albedo = SHIRT_COLOR * (0.85 + tex);
+            rough = SHIRT_ROUGHNESS;
+            spec  = SHIRT_SPECULAR;
+        }
+        else if (matID == MAT_DENIM) {
+            float tex = noise3(p * vec3(12.0,6.0,12.0)) * DENIM_TEXTURE_AMP;
+            albedo = DENIM_COLOR * (0.82 + tex*0.18);
+            rough = DENIM_ROUGHNESS;
+            spec  = DENIM_SPECULAR;
+        }
+        else { // MAT_SKIN
+            float tex = noise3(p * 35.0) * SKIN_TEXTURE_AMP;
+            albedo = SKIN_BASE * (0.92 + tex);
+            rough = 0.28;
+            spec = 0.42;
+        }
+
+        vec3 lighting = albedo * (0.25 + 0.9*diff);
+        lighting += RIM_COLOR * rim * RIM_INTENSITY;
+
+        if (matID == MAT_SKIN) {
+            float sss = max(0.0, 0.6 - diff) * (albedo.r + albedo.g + albedo.b) / 3.0;
+            lighting += SKIN_SUBSURFACE * sss * 1.8;
+        }
+
+        vec3 h = normalize(light - rd);
+        float specTerm = pow(max(0.0, dot(n, h)), 32.0);
+        lighting += vec3(1.0) * specTerm * spec * rim;
+
+        col = lighting;
+    }
+
+    float vig = 1.0 - dot(uv,uv)*0.0;
+    col *= vig * 0.1;
+
+    col = tonemap(col);
+
+    imageStore(outputImage, pix, vec4(col, 1.0));
+}

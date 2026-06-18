@@ -1,0 +1,3 @@
+AMMOFAT v1.0 RTX-AMMOS GPU-native FAT16+
+Field layer L2 | signature AMMOFAT1 | IOCTL 0x2F10
+FAT16+ journaling metadata | GPU HD mirror
