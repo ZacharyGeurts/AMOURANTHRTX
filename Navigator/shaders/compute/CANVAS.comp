@@ -3633,37 +3633,56 @@ vec3 rtxWmTitleBar(vec2 winLocal, vec2 winSize, float titleH, ThemePal th) {
     float t = field.sealed_time;
     float uiSc = max(winSize.x / 1920.0, 0.75) * 1.35;
     vec2 muv = vec2(winLocal.x / max(winSize.x, 1.0), winLocal.y / max(titleH, 1.0));
+    uint wmPack = field.data_bus[52];
+    bool gnomeSkin = (wmPack & (1u << 15u)) != 0u;
     vec3 base = aosMaterialTint(muv, AOS_MAT_TITLE, th.void_, th, t);
-    base += th.accent * 0.05 * sin(winLocal.x * 0.03 + t * 1.4);
-    base += th.gemTint * smoothstep(titleH, titleH - 3.0, titleH - winLocal.y) * 0.14;
+    if (gnomeSkin) {
+        base = mix(th.panel * 0.88, th.void_ * 0.42, 0.35);
+        base += th.accent * 0.02;
+        float bottomLine = smoothstep(titleH - 1.5 * uiSc, titleH - 0.5 * uiSc, winLocal.y);
+        base = mix(base, th.accent * 0.12 + th.panel * 0.25, bottomLine * 0.45);
+    } else {
+        base += th.accent * 0.05 * sin(winLocal.x * 0.03 + t * 1.4);
+        base += th.gemTint * smoothstep(titleH, titleH - 3.0, titleH - winLocal.y) * 0.14;
+    }
     vec2 cell = vec2(8.0, 14.0) * uiSc;
     float rowY = titleH * 0.5 - 7.0 * uiSc;
     float ink = 0.0;
     float inkB = 0.0;
-    float menuX0 = 10.0 * uiSc;
-    float menuX1 = 60.0 * uiSc;
-    float menuX2 = 110.0 * uiSc;
-    float menuX3 = 160.0 * uiSc;
-    uint wmPack = field.data_bus[52];
     uint openMenu = (wmPack >> 8u) & 7u;
-    ink = max(ink, dosHudRun(winLocal, menuX0, rowY, cell, 70u, 105u, 108u, 101u, 32u, 32u, 32u, 32u));
-    inkB = max(inkB, dosHudRunBorder(winLocal, menuX0, rowY, cell, 70u, 105u, 108u, 101u, 32u, 32u, 32u, 32u));
-    ink = max(ink, dosHudRun(winLocal, menuX1, rowY, cell, 69u, 100u, 105u, 116u, 32u, 32u, 32u, 32u));
-    inkB = max(inkB, dosHudRunBorder(winLocal, menuX1, rowY, cell, 69u, 100u, 105u, 116u, 32u, 32u, 32u, 32u));
-    ink = max(ink, dosHudRun(winLocal, menuX2, rowY, cell, 86u, 105u, 101u, 119u, 32u, 32u, 32u, 32u));
-    inkB = max(inkB, dosHudRunBorder(winLocal, menuX2, rowY, cell, 86u, 105u, 101u, 119u, 32u, 32u, 32u, 32u));
-    ink = max(ink, dosHudRun(winLocal, menuX3, rowY, cell, 72u, 101u, 108u, 112u, 32u, 32u, 32u, 32u));
-    inkB = max(inkB, dosHudRunBorder(winLocal, menuX3, rowY, cell, 72u, 101u, 108u, 112u, 32u, 32u, 32u, 32u));
-    if (openMenu == 1u && winLocal.x >= menuX0 - 2.0 * uiSc && winLocal.x < menuX0 + 46.0 * uiSc)
-        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
-    if (openMenu == 2u && winLocal.x >= menuX1 - 2.0 * uiSc && winLocal.x < menuX1 + 46.0 * uiSc)
-        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
-    if (openMenu == 3u && winLocal.x >= menuX2 - 2.0 * uiSc && winLocal.x < menuX2 + 46.0 * uiSc)
-        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
-    if (openMenu == 4u && winLocal.x >= menuX3 - 2.0 * uiSc && winLocal.x < menuX3 + 46.0 * uiSc)
-        base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+    if (!gnomeSkin) {
+        float menuX0 = 10.0 * uiSc;
+        float menuX1 = 60.0 * uiSc;
+        float menuX2 = 110.0 * uiSc;
+        float menuX3 = 160.0 * uiSc;
+        ink = max(ink, dosHudRun(winLocal, menuX0, rowY, cell, 70u, 105u, 108u, 101u, 32u, 32u, 32u, 32u));
+        inkB = max(inkB, dosHudRunBorder(winLocal, menuX0, rowY, cell, 70u, 105u, 108u, 101u, 32u, 32u, 32u, 32u));
+        ink = max(ink, dosHudRun(winLocal, menuX1, rowY, cell, 69u, 100u, 105u, 116u, 32u, 32u, 32u, 32u));
+        inkB = max(inkB, dosHudRunBorder(winLocal, menuX1, rowY, cell, 69u, 100u, 105u, 116u, 32u, 32u, 32u, 32u));
+        ink = max(ink, dosHudRun(winLocal, menuX2, rowY, cell, 86u, 105u, 101u, 119u, 32u, 32u, 32u, 32u));
+        inkB = max(inkB, dosHudRunBorder(winLocal, menuX2, rowY, cell, 86u, 105u, 101u, 119u, 32u, 32u, 32u, 32u));
+        ink = max(ink, dosHudRun(winLocal, menuX3, rowY, cell, 72u, 101u, 108u, 112u, 32u, 32u, 32u, 32u));
+        inkB = max(inkB, dosHudRunBorder(winLocal, menuX3, rowY, cell, 72u, 101u, 108u, 112u, 32u, 32u, 32u, 32u));
+        if (openMenu == 1u && winLocal.x >= menuX0 - 2.0 * uiSc && winLocal.x < menuX0 + 46.0 * uiSc)
+            base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+        if (openMenu == 2u && winLocal.x >= menuX1 - 2.0 * uiSc && winLocal.x < menuX1 + 46.0 * uiSc)
+            base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+        if (openMenu == 3u && winLocal.x >= menuX2 - 2.0 * uiSc && winLocal.x < menuX2 + 46.0 * uiSc)
+            base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+        if (openMenu == 4u && winLocal.x >= menuX3 - 2.0 * uiSc && winLocal.x < menuX3 + 46.0 * uiSc)
+            base = mix(base, th.accent * 0.22 + th.panel * 0.45, 0.55);
+    } else {
+        float iconSz = titleH * 0.62;
+        float iconX = 12.0 * uiSc;
+        float iconY = (titleH - iconSz) * 0.5;
+        if (winLocal.x >= iconX && winLocal.x < iconX + iconSz
+                && winLocal.y >= iconY && winLocal.y < iconY + iconSz) {
+            vec2 il = (winLocal - vec2(iconX, iconY)) / iconSz;
+            base = mix(base, aosBlendIcon(base, sampleAosIconRgba(0u, il)), 0.85);
+        }
+    }
     uint titleTab = (field.data_bus[54] >> 24u) & 0xFFu;
-    float titleX = 220.0 * uiSc;
+    float titleX = gnomeSkin ? (winSize.x * 0.5 - 88.0 * uiSc) : (220.0 * uiSc);
     if (titleTab < 255u) {
         uint titleBase = AOS_TASKBAR_RAM + 0x10u + titleTab * AOS_TAB_STRIDE;
         ink = max(ink, dosHudRamStr(winLocal, titleX, rowY, cell, titleBase, 22u));
@@ -3673,7 +3692,7 @@ vec3 rtxWmTitleBar(vec2 winLocal, vec2 winSize, float titleH, ThemePal th) {
         ink = max(ink, dosHudRun(winLocal, titleX, rowY, cell, 82u, 84u, 88u, 32u, 83u, 104u, 101u, 108u));
         inkB = max(inkB, dosHudRunBorder(winLocal, titleX, rowY, cell, 82u, 84u, 88u, 32u, 83u, 104u, 101u, 108u));
     }
-    uint wm = field.data_bus[52];
+    uint wm = wmPack;
     float btn = 30.0;
     float bx = winSize.x - btn * 3.0 - 10.0;
     vec3 c;

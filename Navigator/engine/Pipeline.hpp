@@ -1477,7 +1477,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                     FieldAmmoFat::mount();
                     FieldCdRom::autoMount(FieldDos::assetRoot());
                     FieldDrives::refresh();
-                    FieldAmouranthOs::bootShell();
+                    FieldAmouranthOs::boot();
                     FieldNesImport::ensureImported();
                     FieldAosLoading::signalBooted();
                     FieldAmouranthOs::tick(width, height);
@@ -1486,7 +1486,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                             static_cast<std::uint8_t*>(fieldX86DieMapped),
                             FIELD_X86_DIE_HEADER_BYTES);
                         if (seedRam)
-                            FieldRtxBoot::paintTerminalShell(seedRam);
+                            FieldRtxBoot::clearScreen(seedRam, 0x07u);
                     }
                     if (std::getenv("AMOURANTHRTX_LAUNCH_DOOM") && !FieldAmmoExec::isActive())
                         FieldAmouranthOs::dispatchAction(7);
@@ -1682,7 +1682,10 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                 FieldRtxConsoleGui::paintChrome(gr);
             if (FieldAmouranthOs::panelVisible && FieldAmouranthOs::active)
                 FieldAmouranthExec::pumpWinGuiMouse(gr);
-            FieldAosStatusBar::writeStatus(gr);
+            if (FieldAmouranthOs::pendingEmptyPanel && gr) {
+                FieldAmouranthExec::paintEmptyPanel(gr);
+                FieldAmouranthOs::pendingEmptyPanel = false;
+            }
             FieldWmStatusBar::packFooter(gr);
         }
         FieldDosViewport::packDataBus(Options::Canvas::DataBus, 64u, gr);

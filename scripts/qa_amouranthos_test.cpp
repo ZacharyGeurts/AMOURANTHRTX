@@ -17,6 +17,11 @@
 #include <cstring>
 #include <vector>
 
+static void pumpExec(std::uint8_t* ram, int frames = 3) {
+    for (int i = 0; i < frames; ++i)
+        FieldAmouranthExec::execPending(ram);
+}
+
 static bool screenHas(const std::uint8_t* ram, const char* needle) {
     char buf[80 * 25 + 1]{};
     for (int i = 0; i < 80 * 25; ++i)
@@ -47,11 +52,11 @@ int main() {
         std::fprintf(stderr, "FAIL floating DOS panel should stay hidden until a program opens\n");
         return 1;
     }
-    if (!FieldAmouranthOs::infoPanelVisible) {
-        std::fprintf(stderr, "FAIL DevKit info card should be visible at boot (desktop mode)\n");
+    if (FieldAmouranthOs::infoPanelVisible) {
+        std::fprintf(stderr, "FAIL DevKit info card should stay hidden at boot\n");
         return 1;
     }
-    std::printf("OK AmouranthOS boot desktop — info panel + taskbar, no popup panel\n");
+    std::printf("OK AmouranthOS boot desktop — black backdrop + taskbar, no popup panel\n");
 
     FieldAmouranthOs::onMouseDown(nullptr, 40.f, static_cast<float>(FieldAmouranthOs::winH) - 20.f, 1, 1);
     if (!FieldAmouranthOs::startOpen) {
@@ -66,8 +71,8 @@ int main() {
         std::fprintf(stderr, "FAIL data_bus aos flag not set\n");
         return 1;
     }
-    if ((bus[42] & (1u << 24u)) == 0u) {
-        std::fprintf(stderr, "FAIL info panel bus bit should be set at boot\n");
+    if ((bus[42] & (1u << 24u)) != 0u) {
+        std::fprintf(stderr, "FAIL info panel bus bit should be clear at boot\n");
         return 1;
     }
     if ((bus[42] & (1u << 25u)) == 0u) {
@@ -106,7 +111,7 @@ int main() {
         bus[42], bus[29], bus[30]);
 
     FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Shell);
-    FieldAmouranthExec::execPending(ram);
+    pumpExec(ram);
     if (!FieldAmouranthExec::screenHasGuiMarker(ram, FieldAmouranthOs::AppId::Shell)) {
         std::fprintf(stderr, "FAIL RTX Shell GUI panel missing\n");
         return 1;
@@ -121,7 +126,7 @@ int main() {
     std::printf("OK GUI launch RTX Shell (focusTitle=%u)\n", shellFocus);
 
     FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::AmmoCode);
-    FieldAmouranthExec::execPending(ram);
+    pumpExec(ram);
     if (!FieldAmouranthExec::screenHasGuiMarker(ram, FieldAmouranthOs::AppId::AmmoCode)) {
         std::fprintf(stderr, "FAIL AmmoCode GUI not active\n");
         return 1;
@@ -129,7 +134,7 @@ int main() {
     std::printf("OK GUI launch AmmoCode\n");
 
     FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::PadTest);
-    FieldAmouranthExec::execPending(ram);
+    pumpExec(ram);
     if (!FieldAmouranthExec::screenHasGuiMarker(ram, FieldAmouranthOs::AppId::PadTest)) {
         std::fprintf(stderr, "FAIL PADTEST GUI missing\n");
         return 1;
@@ -138,7 +143,7 @@ int main() {
 
     FieldAmouranthOs::showDosPanelCentered();
     FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::FileCmd);
-    FieldAmouranthExec::execPending(ram);
+    pumpExec(ram);
     if (!FieldAmouranthOs::panelVisible) {
         std::fprintf(stderr, "FAIL DOS panel should open for FILECMD\n");
         return 1;

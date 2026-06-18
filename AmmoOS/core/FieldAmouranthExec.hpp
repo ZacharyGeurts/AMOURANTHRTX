@@ -138,6 +138,12 @@ inline void clearPanel(std::uint8_t* ram, std::uint8_t attr = 0x0Fu) noexcept {
     FieldWinFrame::clearScreen(ram, attr);
 }
 
+inline void paintEmptyPanel(std::uint8_t* ram) noexcept {
+    if (!ram) return;
+    FieldRtxGui::initTextMode(ram);
+    FieldWinFrame::clearScreen(ram, 0x07u);
+}
+
 inline void suspendAllGuestApps(std::uint8_t* ram) noexcept {
     FieldAmouranthOs::clearStaleGuestFlags();
     if (FieldAmmoExec::isActive() && ram)
@@ -291,6 +297,10 @@ inline FieldAmouranthOs::AppId appFromLaunch(FieldAmouranthLaunch::GuiApp g) noe
 
 inline void execPending(std::uint8_t* ram, void* mapped = nullptr,
                         std::size_t ramByteOffset = 0) noexcept {
+    if (FieldAmouranthLaunch::deferGuiFrames > 0) {
+        --FieldAmouranthLaunch::deferGuiFrames;
+        return;
+    }
     if (FieldAmouranthLaunch::pendingGuiApp != FieldAmouranthLaunch::GuiApp::None) {
         launchGui(appFromLaunch(FieldAmouranthLaunch::pendingGuiApp), ram, mapped, ramByteOffset);
         FieldAmouranthLaunch::clear();

@@ -1,7 +1,7 @@
 #pragma once
 
-// AmouranthOS — DevKit taskbar shell: Start, programs, clock. Panels launch on demand.
-// Default desktop shows version/quality info; DOS panel hidden until a program opens.
+// AmouranthOS — RTX desktop shell: Start menu launches programs on demand.
+// Black desktop backdrop at boot; windows open empty then load content.
 
 #include "FieldAosStatusBar.hpp"
 #include "FieldAmouranthFileCmd.hpp"
@@ -109,7 +109,8 @@ inline bool active = false;
 inline bool qaHoldInfoDesktop = false;
 inline bool startOpen = false;
 inline bool panelVisible = false;
-inline bool infoPanelVisible = true;
+inline bool infoPanelVisible = false;
+inline bool pendingEmptyPanel = false;
 inline int  nextProgId = 1;
 inline AppId focusedApp = AppId::None;
 inline int  focusedProgId = 0;
@@ -222,26 +223,16 @@ inline void hideDosPanel() noexcept {
     FieldDosViewport::panelOx = -8192.f;
     FieldDosViewport::panelOy = -8192.f;
     FieldDosViewport::panelPositioned = true;
-    if (!active) {
-        if (consoleShell) {
-            FieldDosViewport::panelStretch = true;
-            Options::Canvas::DosPanelStretch = true;
-            Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
-            infoPanelVisible = false;
-            FieldAmouranthInfo::visible = false;
-        } else {
-            FieldDosViewport::panelStretch = false;
-            Options::Canvas::DosPanelStretch = false;
-            Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
-            infoPanelVisible = true;
-            FieldAmouranthInfo::visible = true;
-        }
-    } else if (!panelVisible) {
-        infoPanelVisible = true;
-        FieldAmouranthInfo::visible = true;
+    infoPanelVisible = false;
+    FieldAmouranthInfo::visible = false;
+    if (consoleShell) {
+        FieldDosViewport::panelStretch = true;
+        Options::Canvas::DosPanelStretch = true;
+        Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
     } else {
-        infoPanelVisible = false;
-        FieldAmouranthInfo::visible = false;
+        FieldDosViewport::panelStretch = false;
+        Options::Canvas::DosPanelStretch = false;
+        Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
     }
 }
 
@@ -327,7 +318,7 @@ inline void focusProgram(int progId, bool restoreContent = true) noexcept {
     FieldAmouranthWm::menuItemHover = -1;
     FieldAmouranthWm::raiseFocusedProgram();
     if (restoreContent && focusedApp != AppId::None)
-        FieldAmouranthLaunch::queueGui(guiAppFor(focusedApp));
+        FieldAmouranthLaunch::queueGui(guiAppFor(focusedApp), false, 0);
 }
 
 inline Program& openNewWindow(AppId app) noexcept {
@@ -362,13 +353,14 @@ inline Program& openNewWindow(AppId app) noexcept {
     panelVisible = true;
     infoPanelVisible = false;
     FieldAmouranthInfo::visible = false;
+    pendingEmptyPanel = true;
     Options::Canvas::DosInputFocused = true;
     FieldAmouranthWm::raiseFocusedProgram();
     return programs.back();
 }
 
 inline float desktopTopInset() noexcept {
-    return active ? FieldAosStatusBar::height() * uiScale() : 0.f;
+    return 0.f;
 }
 
 inline void showDosPanelCentered() noexcept {
@@ -466,36 +458,6 @@ inline void packStartLabel(std::uint8_t* ram) noexcept {
     ram[base + 5u] = 0u;
 }
 
-// Taskbar + Start menu only — no wallpaper desktop (x86.comp default path).
-inline void bootShell() noexcept {
-    active = false;
-    consoleShell = true;
-    startOpen = false;
-    programs.clear();
-    nextProgId = 1;
-    focusedApp = AppId::None;
-    focusedProgId = 0;
-    Options::AmouranthOs::EnableDesktop = false;
-    Options::AmouranthOs::EnableTaskbar = true;
-    Options::SDL3::StartFullscreen = true;
-    Options::SDL3::PendingFullscreenAfterLoad = true;
-    FieldDosViewport::panelStretch = true;
-    Options::Canvas::DosPanelStretch = true;
-    Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
-    infoPanelVisible = false;
-    FieldAmouranthInfo::visible = false;
-    panelVisible = false;
-    FieldAmouranthWm::resetScale();
-    FieldDosViewport::crispFont = true;
-    FieldDosViewport::subpixelFont = false;
-    FieldDosViewport::sharpen = 0.72f;
-    FieldDosViewport::fontScale = 1.35f;
-    FieldRtxThemes::applyIndex(3);
-    hideDosPanel();
-    FieldAmouranthMenu::rebuildVisible();
-    std::fprintf(stderr, "[AMOURANTHOS] x86 shell — Start menu | folder | no popups\n");
-}
-
 inline void boot() noexcept {
     active = true;
     consoleShell = false;
@@ -504,6 +466,7 @@ inline void boot() noexcept {
     nextProgId = 1;
     focusedApp = AppId::None;
     focusedProgId = 0;
+    pendingEmptyPanel = false;
     Options::AmouranthOs::EnableDesktop = true;
     Options::AmouranthOs::EnableTaskbar = true;
     Options::SDL3::StartFullscreen = true;
@@ -511,8 +474,9 @@ inline void boot() noexcept {
     FieldDosViewport::panelStretch = false;
     Options::Canvas::DosPanelStretch = false;
     Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
-    infoPanelVisible = true;
-    FieldAmouranthInfo::visible = true;
+    infoPanelVisible = false;
+    FieldAmouranthInfo::visible = false;
+    panelVisible = false;
     FieldAmouranthWm::resetScale();
     FieldAmouranthDesktop::boot();
     hideDosPanel();
@@ -523,13 +487,16 @@ inline void boot() noexcept {
     FieldDosViewport::subpixelFont = false;
     FieldDosViewport::sharpen = 0.55f;
     FieldDosViewport::scanlines = false;
-    FieldDosViewport::scanlineMix = 0.04f;
-    FieldDosViewport::panelGlow = 0.08f;
+    FieldDosViewport::scanlineMix = 0.02f;
+    FieldDosViewport::panelGlow = 0.04f;
+    FieldRtxThemes::applyIndex(7);
     FieldRuntimeInfo::refresh();
     FieldAmouranthInfo::tick();
     FieldAmouranthMenu::rebuildVisible();
-    std::fprintf(stderr, "[AMOURANTHOS] RTX WM desktop — Start menu categories | Exit → Diagnostics\n");
+    std::fprintf(stderr, "[AMOURANTHOS] RTX desktop — black theme | Start to launch | no startup window\n");
 }
+
+inline void bootShell() noexcept { boot(); }
 
 inline void requestGracefulShutdown() noexcept {
     startOpen = false;
@@ -546,29 +513,21 @@ inline void requestGracefulShutdown() noexcept {
 
 inline void deactivate() noexcept {
     active = false;
-    consoleShell = true;
+    consoleShell = false;
     startOpen = false;
-    infoPanelVisible = true;
+    infoPanelVisible = false;
+    FieldAmouranthInfo::visible = false;
     focusedApp = AppId::None;
     focusedProgId = 0;
     programs.clear();
-    Options::AmouranthOs::EnableDesktop = false;
-    Options::AmouranthOs::EnableTaskbar = true;
+    pendingEmptyPanel = false;
+    FieldAmouranthLaunch::clear();
     FieldAmouranthFileCmd::close();
-    FieldDosViewport::panelOx = 0.f;
-    FieldDosViewport::panelOy = 0.f;
-    FieldDosViewport::panelPositioned = false;
-    FieldDosViewport::panelStretch = true;
-    Options::Canvas::DosPanelStretch = true;
-    Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
-    FieldAmouranthInfo::visible = true;
-    pendingShellRestore = true;
+    clearStaleGuestFlags();
+    panelVisible = false;
     hideDosPanel();
-    FieldDosViewport::panelStretch = true;
-    Options::Canvas::DosPanelStretch = true;
-    Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
     FieldAmouranthWm::applyPanelScale();
-    std::fprintf(stderr, "[AMOURANTHOS] Exit to Diagnostics — console backdrop + Start menu\n");
+    std::fprintf(stderr, "[AMOURANTHOS] Desktop off — no windows\n");
 }
 
 inline void sanitizeVgaTail(std::uint8_t* ram) noexcept {

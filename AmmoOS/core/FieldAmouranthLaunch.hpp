@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 
@@ -13,22 +14,26 @@ enum class GuiApp : std::uint8_t {
 inline std::string pendingShellCmd;
 inline GuiApp pendingGuiApp = GuiApp::None;
 inline bool pendingNesPadOnly = false;
+inline int deferGuiFrames = 0;
 
-inline void queue(const std::string& cmd) noexcept {
+inline void queue(const std::string& cmd, int deferFrames = 2) noexcept {
     pendingShellCmd = cmd;
     pendingGuiApp = GuiApp::None;
+    deferGuiFrames = std::max(deferGuiFrames, deferFrames);
 }
 
-inline void queueGui(GuiApp app, bool nesPadOnly = false) noexcept {
+inline void queueGui(GuiApp app, bool nesPadOnly = false, int deferFrames = 2) noexcept {
     pendingGuiApp = app;
     pendingShellCmd.clear();
     pendingNesPadOnly = nesPadOnly;
+    deferGuiFrames = std::max(deferGuiFrames, deferFrames);
 }
 
 inline void clear() noexcept {
     pendingShellCmd.clear();
     pendingGuiApp = GuiApp::None;
     pendingNesPadOnly = false;
+    deferGuiFrames = 0;
 }
 
 inline bool hasPending() noexcept {
