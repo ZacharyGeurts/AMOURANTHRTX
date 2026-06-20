@@ -36,35 +36,38 @@ set(FIELD_X86_HEADERS
 )
 
 # =============================================================================
-# Library target (standalone only — AMOURANTHRTX parent builds Navigator/engine copy)
+# Library target
 # =============================================================================
-if(NOT TARGET field_x86)
-    add_library(field_x86 STATIC ${FIELD_X86_SOURCES} ${FIELD_X86_HEADERS})
+add_library(field_x86 STATIC ${FIELD_X86_SOURCES} ${FIELD_X86_HEADERS})
 
-    target_include_directories(field_x86
-        PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
+target_include_directories(field_x86 
+    PUBLIC 
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
-    target_compile_definitions(field_x86 PRIVATE
-        X86EMU_CORE_FIELD_DIE=1
-    )
+target_compile_definitions(field_x86 PRIVATE 
+    X86EMU_CORE_FIELD_DIE=1
+)
 
-    if(FIELD_X86_ENABLE_AVX)
-        target_compile_definitions(field_x86 PRIVATE FIELD_X86_ENABLE_AVX)
-        message(STATUS "FieldX86Core: AVX support enabled (experimental)")
-    endif()
-
-    target_compile_options(field_x86 PRIVATE
-        $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -O3 -ffast-math>
-        $<$<C_COMPILER_ID:MSVC>:/W4 /O2>
-    )
-
-    target_link_libraries(field_x86 PRIVATE m)
-    add_library(x86emu ALIAS field_x86)
-else()
-    message(STATUS "FieldX86Core: using field_x86 from parent project")
+# Optional AVX support
+if(FIELD_X86_ENABLE_AVX)
+    target_compile_definitions(field_x86 PRIVATE FIELD_X86_ENABLE_AVX)
+    message(STATUS "FieldX86Core: AVX support enabled (experimental)")
 endif()
+
+# Optimization & warnings
+target_compile_options(field_x86 PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -O3 -ffast-math>
+    $<$<C_COMPILER_ID:MSVC>:/W4 /O2>
+)
+
+# Link math library
+target_link_libraries(field_x86 PRIVATE m)
+
+# =============================================================================
+# Alias for easier use in parent projects
+# =============================================================================
+add_library(x86emu ALIAS field_x86)
 
 # =============================================================================
 # Install
