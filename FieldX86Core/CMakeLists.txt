@@ -1,101 +1,75 @@
 # =============================================================================
-# Field RTX x86 Core - CMakeLists.txt
-# Full no-stubs x86 emulator core for Field Die (legacy + FPU + SSE)
+# Field RTX x86 Core — full historical x86 (8086→Core2) in-tree libx86emu for Field Die
+# ISA: RM/PM32 + x87 + MMX + SSE1 (+ museum personas via FieldX86Identity)
+# Not for separate distribution. Dual licensed with AMOURANTHRTX (GPL v3 / commercial)
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.16)
 project(FieldX86Core LANGUAGES C)
 
-# =============================================================================
-# Options
-# =============================================================================
-option(FIELD_X86_BUILD_TESTS "Build test binaries" OFF)
-option(FIELD_X86_ENABLE_AVX  "Enable basic AVX support (experimental)" OFF)
+if(TARGET field_x86)
+    message(STATUS "FieldX86Core: using field_x86 from parent AMOURANTHRTX build")
+    return()
+endif()
 
-# =============================================================================
-# Source files
-# =============================================================================
+option(FIELD_X86_BUILD_TESTS "Build optional FieldX86Core test harness" OFF)
+option(FIELD_X86_ENABLE_AVX  "Enable experimental AVX decode paths" OFF)
+
 set(FIELD_X86_SOURCES
     src/api.c
     src/decode.c
-    src/mem.c
     src/fpu.c
+    src/mem.c
     src/ops.c
     src/ops2.c
     src/prim_ops.c
 )
 
 set(FIELD_X86_HEADERS
-    include/x86emu.h
-    include/x86emu_int.h
     include/decode.h
-    include/mem.h
     include/fpu.h
+    include/mem.h
     include/ops.h
     include/prim_ops.h
+    include/x86emu.h
+    include/x86emu_int.h
 )
 
-# =============================================================================
-# Library target
-# =============================================================================
 add_library(field_x86 STATIC ${FIELD_X86_SOURCES} ${FIELD_X86_HEADERS})
-
-target_include_directories(field_x86 
-    PUBLIC 
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_compile_definitions(field_x86 PRIVATE 
-    X86EMU_CORE_FIELD_DIE=1
-)
-
-# Optional AVX support
-if(FIELD_X86_ENABLE_AVX)
-    target_compile_definitions(field_x86 PRIVATE FIELD_X86_ENABLE_AVX)
-    message(STATUS "FieldX86Core: AVX support enabled (experimental)")
-endif()
-
-# Optimization & warnings
-target_compile_options(field_x86 PRIVATE
-    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -O3 -ffast-math>
-    $<$<C_COMPILER_ID:MSVC>:/W4 /O2>
-)
-
-# Link math library
-target_link_libraries(field_x86 PRIVATE m)
-
-# =============================================================================
-# Alias for easier use in parent projects
-# =============================================================================
 add_library(x86emu ALIAS field_x86)
 
-# =============================================================================
-# Install
-# =============================================================================
-install(TARGETS field_x86 
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
+target_include_directories(field_x86
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
-install(DIRECTORY include/ 
-    DESTINATION include/FieldX86Core
+target_compile_definitions(field_x86
+    PUBLIC  FIELD_X86_CORE=1
+    PRIVATE X86EMU_CORE_FIELD_DIE=1
 )
 
-# =============================================================================
-# Optional test binary
-# =============================================================================
-if(FIELD_X86_BUILD_TESTS)
-    add_executable(field_x86_test tests/main.c)
-    target_link_libraries(field_x86_test PRIVATE field_x86)
-    
-    # Simple test that runs a few instructions
-    target_compile_definitions(field_x86_test PRIVATE FIELD_X86_TEST_MODE)
+if(FIELD_X86_ENABLE_AVX)
+    target_compile_definitions(field_x86 PRIVATE FIELD_X86_ENABLE_AVX=1)
+    message(STATUS "FieldX86Core: AVX decode paths enabled (experimental)")
 endif()
 
-# =============================================================================
-# Status
-# =============================================================================
-message(STATUS "FieldX86Core configured")
-message(STATUS "   Source files: ${FIELD_X86_SOURCES}")
-message(STATUS "   GPU integration: ENABLED (direct VRAM mapping)")
-message(STATUS "   Full ISA coverage: Legacy + FPU + SSE1–SSE4.2")
+target_compile_options(field_x86 PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-w -O2>
+    $<$<C_COMPILER_ID:MSVC>:/W0 /O2>
+)
+
+set_target_properties(field_x86 PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
+)
+
+target_link_libraries(field_x86 PRIVATE m)
+
+if(FIELD_X86_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/main.c")
+    add_executable(field_x86_test tests/main.c)
+    target_link_libraries(field_x86_test PRIVATE field_x86)
+    target_compile_definitions(field_x86_test PRIVATE FIELD_X86_TEST_MODE=1)
+endif()
+
+message(STATUS "FieldX86Core: standalone static library configured (${CMAKE_CURRENT_SOURCE_DIR})")

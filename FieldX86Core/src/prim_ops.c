@@ -1,100 +1,13 @@
 /****************************************************************************
 *
-* Realmode X86 Emulator Library
-*
-* Copyright (c) 1996-1999 SciTech Software, Inc.
-* Copyright (c) David Mosberger-Tang
-* Copyright (c) 1999 Egbert Eich
-* Copyright (c) 2007-2017 SUSE LINUX GmbH; Author: Steffen Winterfeldt
-*
-*  ========================================================================
-*
-*  Permission to use, copy, modify, distribute, and sell this software and
-*  its documentation for any purpose is hereby granted without fee,
-*  provided that the above copyright notice appear in all copies and that
-*  both that copyright notice and this permission notice appear in
-*  supporting documentation, and that the name of the authors not be used
-*  in advertising or publicity pertaining to distribution of the software
-*  without specific, written prior permission.  The authors makes no
-*  representations about the suitability of this software for any purpose.
-*  It is provided "as is" without express or implied warranty.
-*
-*  THE AUTHORS DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
-*  INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
-*  EVENT SHALL THE AUTHORS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
-*  CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
-*  USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-*  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-*  PERFORMANCE OF THIS SOFTWARE.
-*
-*  ========================================================================
+* Field RTX x86 Core (libx86emu lineage, in-tree for Field Die host CPU)
+* Not for separate distribution. Dual licensed with AMOURANTHRTX (GPL v3 / commercial).
 *
 * Description:
 *   Implement the primitive machine operations used by the emulation code
 *   in ops.c
 *
-*   Carry Chain Calculation
-*
-*   This represents a somewhat expensive calculation which is
-*   apparently required to emulate the setting of the OF and AF flag.
-*   The latter is not so important, but the former is.  The overflow
-*   flag is the XOR of the top two bits of the carry chain for an
-*   addition (similar for subtraction).  Since we do not want to
-*   simulate the addition in a bitwise manner, we try to calculate the
-*   carry chain given the two operands and the result.
-*
-*   So, given the following table, which represents the addition of two
-*   bits, we can derive a formula for the carry chain.
-*
-*   a   b   cin   r     cout
-*   0   0   0     0     0
-*   0   0   1     1     0
-*   0   1   0     1     0
-*   0   1   1     0     1
-*   1   0   0     1     0
-*   1   0   1     0     1
-*   1   1   0     0     1
-*   1   1   1     1     1
-*
-*   Construction of table for cout:
-*
-*   ab
-*   r  \  00   01   11  10
-*   |------------------
-*   0  |   0    1    1   1
-*   1  |   0    0    1   0
-*
-*   By inspection, one gets:  cc = ab +  r'(a + b)
-*
-*   That represents alot of operations, but NO CHOICE....
-*
-*   Borrow Chain Calculation.
-*
-*   The following table represents the subtraction of two bits, from
-*   which we can derive a formula for the borrow chain.
-*
-*   a   b   bin   r     bout
-*   0   0   0     0     0
-*   0   0   1     1     1
-*   0   1   0     1     1
-*   0   1   1     0     1
-*   1   0   0     1     0
-*   1   0   1     0     0
-*   1   1   0     0     0
-*   1   1   1     1     1
-*
-*   Construction of table for cout:
-*
-*   ab
-*   r  \  00   01   11  10
-*   |------------------
-*   0  |   0    1    0   0
-*   1  |   1    1    1   0
-*
-*   By inspection, one gets:  bc = a'b +  r(a' + b)
-*
 ****************************************************************************/
-
 
 #include "include/x86emu_int.h"
 

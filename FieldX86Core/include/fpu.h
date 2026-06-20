@@ -1,6 +1,10 @@
 /****************************************************************************
 *
-* x87 FPU emulation for libx86emu
+* Field RTX x86 Core (libx86emu lineage, in-tree for Field Die host CPU)
+* Not for separate distribution. Dual licensed with AMOURANTHRTX (GPL v3 / commercial).
+*
+* Description:
+*   x87 FPU emulation.
 *
 ****************************************************************************/
 

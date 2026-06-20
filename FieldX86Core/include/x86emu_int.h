@@ -1,36 +1,12 @@
 /****************************************************************************
 *
-* Realmode X86 Emulator Library
-*
-* Copyright (c) 2007-2017 SUSE LINUX GmbH; Author: Steffen Winterfeldt
-*
-*  ========================================================================
-*
-*  Permission to use, copy, modify, distribute, and sell this software and
-*  its documentation for any purpose is hereby granted without fee,
-*  provided that the above copyright notice appear in all copies and that
-*  both that copyright notice and this permission notice appear in
-*  supporting documentation, and that the name of the authors not be used
-*  in advertising or publicity pertaining to distribution of the software
-*  without specific, written prior permission.  The authors makes no
-*  representations about the suitability of this software for any purpose.
-*  It is provided "as is" without express or implied warranty.
-*
-*  THE AUTHORS DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
-*  INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
-*  EVENT SHALL THE AUTHORS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
-*  CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
-*  USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-*  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-*  PERFORMANCE OF THIS SOFTWARE.
-*
-*  ========================================================================
+* Field RTX x86 Core (libx86emu lineage, in-tree for Field Die host CPU)
+* Not for separate distribution. Dual licensed with AMOURANTHRTX (GPL v3 / commercial).
 *
 * Description:
 *   Header file for library internal macros and definitions.
 *
 ****************************************************************************/
-
 
 #ifndef __X86EMU_X86EMU_INT_H
 #define __X86EMU_X86EMU_INT_H
@@ -53,6 +29,7 @@
 #define INTR_RAISE_SOFT(a, n)	x86emu_intr_raise(a, n, INTR_TYPE_SOFT, 0)
 #define INTR_RAISE_GP(a, err)	x86emu_intr_raise(a, 0x0d, INTR_TYPE_FAULT | INTR_MODE_RESTART | INTR_MODE_ERRCODE, err)
 #define INTR_RAISE_UD(a)	x86emu_intr_raise(a, 0x06, INTR_TYPE_FAULT | INTR_MODE_RESTART, 0)
+#define INTR_RAISE_BR(a)	x86emu_intr_raise(a, 0x05, INTR_TYPE_FAULT | INTR_MODE_RESTART, 0)
 
 #define MODE_REPE		((emu)->x86.mode & _MODE_REPE)
 #define MODE_REPNE		((emu)->x86.mode & _MODE_REPNE)

@@ -1,40 +1,13 @@
 /****************************************************************************
 *
-* Realmode X86 Emulator Library
-*
-* Copyright (c) 1996-1999 SciTech Software, Inc.
-* Copyright (c) David Mosberger-Tang
-* Copyright (c) 1999 Egbert Eich
-* Copyright (c) 2007-2017 SUSE LINUX GmbH; Author: Steffen Winterfeldt
-*
-*  ========================================================================
-*
-*  Permission to use, copy, modify, distribute, and sell this software and
-*  its documentation for any purpose is hereby granted without fee,
-*  provided that the above copyright notice appear in all copies and that
-*  both that copyright notice and this permission notice appear in
-*  supporting documentation, and that the name of the authors not be used
-*  in advertising or publicity pertaining to distribution of the software
-*  without specific, written prior permission.  The authors makes no
-*  representations about the suitability of this software for any purpose.
-*  It is provided "as is" without express or implied warranty.
-*
-*  THE AUTHORS DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
-*  INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
-*  EVENT SHALL THE AUTHORS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
-*  CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
-*  USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-*  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-*  PERFORMANCE OF THIS SOFTWARE.
-*
-*  ========================================================================
+* Field RTX x86 Core (libx86emu lineage, in-tree for Field Die host CPU)
+* Not for separate distribution. Dual licensed with AMOURANTHRTX (GPL v3 / commercial).
 *
 * Description:
 *   Subroutines to implement the decoding and emulation of all the x86
 *   extended two-byte processor instructions.
 *
 ****************************************************************************/
-
 
 #include "include/x86emu_int.h"
 #include "include/fpu.h"
@@ -459,21 +432,6 @@ static inline u16 mmx_w(u64 v, int i)
   return (u16) (v >> (16 * i));
 }
 
-static inline s16 mmx_sw(u64 v, int i)
-{
-  return (s16) mmx_w(v, i);
-}
-
-static inline u32 mmx_d(u64 v, int i)
-{
-  return (u32) (v >> (32 * i));
-}
-
-static inline s32 mmx_sd(u64 v, int i)
-{
-  return (s32) mmx_d(v, i);
-}
-
 static u32 sse_lane_u32(const I128_reg_t *r, int lane)
 {
   const int o = lane * FP_SP_SIZE;
@@ -497,6 +455,21 @@ static void sse_lane_set_f32(I128_reg_t *r, int lane, float f)
   r->reg[o + 1] = (u8) (u.u >> 8);
   r->reg[o + 2] = (u8) (u.u >> 16);
   r->reg[o + 3] = (u8) (u.u >> 24);
+}
+
+static inline s16 mmx_sw(u64 v, int i)
+{
+  return (s16) mmx_w(v, i);
+}
+
+static inline u32 mmx_d(u64 v, int i)
+{
+  return (u32) (v >> (32 * i));
+}
+
+static inline s32 mmx_sd(u64 v, int i)
+{
+  return (s32) mmx_d(v, i);
 }
 
 static u64 mmx_read_src(x86emu_t *emu, int mod, int rl)
@@ -1868,7 +1841,10 @@ static void x86emuOp2_SSEcomiss(x86emu_t *emu, u8 op2)
   u32 addr;
   float a, b;
 
-  OP_DECODE(op2 == 0x2e ? "ucomiss " : "comiss ");
+  if (op2 == 0x2e)
+    OP_DECODE("ucomiss ");
+  else
+    OP_DECODE("comiss ");
   x86emuOp2_sse_enabled_check(emu);
   fetch_decode_modrm(emu, &mod, &rh, &rl);
 

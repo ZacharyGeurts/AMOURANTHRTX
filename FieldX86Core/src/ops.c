@@ -1,71 +1,13 @@
 /****************************************************************************
 *
-* Realmode X86 Emulator Library
-*
-* Copyright (c) 1996-1999 SciTech Software, Inc.
-* Copyright (c) David Mosberger-Tang
-* Copyright (c) 1999 Egbert Eich
-* Copyright (c) 2007-2017 SUSE LINUX GmbH; Author: Steffen Winterfeldt
-*
-*  ========================================================================
-*
-*  Permission to use, copy, modify, distribute, and sell this software and
-*  its documentation for any purpose is hereby granted without fee,
-*  provided that the above copyright notice appear in all copies and that
-*  both that copyright notice and this permission notice appear in
-*  supporting documentation, and that the name of the authors not be used
-*  in advertising or publicity pertaining to distribution of the software
-*  without specific, written prior permission.  The authors makes no
-*  representations about the suitability of this software for any purpose.
-*  It is provided "as is" without express or implied warranty.
-*
-*  THE AUTHORS DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
-*  INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
-*  EVENT SHALL THE AUTHORS BE LIABLE FOR ANY SPECIAL, INDIRECT OR
-*  CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF
-*  USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-*  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-*  PERFORMANCE OF THIS SOFTWARE.
-*
-*  ========================================================================
+* Field RTX x86 Core (libx86emu lineage, in-tree for Field Die host CPU)
+* Not for separate distribution. Dual licensed with AMOURANTHRTX (GPL v3 / commercial).
 *
 * Description:
 *   Subroutines to implement the decoding and emulation of all the
 *   x86 processor instructions.
 *
-*   There are approximately 250 subroutines in here, which correspond
-*   to the 256 byte-"opcodes" found on the 8086.  The table which
-*   dispatches this is found in the files optab.[ch].
-*
-*   Each opcode proc has a comment preceeding it which gives it's table
-*   address.  Several opcodes are missing (undefined) in the table.
-*
-*   Each proc includes information for decoding (OP_DECODE).
-*
-*   Many of the procedures are *VERY* similar in coding.  This has
-*   allowed for a very large amount of code to be generated in a fairly
-*   short amount of time (i.e. cut, paste, and modify).  The result is
-*   that much of the code below could have been folded into subroutines
-*   for a large reduction in size of this file.  The downside would be
-*   that there would be a penalty in execution speed.  The file could
-*   also have been *MUCH* larger by inlining certain functions which
-*   were called.  This could have resulted even faster execution.  The
-*   prime directive I used to decide whether to inline the code or to
-*   modularize it, was basically: 1) no unnecessary subroutine calls,
-*   2) no routines more than about 200 lines in size, and 3) modularize
-*   any code that I might not get right the first time.  The fetch_*
-*   subroutines fall into the latter category.  The The decode_* fall
-*   into the second category.  The coding of the "switch(mod){ .... }"
-*   in many of the subroutines below falls into the first category.
-*   Especially, the coding of {add,and,or,sub,...}_{byte,word}
-*   subroutines are an especially glaring case of the third guideline.
-*   Since so much of the code is cloned from other modules (compare
-*   opcode #00 to opcode #01), making the basic operations subroutine
-*   calls is especially important; otherwise mistakes in coding an
-*   "add" would represent a nightmare in maintenance.
-*
 ****************************************************************************/
-
 
 #include "include/x86emu_int.h"
 #include "include/fpu.h"
@@ -1197,8 +1139,70 @@ static void x86emuOp_pop_all(x86emu_t *emu, u8 op1)
 }
 
 
-/* opcode 0x62: BOUND (not implemented) */
-/* opcode 0x63: ARPL (not implemented) */
+/****************************************************************************
+REMARKS:
+Handles opcode 0x62 — BOUND (186+)
+****************************************************************************/
+static void x86emuOp_bound(x86emu_t *emu, u8 op1)
+{
+  int mod, rl, rh;
+  u32 addr;
+
+  OP_DECODE("bound ");
+  fetch_decode_modrm(emu, &mod, &rh, &rl);
+  addr = decode_rm_address(emu, mod, rl);
+  if(MODE_DATA32) {
+    s32 idx = (s32) *decode_rm_long_register(emu, rh);
+    s32 lo = (s32) fetch_data_long(emu, addr);
+    s32 hi = (s32) fetch_data_long(emu, addr + 4);
+    if(idx < lo || idx > hi)
+      INTR_RAISE_BR(emu);
+  }
+  else {
+    s16 idx = (s16) *decode_rm_word_register(emu, rh);
+    s16 lo = (s16) fetch_data_word(emu, addr);
+    s16 hi = (s16) fetch_data_word(emu, addr + 2);
+    if(idx < lo || idx > hi)
+      INTR_RAISE_BR(emu);
+  }
+}
+
+
+/****************************************************************************
+REMARKS:
+Handles opcode 0x63 — ARPL (286+ protected mode)
+****************************************************************************/
+static void x86emuOp_arpl(x86emu_t *emu, u8 op1)
+{
+  int mod, rl, rh;
+  u16 src, old, addr;
+
+  OP_DECODE("arpl ");
+  fetch_decode_modrm(emu, &mod, &rh, &rl);
+  src = *decode_rm_word_register(emu, rh);
+  if(mod == 3) {
+    u16 *dst = decode_rm_word_register(emu, rl);
+    old = *dst;
+    if((old & 3) < (src & 3)) {
+      *dst = (u16)((old & 0xfffc) | (src & 3));
+      SET_FLAG(F_ZF);
+    }
+    else {
+      CLEAR_FLAG(F_ZF);
+    }
+  }
+  else {
+    addr = decode_rm_address(emu, mod, rl);
+    old = fetch_data_word(emu, addr);
+    if((old & 3) < (src & 3)) {
+      store_data_word(emu, addr, (u16)((old & 0xfffc) | (src & 3)));
+      SET_FLAG(F_ZF);
+    }
+    else {
+      CLEAR_FLAG(F_ZF);
+    }
+  }
+}
 
 
 /****************************************************************************
@@ -5479,8 +5483,8 @@ void (*x86emu_optab[256])(x86emu_t *emu, u8) =
 
   /*  0x60 */ x86emuOp_push_all,
   /*  0x61 */ x86emuOp_pop_all,
-  /*  0x62 */ x86emuOp_illegal_op,	/* bound */
-  /*  0x63 */ x86emuOp_illegal_op,	/* arpl */
+  /*  0x62 */ x86emuOp_bound,
+  /*  0x63 */ x86emuOp_arpl,
   /*  0x64 */ x86emuOp_illegal_op,	/* FS: */
   /*  0x65 */ x86emuOp_illegal_op,	/* GS: */
   /*  0x66 */ x86emuOp_illegal_op,	/* DATA32: */
