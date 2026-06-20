@@ -101,16 +101,6 @@ constexpr std::uint32_t BUS_AOS_MENU_SEARCH   = 1u << 26u;
 constexpr std::uint32_t BUS_AOS_EXIT_CONFIRM = 1u << 27u;
 constexpr std::uint32_t BUS_AOS_FOLDER_VIEW  = 1u << 30u;
 
-/* data_bus[54-61] — AmouranthOS chrome + DOS viewport (shellChromeActive overlays [54]).
- * [54] byte0 menu hover row (0xFF=none) | byte1 taskbar tab hover (0xFF=none)
- *      byte2 menu visible row count     | byte3 focused title string index (TASKBAR_RAM tab, 0xFF=none)
- * [55..56] panel glow / sharpen (FieldDosViewport)
- * [57] conventional memory KB | extended MB   [58] DOS HUD height
- * [59] HD free bytes
- * [60] compositor: [31:24] surface count | [23:16] focused tab idx | [15:0] focused outer W (px)
- * [61] compositor: [31:24] stack revision | [23:16] surface flags   | [15:0] focused outer H (px)
- *      SURFACE_RAM @ 0xB9000 — per-surface rects for multi-window compositor (stride 16) */
-
 constexpr std::uint32_t BUS_CHROME_MENU_HOVER_SHIFT  = 0u;
 constexpr std::uint32_t BUS_CHROME_TASK_HOVER_SHIFT  = 8u;
 constexpr std::uint32_t BUS_CHROME_MENU_ROWS_SHIFT   = 16u;
@@ -180,7 +170,7 @@ inline float filesDragMx0 = 0.f, filesDragMy0 = 0.f;
 inline float pointerMx = 0.f, pointerMy = 0.f;
 inline std::uint8_t browserIconSlot = 17u;
 inline bool pendingShellRestore = false;
-inline bool consoleShell = false;  // diagnostics console; desktop boots active from startup
+inline bool consoleShell = false;
 inline std::uint32_t wallpaperIndex = 8u;
 inline SDL_Window* hostWindow = nullptr;
 
@@ -227,4 +217,291 @@ namespace FieldAmouranthOs {
 inline void deactivate() noexcept;
 inline void requestGracefulShutdown(std::uint8_t* ram = nullptr) noexcept;
 
-// UPLOAD_IN_PROGRESS_PART2
+inline std::uint8_t appIcon(AppId a) noexcept {
+    using IS = FieldAmouranthTextures::IconSlot;
+    switch (a) {
+    case AppId::AmmoCode: return static_cast<std::uint8_t>(IS::AmmoCode);
+    case AppId::QBasic:   return static_cast<std::uint8_t>(IS::QBasic);
+    case AppId::FieldC:   return static_cast<std::uint8_t>(IS::FieldC);
+    case AppId::PadTest:  return static_cast<std::uint8_t>(IS::PadTest);
+    case AppId::Nes:      return static_cast<std::uint8_t>(IS::Nes);
+    case AppId::Browser:  return static_cast<std::uint8_t>(IS::Display);
+    case AppId::Vscodium: return static_cast<std::uint8_t>(IS::Vscodium);
+    case AppId::FileCmd:  return static_cast<std::uint8_t>(IS::FileCmd);
+    case AppId::Doom:     return static_cast<std::uint8_t>(IS::Doom);
+    case AppId::Monitor:  return static_cast<std::uint8_t>(IS::Monitor);
+    case AppId::A2600:
+    case AppId::A2600Setup: return static_cast<std::uint8_t>(IS::Nes);
+    case AppId::Sms:
+    case AppId::SmsSetup: return static_cast<std::uint8_t>(IS::Nes);
+    case AppId::Genesis:
+    case AppId::GenesisSetup:
+    case AppId::Snes:
+    case AppId::SnesSetup: return static_cast<std::uint8_t>(IS::Nes);
+    default:              return static_cast<std::uint8_t>(IS::Shell);
+    }
+}
+
+inline const char* appTitle(AppId a) noexcept {
+    switch (a) {
+    case AppId::AmmoCode: return "AmmoCode IDE";
+    case AppId::QBasic:   return "QBASIC";
+    case AppId::FieldC:   return "Field Compiler";
+    case AppId::PadTest:  return "PADTEST";
+    case AppId::Nes:      return "AmmoNES";
+    case AppId::NesSetup: return "AmmoNES Setup";
+    case AppId::Browser:  return "Field Web";
+    case AppId::Vscodium: return "VSCodium";
+    case AppId::FileCmd:  return "AmmoFiles";
+    case AppId::Doom:     return "Shareware Doom";
+    case AppId::Monitor:  return "System Monitor";
+    case AppId::A2600:      return "AmmoA2600";
+    case AppId::A2600Setup: return "AmmoA2600 Setup";
+    case AppId::Sms:        return "AmmoSMS";
+    case AppId::SmsSetup:   return "AmmoSMS Setup";
+    case AppId::Genesis:    return "AmmoGenesis";
+    case AppId::GenesisSetup: return "AmmoGenesis Setup";
+    case AppId::Snes:       return "AmmoSNES";
+    case AppId::SnesSetup:  return "AmmoSNES Setup";
+    default:              return "RTX Shell";
+    }
+}
+
+inline const char* appTooltip(AppId a) noexcept {
+    switch (a) {
+    case AppId::AmmoCode: return "Code editor";
+    case AppId::QBasic:   return "BASIC interpreter";
+    case AppId::FieldC:   return "C compiler";
+    case AppId::PadTest:  return "Gamepad test";
+    case AppId::Nes:      return "NES emulator";
+    case AppId::NesSetup: return "NES options";
+    case AppId::FileCmd:  return "Files — browse and open";
+    case AppId::Browser:  return "Embedded web panel";
+    case AppId::Vscodium: return "Host editor";
+    case AppId::Doom:     return "DOOM shareware";
+    case AppId::Monitor:  return "Host runtime dashboard";
+    case AppId::A2600:      return "Atari 2600 emulator";
+    case AppId::A2600Setup: return "A2600 options";
+    case AppId::Sms:        return "Master System emulator";
+    case AppId::SmsSetup:   return "SMS options";
+    case AppId::Genesis:    return "Genesis emulator";
+    case AppId::GenesisSetup: return "Genesis options";
+    case AppId::Snes:       return "SNES + SuperFX";
+    case AppId::SnesSetup:  return "SNES / GSU options";
+    case AppId::Shell:    return "Program launcher and DOS shell";
+    default:              return "AmouranthOS application";
+    }
+}
+
+inline bool guestAppRunning() noexcept {
+    return FieldAmmoCode::active || FieldAmouranthFileCmd::active
+        || FieldPadTest::active || FieldNes::active
+        || FieldA2600::active || FieldSms::active
+        || FieldGenesis::active || FieldSnes::active
+        || FieldAmmoBrowser::isActive()
+        || FieldRtxBasic::active
+        || FieldAmmoText::active || FieldMonacoEdit::active || FieldRtxThemePicker::active
+        || FieldAmmoExec::isActive() || FieldAosMonitor::active;
+}
+
+inline bool hasShellProgram() noexcept {
+    for (const auto& p : programs)
+        if (p.app == AppId::Shell && p.running) return true;
+    return false;
+}
+
+inline void ensureShellTab() noexcept {
+    if (!shellChromeActive() || hasShellProgram()) return;
+    Program pr{};
+    pr.id = nextProgId++;
+    pr.app = AppId::Shell;
+    pr.icon = appIcon(AppId::Shell);
+    pr.tooltip = appTooltip(AppId::Shell);
+    std::snprintf(pr.titleBuf, sizeof pr.titleBuf, "%s", appTitle(AppId::Shell));
+    pr.title = pr.titleBuf;
+    pr.running = true;
+    programs.push_back(pr);
+    if (focusedProgId <= 0) {
+        focusedProgId = pr.id;
+        focusedApp = AppId::Shell;
+    }
+}
+
+inline float uiScale() noexcept;
+inline float scaledTaskbarH() noexcept;
+inline float desktopTopInset() noexcept;
+inline float chromeViewportW() noexcept;
+inline float chromeViewportH() noexcept;
+
+#include "FieldWmDock.hpp"
+#include "FieldWmShell.hpp"
+
+inline void pauseBackgroundEmulators() noexcept {
+    if (FieldNes::active) FieldNes::paused = true;
+    if (FieldSnes::active) FieldSnes::paused = true;
+    if (FieldGenesis::active) FieldGenesis::paused = true;
+    if (FieldSms::active) FieldSms::paused = true;
+    if (FieldA2600::active) FieldA2600::paused = true;
+}
+
+inline void suspendGuestTicks() noexcept {
+    pauseBackgroundEmulators();
+    FieldAmouranthLaunch::clear();
+}
+
+inline bool isGfxEmuApp(AppId app) noexcept {
+    return app == AppId::Nes || app == AppId::NesSetup
+        || app == AppId::A2600 || app == AppId::A2600Setup
+        || app == AppId::Sms || app == AppId::SmsSetup
+        || app == AppId::Genesis || app == AppId::GenesisSetup
+        || app == AppId::Snes || app == AppId::SnesSetup
+        || app == AppId::Doom;
+}
+
+inline void applyAppViewport(AppId app) noexcept {
+    FieldDosViewport::clearEmuViewport();
+    switch (app) {
+    case AppId::Nes:
+    case AppId::NesSetup:
+        FieldDosViewport::setEmuViewport(640.f, 400.f);
+        break;
+    case AppId::A2600:
+    case AppId::A2600Setup:
+        FieldDosViewport::setEmuViewport(320.f, 384.f);
+        break;
+    case AppId::Sms:
+    case AppId::SmsSetup:
+        FieldDosViewport::setEmuViewport(512.f, 384.f);
+        break;
+    case AppId::Genesis:
+    case AppId::GenesisSetup:
+        FieldDosViewport::setEmuViewport(640.f, 448.f);
+        break;
+    case AppId::Snes:
+    case AppId::SnesSetup:
+        FieldDosViewport::setEmuViewport(512.f, 448.f);
+        break;
+    case AppId::Doom:
+        FieldDosViewport::setEmuViewport(640.f, 400.f);
+        break;
+    case AppId::Monitor:
+        FieldDosViewport::setEmuViewport(1024.f, 720.f);
+        break;
+    case AppId::Browser:
+    case AppId::FieldC:
+    case AppId::FileCmd:
+    case AppId::AmmoCode:
+    case AppId::PadTest:
+    case AppId::Vscodium:
+        FieldDosViewport::setEmuViewport(520.f, 360.f);
+        break;
+    case AppId::Shell:
+    case AppId::QBasic:
+        FieldDosViewport::setEmuViewport(FieldWmShell::COMPACT_LOGICAL_W,
+            FieldWmShell::COMPACT_LOGICAL_H);
+        break;
+    default:
+        FieldDosViewport::setEmuViewport(FieldWmShell::COMPACT_LOGICAL_W,
+            FieldWmShell::COMPACT_LOGICAL_H);
+        break;
+    }
+}
+
+inline void hideDosPanel() noexcept {
+    panelVisible = false;
+    Options::Canvas::DosInputFocused = false;
+    suspendGuestTicks();
+    FieldDosViewport::panelOx = -8192.f;
+    FieldDosViewport::panelOy = -8192.f;
+    FieldDosViewport::panelPositioned = true;
+    FieldDosViewport::clearEmuViewport();
+    infoPanelVisible = false;
+    FieldAmouranthInfo::visible = false;
+    if (consoleShell) {
+        FieldDosViewport::panelStretch = true;
+        Options::Canvas::DosPanelStretch = true;
+        Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
+    } else {
+        FieldDosViewport::panelStretch = false;
+        Options::Canvas::DosPanelStretch = false;
+        Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
+    }
+}
+
+inline Program* findProgram(int progId) noexcept {
+    for (auto& p : programs)
+        if (p.id == progId) return &p;
+    return nullptr;
+}
+
+inline void saveFocusedPanelPos() noexcept {
+    if (focusedProgId <= 0) return;
+    Program* p = findProgram(focusedProgId);
+    if (!p) return;
+    p->panelOx = FieldDosViewport::panelOx;
+    p->panelOy = FieldDosViewport::panelOy;
+    p->panelScale = FieldAmouranthWm::panelScale;
+}
+
+inline float cascadeOffset(std::size_t idx) noexcept {
+    return WIN_CASCADE * uiScale() * static_cast<float>(idx % 8u);
+}
+
+inline void applyProgramPanel(const Program& pr) noexcept {
+    if (pr.panelScale > 0.f) {
+        FieldAmouranthWm::panelScale = pr.panelScale;
+        FieldAmouranthWm::applyPanelScale();
+    }
+    FieldWmDock::applyToViewport(pr);
+}
+
+inline FieldAmouranthLaunch::GuiApp guiAppFor(AppId app) noexcept;
+
+inline void placeNewWindow(Program& pr) noexcept {
+    if (pr.panelScale < 0.f) {
+        if (isGfxEmuApp(pr.app)) {
+            applyAppViewport(pr.app);
+            FieldDosViewport::panelStretch = false;
+            FieldWmShell::applyDataCenterScale();
+        } else {
+            FieldWmShell::applyCompactViewport();
+        }
+        pr.panelScale = FieldWmInput::panelScale;
+    }
+    FieldWmDock::dockProgram(pr);
+}
+
+inline void clearStaleGuestFlags() noexcept {
+    FieldAmmoText::active = false;
+    FieldRtxThemePicker::close();
+    FieldRtxBasic::active = false;
+    FieldAmmoCode::active = false;
+    FieldPadTest::active = false;
+    FieldAmmoBrowser::close();
+    FieldAmouranthFileCmd::close();
+    FieldAosMonitor::active = false;
+    FieldRtxShell::graphicsActive = false;
+    if (!FieldNes::active) {
+        FieldNes::optionsOpen = false;
+        FieldAmmoNesSetup::active = false;
+    }
+    if (!FieldA2600::active) {
+        FieldA2600::optionsOpen = false;
+        FieldAmmoA2600Setup::active = false;
+    }
+    if (!FieldSms::active) {
+        FieldSms::optionsOpen = false;
+        FieldAmmoSmsSetup::active = false;
+    }
+    if (!FieldGenesis::active) {
+        FieldGenesis::optionsOpen = false;
+        FieldAmmoGenesisSetup::active = false;
+    }
+    if (!FieldSnes::active) {
+        FieldSnes::optionsOpen = false;
+        FieldAmmoSnesSetup::active = false;
+    }
+    if (!FieldNes::active && !FieldA2600::active && !FieldSms::active
+            && !FieldGenesis::active && !FieldSnes::active)
+        FieldEmuFileDialog::close();
+}
