@@ -2,7 +2,6 @@
 
 // Seed the Field Die SSBO for GPU execute_cycle() — one-shot host BIOS, then GPU owns the CPU.
 
-#include "FieldBios.hpp"
 #include "FieldDos.hpp"
 #include "FieldGpuFiles.hpp"
 #include "FieldPlatform.hpp"
@@ -11,6 +10,14 @@
 
 #include <cstdio>
 #include <vector>
+
+#include <x86emu.h>
+
+namespace FieldBios {
+bool launchMzExec(x86emu_t* e, const std::vector<std::uint8_t>& img, const char* dosPath,
+    std::uint16_t pspSeg);
+bool launchComImage(x86emu_t* e, const std::vector<std::uint8_t>& com, std::uint16_t pspSeg);
+}
 
 namespace FieldGpuLaunch {
 
@@ -21,7 +28,7 @@ inline bool seedMzExec(void* mapped, std::size_t offset, std::uint8_t* ram,
     if (!mapped || !ram || image.size() < 32u) return false;
 
     FieldX86Emu::ensure(mapped, offset);
-    if (!FieldBios::launchMzExec(FieldX86Emu::emu, image, dosPath))
+    if (!FieldBios::launchMzExec(FieldX86Emu::emu, image, dosPath, 0x1000u))
         return false;
 
     const std::uint32_t staged = FieldGpuFiles::stageForLaunch(ram, dosPath);
@@ -46,7 +53,7 @@ inline bool seedCom(void* mapped, std::size_t offset, std::uint8_t* ram,
     if (!mapped || !ram || image.empty()) return false;
 
     FieldX86Emu::ensure(mapped, offset);
-    if (!FieldBios::launchComImage(FieldX86Emu::emu, image))
+    if (!FieldBios::launchComImage(FieldX86Emu::emu, image, 0x0800u))
         return false;
 
     FieldX86Emu::syncToDie(mapped);

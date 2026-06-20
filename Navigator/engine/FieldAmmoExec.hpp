@@ -2,17 +2,17 @@
 
 // AmmoDOS — FieldX86Native host CPU runs DOS/4GW; GPU die composites VGA (CTRL_HOST_CPU skips shader execute_cycle).
 
-#include "FieldBios.hpp"
-#include "FieldRtxPm.hpp"
 #include "FieldDos.hpp"
 #include "FieldDosConfig.hpp"
 #include "FieldGpuFiles.hpp"
-#include "FieldGpuLaunch.hpp"
 #include "FieldPlatform.hpp"
 #include "FieldVga.hpp"
 #include "FieldX86Emu.hpp"
 #include "FieldX86Runtime.hpp"
 #include "OptionsMenu.hpp"
+#include "FieldBios.hpp"
+#include "FieldGpuLaunch.hpp"
+#include "FieldRtxPm.hpp"
 
 #include <cstdio>
 #include <cstring>

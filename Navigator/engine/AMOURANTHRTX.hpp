@@ -1309,16 +1309,29 @@ inline bool initRTX(SDL_Window* window, int width, int height) noexcept {
 }
 
 inline void cleanupRTX() noexcept {
-    vkDeviceWaitIdle(rtx().device);
+    if (!rtx().device && !rtx().instance) return;
+    if (rtx().device) vkDeviceWaitIdle(rtx().device);
     Swapchain::cleanup();
-    for (auto& [h, b] : rtx().buffers) { 
-		if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
-        vkDestroyBuffer(rtx().device, b.buffer, nullptr);
-        vkFreeMemory(rtx().device, b.memory, nullptr);
+    if (rtx().device) {
+        for (auto& [h, b] : rtx().buffers) {
+            if (b.mapped) vkUnmapMemory(rtx().device, b.memory);
+            vkDestroyBuffer(rtx().device, b.buffer, nullptr);
+            vkFreeMemory(rtx().device, b.memory, nullptr);
+        }
+        rtx().buffers.clear();
+        if (rtx().transient_pool) {
+            vkDestroyCommandPool(rtx().device, rtx().transient_pool, nullptr);
+            rtx().transient_pool = VK_NULL_HANDLE;
+        }
+        vkDestroyDevice(rtx().device, nullptr);
+        rtx().device = VK_NULL_HANDLE;
     }
-    rtx().buffers.clear();
-    if (rtx().transient_pool) vkDestroyCommandPool(rtx().device, rtx().transient_pool, nullptr);
-    if (rtx().device)         vkDestroyDevice(rtx().device, nullptr);
-    if (rtx().surface)        vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);
-    if (rtx().instance)       vkDestroyInstance(rtx().instance, nullptr);
+    if (rtx().surface && rtx().instance) {
+        vkDestroySurfaceKHR(rtx().instance, rtx().surface, nullptr);
+        rtx().surface = VK_NULL_HANDLE;
+    }
+    if (rtx().instance) {
+        vkDestroyInstance(rtx().instance, nullptr);
+        rtx().instance = VK_NULL_HANDLE;
+    }
 }

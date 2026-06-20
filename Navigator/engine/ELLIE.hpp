@@ -993,13 +993,9 @@ static void apocalypse_handler(int sig, siginfo_t* info, void*) noexcept {
     safe_writeln(COLOR_CYAN "BACKTRACE:" COLOR_RESET);
     void* array[64];
     int n = backtrace(array, 64);
-    char** syms = backtrace_symbols(array, n);
-    if (syms) {
-        for (int i = 1; i < n && i < 20; ++i) {
-            snprintf(buf, sizeof(buf), "  [%02d] %s", i-1, syms[i]);
-            safe_writeln(buf);
-        }
-        free(syms);
+    if (n > 1) {
+        // backtrace_symbols_fd avoids malloc in the signal handler (free() can corrupt if heap is already damaged).
+        backtrace_symbols_fd(array, n, STDERR_FILENO);
     }
     safe_writeln("");
 

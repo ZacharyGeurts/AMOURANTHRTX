@@ -11,14 +11,18 @@
 #include "ELLIE.hpp"
 #include "Camera.hpp"
 #include "OptionsMenu.hpp"
+#include "FieldDos.hpp"
+#include "FieldRtxMemTree.hpp"
 #include "FieldDosDisplay.hpp"
 #include "FieldAosTest.hpp"
 #include "FieldAmouranthFileCmd.hpp"
 #include "FieldAmouranthCursor.hpp"
 #include "FieldAmouranthOs.hpp"
-#include "FieldAosLoading.hpp"
+#include "FieldAmouranthDeactivate.hpp"
+
 #include "FieldSnapDump.hpp"
 #include "FieldBios.hpp"
+#include "FieldX86Emu.hpp"
 #include "FieldDosChrome.hpp"
 #include "FieldRtxTerm.hpp"
 #include "Pipeline.hpp"
@@ -90,12 +94,28 @@ public:
         LOG_DEBUG_CAT("RAYCANVAS", "CTOR: begin RayCanvas init — width={} height={} (source loc logged)", initialWidth, initialHeight);
         LOG_DEBUG_CAT("THERMO", "CTOR THERMO: pre-pipeline — about to create accountant buffer + fabric seeds");
         Pipeline::create_pipeline_layout();
-        FieldAosLoading::tick();
-        Pipeline::create_canvas_pipeline(Options::Canvas::CurrentName());
-        FieldAosLoading::tick();
+        Pipeline::pump_startup_events();
+        Pipeline::boot_x86_canvas();
+        Pipeline::pump_startup_events();
         SDL3System::get().applyMouseCapture();
         FieldAmouranthOs::init(window_);
+        FieldAmouranthOs::boot();
+        if (window_) {
+            FieldDosChrome::refreshWindowMetrics(window_);
+            SDL_RaiseWindow(window_);
+        }
+        if (Pipeline::fieldX86DieMapped) {
+            if (auto* gr = FieldDos::guestRam(
+                    static_cast<std::uint8_t*>(Pipeline::fieldX86DieMapped),
+                    Pipeline::FIELD_X86_DIE_HEADER_BYTES)) {
+                FieldX86Emu::bindChromeGuest(gr);
+                FieldAmouranthHudRam::clearRegion(gr);
+                FieldAmouranthOs::seedChromeRam(gr);
+                FieldAmouranthOs::packDataBus(Options::Canvas::DataBus, gr);
+            }
+        }
         FieldAmouranthCursor::init();
+        Pipeline::pump_startup_events();
         LOG_DEBUG_CAT("THERMO", "CTOR THERMO: after Pipeline::create_canvas_pipeline('{}')", Options::Canvas::CurrentName());
         createTimestampQueryPool();  // always (for gpu timing/adaptive); probe extra slots/writes gated
         createPipelineStatisticsQueryPool();  // gated inside, zero cost if !caps or !probes
@@ -103,10 +123,9 @@ public:
         updateRenderResolution();
         createPersistentHDR();
         createPreviousHDR();
-        FieldAosLoading::tick();
+        Pipeline::pump_startup_events();
         LOG_DEBUG_CAT("THERMO", "CTOR THERMO: HDR pair ready — now seeding analog field fabric (Phi/Thermo/Flow entropy floor)");
         createAnalogFieldFabric();   // Phi + Thermo + Flow — the propalactic heart (our thermo field)
-        FieldAosLoading::tick();
         LOG_DEBUG_CAT("RAYCANVAS", "DEBUG: after fabric (Thermo image ready)");
         LOG_DEBUG_CAT("THERMO", "CTOR THERMO: fabric created — field seeds will be applied in clearFieldImages (thermo entropy floor ~0.015)");
 
@@ -115,13 +134,17 @@ public:
         preTransitionAllImagesToGeneral();
 
         createDescriptorPoolAndSet();
-        FieldAosLoading::tick();
+        Pipeline::pump_startup_events();
         LOG_DEBUG_CAT("RAYCANVAS", "DEBUG: after pool+set");
         LOG_DEBUG_CAT("THERMO", "CTOR THERMO: pool+set allocated — next updateDescriptorSet will write binding 2 (accountant) + 8/9/10 (fields)");
 
         LOG_DEBUG_CAT("THERMO", "CTOR THERMO: entering updateDescriptorSet — will populate binding 2 accountant + field descriptors for entropy/boundary reads");
         updateDescriptorSet();       // includes explicit binding 2 for THERMO_ACCOUNTANT + fields
         LOG_DEBUG_CAT("RAYCANVAS", "DEBUG: after descriptor update (bindings incl 2 accountant)");
+        s_activeInstance_ = this;
+        Pipeline::patchX86ChromeDescriptors = &RayCanvas::patchChromeDescriptorsStatic;
+        Pipeline::sync_aos_textures();
+        ensureX86ChromeTextureBindings();
         LOG_DEBUG_CAT("THERMO", "CTOR THERMO: descriptor writes complete (accountant at b2, thermo field at b9) — pre-clears next");
 
         if (!headless_) {
@@ -154,12 +177,18 @@ public:
         if (headless_) {
             LOG_INFO_CAT("RAYCANVAS", "HEADLESS RayCanvas ready: offscreen mode. NO swap present waits. First maybeUpdateCanvas dispatch will populate accountant + fields. Status block + thermo logs will make values visible. Use AMOURANTHRTX_MAX_FRAMES to bound run. Tolerant: warnings not fatals.");
         }
+        if (Options::SDL3::RequestQuit)
+            destroyed_ = true;
     }
 
     ~RayCanvas() {
-        if (destroyed_) return;
+        if (resourcesReleased_) return;
+        resourcesReleased_ = true;
         destroyed_ = true;
-        vkDeviceWaitIdle(rtx().device);
+        if (Pipeline::hotswap_compile_still_running()) return;
+        Pipeline::prepare_shutdown();
+        if (rtx().device)
+            vkDeviceWaitIdle(rtx().device);
 
         LOG_DEBUG_CAT("THERMO", "DTOR THERMO: beginning shutdown — unmapping thermo accountant (final prevMaintCost/freeEnergyIncome/entropy/boundaryThermo values frozen) — last status had full THERMO");
         LOG_DEBUG_CAT("THERMO", "DTOR THERMO: fabric+accountant+descriptors released (pre-trans/clears/dispatch steps complete for lifetime)");
@@ -194,7 +223,10 @@ public:
         LOG_DEBUG_CAT("RAYCANVAS", "DTOR: fabric + accountant + descriptors released");
         FieldAmouranthCursor::shutdown();
         FieldAmouranthOs::shutdown();
-        FieldAosLoading::shutdown();
+        if (s_activeInstance_ == this) {
+            s_activeInstance_ = nullptr;
+            Pipeline::patchX86ChromeDescriptors = nullptr;
+        }
         LOG_SUCCESS_CAT("RAYCANVAS", "Hybrid renderer destroyed (compute + RT + SBT + RTXGI cleaned up)");
     }
 
@@ -211,6 +243,14 @@ public:
         double now = TotalTime::get().seconds();
         int currentW = window_width_;
         int currentH = window_height_;
+        if (window_) {
+            int pixW = 0, pixH = 0;
+            SDL_GetWindowSizeInPixels(window_, &pixW, &pixH);
+            if (pixW > 0 && pixH > 0) {
+                currentW = pixW;
+                currentH = pixH;
+            }
+        }
         bool quit = false;
         bool fullscreen_toggle = false;
 
@@ -219,22 +259,75 @@ public:
         while (SDL_PollEvent(&ev)) {
             INPUT.pump(ev);
 
-            if (ev.type == SDL_EVENT_QUIT)           { quit = true; }
-            if (ev.type == SDL_EVENT_WINDOW_RESIZED) { currentW = ev.window.data1; currentH = ev.window.data2; }
+            if (ev.type == SDL_EVENT_QUIT) {
+                if (FieldAmouranthExitConfirm::isOpen()) {
+                    FieldAmouranthExitConfirm::dismiss(FieldX86Emu::ramHost);
+                    quit = true;
+                } else if (FieldAmouranthOs::shellChromeActive() && !Options::SDL3::HeadlessMode) {
+                    FieldAmouranthExitConfirm::show();
+                } else {
+                    quit = true;
+                }
+            }
+            if (ev.type == SDL_EVENT_WINDOW_RESIZED
+                    || ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                if (window_) {
+                    SDL_GetWindowSizeInPixels(window_, &currentW, &currentH);
+                } else {
+                    currentW = ev.window.data1;
+                    currentH = ev.window.data2;
+                }
+            }
             if (Options::Canvas::IsX86Fields()) {
+                const bool mainMouseEv = ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                    || ev.type == SDL_EVENT_MOUSE_BUTTON_UP
+                    || ev.type == SDL_EVENT_MOUSE_MOTION;
+                if (mainMouseEv && window_) {
+                    SDL_WindowID evWin = 0u;
+                    if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev.type == SDL_EVENT_MOUSE_BUTTON_UP)
+                        evWin = ev.button.windowID;
+                    else if (ev.type == SDL_EVENT_MOUSE_MOTION)
+                        evWin = ev.motion.windowID;
+                    SDL_Window* evWindow = evWin ? SDL_GetWindowFromID(evWin) : nullptr;
+                    if (evWindow && evWindow != window_)
+                        continue;
+                }
+                if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                    syncChromeInputLayout();
+                    ensureX86ChromeTextureBindings();
+                }
+                if (ev.type == SDL_EVENT_MOUSE_MOTION) {
+                    syncChromeInputLayout();
+                }
                 if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                     bool osHandled = false;
-                    if (FieldAmouranthWm::wmPanelActive())
+                    if (FieldAmouranthOs::shellChromeActive()) {
+                        osHandled = FieldAmouranthOs::onTaskbarMouseDown(
+                            window_, ev.button.x, ev.button.y);
+                        if (!osHandled)
+                            osHandled = FieldAmouranthOs::onMouseDown(window_, ev.button.x, ev.button.y,
+                                ev.button.button, ev.button.clicks);
+                        if (std::getenv("AMOURANTHRTX_DEBUG_CLICKS")) {
+                            float dbgMx = 0.f, dbgMy = 0.f;
+                            FieldDosChrome::chromePointerPixels(window_, ev.button.x, ev.button.y,
+                                dbgMx, dbgMy);
+                            std::fprintf(stderr,
+                                "[CLICK] raw=(%.0f,%.0f) render=(%.1f,%.1f) hover=%d handled=%d start=%d\n",
+                                ev.button.x, ev.button.y, dbgMx, dbgMy,
+                                static_cast<int>(FieldAmouranthOs::hover), osHandled ? 1 : 0,
+                                FieldAmouranthOs::startOpen ? 1 : 0);
+                        }
+                    }
+                    if (osHandled && FieldAmouranthOs::shellChromeActive())
+                        FieldAmouranthOs::packDataBus(Options::Canvas::DataBus,
+                            FieldX86Emu::ramHost);
+                    if (!osHandled && FieldAmouranthWm::wmPanelActive())
                         osHandled = FieldAmouranthWm::onMouseDown(window_, ev.button.x, ev.button.y,
                             ev.button.clicks);
-                    if (!osHandled && FieldAmouranthOs::shellChromeActive())
-                        osHandled = FieldAmouranthOs::onMouseDown(window_, ev.button.x, ev.button.y,
-                            ev.button.button, ev.button.clicks);
                     if (!osHandled && FieldBios::rtxShellActive
                         && FieldRtxTerm::onMouseDown(window_, ev.button.x, ev.button.y))
                         osHandled = true;
-                    if (!osHandled && (!FieldAmouranthOs::shellChromeActive()
-                            || FieldAmouranthOs::shellWindowFocused())) {
+                    if (!osHandled && FieldAmouranthOs::shellWindowFocused()) {
                         if (FieldDosChrome::onMouseDown(window_, ev.button.x, ev.button.y, ev.button.clicks)) {
                             int aw = 0, ah = 0;
                             SDL_GetWindowSizeInPixels(window_, &aw, &ah);
@@ -250,35 +343,54 @@ public:
                     FieldAmouranthWm::onMouseUp();
                     FieldDosChrome::onMouseUp();
                 }
+                if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                        || ev.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+                    if (FieldAmouranthOs::shellChromeActive())
+                        FieldAmouranthOs::syncStartTextInput(window_);
+                }
                 if (ev.type == SDL_EVENT_MOUSE_MOTION) {
                     FieldAmouranthWm::onMouseMotion(window_, ev.motion.x, ev.motion.y);
                     FieldAmouranthOs::onMouseMotion(window_, ev.motion.x, ev.motion.y);
                     FieldDosChrome::onMouseMotion(window_, ev.motion.x, ev.motion.y);
                     if (FieldAmouranthOs::shellChromeActive())
-                        FieldAmouranthCursor::updateFromWm(FieldAmouranthOs::panelVisible);
+                        FieldAmouranthCursor::updateFromWm(FieldAmouranthWm::wmPanelActive());
                 }
                 if (ev.type == SDL_EVENT_MOUSE_WHEEL) {
-                    if (FieldAmouranthFileCmd::active)
+                    if (FieldAmouranthWm::wmPanelActive()
+                            && FieldAmouranthWm::openMenu == FieldAmouranthWm::OpenMenu::System)
+                        FieldAmouranthWm::onMouseWheel(ev.wheel.y);
+                    else if (FieldAmouranthFileCmd::active)
                         FieldAmouranthFileCmd::handleWheel(static_cast<int>(ev.wheel.y));
                     else if (FieldBios::rtxShellActive && Options::Canvas::DosInputFocused)
                         FieldRtxTerm::handleWheel(static_cast<int>(ev.wheel.y));
                 }
             }
 
+            if (ev.type == SDL_EVENT_TEXT_INPUT) {
+                if (Options::Canvas::IsX86Fields()
+                        && FieldAmouranthOs::onTextInput(ev.text.text))
+                    continue;
+            }
+
             if (ev.type == SDL_EVENT_KEY_DOWN) {
                 bool altPressed = (ev.key.mod & SDL_KMOD_ALT) != 0;
 
                 if (Options::Canvas::IsX86Fields()) {
-                    if (FieldAmouranthOs::onKeyDown(ev.key.scancode))
+                    if (FieldAmouranthOs::onKeyDown(ev.key.scancode)) {
+                        FieldAmouranthOs::syncStartTextInput(window_);
                         continue;
+                    }
                     if (altPressed && ev.key.scancode == SDL_SCANCODE_F4
                             && FieldAmouranthOs::panelVisible) {
                         FieldAmouranthWm::closeWindow();
                         continue;
                     }
                     if (altPressed && ev.key.scancode == SDL_SCANCODE_Q) {
-                        quit = true;
-                        LOG_INFO_CAT("WINDOW", "Alt+Q — quit Ammo DOS");
+                        if (FieldAmouranthOs::shellChromeActive())
+                            FieldAmouranthExitConfirm::show();
+                        else
+                            quit = true;
+                        LOG_INFO_CAT("WINDOW", "Alt+Q — exit confirm");
                     }
                     if (altPressed && ev.key.scancode == SDL_SCANCODE_GRAVE) {
                         Options::Canvas::DosInputFocused = !Options::Canvas::DosInputFocused;
@@ -329,6 +441,14 @@ public:
             }
         }
 
+        if (Options::SDL3::RequestQuit) {
+            Pipeline::signal_app_quit();
+            if (window_) SDL_HideWindow(window_);
+            destroyed_ = true;
+            LOG_INFO_CAT("RAYCANVAS", "AmmoOS shut down — exiting main loop");
+            return false;
+        }
+
         if (fullscreen_toggle) { toggleFullscreen(); }
         if (Options::SDL3::PendingFullscreenApply) {
             Options::SDL3::PendingFullscreenApply = false;
@@ -351,7 +471,8 @@ public:
         if (minimized_ || sizeChanged || needsRecreate_) {
             onResize(currentW, currentH, sizeChanged);
             minimized_ = false;
-            if (!headless_) {
+            syncChromeInputLayout();
+            if (!headless_ && (sizeChanged || needsRecreate_)) {
                 return isRunning;
             }
             // headless: after onResize (which may have 0 w/h), fall through to firstFrame/dispatch this frame for pop guarantee
@@ -361,8 +482,14 @@ public:
         if (!headless_ && (!Swapchain::get() || !hdrOutputImage_ || !hdrOutputView_)) { return isRunning; }
         if (headless_ && (!hdrOutputImage_ || !hdrOutputView_)) { return isRunning; }  // still need HDR targets for offscreen dispatch
 
-        if (FieldAosLoading::isActive())
-            FieldAosLoading::tick();
+        if (FieldAmouranthOs::shellChromeActive())
+            syncChromeInputLayout();
+
+        if (Pipeline::hotswap_compile_active.load(std::memory_order_acquire) > 0)
+            Pipeline::pump_ui_while_waiting();
+        Pipeline::kick_deferred_hotswap_compile();
+        if (Pipeline::try_hotswap_canvas_pipeline())
+            ensureX86ChromeTextureBindings();
 
         if (firstFrame_) {
             TotalTime::get().seal();
@@ -431,6 +558,8 @@ public:
                     vkCmdBeginQuery(cmd, pipelineStatsQueryPool_, 0, 0);
                 }
 
+                Pipeline::sync_aos_textures();
+                ensureX86ChromeTextureBindings();
                 Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
 
                 if (pOn && pipelineStatsQueryPool_) {
@@ -474,7 +603,7 @@ public:
                 int gcount = pOn ? 3 : 2;
                 if (timestampQueryPool_) {
                     gotTimestamps = (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, gcount, sizeof(timestamps), timestamps, sizeof(uint64_t), 
-                                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS);
+                                              VK_QUERY_RESULT_64_BIT) == VK_SUCCESS);
                 }
                 if (gotTimestamps && pOn && Pipeline::rtxProbeMapped) {
                     double gpuTimeMs = static_cast<double>(timestamps[2] - timestamps[0]) * timestampPeriodNs_ / 1000000.0;
@@ -495,7 +624,7 @@ public:
                     if (pipelineStatsQueryPool_) {
                         uint64_t stats[1] = {};
                         if (vkGetQueryPoolResults(rtx().device, pipelineStatsQueryPool_, 0, 1, sizeof(stats), stats, sizeof(uint64_t),
-                                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
+                                                  VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
                             pr->computeInvocations = static_cast<uint32_t>(stats[0]);
                         }
                     }
@@ -503,7 +632,7 @@ public:
                     // non-probe / fallback: simple 2-slot timing
                     uint64_t ts2[2] = {};
                     if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2, sizeof(ts2), ts2, sizeof(uint64_t), 
-                                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
+                                              VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
                         double gpuTimeMs = static_cast<double>(ts2[1] - ts2[0]) * timestampPeriodNs_ / 1000000.0;
                         double alpha = (gpuTimeMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
                         smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
@@ -591,6 +720,8 @@ public:
                 vkCmdResetQueryPool(cmd, pipelineStatsQueryPool_, 0, 1);
                 vkCmdBeginQuery(cmd, pipelineStatsQueryPool_, 0, 0);
             }
+            Pipeline::sync_aos_textures();
+            ensureX86ChromeTextureBindings();
             Pipeline::dispatch_canvas(cmd, render_width_, render_height_, static_cast<float>(now));
             if (pOn && pipelineStatsQueryPool_) {
                 vkCmdEndQuery(cmd, pipelineStatsQueryPool_, 0);
@@ -631,7 +762,7 @@ public:
             int gcount = pOn ? 3 : 2;
             if (timestampQueryPool_) {
                 gotTs = (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, gcount, sizeof(timestamps), timestamps, sizeof(uint64_t), 
-                                          VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS);
+                                          VK_QUERY_RESULT_64_BIT) == VK_SUCCESS);
             }
             if (gotTs && pOn && Pipeline::rtxProbeMapped) {
                 double gpuTimeMs = static_cast<double>(timestamps[2] - timestamps[0]) * timestampPeriodNs_ / 1000000.0;
@@ -651,7 +782,7 @@ public:
                 if (pipelineStatsQueryPool_) {
                     uint64_t stats[1] = {};
                     if (vkGetQueryPoolResults(rtx().device, pipelineStatsQueryPool_, 0, 1, sizeof(stats), stats, sizeof(uint64_t),
-                                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
+                                              VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
                         pr->computeInvocations = static_cast<uint32_t>(stats[0]);
                     }
                 }
@@ -659,7 +790,7 @@ public:
                 // fallback simple timing for !probe or !pOn
                 uint64_t ts2[2] = {};
                 if (vkGetQueryPoolResults(rtx().device, timestampQueryPool_, 0, 2, sizeof(ts2), ts2, sizeof(uint64_t), 
-                                          VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
+                                          VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
                     double gpuTimeMs = static_cast<double>(ts2[1] - ts2[0]) * timestampPeriodNs_ / 1000000.0;
                     double alpha = (gpuTimeMs > smoothedGpuTimeMs_) ? 0.70 : 0.22;
                     smoothedGpuTimeMs_ = (1.0 - alpha) * smoothedGpuTimeMs_ + alpha * gpuTimeMs;
@@ -688,7 +819,7 @@ public:
             if (Options::Rendering::EnableAdaptiveResolution) { adjustAdaptiveScale(now); } 
             else { adaptiveScale_ = 1.0; }
 
-            // Blit to swapchain with vertical flip
+            // Blit to swapchain (top-down — shader writes gid without Y flip)
             VkCommandBuffer blitCmd = beginTransientCommandBuffer();
             if (!blitCmd) return isRunning;
 
@@ -711,18 +842,19 @@ public:
 
             VkExtent2D swapExtent = Swapchain::getExtent();
 
-            VkImageBlit flipBlit{};
-            flipBlit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            flipBlit.srcOffsets[0] = { 0, 0, 0 };
-            flipBlit.srcOffsets[1] = { render_width_, render_height_, 1 };
-            flipBlit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            flipBlit.dstOffsets[0] = { 0, static_cast<int32_t>(swapExtent.height), 0 };
-            flipBlit.dstOffsets[1] = { static_cast<int32_t>(swapExtent.width), 0, 1 };
+            VkImageBlit blit{};
+            blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            blit.srcOffsets[0] = { 0, 0, 0 };
+            blit.srcOffsets[1] = { render_width_, render_height_, 1 };
+            blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            blit.dstOffsets[0] = { 0, 0, 0 };
+            blit.dstOffsets[1] = { static_cast<int32_t>(swapExtent.width),
+                                   static_cast<int32_t>(swapExtent.height), 1 };
 
-            vkCmdBlitImage(blitCmd, 
+            vkCmdBlitImage(blitCmd,
                            hdrOutputImage_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
-                           1, &flipBlit, VK_FILTER_LINEAR);
+                           swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &blit, VK_FILTER_LINEAR);
 
             VkImageMemoryBarrier presentBarrier{};
             presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -745,11 +877,8 @@ public:
             if (pres == VK_SUCCESS) {
                 Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
                 measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
-                FieldAosLoading::onPresent();
                 if (FieldAmouranthOs::shellChromeActive() && !headless_)
                     FieldAmouranthOs::tick(window_width_, window_height_);
-                if (FieldAosLoading::isActive())
-                    FieldAosLoading::tick();
             } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
                 needsRecreate_ = true;
             } else if (pres != VK_SUCCESS) {
@@ -783,6 +912,10 @@ public:
             double targetFrameMs  = 1000.0 / measuredRefreshRateHz_;
             double gpuLoadPercent = targetFrameMs > 0.001 ? (smoothedGpuTimeMs_ / targetFrameMs) * 100.0 : 0.0;
             VRAMReality vram = Memory::measureReality();
+            if (vram.usable > 0)
+                FieldRtxMemTree::setCardBudget(vram.usable);
+            else if (vram.total > 0)
+                FieldRtxMemTree::setCardBudget(vram.total);
 
             double usedMB         = static_cast<double>(vram.driver_footprint) / (1024.0 * 1024.0);
             double totalMB        = static_cast<double>(vram.total) / (1024.0 * 1024.0);
@@ -979,9 +1112,10 @@ private:
 
         if (Options::Canvas::IsX86Fields()) {
             Options::Canvas::ControlFlags |= 1u;
+            Pipeline::boot_x86_canvas(Options::Canvas::CurrentName());
+        } else {
+            Pipeline::create_canvas_pipeline(Options::Canvas::CurrentName());
         }
-
-        Pipeline::create_canvas_pipeline(Options::Canvas::CurrentName());
         SDL3System::get().applyMouseCapture();
 
         if (descriptorSet_ != VK_NULL_HANDLE) {
@@ -1087,6 +1221,7 @@ private:
         if (descriptorSet_ != VK_NULL_HANDLE) {
             vkFreeDescriptorSets(rtx().device, descriptorPool_, 1, &descriptorSet_);
             descriptorSet_ = VK_NULL_HANDLE;
+            Pipeline::aosTextureBindDirty = true;
         }
         if (descriptorPool_ != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(rtx().device, descriptorPool_, nullptr);
@@ -1404,7 +1539,7 @@ void clearFieldImages() noexcept {
 
         if (Pipeline::currentCanvasKind == Pipeline::CanvasKind::X86Fields) {
             Pipeline::create_field_descriptor_layout();
-            poolSizes[0] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4};
+            poolSizes[0] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 9};
             poolSizes[1] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2};
             poolSizeCount = 2;
             layout = &Pipeline::field_descriptor_layout;
@@ -1441,6 +1576,108 @@ void clearFieldImages() noexcept {
             LOG_FATAL_CAT("RAYCANVAS", "vkAllocateDescriptorSets failed: {}", vkh.result(allocRes));
             descriptorSet_ = VK_NULL_HANDLE;
         }
+    }
+
+    void syncChromeViewport() noexcept {
+        if (!FieldAmouranthOs::shellChromeActive()) return;
+        if (window_) {
+            FieldDosChrome::refreshWindowMetrics(window_);
+            int pixW = 0, pixH = 0;
+            SDL_GetWindowSizeInPixels(window_, &pixW, &pixH);
+            if (pixW > 0 && pixH > 0) {
+                window_width_  = pixW;
+                window_height_ = pixH;
+            }
+        }
+        const int winW = window_width_ > 0 ? window_width_ : render_width_;
+        const int winH = window_height_ > 0 ? window_height_ : render_height_;
+        FieldDosDisplay::syncViewport(winW, winH, render_width_, render_height_);
+    }
+
+    void syncChromeInputLayout() noexcept {
+        if (!FieldAmouranthOs::shellChromeActive()) return;
+        if (window_) {
+            FieldDosChrome::refreshWindowMetrics(window_);
+            int pixW = 0, pixH = 0;
+            SDL_GetWindowSizeInPixels(window_, &pixW, &pixH);
+            if (pixW > 0 && pixH > 0) {
+                window_width_  = pixW;
+                window_height_ = pixH;
+            }
+        }
+        updateRenderResolution();
+        syncChromeViewport();
+        FieldAmouranthOs::tick(render_width_, render_height_);
+    }
+
+    // Bind chrome textures when views appear or descriptor set is recreated — never write null views.
+    static void patchChromeDescriptorsStatic() noexcept {
+        if (s_activeInstance_) s_activeInstance_->ensureX86ChromeTextureBindings();
+    }
+
+    void ensureX86ChromeTextureBindings() noexcept {
+        if (!descriptorSet_) return;
+        if (Pipeline::currentCanvasKind != Pipeline::CanvasKind::X86Fields) return;
+
+        static VkDescriptorSet lastSet = VK_NULL_HANDLE;
+        static VkImageView boundAmmo = VK_NULL_HANDLE;
+        static VkImageView boundStart = VK_NULL_HANDLE;
+        static VkImageView boundFontSdf = VK_NULL_HANDLE;
+        if (descriptorSet_ != lastSet) {
+            lastSet = descriptorSet_;
+            boundAmmo = VK_NULL_HANDLE;
+            boundStart = VK_NULL_HANDLE;
+            boundFontSdf = VK_NULL_HANDLE;
+        }
+
+        VkDescriptorImageInfo infos[3]{};
+        VkWriteDescriptorSet writes[3]{};
+        uint32_t n = 0u;
+
+        const bool forceBind = Pipeline::aosTextureBindDirty;
+        if (Pipeline::aosStartTextureView != VK_NULL_HANDLE
+                && (Pipeline::aosStartTextureView != boundStart || forceBind)) {
+            infos[n].imageView = Pipeline::aosStartTextureView;
+            infos[n].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            writes[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[n].dstSet = descriptorSet_;
+            writes[n].dstBinding = 13;
+            writes[n].descriptorCount = 1;
+            writes[n].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[n].pImageInfo = &infos[n];
+            boundStart = Pipeline::aosStartTextureView;
+            ++n;
+        }
+        if (Pipeline::ammoTextureView != VK_NULL_HANDLE
+                && (Pipeline::ammoTextureView != boundAmmo || forceBind)) {
+            infos[n].imageView = Pipeline::ammoTextureView;
+            infos[n].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            writes[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[n].dstSet = descriptorSet_;
+            writes[n].dstBinding = 11;
+            writes[n].descriptorCount = 1;
+            writes[n].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[n].pImageInfo = &infos[n];
+            boundAmmo = Pipeline::ammoTextureView;
+            ++n;
+        }
+        if (Pipeline::rtxFontSdfView != VK_NULL_HANDLE
+                && (Pipeline::rtxFontSdfView != boundFontSdf || forceBind)) {
+            infos[n].imageView = Pipeline::rtxFontSdfView;
+            infos[n].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            writes[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[n].dstSet = descriptorSet_;
+            writes[n].dstBinding = 14;
+            writes[n].descriptorCount = 1;
+            writes[n].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[n].pImageInfo = &infos[n];
+            boundFontSdf = Pipeline::rtxFontSdfView;
+            ++n;
+        }
+        if (n == 0u) return;
+        vkUpdateDescriptorSets(rtx().device, n, writes, 0, nullptr);
+        Pipeline::aosTextureBindDirty = false;
+        LOG_DEBUG_CAT("CANVAS", "x86 chrome textures bound — {} write(s)", n);
     }
 
     void updateDescriptorSet() noexcept {
@@ -1501,35 +1738,51 @@ void clearFieldImages() noexcept {
             w10.dstSet = descriptorSet_; w10.dstBinding = 10; w10.descriptorCount = 1;
             w10.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w10.pImageInfo = &flowInfo;
 
-            Pipeline::create_ammo_texture();
             Pipeline::sync_aos_textures();
+
             VkDescriptorImageInfo ammoInfo{};
-            ammoInfo.imageView   = Pipeline::ammoTextureView;
-            ammoInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            VkWriteDescriptorSet w11{};
-            w11.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            w11.dstSet = descriptorSet_; w11.dstBinding = 11; w11.descriptorCount = 1;
-            w11.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w11.pImageInfo = &ammoInfo;
-
             VkDescriptorImageInfo aosWallInfo{};
-            aosWallInfo.imageView   = Pipeline::aosWallTextureView;
-            aosWallInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            VkWriteDescriptorSet w12{};
-            w12.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            w12.dstSet = descriptorSet_; w12.dstBinding = 12; w12.descriptorCount = 1;
-            w12.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w12.pImageInfo = &aosWallInfo;
-
             VkDescriptorImageInfo aosStartInfo{};
-            aosStartInfo.imageView   = Pipeline::aosStartTextureView;
-            aosStartInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            VkWriteDescriptorSet w13{};
-            w13.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            w13.dstSet = descriptorSet_; w13.dstBinding = 13; w13.descriptorCount = 1;
-            w13.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w13.pImageInfo = &aosStartInfo;
+            VkDescriptorImageInfo fontSdfInfo{};
+            VkWriteDescriptorSet writes[10]{w0, w1, w2, w8, w9, w10};
+            uint32_t writeCount = 6u;
 
-            VkWriteDescriptorSet writes[9] = {w0, w1, w2, w8, w9, w10, w11, w12, w13};
-            vkUpdateDescriptorSets(rtx().device, 9, writes, 0, nullptr);
-            LOG_DEBUG_CAT("CANVAS", "x86 descriptor set: b0=HDR b1=die b2=acct b8=Phi b9=Thm b10=Flw b11=ammo b12=aosWall b13=aosStart");
+            if (Pipeline::ammoTextureView != VK_NULL_HANDLE) {
+                ammoInfo.imageView   = Pipeline::ammoTextureView;
+                ammoInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkWriteDescriptorSet& w11 = writes[writeCount++];
+                w11.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                w11.dstSet = descriptorSet_; w11.dstBinding = 11; w11.descriptorCount = 1;
+                w11.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w11.pImageInfo = &ammoInfo;
+            }
+            if (Pipeline::aosWallTextureView != VK_NULL_HANDLE) {
+                aosWallInfo.imageView   = Pipeline::aosWallTextureView;
+                aosWallInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkWriteDescriptorSet& w12 = writes[writeCount++];
+                w12.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                w12.dstSet = descriptorSet_; w12.dstBinding = 12; w12.descriptorCount = 1;
+                w12.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w12.pImageInfo = &aosWallInfo;
+            }
+            if (Pipeline::aosStartTextureView != VK_NULL_HANDLE) {
+                aosStartInfo.imageView   = Pipeline::aosStartTextureView;
+                aosStartInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkWriteDescriptorSet& w13 = writes[writeCount++];
+                w13.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                w13.dstSet = descriptorSet_; w13.dstBinding = 13; w13.descriptorCount = 1;
+                w13.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w13.pImageInfo = &aosStartInfo;
+            }
+            if (Pipeline::rtxFontSdfView != VK_NULL_HANDLE) {
+                fontSdfInfo.imageView   = Pipeline::rtxFontSdfView;
+                fontSdfInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkWriteDescriptorSet& w14 = writes[writeCount++];
+                w14.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                w14.dstSet = descriptorSet_; w14.dstBinding = 14; w14.descriptorCount = 1;
+                w14.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w14.pImageInfo = &fontSdfInfo;
+            }
+
+            vkUpdateDescriptorSets(rtx().device, writeCount, writes, 0, nullptr);
+            LOG_DEBUG_CAT("CANVAS", "x86 descriptor set: {} write(s) (chrome textures deferred if not ready)",
+                writeCount);
             return;
         }
 
@@ -1540,7 +1793,9 @@ void clearFieldImages() noexcept {
         }
 
         if (headless_) {
-            LOG_DEBUG_CAT("RAYCANVAS", "DEBUG: headless - skipping full descriptor update (AS/images/buffer mix can fault lavapipe in this debug env). Set allocated; dispatch + host accountant pop + fabric will still run. Real driver on desktop will use full path.");
+            Pipeline::sync_aos_textures();
+            ensureX86ChromeTextureBindings();
+            LOG_DEBUG_CAT("RAYCANVAS", "DEBUG: headless - chrome textures bound; skipping full AS descriptor update");
             return;
         }
 
@@ -1909,6 +2164,7 @@ private:
 
     bool           minimized_                 = false;
     bool           destroyed_                 = false;
+    bool           resourcesReleased_         = false;
     bool           firstFrame_                = true;
 
     uint64_t       materialsHandle_           = 0;
@@ -1957,8 +2213,11 @@ private:
 
     bool           headless_                  = false;  // AMOURANTHRTX_HEADLESS etc — skips acquire/present, still dispatches for accountant
 
+    static RayCanvas* s_activeInstance_;
+
     int64_t        maxFrames_                 = 0;      // from env AMOURANTHRTX_MAX_FRAMES for bounded clean exit
     uint64_t       totalFrames_;                        // always-increasing dispatch count (survives fps reset) — ensures N full dispatches + pop before exit
 };
 
 inline RayCanvas* rayCanvas = nullptr;
+inline RayCanvas* RayCanvas::s_activeInstance_ = nullptr;

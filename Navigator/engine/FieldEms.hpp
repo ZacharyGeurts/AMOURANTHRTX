@@ -3,6 +3,7 @@
 // LIM EMS 4.0 — page frame at segment 0xE000, 64 pool pages in guest RAM at 0x00E00000.
 
 #include "FieldPlatform.hpp"
+#include "FieldRtxMemory.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -35,8 +36,17 @@ inline bool          poolInit    = false;
 inline EmsHandle     handles[256]{};
 inline bool          poolUsed[POOL_PAGES]{};
 
+inline void deactivate() noexcept {
+    poolInit = false;
+    freePages = static_cast<std::uint16_t>(POOL_PAGES);
+    nextHandle = 1u;
+    pageFrameSeg = PAGE_FRAME_SEG;
+    for (auto& h : handles) h = {};
+    for (auto& u : poolUsed) u = false;
+}
+
 inline void initPool(x86emu_t* e) noexcept {
-    if (!e || poolInit) return;
+    if (!e || poolInit || !FieldRtxMemory::emmLive()) return;
     for (std::uint32_t pg = 0; pg < POOL_PAGES; ++pg) {
         const std::uint32_t base = POOL_BASE + pg * PAGE_BYTES;
         for (std::uint32_t i = 0; i < PAGE_BYTES; ++i)
@@ -44,6 +54,11 @@ inline void initPool(x86emu_t* e) noexcept {
         poolUsed[pg] = false;
     }
     poolInit = true;
+}
+
+inline void activate(x86emu_t* e) noexcept {
+    if (!e || !FieldRtxMemory::emmLive()) return;
+    initPool(e);
 }
 
 inline int allocPoolRun(std::uint8_t count, std::uint8_t& firstOut) noexcept {
@@ -92,6 +107,7 @@ inline EmsHandle* handlePtr(std::uint16_t handle) noexcept {
 
 inline int handleInt34(x86emu_t* e) noexcept {
     if (!e) return 0;
+    if (!FieldRtxMemory::emmLive()) return 0;
     initPool(e);
     const std::uint8_t ah = static_cast<std::uint8_t>(e->x86.R_EAX >> 8);
     switch (ah) {

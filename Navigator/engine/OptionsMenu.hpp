@@ -425,14 +425,13 @@ namespace Options::Input
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 // CANVAS SWIPE — hot-swap compute shaders without losing the classic engine path
-// Default canvas is x86.comp (Big Grin die + FieldSocket). Swipe list retained for dev builds.
+// Default canvas is x86.comp (Big Grin die + FieldSocket + AmmoOS chrome).
 // Everything else uses the classic thermo/HDR/RT descriptor layout.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace Options::Canvas
 {
     inline constexpr const char* SwipeList[] = {
 		"x86",
-		"CANVAS",
 		"Amouranth",
 		"energy",     
         "Flowers",
@@ -453,6 +452,9 @@ namespace Options::Canvas
 
     // Set true when CANVAS.comp is the x86 FieldSocket die shader (default on).
     inline bool CanvasUsesX86Die = true;
+
+    // True once the live x86.comp Vk pipeline is active (programs/emulators need this, not aos_load).
+    inline bool ProgramsCanvasReady = false;
 
     // CPU cycles per frame — host 8086 runs up to 262144; GPU die fallback capped at 8192.
     inline uint32_t CyclesPerFrame = 131072u;
@@ -478,7 +480,7 @@ namespace Options::Canvas
 
     inline bool IsX86Fields() noexcept {
         const std::string_view name{CurrentName()};
-        return name == "x86" || IsThemeCanvas(name)
+        return name == "x86" || name == "aos_load" || IsThemeCanvas(name)
             || (name == "CANVAS" && CanvasUsesX86Die);
     }
 
@@ -490,6 +492,7 @@ namespace Options::Canvas
     inline constexpr uint32_t ControlAmmoExec   = 1024u;
     inline constexpr uint32_t ControlDosPanelFs      = 256u;
     inline constexpr uint32_t ControlDosPanelStretch = 512u;
+    inline constexpr uint32_t ControlFieldDebugHud   = 2048u;  // x86 field-die monitor (off in production)
     inline bool DosImmersiveMode  = false;
     inline bool DosPanelStretch   = false;
     inline bool BootRtxDos = true;
@@ -498,7 +501,7 @@ namespace Options::Canvas
     inline bool  DosCrispFont       = true;
     inline bool  DosScanlines       = false;
     inline bool DosPanelFullscreen = false;
-    inline bool DosInputFocused    = true;
+    inline bool DosInputFocused    = false;
     inline constexpr uint32_t ThemeMask   = 0x7u << 8u;
     inline constexpr size_t ColorThemeCount = 1u;
     inline constexpr const char* ColorThemeNames[] = { "Amouranth" };
@@ -574,6 +577,16 @@ namespace Options::AnalogFields
 
     inline bool  EnableFieldViz   = true;     // let canvas modulate visuals from the living fields
     inline int   FieldVizMode     = 4;        // 0=Phi waves+interference, 1=Thermo (blackbody), 2=Flow advection, 3=Gate events, 4=All
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Golden Era emulators — shared defaults for AmmoNES / SMS / Genesis / A2600
+// ─────────────────────────────────────────────────────────────────────────────
+namespace Options::Emulators
+{
+    inline int  DefaultAudioStyle = 1;   // 0=Classic/chippy  1=Modern/smooth
+    inline bool SoundOnByDefault  = true;
+    inline int  MasterVolume      = 256; // 0-512
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -10,10 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace FieldBios {
-extern bool pmExecActive;
-extern bool rtxShellActive;
-}
+
 
 namespace FieldX86Runtime {
 

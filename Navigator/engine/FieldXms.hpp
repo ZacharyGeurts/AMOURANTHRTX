@@ -6,6 +6,7 @@
 #include "FieldDpmi.hpp"
 #include "FieldPlatform.hpp"
 #include "FieldRaid.hpp"
+#include "FieldRtxMemory.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -76,10 +77,31 @@ inline void installDriverStub(x86emu_t* e) noexcept {
     installed = true;
 }
 
-inline void install(x86emu_t* e) noexcept {
-    if (!e) return;
+inline void deactivate() noexcept {
+    installed = false;
+    a20Enabled = true;
+    ctrl = {};
+    ctrl.specRev = SPEC_VER;
+    ctrl.freeBytes = 0u;
+    ctrl.hmaAvail = 0u;
+    ctrl.a20State = 1u;
+    nextHandle = 1u;
+    for (auto& h : handles) h = {};
+}
+
+inline void activate(x86emu_t* e) noexcept {
+    if (!e || !FieldRtxMemory::xmsLive()) return;
     FieldDpmi::install(e);
     installDriverStub(e);
+    ctrl.freeBytes = POOL_BYTES;
+    ctrl.hmaAvail = 0xFFFFu;
+    writeControlBlock(e);
+}
+
+inline void install(x86emu_t* e) noexcept {
+    if (!e) return;
+    FieldRtxMemory::popXms(FieldDos::hdGuestRamPtr);
+    activate(e);
 }
 
 inline bool copyGuestRange(x86emu_t* e, std::uint32_t dst, std::uint32_t src,
@@ -240,14 +262,17 @@ inline int handleInt2fXms(x86emu_t* e) noexcept {
     if (!e) return 0;
     const std::uint16_t ax = static_cast<std::uint16_t>(e->x86.R_EAX & 0xFFFFu);
     if (ax == MUX_INSTALL) {
-        install(e);
+        if (!FieldRtxMemory::xmsLive()) return 0;
+        activate(e);
         e->x86.R_AL = 0x80u;
         e->x86.R_ES = (e->x86.R_ES & 0xFFFF0000u) | FieldDpmi::xmsCodeSeg;
         e->x86.R_BX = (e->x86.R_BX & 0xFFFF0000u) | 0x0000u;
         return 1;
     }
-    if (ax == MUX_DISPATCH)
+    if (ax == MUX_DISPATCH) {
+        if (!FieldRtxMemory::xmsLive()) return 0;
         return dispatchDriver(e);
+    }
     return 0;
 }
 

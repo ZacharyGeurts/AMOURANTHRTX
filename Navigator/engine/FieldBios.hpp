@@ -2,14 +2,15 @@
 
 // IBM PC/AT BIOS data area + INT 10/11/12/13/15/16/1A/19 stubs for MS-DOS 6.30 boot.
 
+#include "FieldRtxShell.hpp"
 #include "FieldAmmoShell.hpp"
 #include "FieldCmos.hpp"
 #include "FieldRtxBoot.hpp"
 #include "FieldRtxDrivers.hpp"
-#include "FieldRtxShell.hpp"
 #include "FieldDevices.hpp"
 #include "FieldDos.hpp"
 #include "FieldDosConfig.hpp"
+#include "FieldRtxMemory.hpp"
 #include "FieldMscdex.hpp"
 #include "FieldInput.hpp"
 #include "FieldSb16.hpp"
@@ -40,9 +41,7 @@
 namespace FieldBios {
 
 inline std::uint16_t syntheticKey = 0;
-inline bool guestBootSettled = false;
-inline bool rtxShellActive = false;  // GPU-primary interactive shell (not headless)
-inline bool pmExecActive = false; // MZ/COM/DOS4GW LE — extended DOS host trap set
+// guestBootSettled / rtxShellActive / pmExecActive — defined in FieldX86Emu.hpp (shared w/ runtime)
 inline std::uint32_t lastHostKey = 0;
 inline bool lastKeyDown = false;
 inline std::uint16_t consumedHostKey = 0;
@@ -293,13 +292,23 @@ inline void seedKernelDecompressorStack(x86emu_t* e) {
     x86emu_write_word(e, 0x12CE0u + 0x38CFu + 2u, 0x0268u);
 }
 
+inline void patchConventionalKb(x86emu_t* e, std::uint8_t* ram) noexcept {
+    if (e) {
+        x86emu_write_word(e, BDA_BASE + 0x13, FieldRtxMemory::conventionalKb);
+        x86emu_write_word(e, 0x0413u, static_cast<u16>(FieldRtxMemory::conventionalKb));
+    }
+    if (!ram) ram = FieldX86Emu::ramHost;
+    FieldRtxMemory::patchGuest(ram);
+}
+
 inline void init(x86emu_t* e) {
     if (!e) return;
 
     FieldCmos::init(FieldDos::hdReady);
 
     x86emu_write_word(e, BDA_BASE + 0x10, 0x54F3u); /* VGA + coproc + 2 floppies + 101-key */
-    x86emu_write_word(e, BDA_BASE + 0x13, FieldPlatform::CONVENTIONAL_KB);
+    FieldRegistry::applyMemoryConfig();
+    patchConventionalKb(e, nullptr);
     x86emu_write_word(e, BDA_BASE + 0x15, 0x0200u); /* user wait / lpt timeout */
     x86emu_write_byte(e, BDA_BASE + 0x17, FieldDos::hdReady ? 0x80u : 0x00u);
     x86emu_write_byte(e, BDA_BASE + 0x18, 0x70u);   /* fixed disk count */
@@ -313,7 +322,6 @@ inline void init(x86emu_t* e) {
     x86emu_write_byte(e, BDA_BASE + 0x63, 0x03u);   /* floppy motor status */
     x86emu_write_byte(e, BDA_BASE + 0x75, FieldDos::hdReady ? 2 : 1);
     x86emu_write_word(e, BDA_BASE + 0x7C, static_cast<u16>(FieldPlatform::EXTENDED_KB));
-    x86emu_write_word(e, 0x0413u, static_cast<u16>(FieldPlatform::CONVENTIONAL_KB));
     x86emu_write_byte(e, 0xFFFFEu, 0x00u);
     x86emu_write_byte(e, 0xFFFFFu, 0xFCu);         /* BIOS model: 80386 */
 
@@ -1328,7 +1336,7 @@ inline int handleInt(x86emu_t* e, u8 num, std::uint32_t hostKey, bool keyDown, s
         return 1;
     }
     if (num == 0x12) {
-        e->x86.R_EAX = (e->x86.R_EAX & 0xFFFF0000u) | FieldPlatform::CONVENTIONAL_KB;
+        e->x86.R_EAX = (e->x86.R_EAX & 0xFFFF0000u) | FieldRtxMemory::conventionalKb;
         return 1;
     }
 
@@ -1525,11 +1533,11 @@ inline int handleInt(x86emu_t* e, u8 num, std::uint32_t hostKey, bool keyDown, s
             e->x86.R_EAX = (e->x86.R_EAX & 0xFFFF0000u)
                          | (static_cast<std::uint32_t>(FieldPlatform::EXTENDED_KB) & 0xFFFFu);
             e->x86.R_EBX = (e->x86.R_EBX & 0xFFFF0000u)
-                         | (static_cast<std::uint32_t>(FieldPlatform::CONVENTIONAL_KB) & 0xFFFFu);
+                         | (static_cast<std::uint32_t>(FieldRtxMemory::conventionalKb) & 0xFFFFu);
             e->x86.R_ECX = (e->x86.R_ECX & 0xFFFF0000u)
                          | ((FieldPlatform::EXTENDED_KB >> 16) & 0xFFFFu);
             e->x86.R_EDX = (e->x86.R_EDX & 0xFFFF0000u)
-                         | ((FieldPlatform::CONVENTIONAL_KB >> 8) & 0xFFFFu);
+                         | ((FieldRtxMemory::conventionalKb >> 8) & 0xFFFFu);
             e->x86.R_FLG &= ~F_CF;
             return 1;
         }

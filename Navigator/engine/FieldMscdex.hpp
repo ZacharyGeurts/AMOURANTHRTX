@@ -4,6 +4,7 @@
 
 #include "FieldCdRom.hpp"
 #include "FieldLayerShell.hpp"
+#include "FieldRtxMemory.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -19,7 +20,18 @@ inline std::uint8_t numDrives = 0;
 inline std::uint8_t driveLetters[4]{};
 inline std::uint8_t driverSubunit = 0;
 
+inline void dismiss() noexcept {
+    installed = false;
+    numDrives = 0;
+    driverSubunit = 0;
+    for (auto& l : driveLetters) l = 0;
+}
+
 inline void install() noexcept {
+    if (!FieldRtxMemory::mscdexLive()) {
+        dismiss();
+        return;
+    }
     installed = true;
     numDrives = FieldCdRom::ready ? 1u : 0u;
     if (numDrives > 0) {
@@ -31,7 +43,7 @@ inline void install() noexcept {
 inline std::uint16_t handle(std::uint16_t ax, std::uint16_t bx, std::uint16_t /*cx*/,
                             std::uint16_t& outBx, std::uint16_t& outCx, std::uint16_t& outDx,
                             std::uint32_t& outEax) noexcept {
-    if (!installed) install();
+    if (!FieldRtxMemory::mscdexLive() || !installed) return 0;
     const std::uint8_t fn = static_cast<std::uint8_t>((ax >> 8) & 0xFFu);
     if (fn != 0x15u) return 0; /* MSCDEX multiplex */
     const std::uint8_t sub = static_cast<std::uint8_t>(ax & 0xFFu);
@@ -97,7 +109,7 @@ inline std::string statusLine() noexcept {
     const char* layer = FieldLayer::isShellActive(FieldLayer::LayerId::Mscdex) ? "ON" : "off";
     if (!FieldCdRom::ready)
         return std::string("MSCDEX [mscdex layer ") + layer
-            + "]: no CD-ROM (drop .iso in assets/dos/incoming/cd/)";
+            + "]: no CD-ROM (USB/DVD /dev/sr0 or .iso in assets/dos/incoming/cd/)";
     char buf[160];
     std::snprintf(buf, sizeof buf,
         "MSCDEX 2.1 [mscdex layer %s] L%u — %u drive(s) D: %s (%u sectors)",

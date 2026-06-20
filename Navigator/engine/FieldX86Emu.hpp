@@ -29,14 +29,15 @@ extern "C" {
 
 namespace FieldBios {
 void init(x86emu_t* emu);
+void patchConventionalKb(x86emu_t* e, std::uint8_t* ram) noexcept;
 int handleInt(x86emu_t* e, u8 num, std::uint32_t key, bool keyDown, std::uint64_t ticks);
 void enqueueHostKey(std::uint16_t key) noexcept;
 void pumpHostShell(x86emu_t* emu, std::uint32_t key, bool keyDown, std::uint8_t* ram);
 void maintainBoot(x86emu_t* emu, u64 tsc, std::uint8_t* ram);
 void recoverFromHalt(x86emu_t* emu);
-extern bool pmExecActive;
-extern bool guestBootSettled;
-extern bool rtxShellActive;
+inline bool pmExecActive = false;
+inline bool guestBootSettled = false;
+inline bool rtxShellActive = false;
 }
 
 namespace FieldX86Emu {
@@ -61,6 +62,11 @@ struct DieView {
 inline x86emu_t* emu         = nullptr;
 inline void*     dieMapped   = nullptr;
 inline std::uint8_t* ramHost = nullptr;
+
+// Chrome HUD writes guest RAM before the x86 emulator binds — keep ramHost in sync.
+inline void bindChromeGuest(std::uint8_t* guestRam) noexcept {
+    if (guestRam) ramHost = guestRam;
+}
 inline std::size_t ramByteOffset = 0;
 inline bool      pagesMapped = false;
 inline bool      biosInited  = false;

@@ -16,6 +16,7 @@
 #include "FieldPlatform.hpp"
 #include "FieldRaid.hpp"
 #include "FieldRegistry.hpp"
+#include "FieldRtxMemory.hpp"
 #include "FieldVga.hpp"
 
 #include "FieldLayerShell.hpp"
@@ -199,7 +200,7 @@ inline void audioPack(std::uint32_t* bus, std::size_t off) noexcept {
 
 // --- Mscdex ------------------------------------------------------------------
 inline void mscdexSync(const std::uint8_t* /*ram*/) noexcept {
-    if (!FieldMscdex::installed && FieldCdRom::ready)
+    if (FieldRtxMemory::mscdexLive() && FieldCdRom::ready)
         FieldMscdex::install();
 }
 
