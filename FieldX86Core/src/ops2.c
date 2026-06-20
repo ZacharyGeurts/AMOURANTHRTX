@@ -39,6 +39,8 @@
 #include "include/x86emu_int.h"
 #include "include/fpu.h"
 
+#include <math.h>
+
 /*----------------------------- Implementation ----------------------------*/
 
 
@@ -470,6 +472,31 @@ static inline u32 mmx_d(u64 v, int i)
 static inline s32 mmx_sd(u64 v, int i)
 {
   return (s32) mmx_d(v, i);
+}
+
+static u32 sse_lane_u32(const I128_reg_t *r, int lane)
+{
+  const int o = lane * FP_SP_SIZE;
+  return (u32) r->reg[o] | ((u32) r->reg[o + 1] << 8) |
+    ((u32) r->reg[o + 2] << 16) | ((u32) r->reg[o + 3] << 24);
+}
+
+static float sse_lane_f32(const I128_reg_t *r, int lane)
+{
+  union { u32 u; float f; } u;
+  u.u = sse_lane_u32(r, lane);
+  return u.f;
+}
+
+static void sse_lane_set_f32(I128_reg_t *r, int lane, float f)
+{
+  union { u32 u; float v; } u;
+  u.v = f;
+  const int o = lane * FP_SP_SIZE;
+  r->reg[o]     = (u8) u.u;
+  r->reg[o + 1] = (u8) (u.u >> 8);
+  r->reg[o + 2] = (u8) (u.u >> 16);
+  r->reg[o + 3] = (u8) (u.u >> 24);
 }
 
 static u64 mmx_read_src(x86emu_t *emu, int mod, int rl)
@@ -1675,6 +1702,207 @@ static void x86emuOp2_conditional_move(x86emu_t *emu, u8 op2)
     }
   }
 }
+
+/****************************************************************************
+REMARKS:
+Handles opcode 0x0f,0x50 movmskps
+****************************************************************************/
+static void x86emuOp2_SSEmovmskps(x86emu_t *emu, u8 op2)
+{
+  int mod, rl, rh;
+  I128_reg_t *src;
+  u32 *dst;
+  int i;
+
+  (void) op2;
+  OP_DECODE("movmskps ");
+  x86emuOp2_sse_enabled_check(emu);
+  fetch_decode_modrm(emu, &mod, &rh, &rl);
+
+  if(mod != 3) {
+    INTR_RAISE_UD(emu);
+    return;
+  }
+
+  dst = decode_rm_long_register(emu, rh);
+  OP_DECODE(",");
+  src = decode_rm_sse_register(emu, rl);
+
+  *dst &= 0xffffff00u;
+  for(i = 0; i < 4; i++) {
+    if(src->reg[i * FP_SP_SIZE + 3] & 0x80)
+      *dst |= (1u << i);
+  }
+}
+
+
+/****************************************************************************
+REMARKS:
+Handles opcode 0x0f,0x51-0x53 0x58-0x5f packed float ops
+****************************************************************************/
+static void x86emuOp2_SSEfloatops(x86emu_t *emu, u8 op2)
+{
+  int mod, rl, rh, lane;
+  I128_reg_t *src, *dst, tmp;
+  u32 addr;
+  float a, b, r;
+
+  switch(op2) {
+    case 0x51: OP_DECODE("sqrtps "); break;
+    case 0x52: OP_DECODE("rsqrtps "); break;
+    case 0x53: OP_DECODE("rcpps "); break;
+    case 0x58: OP_DECODE("addps "); break;
+    case 0x59: OP_DECODE("mulps "); break;
+    case 0x5b: OP_DECODE("cvtdq2ps "); break;
+    case 0x5c: OP_DECODE("subps "); break;
+    case 0x5d: OP_DECODE("minps "); break;
+    case 0x5e: OP_DECODE("divps "); break;
+    case 0x5f: OP_DECODE("maxps "); break;
+    default:
+      INTR_RAISE_UD(emu);
+      return;
+  }
+
+  x86emuOp2_sse_enabled_check(emu);
+  fetch_decode_modrm(emu, &mod, &rh, &rl);
+
+  if(mod == 3) {
+    dst = decode_rm_sse_register(emu, rh);
+    OP_DECODE(",");
+    src = decode_rm_sse_register(emu, rl);
+  }
+  else {
+    dst = decode_rm_sse_register(emu, rh);
+    OP_DECODE(",");
+    addr = decode_rm_address(emu, mod, rl);
+    tmp = fetch_data_qlong(emu, addr);
+    src = &tmp;
+  }
+
+  for(lane = 0; lane < 4; lane++) {
+    a = sse_lane_f32(dst, lane);
+    b = sse_lane_f32(src, lane);
+    switch(op2) {
+      case 0x51:
+        r = sqrtf(b);
+        break;
+      case 0x52:
+        r = (b == 0.0f) ? INFINITY : 1.0f / sqrtf(b);
+        break;
+      case 0x53:
+        r = (b == 0.0f) ? INFINITY : 1.0f / b;
+        break;
+      case 0x58:
+        r = a + b;
+        break;
+      case 0x59:
+        r = a * b;
+        break;
+      case 0x5b:
+        r = (float) (s32) sse_lane_u32(src, lane);
+        break;
+      case 0x5c:
+        r = a - b;
+        break;
+      case 0x5d:
+        r = (isnan(a) || isnan(b)) ? NAN : (a < b ? a : b);
+        break;
+      case 0x5e:
+        r = a / b;
+        break;
+      case 0x5f:
+        r = (isnan(a) || isnan(b)) ? NAN : (a > b ? a : b);
+        break;
+      default:
+        r = b;
+        break;
+    }
+    sse_lane_set_f32(dst, lane, r);
+  }
+}
+
+
+/****************************************************************************
+REMARKS:
+Handles opcode 0x0f,0x2a cvtpi2ps
+****************************************************************************/
+static void x86emuOp2_SSEcvtpi2ps(x86emu_t *emu, u8 op2)
+{
+  int mod, rl, rh, lane;
+  I128_reg_t *dst;
+  u64 mmx;
+  u32 addr;
+
+  (void) op2;
+  OP_DECODE("cvtpi2ps ");
+  x86emuOp2_sse_enabled_check(emu);
+  x86emuOp2_mmx_enabled_check(emu);
+  fetch_decode_modrm(emu, &mod, &rh, &rl);
+
+  dst = decode_rm_sse_register(emu, rh);
+  OP_DECODE(",");
+
+  if(mod == 3) {
+    mmx = mmx_regs[rl];
+  }
+  else {
+    addr = decode_rm_address(emu, mod, rl);
+    mmx = mmx_fetch_qword(emu, addr);
+  }
+
+  for(lane = 0; lane < 2; lane++) {
+    const s32 iv = (s32) (mmx >> (32 * lane));
+    sse_lane_set_f32(dst, lane, (float) iv);
+  }
+}
+
+
+/****************************************************************************
+REMARKS:
+Handles opcode 0x0f,0x2e-0x2f scalar compare
+****************************************************************************/
+static void x86emuOp2_SSEcomiss(x86emu_t *emu, u8 op2)
+{
+  int mod, rl, rh;
+  I128_reg_t *src, *dst, tmp;
+  u32 addr;
+  float a, b;
+
+  OP_DECODE(op2 == 0x2e ? "ucomiss " : "comiss ");
+  x86emuOp2_sse_enabled_check(emu);
+  fetch_decode_modrm(emu, &mod, &rh, &rl);
+
+  if(mod == 3) {
+    dst = decode_rm_sse_register(emu, rh);
+    OP_DECODE(",");
+    src = decode_rm_sse_register(emu, rl);
+  }
+  else {
+    dst = decode_rm_sse_register(emu, rh);
+    OP_DECODE(",");
+    addr = decode_rm_address(emu, mod, rl);
+    tmp = fetch_data_qlong(emu, addr);
+    src = &tmp;
+  }
+
+  a = sse_lane_f32(dst, 0);
+  b = sse_lane_f32(src, 0);
+
+  CLEAR_FLAG(F_CF | F_ZF | F_PF | F_SF | F_OF);
+  if(isnan(a) || isnan(b)) {
+    SET_FLAG(F_CF | F_ZF | F_PF);
+  }
+  else if(a > b) {
+    /* ordered above */
+  }
+  else if(a < b) {
+    SET_FLAG(F_CF);
+  }
+  else {
+    SET_FLAG(F_ZF);
+  }
+}
+
 
 /****************************************************************************
 REMARKS:
@@ -3139,12 +3367,12 @@ void (*x86emu_optab2[256])(x86emu_t *emu, u8) =
   /*  0x27 */ x86emuOp2_illegal_op,
   /*  0x28 */ x86emuOp2_SSEmovops,
   /*  0x29 */ x86emuOp2_SSEmovops,
-  /*  0x2a */ x86emuOp2_illegal_op,
+  /*  0x2a */ x86emuOp2_SSEcvtpi2ps,
   /*  0x2b */ x86emuOp2_SSEmovops,
   /*  0x2c */ x86emuOp2_SSEmovops,
   /*  0x2d */ x86emuOp2_illegal_op,
-  /*  0x2e */ x86emuOp2_illegal_op,
-  /*  0x2f */ x86emuOp2_illegal_op,
+  /*  0x2e */ x86emuOp2_SSEcomiss,
+  /*  0x2f */ x86emuOp2_SSEcomiss,
 
   /*  0x30 */ x86emuOp2_wrmsr,
   /*  0x31 */ x86emuOp2_rdtsc,
@@ -3180,22 +3408,22 @@ void (*x86emu_optab2[256])(x86emu_t *emu, u8) =
   /*  0x4e */ x86emuOp2_conditional_move,
   /*  0x4f */ x86emuOp2_conditional_move,
 
-  /*  0x50 */ x86emuOp2_illegal_op,
-  /*  0x51 */ x86emuOp2_illegal_op,
-  /*  0x52 */ x86emuOp2_illegal_op,
-  /*  0x53 */ x86emuOp2_illegal_op,
+  /*  0x50 */ x86emuOp2_SSEmovmskps,
+  /*  0x51 */ x86emuOp2_SSEfloatops,
+  /*  0x52 */ x86emuOp2_SSEfloatops,
+  /*  0x53 */ x86emuOp2_SSEfloatops,
   /*  0x54 */ x86emuOp2_SSElogicalops,
   /*  0x55 */ x86emuOp2_SSElogicalops,
   /*  0x56 */ x86emuOp2_SSElogicalops,
   /*  0x57 */ x86emuOp2_SSElogicalops,
-  /*  0x58 */ x86emuOp2_illegal_op,
-  /*  0x59 */ x86emuOp2_illegal_op,
-  /*  0x5a */ x86emuOp2_illegal_op,
-  /*  0x5b */ x86emuOp2_illegal_op,
-  /*  0x5c */ x86emuOp2_illegal_op,
-  /*  0x5d */ x86emuOp2_illegal_op,
-  /*  0x5e */ x86emuOp2_illegal_op,
-  /*  0x5f */ x86emuOp2_illegal_op,
+  /*  0x58 */ x86emuOp2_SSEfloatops,
+  /*  0x59 */ x86emuOp2_SSEfloatops,
+  /*  0x5a */ x86emuOp2_illegal_op,  /* cvtps2pd — DP lanes not wired */
+  /*  0x5b */ x86emuOp2_SSEfloatops,
+  /*  0x5c */ x86emuOp2_SSEfloatops,
+  /*  0x5d */ x86emuOp2_SSEfloatops,
+  /*  0x5e */ x86emuOp2_SSEfloatops,
+  /*  0x5f */ x86emuOp2_SSEfloatops,
 
   /*  0x60 */ x86emuOp2_MMX,      /* punpcklbw                */
   /*  0x61 */ x86emuOp2_MMX,      /* punpcklwd                */

@@ -231,6 +231,47 @@ static void fpu_store_m32int(x86emu_t *emu, u32 addr, s32 v)
   store_data_long(emu, addr, (u32) v);
 }
 
+static int fpu_fcmov_cond(int reg)
+{
+  const int c0 = (fpu.status & FPU_SW_C0) != 0;
+  const int c2 = (fpu.status & FPU_SW_C2) != 0;
+  const int c3 = (fpu.status & FPU_SW_C3) != 0;
+
+  switch(reg) {
+    case 0: return c0;              /* FCMOVB */
+    case 1: return c3;              /* FCMOVE */
+    case 2: return c0 || c3;        /* FCMOVBE */
+    case 3: return c2;              /* FCMOVU (unordered) */
+    default: return 0;
+  }
+}
+
+static void fpu_fxam(void)
+{
+  const int p = fpu_phys(0);
+  const int tag = fpu_tag_get(p);
+  const double v = fpu.st[p];
+
+  fpu.status &= ~(FPU_SW_C0 | FPU_SW_C1 | FPU_SW_C2 | FPU_SW_C3);
+
+  if(tag == FPU_TAG_EMPTY) {
+    fpu.status |= FPU_SW_C0 | FPU_SW_C3;
+  }
+  else if(tag == FPU_TAG_ZERO) {
+    fpu.status |= FPU_SW_C3;
+  }
+  else if(tag == FPU_TAG_SPECIAL || isnan(v) || isinf(v)) {
+    fpu.status |= FPU_SW_C0 | FPU_SW_C2;
+    if(signbit(v))
+      fpu.status |= FPU_SW_C1;
+  }
+  else {
+    fpu.status |= FPU_SW_C2;
+    if(signbit(v))
+      fpu.status |= FPU_SW_C1;
+  }
+}
+
 static void fpu_compare(double a, double b)
 {
   fpu.status &= ~(FPU_SW_C0 | FPU_SW_C2 | FPU_SW_C3);
@@ -531,7 +572,7 @@ static void fpu_esc_d9_reg(x86emu_t *emu, int reg, int rm)
         case 0: fpu_set(0, -fpu_get(0)); break;          /* FCHS */
         case 1: fpu_set(0, fabs(fpu_get(0))); break;     /* FABS */
         case 3: fpu_compare(fpu_get(0), 0.0); break;     /* FTST */
-        case 4: /* FXAM */ break;
+        case 4: fpu_fxam(); break;     /* FXAM */
         default: break;
       }
       break;
@@ -605,8 +646,8 @@ static void fpu_esc_db_reg(x86emu_t *emu, int reg, int rm)
 {
   (void) emu;
   if(reg == 0 || reg == 1 || reg == 2 || reg == 3) {
-    /* FCMOVcc: approximate as unconditional for Watcom DOOM */
-    fpu_set(0, fpu_get(rm));
+    if(fpu_fcmov_cond(reg))
+      fpu_set(0, fpu_get(rm));
   }
   else if(reg == 4) {
     switch(rm) {
@@ -635,7 +676,7 @@ static void fpu_esc_dd_reg(x86emu_t *emu, int reg, int rm)
       fpu_exchange(rm);
       break;
     case 2:
-      /* FST ST(i) */
+      fpu_set(rm, fpu_get(0));       /* FST ST(i) */
       break;
     case 3:
       fpu_pop();
