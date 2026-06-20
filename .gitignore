@@ -3,11 +3,15 @@ build/
 build-release/
 build-windows/
 build-web/
+cache/
 CMakeCache.txt
 CMakeFiles/
 *.cmake
+!CMakeLists.txt
+!Toolchain-*.cmake
 compile_commands.json
 .shader_hash_cache
+assets/shaders/
 
 # Python caches (non-disk)
 __pycache__/
@@ -22,10 +26,12 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and local reports
 *.log
 amouranth_engine.log
 grok_report.pdf
+*.pdf
+!LICENSE
 
 # Runtime data (keep structure, not live journals)
 assets/data/journals/*
