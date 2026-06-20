@@ -13,6 +13,14 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
+
+namespace FieldNes {
+extern bool active;
+extern bool paused;
+extern bool romLoaded;
+extern std::string romPath;
+}
 
 namespace FieldWmStatusBar {
 
@@ -96,9 +104,28 @@ inline void packFileCmd(std::uint8_t* ram) noexcept {
     writeStr(ram, buf);
 }
 
+inline void packNes(std::uint8_t* ram) noexcept {
+    if (!ram || !FieldNes::active) return;
+    char buf[FOOTER_LEN + 1]{};
+    if (!FieldNes::romLoaded) {
+        std::snprintf(buf, sizeof buf,
+            " AmmoNES — File>Open or Recent — Emulation>Pause/Turbo ");
+    } else {
+        const char* base = FieldNes::romPath.c_str();
+        const char* slash = std::strrchr(base, '\\');
+        const char* name = slash ? slash + 1 : base;
+        std::snprintf(buf, sizeof buf, " %s%s  |  %s  |  File>Open  Recent  Emulation ",
+            name, FieldNes::paused ? " [Paused]" : "", name);
+    }
+    ram[FOOTER_RAM] = static_cast<std::uint8_t>(Mode::System);
+    writeStr(ram, buf);
+}
+
 inline void packFooter(std::uint8_t* ram) noexcept {
     if (!ram) return;
-    if (FieldAmmoText::active)
+    if (FieldNes::active)
+        packNes(ram);
+    else if (FieldAmmoText::active)
         packEditor(ram);
     else if (FieldAmouranthFileCmd::active)
         packFileCmd(ram);

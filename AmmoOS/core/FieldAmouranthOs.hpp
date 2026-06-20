@@ -101,6 +101,16 @@ constexpr std::uint32_t BUS_AOS_MENU_SEARCH   = 1u << 26u;
 constexpr std::uint32_t BUS_AOS_EXIT_CONFIRM = 1u << 27u;
 constexpr std::uint32_t BUS_AOS_FOLDER_VIEW  = 1u << 30u;
 
+/* data_bus[54-61] — AmouranthOS chrome + DOS viewport (shellChromeActive overlays [54]).
+ * [54] byte0 menu hover row (0xFF=none) | byte1 taskbar tab hover (0xFF=none)
+ *      byte2 menu visible row count     | byte3 focused title string index (TASKBAR_RAM tab, 0xFF=none)
+ * [55..56] panel glow / sharpen (FieldDosViewport)
+ * [57] conventional memory KB | extended MB   [58] DOS HUD height
+ * [59] HD free bytes
+ * [60] compositor: [31:24] surface count | [23:16] focused tab idx | [15:0] focused outer W (px)
+ * [61] compositor: [31:24] stack revision | [23:16] surface flags   | [15:0] focused outer H (px)
+ *      SURFACE_RAM @ 0xB9000 — per-surface rects for multi-window compositor (stride 16) */
+
 constexpr std::uint32_t BUS_CHROME_MENU_HOVER_SHIFT  = 0u;
 constexpr std::uint32_t BUS_CHROME_TASK_HOVER_SHIFT  = 8u;
 constexpr std::uint32_t BUS_CHROME_MENU_ROWS_SHIFT   = 16u;
@@ -170,7 +180,7 @@ inline float filesDragMx0 = 0.f, filesDragMy0 = 0.f;
 inline float pointerMx = 0.f, pointerMy = 0.f;
 inline std::uint8_t browserIconSlot = 17u;
 inline bool pendingShellRestore = false;
-inline bool consoleShell = false;
+inline bool consoleShell = false;  // diagnostics console; desktop boots active from startup
 inline std::uint32_t wallpaperIndex = 8u;
 inline SDL_Window* hostWindow = nullptr;
 
@@ -250,6 +260,7 @@ inline const char* appTitle(AppId a) noexcept {
     case AppId::PadTest:  return "PADTEST";
     case AppId::Nes:      return "AmmoNES";
     case AppId::NesSetup: return "AmmoNES Setup";
+
     case AppId::Browser:  return "Field Web";
     case AppId::Vscodium: return "VSCodium";
     case AppId::FileCmd:  return "AmmoFiles";
@@ -275,6 +286,7 @@ inline const char* appTooltip(AppId a) noexcept {
     case AppId::PadTest:  return "Gamepad test";
     case AppId::Nes:      return "NES emulator";
     case AppId::NesSetup: return "NES options";
+
     case AppId::FileCmd:  return "Files — browse and open";
     case AppId::Browser:  return "Embedded web panel";
     case AppId::Vscodium: return "Host editor";
@@ -477,10 +489,12 @@ inline void clearStaleGuestFlags() noexcept {
     FieldRtxBasic::active = false;
     FieldAmmoCode::active = false;
     FieldPadTest::active = false;
+
     FieldAmmoBrowser::close();
     FieldAmouranthFileCmd::close();
     FieldAosMonitor::active = false;
     FieldRtxShell::graphicsActive = false;
+
     if (!FieldNes::active) {
         FieldNes::optionsOpen = false;
         FieldAmmoNesSetup::active = false;
@@ -679,8 +693,8 @@ inline void removeTopProgram() noexcept {
     const int closedId = focusedProgId;
     if (Program* p = findProgram(closedId)) {
         FieldAosAppJournal::recordClose(p->id,
-            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)),
-            p.title);
+            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p->app)),
+            p->title);
     }
     if (closedId > 0)
         removeProgramById(closedId);
@@ -697,8 +711,8 @@ inline void removeTopProgram() noexcept {
 inline void markFocusedMinimized() noexcept {
     if (Program* p = findProgram(focusedProgId)) {
         FieldAosAppJournal::recordMinimize(p->id,
-            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)),
-            p.title);
+            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p->app)),
+            p->title);
         p->minimized = true;
     }
 }
@@ -1023,3 +1037,1017 @@ inline float scaledSearchPanelTop() noexcept {
 inline float scaledSearchPanelW() noexcept {
     return FieldAmouranthSearchFlyout::panelW(uiScale());
 }
+
+inline float scaledSearchPanelH() noexcept {
+    return FieldAmouranthSearchFlyout::panelH(uiScale());
+}
+
+inline float scaledTopBarH() noexcept {
+    return desktopTopInset();
+}
+
+inline float scaledMenuRootHeight() noexcept {
+    return FieldAmouranthMenu::rootMenuHeight(
+        scaledMenuRowH(), scaledMenuHeaderH(), scaledMenuPad());
+}
+
+inline float scaledMenuFlyoutHeight() noexcept {
+    return FieldAmouranthMenu::flyoutMenuHeight(scaledMenuRowH(), scaledMenuPad());
+}
+
+inline float scaledMenuHeight() noexcept {
+    return scaledMenuRootHeight();
+}
+
+inline float taskbarY() noexcept { return chromeViewportH() - scaledTaskbarH(); }
+
+inline void closeStartMenu() noexcept {
+    startOpen = false;
+    FieldAmouranthSearchFlyout::clearQuery();
+    FieldAmouranthMenu::closeMenuFocus();
+}
+
+inline void syncStartTextInput(SDL_Window* window) noexcept {
+    if (!window) return;
+    const bool want = startOpen && shellChromeActive();
+    if (want == startTextInputActive) return;
+    startTextInputActive = want;
+    if (want)
+        SDL_StartTextInput(window);
+    else
+        SDL_StopTextInput(window);
+}
+
+// Match aosStartButtonBounds / aosFolderButtonBounds in x86.comp (pad + lift).
+inline void taskbarChromeButtonY(float& y0, float& y1) noexcept {
+    const auto L = taskbarLayout();
+    y0 = L.barY0 + L.pad - L.lift;
+    y1 = L.barY1 - L.pad;
+}
+
+inline float scaledMenuRootTop() noexcept {
+    return taskbarY() - scaledMenuRootHeight();
+}
+
+// Root menu rows start at rootTop + headH in aos_chrome.inc (no extra pad before rows).
+inline float scaledMenuRootRowY0() noexcept {
+    return scaledMenuRootTop() + scaledMenuHeaderH();
+}
+
+inline void exitConfirmPanelBounds(float& x0, float& y0, float& w, float& h) noexcept;
+inline int exitConfirmButtonAt(float mx, float my) noexcept;
+
+inline float scaledMenuFlyoutTop() noexcept {
+    return taskbarY() - scaledMenuFlyoutHeight();
+}
+
+inline float scaledFilesCellW() noexcept { return 88.f * uiScale(); }
+inline float scaledFilesCellH() noexcept { return 96.f * uiScale(); }
+inline float scaledFilesPad() noexcept { return 10.f * uiScale(); }
+inline float scaledFilesHeadH() noexcept { return 30.f * uiScale(); }
+
+inline float scaledFilesPanelW() noexcept {
+    return scaledFilesPad() * 2.f
+        + scaledFilesCellW() * static_cast<float>(FieldAmouranthFilesMenu::GRID_COLS);
+}
+
+inline float scaledFilesPanelH() noexcept {
+    const int rows = FieldAmouranthFilesMenu::gridRows();
+    return scaledFilesHeadH() + scaledFilesPad() * 2.f
+        + scaledFilesCellH() * static_cast<float>(rows);
+}
+
+inline float scaledFilesPanelX() noexcept {
+    return quickLaunchX(0);
+}
+
+inline std::uint8_t browserIconSlotFromId(const std::string& id) noexcept {
+    using IS = FieldAmouranthTextures::IconSlot;
+    if (id.find("firefox") != std::string::npos)
+        return static_cast<std::uint8_t>(IS::BrowserFirefox);
+    if (id.find("chrome") != std::string::npos || id.find("chromium") != std::string::npos)
+        return static_cast<std::uint8_t>(IS::BrowserChrome);
+    if (id.find("edge") != std::string::npos)
+        return static_cast<std::uint8_t>(IS::BrowserEdge);
+    return static_cast<std::uint8_t>(IS::Display);
+}
+
+inline void syncBrowserIconSlot() noexcept {
+    if (FieldBrowserHook::hooked && !FieldBrowserHook::browserId.empty()) {
+        browserIconSlot = browserIconSlotFromId(FieldBrowserHook::browserId);
+        return;
+    }
+    std::string bin, id, label;
+    if (FieldBrowserHook::resolveDefault(bin, id, label))
+        browserIconSlot = browserIconSlotFromId(id);
+    else
+        browserIconSlot = static_cast<std::uint8_t>(FieldAmouranthTextures::IconSlot::Display);
+}
+
+inline float scaledFilesPanelTop() noexcept {
+    float btnY0 = 0.f, btnY1 = 0.f;
+    taskbarChromeButtonY(btnY0, btnY1);
+    return btnY0 - scaledFilesPanelH() - 6.f * uiScale();
+}
+
+constexpr float TASKBAR_HIT_SLOP = 6.f;
+
+// Start/quick-launch buttons extend above the taskbar strip (shader lift); test full bounds.
+inline HitZone hitTaskbarButtons(float mx, float my, float slop = 0.f) noexcept {
+    if (!Options::AmouranthOs::EnableTaskbar) return HitZone::None;
+    float btnY0 = 0.f, btnY1 = 0.f;
+    taskbarChromeButtonY(btnY0, btnY1);
+    btnY0 -= slop;
+    btnY1 += slop;
+    if (my < btnY0 || my >= btnY1) return HitZone::None;
+    const float btnH = btnY1 - btnY0;
+    const float pad = 6.f * uiScale() - slop;
+    if (pointIn(mx, my, pad, btnY0, scaledStartW() + slop * 2.f, btnH))
+        return HitZone::StartBtn;
+    const float btnW = scaledQuickBtnW() + slop * 2.f;
+    for (int qi = 0; qi < QUICK_LAUNCH_N; ++qi) {
+        if (!pointIn(mx, my, quickLaunchX(qi) - slop, btnY0, btnW, btnH)) continue;
+        switch (qi) {
+        case 0: return HitZone::FilesBtn;
+        case 1: return HitZone::TerminalBtn;
+        case 2: return HitZone::MonitorBtn;
+        case 3: return HitZone::BrowserBtn;
+        default: break;
+        }
+    }
+    return HitZone::None;
+}
+
+inline bool taskbarChromeCapturesPointer(float mx, float my) noexcept {
+    if (!shellChromeActive() || !Options::AmouranthOs::EnableTaskbar)
+        return false;
+    if (my < scaledTopBarH()) return false;
+    if (hitTaskbarButtons(mx, my) != HitZone::None) return true;
+    return my >= taskbarY();
+}
+
+inline bool isTaskbarChromeHit(HitZone zone) noexcept {
+    switch (zone) {
+    case HitZone::StartBtn:
+    case HitZone::FilesBtn:
+    case HitZone::TerminalBtn:
+    case HitZone::MonitorBtn:
+    case HitZone::BrowserBtn:
+    case HitZone::TaskBtn:
+    case HitZone::Clock:
+    case HitZone::Taskbar:
+    case HitZone::FilesMenu:
+    case HitZone::StartMenu:
+    case HitZone::StartMenuFlyout:
+    case HitZone::StartMenuSearch:
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline HitZone hitTest(float mx, float my) noexcept {
+    if (my < scaledTopBarH()) return HitZone::None;
+    const float slop = TASKBAR_HIT_SLOP * uiScale();
+    if (HitZone btn = hitTaskbarButtons(mx, my, slop); btn != HitZone::None)
+        return btn;
+    if (HitZone btn = hitTaskbarButtons(mx, my); btn != HitZone::None)
+        return btn;
+    const auto L = taskbarLayout();
+    if (my >= L.barY0) {
+        int tabSlot = 0;
+        for (const auto& p : programs) {
+            if (!p.running) continue;
+            const float tx = FieldTaskbarLayout::tabX(L, tabSlot);
+            if (pointIn(mx, my, tx, L.tabY, L.tabW, L.tabH))
+                return HitZone::TaskBtn;
+            ++tabSlot;
+        }
+        if (pointIn(mx, my, L.clockX0, L.barY0 + 5.f * uiScale(),
+                L.clockW, L.taskH - 10.f * uiScale()))
+            return HitZone::Clock;
+        return HitZone::Taskbar;
+    }
+    if (filesOpen) {
+        if (pointIn(mx, my, scaledFilesPanelX(), scaledFilesPanelTop(),
+                scaledFilesPanelW(), scaledFilesPanelH()))
+            return HitZone::FilesMenu;
+    }
+    if (FieldAmouranthFolderView::open) {
+        const float scale = uiScale();
+        const float pw = 640.f * scale;
+        const float ph = 480.f * scale;
+        const float px = static_cast<float>(winW) * 0.5f - pw * 0.5f;
+        const float py = static_cast<float>(winH) * 0.38f - ph * 0.5f;
+        if (pointIn(mx, my, px, py, pw, ph))
+            return HitZone::FolderView;
+    }
+    if (FieldAmouranthDesktop::iconAt(mx, my) >= 0)
+        return HitZone::Desktop;
+    if (startOpen) {
+        const float rootSy = scaledMenuRootTop();
+        const float rootH = scaledMenuRootHeight();
+        if (FieldAmouranthSearchFlyout::active()) {
+            const float sx = scaledSearchPanelLeft();
+            const float sy = scaledSearchPanelTop();
+            const float sw = scaledSearchPanelW();
+            const float sh = scaledSearchPanelH();
+            if (pointIn(mx, my, sx, sy, sw, sh))
+                return HitZone::StartMenuSearch;
+        }
+        if (FieldAmouranthMenu::flyoutOpen() && !FieldAmouranthSearchFlyout::active()) {
+            const float flySy = scaledMenuFlyoutTop();
+            const float flyH = scaledMenuFlyoutHeight();
+            const float fx = scaledMenuPad() + scaledMenuW() + scaledMenuFlyoutGap();
+            if (pointIn(mx, my, fx, flySy, scaledMenuFlyoutW(), flyH))
+                return HitZone::StartMenuFlyout;
+        }
+        if (pointIn(mx, my, scaledMenuPad(), rootSy, scaledMenuW(), rootH))
+            return HitZone::StartMenu;
+    }
+    return HitZone::Desktop;
+}
+
+inline int programIndexFromTaskTab(int tabSlot) noexcept {
+    if (tabSlot < 0) return -1;
+    int slot = 0;
+    for (std::size_t i = 0; i < programs.size(); ++i) {
+        if (!programs[i].running) continue;
+        if (slot == tabSlot) return static_cast<int>(i);
+        ++slot;
+    }
+    return -1;
+}
+
+// Tab slot index (running programs only) — matches packTaskbarRam / shader tabCount order.
+inline int taskBtnIndex(float mx, float my) noexcept {
+    const auto L = taskbarLayout();
+    int tabSlot = 0;
+    for (std::size_t i = 0; i < programs.size(); ++i) {
+        if (!programs[i].running) continue;
+        const float tx = FieldTaskbarLayout::tabX(L, tabSlot);
+        if (pointIn(mx, my, tx, L.tabY, L.tabW, L.tabH))
+            return tabSlot;
+        ++tabSlot;
+    }
+    return -1;
+}
+
+inline FieldAmouranthLaunch::GuiApp guiAppFor(AppId app) noexcept {
+    switch (app) {
+    case AppId::Shell:    return FieldAmouranthLaunch::GuiApp::Shell;
+    case AppId::AmmoCode: return FieldAmouranthLaunch::GuiApp::AmmoCode;
+    case AppId::QBasic:   return FieldAmouranthLaunch::GuiApp::QBasic;
+    case AppId::FieldC:   return FieldAmouranthLaunch::GuiApp::FieldC;
+    case AppId::PadTest:  return FieldAmouranthLaunch::GuiApp::PadTest;
+    case AppId::Nes:      return FieldAmouranthLaunch::GuiApp::Nes;
+    case AppId::NesSetup: return FieldAmouranthLaunch::GuiApp::NesSetup;
+    case AppId::Browser:  return FieldAmouranthLaunch::GuiApp::Browser;
+    case AppId::FileCmd:  return FieldAmouranthLaunch::GuiApp::FileCmd;
+    case AppId::Doom:     return FieldAmouranthLaunch::GuiApp::Doom;
+    case AppId::Monitor:  return FieldAmouranthLaunch::GuiApp::Monitor;
+    case AppId::A2600:      return FieldAmouranthLaunch::GuiApp::A2600;
+    case AppId::A2600Setup: return FieldAmouranthLaunch::GuiApp::A2600Setup;
+    case AppId::Sms:        return FieldAmouranthLaunch::GuiApp::Sms;
+    case AppId::SmsSetup:   return FieldAmouranthLaunch::GuiApp::SmsSetup;
+    case AppId::Genesis:    return FieldAmouranthLaunch::GuiApp::Genesis;
+    case AppId::GenesisSetup: return FieldAmouranthLaunch::GuiApp::GenesisSetup;
+    case AppId::Snes:       return FieldAmouranthLaunch::GuiApp::Snes;
+    case AppId::SnesSetup:  return FieldAmouranthLaunch::GuiApp::SnesSetup;
+    default: return FieldAmouranthLaunch::GuiApp::None;
+    }
+}
+
+inline void dispatchAction(int action) noexcept {
+    switch (action) {
+    case 1:
+        openNewWindow(AppId::AmmoCode);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::AmmoCode);
+        break;
+    case 2:
+        FieldAmouranthLaunch::queueDosConsole();
+        break;
+    case 32:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Shell);
+        break;
+    case 3:
+        openNewWindow(AppId::QBasic);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::QBasic);
+        break;
+    case 4:
+        openNewWindow(AppId::FieldC);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::FieldC);
+        break;
+    case 5:
+        openNewWindow(AppId::PadTest);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::PadTest);
+        break;
+    case 6:
+        openNewWindow(AppId::Nes);
+        showDosPanelDocked();
+        break;
+    case 30:
+        openNewWindow(AppId::Nes);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Nes, false, 2, true);
+        break;
+    case 31:
+        openNewWindow(AppId::Nes);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Nes, true, 2, true);
+        break;
+
+    case 11:
+        openNewWindow(AppId::FileCmd);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::FileCmd);
+        showDosPanelDocked();
+        break;
+    case 12:
+        launchVscodium();
+        break;
+    case 33:
+        launchDosConsole();
+        break;
+    case 15:
+        openNewWindow(AppId::Browser);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Browser);
+        break;
+    case 7:
+        openNewWindow(AppId::Doom);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Doom);
+        break;
+    case 20:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("C:\\GAMES\\KEEN4\\KEEN4E.EXE");
+        break;
+    case 21:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("C:\\GAMES\\WOLF3D\\WOLF3D.EXE");
+        break;
+    case 22:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("C:\\GAMES\\COSMO\\COSMO1.EXE");
+        break;
+    case 13:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("DRIVES");
+        break;
+    case 14:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("MOUNT CD");
+        break;
+    case 16:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("BIOS");
+        break;
+    case 17:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("DEVICES");
+        break;
+    case 18:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("REGEDIT");
+        break;
+    case 19:
+    case 28:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("AMMOTEXT");
+        break;
+    case 29:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("THEMES");
+        break;
+    case 23:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("MEMORYUP /S");
+        break;
+    case 24:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("SCANDISK");
+        break;
+    case 25:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("TOOLS");
+        break;
+    case 26:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("SOUND");
+        break;
+    case 27:
+        openNewWindow(AppId::Shell);
+        FieldAmouranthLaunch::queue("EXTMAP");
+        break;
+    case 34:
+        openNewWindow(AppId::A2600);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::A2600);
+        break;
+    case 35:
+        openNewWindow(AppId::A2600);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::A2600, false, 2, true);
+        break;
+    case 36:
+        openNewWindow(AppId::Sms);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Sms);
+        break;
+    case 37:
+        openNewWindow(AppId::Sms);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Sms, false, 2, true);
+        break;
+    case 38:
+        openNewWindow(AppId::Genesis);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Genesis);
+        break;
+    case 39:
+        openNewWindow(AppId::Genesis);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Genesis, false, 2, true);
+        break;
+    case 40:
+        openNewWindow(AppId::Snes);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Snes);
+        break;
+    case 41:
+        openNewWindow(AppId::Snes);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Snes, false, 2, true);
+        break;
+    case 99:
+        FieldAmouranthExitConfirm::show();
+        break;
+    default: break;
+    }
+    FieldAmouranthLaunch::deferGuiFrames = 0;
+    closeStartMenu();
+    filesOpen = false;
+    FieldAmouranthFilesMenu::hover = -1;
+    syncDesktopState();
+}
+
+inline bool onTextInput(const char* text) noexcept {
+    if (!shellChromeActive() || !startOpen || !text || !text[0]) return false;
+    for (const char* p = text; *p; ++p)
+        FieldAmouranthSearchFlyout::appendChar(*p);
+    return true;
+}
+
+inline bool onKeyDown(SDL_Scancode sc) noexcept {
+    if (!shellChromeActive()) return false;
+    if (FieldAmouranthExitConfirm::isOpen()) {
+        std::uint16_t key = 0;
+        if (sc == SDL_SCANCODE_ESCAPE) key = 0x011Bu;
+        else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) key = 0x1C0Du;
+        if (key && FieldAmouranthExitConfirm::onKey(key, FieldX86Emu::ramHost))
+            return true;
+        return true;
+    }
+    if (!startOpen) return false;
+
+    if (sc == SDL_SCANCODE_BACKSPACE) {
+        FieldAmouranthSearchFlyout::backspace();
+        return true;
+    }
+    if (sc == SDL_SCANCODE_ESCAPE) {
+        if (FieldAmouranthSearchFlyout::query[0]) {
+            FieldAmouranthSearchFlyout::clearQuery();
+            return true;
+        }
+        closeStartMenu();
+        return true;
+    }
+
+    std::uint16_t key = 0;
+    switch (sc) {
+    case SDL_SCANCODE_UP:     key = 0x4800u; break;
+    case SDL_SCANCODE_DOWN:   key = 0x5000u; break;
+    case SDL_SCANCODE_LEFT:   key = 0x4B00u; break;
+    case SDL_SCANCODE_RIGHT:  key = 0x4D00u; break;
+    case SDL_SCANCODE_RETURN:
+    case SDL_SCANCODE_KP_ENTER:
+        key = 0x1C0Du;
+        break;
+    default: return false;
+    }
+
+    if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
+        if (FieldAmouranthSearchFlyout::active()) {
+            int row = FieldAmouranthSearchFlyout::hover;
+            if (row < 0) row = 0;
+            FieldAmouranthSearchFlyout::launchRow(row, FieldX86Emu::ramHost);
+            closeStartMenu();
+            filesOpen = false;
+            FieldAmouranthFilesMenu::hover = -1;
+            return true;
+        }
+    }
+    if (!FieldAmouranthMenu::handleMenuKey(key)) return false;
+    if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
+        int action = 0;
+        if (FieldAmouranthMenu::focusPane == FieldAmouranthMenu::MenuPane::Flyout
+            && FieldAmouranthMenu::flyoutOpen())
+            action = FieldAmouranthMenu::actionForFlyoutRow(FieldAmouranthMenu::flyoutFocus);
+        else
+            action = FieldAmouranthMenu::actionForRootRow(FieldAmouranthMenu::rootFocus);
+        if (action > 0)
+            dispatchAction(action);
+    }
+    return true;
+}
+
+inline bool onMouseDown(SDL_Window* window, float lx, float ly, Uint8 /*button*/, Uint8 /*clicks*/) noexcept {
+    if (!shellChromeActive()) return false;
+    float mx = 0.f, my = 0.f;
+    FieldDosChrome::chromePointerPixels(window, lx, ly, mx, my);
+    hover = hitTest(mx, my);
+    if (FieldAmouranthExitConfirm::isOpen()) {
+        std::uint8_t* ram = FieldX86Emu::ramHost;
+        const int exitBtn = exitConfirmButtonAt(mx, my);
+        if (exitBtn == 1) {
+            FieldAmouranthExitConfirm::confirmYes(ram);
+            return true;
+        }
+        if (exitBtn == 2) {
+            FieldAmouranthExitConfirm::dismiss(ram);
+            return true;
+        }
+        int action = 0;
+        if (ram && FieldAmouranthExitConfirm::pumpMouse(ram, action))
+            return true;
+        if (!isTaskbarChromeHit(hover) && !forceTaskbarChromeClick)
+            return true;
+        FieldAmouranthExitConfirm::dismiss(ram);
+    }
+    const float slop = TASKBAR_HIT_SLOP * uiScale();
+    if (HitZone btn = hitTaskbarButtons(mx, my, slop); btn != HitZone::None)
+        hover = btn;
+    else if (HitZone tight = hitTaskbarButtons(mx, my); tight != HitZone::None)
+        hover = tight;
+    if (isTaskbarChromeHit(hover))
+        Options::Canvas::DosInputFocused = false;
+    if (!forceTaskbarChromeClick
+            && !isTaskbarChromeHit(hover) && !taskbarChromeCapturesPointer(mx, my)
+            && (panelVisible || consoleShell)) {
+        const auto wh = FieldAmouranthWm::hitTest(mx, my);
+        if (wh == FieldAmouranthWm::ChromeHit::Content) {
+            Options::Canvas::DosInputFocused = true;
+            closeStartMenu();
+            filesOpen = false;
+            FieldAmouranthFilesMenu::hover = -1;
+            syncStartTextInput(window);
+            return true;
+        }
+        if (wh != FieldAmouranthWm::ChromeHit::None)
+            return false;
+        const int hitProg = FieldAmouranthWm::hitTestProgramStack(mx, my, true);
+        if (hitProg > 0 && hitProg != focusedProgId) {
+            focusProgram(hitProg, false);
+            Options::Canvas::DosInputFocused = false;
+            closeStartMenu();
+            filesOpen = false;
+            FieldAmouranthFilesMenu::hover = -1;
+            return true;
+        }
+    }
+
+    if (hover == HitZone::StartBtn) {
+        startOpen = !startOpen;
+        filesOpen = false;
+        FieldAmouranthFilesMenu::hover = -1;
+        if (startOpen) {
+            FieldAmouranthMenu::rebuildVisible();
+        } else {
+            FieldAmouranthSearchFlyout::clearQuery();
+            FieldAmouranthMenu::closeMenuFocus();
+        }
+        syncStartTextInput(window);
+        return true;
+    }
+    if (hover == HitZone::FilesBtn) {
+        closeStartMenu();
+        syncStartTextInput(window);
+        filesOpen = !filesOpen;
+        if (filesOpen) FieldAmouranthFilesMenu::rebuild();
+        else FieldAmouranthFilesMenu::hover = -1;
+        return true;
+    }
+    if (hover == HitZone::TerminalBtn) {
+        closeStartMenu();
+        syncStartTextInput(window);
+        filesOpen = false;
+        launchDosConsole();
+        return true;
+    }
+    if (hover == HitZone::MonitorBtn) {
+        closeStartMenu();
+        syncStartTextInput(window);
+        filesOpen = false;
+        FieldAosAppJournal::recordAction(FieldAosAppIdentity::AppId::Monitor,
+            "System Monitor", "quick-launch monitor");
+        openNewWindow(AppId::Monitor);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Monitor);
+        showDosPanelDocked();
+        return true;
+    }
+    if (hover == HitZone::BrowserBtn) {
+        closeStartMenu();
+        syncStartTextInput(window);
+        filesOpen = false;
+        FieldAosAppJournal::recordAction(FieldAosAppIdentity::AppId::Browser,
+            "Field Web", "quick-launch browser");
+        openNewWindow(AppId::Browser);
+        FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Browser);
+        showDosPanelDocked();
+        return true;
+    }
+    if (hover == HitZone::FilesMenu) {
+        const int idx = FieldAmouranthFilesMenu::itemAt(
+            mx, my, scaledFilesPanelX(), scaledFilesPanelTop(),
+            scaledFilesCellW(), scaledFilesCellH(), scaledFilesPad());
+        if (idx >= 0) {
+            filesDragIdx = idx;
+            filesDragMx0 = mx;
+            filesDragMy0 = my;
+        }
+        return true;
+    }
+    if (hover == HitZone::StartMenuSearch) {
+        const float rowY0 = scaledSearchPanelTop()
+            + FieldAmouranthSearchFlyout::pad(uiScale());
+        const int idx = FieldAmouranthSearchFlyout::rowAt(my, rowY0,
+            FieldAmouranthSearchFlyout::rowH(uiScale()),
+            FieldAmouranthSearchFlyout::resultCount);
+        if (idx >= 0) {
+            FieldAmouranthSearchFlyout::launchRow(idx, FieldX86Emu::ramHost);
+            closeStartMenu();
+            syncStartTextInput(window);
+            filesOpen = false;
+            FieldAmouranthFilesMenu::hover = -1;
+        }
+        return true;
+    }
+    if (hover == HitZone::StartMenu || hover == HitZone::StartMenuFlyout) {
+        if (hover == HitZone::StartMenuFlyout) {
+            const float rowY0 = scaledMenuFlyoutTop() + scaledMenuPad();
+            const int idx = FieldAmouranthMenu::rowAt(my, rowY0, scaledMenuRowH(),
+                FieldAmouranthMenu::flyoutCount);
+            const int action = FieldAmouranthMenu::actionForFlyoutRow(idx);
+            if (action > 0)
+                dispatchAction(action);
+        } else {
+            const float rowY0 = scaledMenuRootRowY0();
+            const int idx = FieldAmouranthMenu::rowAt(my, rowY0, scaledMenuRowH(),
+                FieldAmouranthMenu::rootCount);
+            const int action = FieldAmouranthMenu::actionForRootRow(idx);
+            if (action > 0)
+                dispatchAction(action);
+        }
+        return true;
+    }
+    if (hover == HitZone::TaskBtn) {
+        const int tabSlot = taskBtnIndex(mx, my);
+        const int pi = programIndexFromTaskTab(tabSlot);
+        if (pi >= 0 && pi < static_cast<int>(programs.size())) {
+            auto& pr = programs[static_cast<std::size_t>(pi)];
+            if (focusedProgId == pr.id && panelVisible && !pr.minimized) {
+                pr.minimized = true;
+                hideDosPanel();
+            } else {
+                if (pr.minimized)
+                    FieldAosAppJournal::recordRestore(pr.id,
+                        FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(pr.app)),
+                        pr.title);
+                focusProgram(pr.id);
+                panelVisible = true;
+                needsProgramCanvas = true;
+                Options::Canvas::DosInputFocused = true;
+            }
+        }
+        return true;
+    }
+    if (hover == HitZone::Desktop) {
+        const int icon = FieldAmouranthDesktop::iconAt(mx, my);
+        if (icon >= 0) {
+            FieldAmouranthFolderView::show(FieldAmouranthDesktop::kIconPaths[icon]);
+            closeStartMenu();
+            filesOpen = false;
+            return true;
+        }
+        closeStartMenu();
+        syncStartTextInput(window);
+        filesOpen = false;
+        FieldAmouranthFilesMenu::hover = -1;
+        return true;
+    }
+    if (hover == HitZone::FolderView) {
+        const float scale = uiScale();
+        const float pw = 640.f * scale;
+        const float ph = 480.f * scale;
+        const float px = static_cast<float>(winW) * 0.5f - pw * 0.5f;
+        const float py = static_cast<float>(winH) * 0.38f - ph * 0.5f;
+        const int idx = FieldAmouranthFolderView::itemAt(mx, my, px, py, pw, ph, scale);
+        if (idx >= 0)
+            FieldAmouranthFolderView::activateItem(idx, FieldX86Emu::ramHost);
+        return true;
+    }
+    if (hover == HitZone::Clock || hover == HitZone::Taskbar) {
+        closeStartMenu();
+        syncStartTextInput(window);
+        filesOpen = false;
+        FieldAmouranthFilesMenu::hover = -1;
+    }
+    return hover != HitZone::None;
+}
+
+inline bool onTaskbarMouseDown(SDL_Window* window, float lx, float ly) noexcept {
+    if (!shellChromeActive()) return false;
+    float mx = 0.f, my = 0.f;
+    FieldDosChrome::chromePointerPixels(window, lx, ly, mx, my);
+    if (!taskbarChromeCapturesPointer(mx, my)) return false;
+    forceTaskbarChromeClick = true;
+    const bool handled = onMouseDown(window, lx, ly, 1, 1);
+    forceTaskbarChromeClick = false;
+    return handled;
+}
+
+inline void onMouseMotion(SDL_Window* window, float lx, float ly) noexcept {
+    if (!shellChromeActive()) return;
+    float mx = 0.f, my = 0.f;
+    FieldDosChrome::chromePointerPixels(window, lx, ly, mx, my);
+    pointerMx = mx;
+    pointerMy = my;
+    hover = hitTest(mx, my);
+    taskHoverTab = -1;
+    filesBtnHover = (hover == HitZone::FilesBtn);
+    terminalBtnHover = (hover == HitZone::TerminalBtn);
+    monitorBtnHover = (hover == HitZone::MonitorBtn);
+    browserBtnHover = (hover == HitZone::BrowserBtn);
+    if (hover == HitZone::TaskBtn)
+        taskHoverTab = taskBtnIndex(mx, my);
+    FieldAmouranthMenu::rootHover = -1;
+    FieldAmouranthMenu::flyoutHover = -1;
+    FieldAmouranthSearchFlyout::hover = -1;
+    FieldAmouranthFilesMenu::hover = -1;
+    FieldAmouranthFolderView::hover = -1;
+    FieldAmouranthDesktop::onMouseMotion(window, mx, my);
+    if (FieldAmouranthFolderView::open && hover == HitZone::FolderView) {
+        const float scale = uiScale();
+        const float pw = 640.f * scale;
+        const float ph = 480.f * scale;
+        const float px = static_cast<float>(winW) * 0.5f - pw * 0.5f;
+        const float py = static_cast<float>(winH) * 0.38f - ph * 0.5f;
+        FieldAmouranthFolderView::hover = FieldAmouranthFolderView::itemAt(
+            mx, my, px, py, pw, ph, scale);
+    }
+    if (filesOpen && hover == HitZone::FilesMenu) {
+        FieldAmouranthFilesMenu::hover = FieldAmouranthFilesMenu::itemAt(
+            mx, my, scaledFilesPanelX(), scaledFilesPanelTop(),
+            scaledFilesCellW(), scaledFilesCellH(), scaledFilesPad());
+    } else if (startOpen && hover == HitZone::StartMenuFlyout) {
+        const float rowY0 = scaledMenuFlyoutTop() + scaledMenuPad();
+        FieldAmouranthMenu::flyoutHover = FieldAmouranthMenu::rowAt(my, rowY0,
+            scaledMenuRowH(), FieldAmouranthMenu::flyoutCount);
+        FieldAmouranthMenu::focusPane = FieldAmouranthMenu::MenuPane::Flyout;
+    } else if (startOpen && hover == HitZone::StartMenuSearch) {
+        const float rowY0 = scaledSearchPanelTop()
+            + FieldAmouranthSearchFlyout::pad(uiScale());
+        FieldAmouranthSearchFlyout::hover = FieldAmouranthSearchFlyout::rowAt(my, rowY0,
+            FieldAmouranthSearchFlyout::rowH(uiScale()),
+            FieldAmouranthSearchFlyout::resultCount);
+    } else if (startOpen && hover == HitZone::StartMenu) {
+        const float rowY0 = scaledMenuRootRowY0();
+        FieldAmouranthMenu::rootHover = FieldAmouranthMenu::rowAt(my, rowY0,
+            scaledMenuRowH(), FieldAmouranthMenu::rootCount);
+        FieldAmouranthMenu::focusPane = FieldAmouranthMenu::MenuPane::Root;
+        if (!FieldAmouranthSearchFlyout::active()
+            && FieldAmouranthMenu::rootHover >= 0
+            && FieldAmouranthMenu::rootRows[FieldAmouranthMenu::rootHover].type
+                == FieldAmouranthMenu::RowType::Category)
+            FieldAmouranthMenu::openFlyout(
+                static_cast<int>(FieldAmouranthMenu::rootRows[FieldAmouranthMenu::rootHover].cat));
+    }
+    if (filesDragIdx >= 0 && !FieldAmouranthDnD::active()) {
+        const float dx = mx - filesDragMx0;
+        const float dy = my - filesDragMy0;
+        if (dx * dx + dy * dy > 64.f) {
+            char path[72]{};
+            std::snprintf(path, sizeof path, "FORMAT:%s",
+                FieldAmouranthFilesMenu::labelFor(filesDragIdx));
+            FieldAmouranthDnD::begin(path, FieldAmouranthFilesMenu::iconFor(filesDragIdx),
+                0, mx, my);
+        }
+    }
+    if (FieldAmouranthDnD::active())
+        FieldAmouranthDnD::motion(mx, my);
+}
+
+inline void onMouseUp() noexcept {
+    if (!shellChromeActive()) return;
+    const float mx = pointerMx;
+    const float my = pointerMy;
+    if (FieldAmouranthDnD::active()) {
+        FieldAmouranthDnD::Target drop = FieldAmouranthDnD::Target::None;
+        const HitZone hz = hitTest(mx, my);
+        if (hz == HitZone::Desktop)
+            drop = FieldAmouranthDnD::Target::Desktop;
+        else if (hz == HitZone::TaskBtn)
+            drop = FieldAmouranthDnD::Target::TaskbarTab;
+        else if (panelVisible)
+            drop = FieldAmouranthDnD::Target::DosPanel;
+        FieldAmouranthDnD::end(drop, taskHoverTab);
+    }
+    if (filesDragIdx >= 0) {
+        const int action = FieldAmouranthFilesMenu::actionFor(filesDragIdx);
+        if (action > 0)
+            dispatchAction(action);
+        filesDragIdx = -1;
+    }
+}
+
+inline bool shellWindowFocused() noexcept {
+    if (!shellChromeActive()) return true;
+    if (!panelVisible) return false;
+    return Options::Canvas::DosInputFocused;
+}
+
+inline bool shouldPumpGuestInput() noexcept {
+    if (!panelVisible || !Options::Canvas::DosInputFocused) return false;
+    if (FieldAmouranthWm::dragging || FieldAmouranthWm::resizing) return false;
+    if (FieldAmouranthWm::hover != FieldAmouranthWm::ChromeHit::None
+            && FieldAmouranthWm::hover != FieldAmouranthWm::ChromeHit::Content)
+        return false;
+    return true;
+}
+
+// Only advance emulator frames when the focused panel is visible and desktop chrome is idle.
+inline bool emuAdvancesFrames(AppId app) noexcept {
+    if (!panelVisible || startOpen || filesOpen) return false;
+    if (focusedApp != app) return false;
+    if (!shouldPumpGuestInput()) return false;
+    if (FieldEmuFileDialog::active) return false;
+    return true;
+}
+
+inline int focusedTabTitleIndex() noexcept {
+    int tabSlot = 0;
+    for (std::size_t i = 0; i < programs.size() && tabSlot < FieldAmouranthMenu::MAX_TABS; ++i) {
+        if (!programs[i].running) continue;
+        if (programs[i].id == focusedProgId)
+            return tabSlot;
+        ++tabSlot;
+    }
+    return -1;
+}
+
+inline void seedChromeRam(std::uint8_t* ram) noexcept {
+    if (!ram || !shellChromeActive()) return;
+    packChromeRam(ram);
+}
+
+inline void packChromeRam(std::uint8_t* ram) noexcept {
+    if (!ram) ram = FieldX86Emu::ramHost;
+    if (!ram || !shellChromeActive()) return;
+    FieldAmouranthInfo::tick();
+    sanitizeVgaTail(ram);
+    FieldAmouranthMenu::packMenuRam(ram);
+    FieldAmouranthMenu::ProgramTab tabs[FieldAmouranthMenu::MAX_TABS]{};
+    int tabCount = 0;
+    std::uint32_t minMask = 0u;
+    int focusedIdx = -1;
+    for (std::size_t i = 0; i < programs.size() && tabCount < FieldAmouranthMenu::MAX_TABS; ++i) {
+        if (!programs[i].running) continue;
+        tabs[tabCount].title = programs[i].title;
+        tabs[tabCount].icon = programs[i].icon;
+        if (programs[i].minimized)
+            minMask |= 1u << tabCount;
+        if (programs[i].id == focusedProgId)
+            focusedIdx = tabCount;
+        ++tabCount;
+    }
+    FieldAmouranthMenu::packTaskbarRam(ram, tabs, tabCount, focusedIdx, taskHoverTab, minMask);
+    syncBrowserIconSlot();
+    ram[FieldAmouranthMenu::TASKBAR_RAM + 4u] = filesBtnHover ? 1u : 0u;
+    ram[FieldAmouranthMenu::TASKBAR_RAM + 5u] = terminalBtnHover ? 1u : 0u;
+    ram[FieldAmouranthMenu::TASKBAR_RAM + 6u] = monitorBtnHover ? 1u : 0u;
+    ram[FieldAmouranthMenu::TASKBAR_RAM + 7u] = browserBtnHover ? 1u : 0u;
+    ram[FieldAmouranthMenu::TASKBAR_RAM + 8u] = browserIconSlot;
+    packStartLabel(ram);
+    FieldAmouranthWm::packSurfaceRam(ram);
+    int idTab = 0;
+    for (const auto& p : programs) {
+        if (!p.running || idTab >= FieldAosAppIdentity::MAX_TABS) continue;
+        FieldAosAppIdentity::packTab(ram, idTab,
+            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)), p.id);
+        char lines[2][FieldAosAppJournal::RECENT_LEN + 1]{};
+        const int n = FieldAosAppJournal::recentLinesForProg(p.id, lines, 2);
+        if (n > 0)
+            FieldAosAppJournal::setRecentForTab(idTab, lines[0]);
+        else
+            FieldAosAppJournal::setRecentForTab(idTab, p.title);
+        if (n > 1)
+            FieldAosAppJournal::setRecent2ForTab(idTab, lines[1]);
+        const char* snap = FieldAosAppJournal::getAppSnapshot(
+            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)));
+        if (snap && snap[0])
+            FieldAosAppJournal::setSnapPreviewForTab(idTab, snap);
+        ++idTab;
+    }
+    FieldAosAppJournal::sync(ram);
+    char dateBuf[24]{};
+    FieldAmouranthInfo::formatDateLine(dateBuf, sizeof dateBuf);
+    FieldAmouranthMenu::packClockDateRam(ram, dateBuf);
+    FieldAmouranthFilesMenu::packRam(ram);
+    FieldAmouranthFolderView::packRam(ram);
+    FieldAmouranthDesktop::packDesktopRam(ram);
+    FieldAmouranthSearchFlyout::packRam(ram);
+    FieldAmouranthDnD::packRam(ram);
+}
+
+inline void packDataBus(std::uint32_t* bus, std::uint8_t* ram = nullptr) noexcept {
+    if (!bus) return;
+    bus[42] &= ~(BUS_AOS_ACTIVE | (0xFu << BUS_AOS_WP_SHIFT)
+               | BUS_AOS_MENU_START | BUS_AOS_MENU_FILE | BUS_AOS_MENU_SEARCH
+               | BUS_AOS_INFO_PANEL | BUS_AOS_PANEL_HIDE | BUS_AOS_CONSOLE_SHELL
+               | BUS_AOS_EXIT_CONFIRM);
+    if (!shellChromeActive()) return;
+    if (active) bus[42] |= BUS_AOS_ACTIVE;
+    if (consoleShell && Options::AmouranthOs::EnableTaskbar)
+        bus[42] |= BUS_AOS_CONSOLE_SHELL;
+    if (startOpen) bus[42] |= BUS_AOS_MENU_START;
+    if (filesOpen) bus[42] |= BUS_AOS_MENU_FILE;
+    if (FieldAmouranthSearchFlyout::active()) bus[42] |= BUS_AOS_MENU_SEARCH;
+    if (infoPanelVisible) bus[42] |= BUS_AOS_INFO_PANEL;
+    const bool consoleStretch = consoleShell && Options::Canvas::DosPanelStretch;
+    if (!panelVisible && !consoleStretch)
+        bus[42] |= BUS_AOS_PANEL_HIDE;
+    if (FieldAmouranthExitConfirm::isOpen())
+        bus[42] |= BUS_AOS_EXIT_CONFIRM;
+    if (FieldAmouranthFolderView::open)
+        bus[42] |= BUS_AOS_FOLDER_VIEW;
+    bus[42] |= (wallpaperIndex & 0xFu) << BUS_AOS_WP_SHIFT;
+    FieldAmouranthInfo::packDataBus(bus);
+    FieldAmouranthWm::packIntoBus(bus);
+    FieldRtxThemes::packBus(bus);
+    FieldAmouranthDesktop::packDataBus(bus);
+    packChromeRam(ram);
+    const int focusTab = focusedTabTitleIndex();
+    const int menuHover = FieldAmouranthMenu::rootHover >= 0
+        ? FieldAmouranthMenu::rootHover : FieldAmouranthMenu::rootFocus;
+    bus[54] = ((menuHover >= 0
+                    ? static_cast<std::uint32_t>(menuHover)
+                    : BUS_CHROME_NONE)
+                << BUS_CHROME_MENU_HOVER_SHIFT)
+            | ((taskHoverTab >= 0
+                    ? static_cast<std::uint32_t>(taskHoverTab)
+                    : BUS_CHROME_NONE)
+                << BUS_CHROME_TASK_HOVER_SHIFT)
+            | ((static_cast<std::uint32_t>(FieldAmouranthMenu::rootCount) & 0xFFu)
+                << BUS_CHROME_MENU_ROWS_SHIFT)
+            | ((focusTab >= 0
+                    ? static_cast<std::uint32_t>(focusTab)
+                    : BUS_CHROME_NONE)
+                << BUS_CHROME_FOCUS_TITLE_SHIFT);
+}
+
+inline void prepareExitConfirmUi() noexcept {
+    startOpen = false;
+    filesOpen = false;
+    // Chrome-layer exit modal only — do not raise DOS panel (that blocks the UI thread on x86 hotswap).
+}
+
+inline void exitConfirmPanelBounds(float& x0, float& y0, float& w, float& h) noexcept {
+    const float scale = uiScale();
+    w = 420.f * scale;
+    h = 200.f * scale;
+    const float vw = chromeViewportW();
+    const float vh = chromeViewportH();
+    x0 = (vw - w) * 0.5f;
+    y0 = (vh - scaledTaskbarH() - h) * 0.45f;
+}
+
+inline int exitConfirmButtonAt(float mx, float my) noexcept {
+    if (!FieldAmouranthExitConfirm::isOpen()) return 0;
+    float x0 = 0.f, y0 = 0.f, w = 0.f, h = 0.f;
+    exitConfirmPanelBounds(x0, y0, w, h);
+    const float scale = uiScale();
+    const float btnW = 148.f * scale;
+    const float btnH = 40.f * scale;
+    const float btnY = y0 + h - btnH - 24.f * scale;
+    const float mid = x0 + w * 0.5f;
+    const float gap = 12.f * scale;
+    if (pointIn(mx, my, mid - gap - btnW, btnY, btnW, btnH)) return 1;
+    if (pointIn(mx, my, mid + gap, btnY, btnW, btnH)) return 2;
+    return 0;
+}
+
+inline void applyShutdownState() noexcept {
+    clearStaleGuestFlags();
+    startOpen = false;
+    FieldAmouranthMenu::closeMenuFocus();
+    filesOpen = false;
+    FieldAmouranthFilesMenu::hover = -1;
+    consoleShell = false;
+    persistOpenSession();
+    programs.clear();
+    focusedProgId = 0;
+    focusedApp = AppId::None;
+    panelVisible = false;
+    hideDosPanel();
+}
+
+} // namespace FieldAmouranthOs

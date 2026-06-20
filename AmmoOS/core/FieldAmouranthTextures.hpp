@@ -6,8 +6,10 @@
 
 namespace FieldAmouranthTextures {
 
-inline constexpr const char* kIconAtlasPath  = "assets/data/icons/aos_icon_atlas.png";
-inline constexpr const char* kStartIconPath  = "assets/data/icons/amouranthos.png";
+inline constexpr const char* kIconAtlasPath     = "assets/data/icons/aos_icon_atlas.png";
+inline constexpr const char* kStartIconPath     = "assets/data/icons/amouranthos.png";
+inline constexpr const char* kStartPortraitPath = "assets/data/icons/amouranth_twitch_logo.png";
+inline constexpr const char* kTwitchLogoPath    = "assets/data/icons/amouranth_twitch_logo.png";
 
 // 64×64 cells in 1024×128 atlas (must match scripts/gen_amouranthos_icons.py)
 enum class IconSlot : std::uint32_t {
@@ -30,6 +32,10 @@ enum class IconSlot : std::uint32_t {
     Desktop   = 16,
     Display   = 17,
     AmmoText  = 18,
+    Monitor   = 19,
+    BrowserFirefox = 20,
+    BrowserChrome  = 21,
+    BrowserEdge    = 22,
 };
 
 inline constexpr std::uint32_t kMenuIconSlots[] = {
@@ -60,8 +66,15 @@ inline constexpr const char* kWallpaperPaths[] = {
 inline constexpr std::uint32_t kWallpaperCount =
     static_cast<std::uint32_t>(sizeof(kWallpaperPaths) / sizeof(kWallpaperPaths[0]));
 
+// data_bus[42] bits 16-19: 0-7 = photo index, 15 = procedural American flag (default)
+inline constexpr std::uint32_t kWallpaperAmericanFlag = 15u;
+
+inline bool isPhotoWallpaper(std::uint32_t index) noexcept {
+    return index < kWallpaperCount;
+}
+
 inline const char* wallpaperPath(std::uint32_t index) noexcept {
-    if (index >= kWallpaperCount) index = 0u;
+    if (!isPhotoWallpaper(index)) return nullptr;
     return kWallpaperPaths[index];
 }
 

@@ -13,7 +13,7 @@
 
 namespace FieldAmouranthInfo {
 
-inline bool visible = true;
+inline bool visible = false;
 inline int  clockHour = 0, clockMin = 0, clockSec = 0;
 inline int  clockDay = 1, clockMonth = 1, clockYear = 2026;
 inline int  clockWday = 0;

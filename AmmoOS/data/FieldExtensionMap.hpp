@@ -5,6 +5,7 @@
 #include "FieldAmmoVfs.hpp"
 #include "FieldJournal.hpp"
 #include "FieldAmouranthLaunch.hpp"
+#include "FieldAosAppJournal.hpp"
 #include "FieldDos.hpp"
 #include "FieldPlatform.hpp"
 
@@ -63,6 +64,12 @@ inline void seedDefaults() noexcept {
         {".ZIP",  "C:\\TOOLS\\AMMOZIP.COM", "%1",  "ZIP archive — AMMOZIP extract"},
         {".NES",  "NES",                 "%1",     "iNES ROM — AmmoNES emulator"},
         {".ROM",  "NES",                 "%1",     "NES ROM — AmmoNES emulator"},
+        {".SFC",  "SNES",                "%1",     "SNES ROM — AmmoSNES emulator"},
+        {".SMC",  "SNES",                "%1",     "SNES ROM — AmmoSNES emulator"},
+        {".MD",   "GENESIS",             "%1",     "Genesis ROM — AmmoGenesis"},
+        {".GEN",  "GENESIS",             "%1",     "Genesis ROM — AmmoGenesis"},
+        {".SMS",  "SMS",                 "%1",     "Master System ROM — AmmoSMS"},
+        {".A26",  "A2600",               "%1",     "Atari 2600 ROM — AmmoA2600"},
         {".ISO",  "MOUNT",               "%1",     "CD-ROM image"},
         {".IMG",  "MOUNT",               "%1",     "Disk image"},
         {".WAD",  "C:\\GAMES\\DOOM\\DOOM.EXE", "%1", "Doom engine WAD"},
@@ -210,6 +217,10 @@ inline bool launchFile(std::uint8_t* ram, const char* filePath,
     ensure();
     const std::string line = buildLaunchLine(filePath, extra);
     appendJournal("LAUNCH", line.c_str());
+    char detail[FieldAosAppJournal::TEXT_LEN + 1];
+    std::snprintf(detail, sizeof detail, ">%s", filePath);
+    FieldAosAppJournal::recordLinkedAction(FieldAosAppJournal::journalProgId,
+        FieldAosAppIdentity::AppId::FileCmd, "AmmoFiles", detail);
     FieldAmouranthLaunch::queue(line);
     (void)ram;
     return true;

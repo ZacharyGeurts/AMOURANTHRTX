@@ -7,6 +7,7 @@
 #include "FieldDosConfig.hpp"
 #include "FieldExtensionMap.hpp"
 #include "FieldPlatform.hpp"
+#include "FieldRtxMemory.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -103,8 +104,10 @@ inline bool parseIni(const std::string& text) noexcept {
 inline void seedDefaults() noexcept {
     hive.clear();
     setValue(std::string(kRoot) + "\\Machine\\Memory", "ReportedRamGB", "4");
-    setValue(std::string(kRoot) + "\\Machine\\Memory", "GuestFastMB", "64");
-    setValue(std::string(kRoot) + "\\Machine\\Memory", "ConventionalKB", "640");
+    setValue(std::string(kRoot) + "\\Machine\\Memory", "GuestFastMB", "1");
+    setValue(std::string(kRoot) + "\\Machine\\Memory", "BootConventionalKB", "512");
+    setValue(std::string(kRoot) + "\\Machine\\Memory", "ConventionalKB", "512");
+    setValue(std::string(kRoot) + "\\Machine\\Memory", "MaxConventionalKB", "640");
     setValue(std::string(kRoot) + "\\Machine\\Storage", "HdLogicalGB", "4");
     setValue(std::string(kRoot) + "\\Machine\\Storage", "RaidStripeKB", "64");
     setValue(std::string(kRoot) + "\\Machine\\Storage", "RaidTickBudgetKB", "256");
@@ -137,6 +140,14 @@ inline void seedDefaults() noexcept {
         setValue(std::string(kRoot) + "\\Layers\\" + ly, "Enabled", "1");
     setValue(std::string(kRoot) + "\\User\\Desktop", "CommanderMouse", "1");
     setValue(std::string(kRoot) + "\\User\\Desktop", "ExtensionEditor", "F6");
+    setValue(std::string(kRoot) + "\\User\\Desktop", "RestoreSession", "1");
+    setValue(std::string(kRoot) + "\\User\\Desktop", "JournalCompactKB", "64");
+    setValue(std::string(kRoot) + "\\User\\Desktop", "JournalMirror", "1");
+    setValue(std::string(kRoot) + "\\User\\Desktop", "Theme", "Dark Chrome");
+    setValue(std::string(kRoot) + "\\User\\Desktop", "ThemeIndex", "8");
+    setValue(std::string(kRoot) + "\\User\\Desktop", "JournalFormats",
+        "Folder,.EXE,.COM,.BAT,.NES,.ROM,.SFC,.MD,.SMS,.A26,.WAD,.ZIP,.ISO,.IMG,"
+        ".TXT,.DOC,.ASM,.C,.FLD,.BAS,.PNG,.JPG,.HTML,.WAV,.MID,.JSON");
     dirty = true;
 }
 
@@ -246,8 +257,35 @@ inline void syncExtensionMapToRegistry() noexcept {
     }
 }
 
+inline void applyMemoryConfig() noexcept {
+    ensure();
+    const std::string sec = std::string(kRoot) + "\\Machine\\Memory";
+    FieldRtxMemory::bootConventionalKb = FieldRtxMemory::parseKb(
+        getValue(sec, "BootConventionalKB", ""),
+        FieldRtxMemory::parseKb(getValue(sec, "ConventionalKB", ""),
+                                FieldRtxMemory::kBootConventionalKb));
+    FieldRtxMemory::bootConventionalKb = std::clamp(
+        FieldRtxMemory::bootConventionalKb,
+        FieldRtxMemory::kMinConventionalKb, FieldRtxMemory::kMaxConventionalKb);
+    FieldRtxMemory::maxConventionalKb = FieldRtxMemory::parseKb(
+        getValue(sec, "MaxConventionalKB", ""), FieldRtxMemory::kMaxConventionalKb);
+    FieldRtxMemory::maxConventionalKb = std::clamp(
+        FieldRtxMemory::maxConventionalKb,
+        FieldRtxMemory::bootConventionalKb, FieldRtxMemory::kMaxConventionalKb);
+    FieldRtxMemory::conventionalKb = FieldRtxMemory::bootConventionalKb;
+    FieldRtxMemory::guestFastMb = FieldRtxMemory::parseMb(
+        getValue(sec, "GuestFastMB", ""), FieldRtxMemory::kBootGuestFastMb);
+    FieldRtxMemory::guestFastMb = std::clamp(FieldRtxMemory::guestFastMb, 1u, 64u);
+    FieldRtxMemory::reportedRamGb = FieldRtxMemory::parseMb(
+        getValue(sec, "ReportedRamGB", ""), 4u);
+    FieldRtxMemory::reportedRamGb = std::clamp(FieldRtxMemory::reportedRamGb, 1u, 64u);
+    FieldRtxMemory::grown = false;
+    FieldRtxMemory::resetTree();
+}
+
 inline void applyDosConfig() noexcept {
     ensure();
+    applyMemoryConfig();
     auto flag = [&](const char* key, bool& out) {
         const std::string v = getValue(std::string(kRoot) + "\\Software\\RTX-DOS\\Audio",
                                        key, out ? "1" : "0");

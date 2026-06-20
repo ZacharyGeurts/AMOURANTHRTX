@@ -94,6 +94,10 @@ inline void onMouseMotion(SDL_Window* w, float lx, float ly) noexcept {
     FieldWmInput::onMouseMotion(w, lx, ly);
 }
 inline void onMouseUp() noexcept { FieldWmInput::onMouseUp(); }
+inline void onMouseWheel(float wheelY) noexcept { FieldWmInput::onMouseWheel(wheelY); }
+inline int hitTestProgramStack(float mx, float my, bool skipFocused = true) noexcept {
+    return FieldWmCore::hitTestProgramStack(mx, my, skipFocused);
+}
 
 inline void writeRamU16(std::uint8_t* ram, std::uint32_t off, std::uint16_t v) noexcept {
     FieldWmCompositor::writeRamU16(ram, off, v);

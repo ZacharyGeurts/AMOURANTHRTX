@@ -11,6 +11,16 @@
 
 namespace FieldAmouranthMenu {
 
+inline void copyText(char* dst, int cap, const char* src) noexcept {
+    if (!dst || cap <= 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    const int max = cap - 1;
+    int i = 0;
+    for (; i < max && src[i] != '\0'; ++i)
+        dst[i] = src[i];
+    dst[i] = '\0';
+}
+
 constexpr std::uint32_t MENU_RAM       = FieldAmouranthHudRam::MENU_RAM;
 constexpr std::uint32_t TASKBAR_RAM    = FieldAmouranthHudRam::TASKBAR_RAM;
 constexpr std::uint32_t CLOCK_DATE_RAM = FieldAmouranthHudRam::CLOCK_DATE_RAM;
@@ -18,7 +28,7 @@ constexpr int           MAX_ROWS     = FieldAmouranthHudRam::MENU_MAX_ROWS;
 constexpr int           ROW_STRIDE   = FieldAmouranthHudRam::MENU_ROW_STRIDE;
 constexpr std::uint32_t MENU_FLYOUT_OFF = FieldAmouranthHudRam::MENU_FLYOUT_OFF;
 constexpr int           LABEL_LEN    = 36;
-constexpr int           DESC_LEN     = 56;
+constexpr int           DESC_LEN     = 72;
 constexpr int           MAX_TABS     = 8;
 constexpr int           TAB_STRIDE   = 32;
 
@@ -91,6 +101,12 @@ static const SourceEntry kCatalog[] = {
     { "RTX Shell",
       "Full RTX-DOS 7.0 command console with Golden Era shell and scrollback",
       2, 4, Category::Programs, RowType::Item },
+    { "DOS Terminal",
+      "RTX-DOS 7.0 command console with HELP, DIR, and scrollback",
+      33, 4, Category::Programs, RowType::Item },
+    { "Program Launcher",
+      "GUI picker for AmmoCode, Doom, PADTEST, and other desktop apps",
+      32, 4, Category::Programs, RowType::Item },
     { "Web Browser",
       "Hooks your OS default browser (Firefox/Chrome) into the display panel",
       15, static_cast<std::uint8_t>(FieldAmouranthTextures::IconSlot::Display),
@@ -161,14 +177,8 @@ static const SourceEntry kCatalog[] = {
       "Shareware classics, emulators, and DOS/4GW launchers",
       0, 16, Category::Games, RowType::Category },
     { "AmmoNES",
-      "iNES emulator — load any .nes ROM from C:\\NES\\ or host import",
+      "iNES emulator — File>Open ROM, Options>Settings/Controls",
       6, 11, Category::Games, RowType::Item },
-    { "AmmoNES Setup",
-      "Video, audio, thermo governor, and system options",
-      30, 11, Category::Games, RowType::Item },
-    { "AmmoNES Controls",
-      "Keyboard and Xbox360/SDL gamepad button mapping",
-      31, 10, Category::Games, RowType::Item },
     { "Shareware Doom",
       "id Software DOOM shareware via DOS/4GW and RTX VGA path",
       7, 14, Category::Games, RowType::Item },
@@ -181,6 +191,18 @@ static const SourceEntry kCatalog[] = {
     { "Cosmo's Adventure",
       "Apogee Cosmo's Cosmic Adventure shareware jump-n-run",
       22, 11, Category::Games, RowType::Item },
+    { "AmmoA2600",
+      "Atari VCS — File>Open .a26/.bin from C:\\A2600\\",
+      34, 11, Category::Games, RowType::Item },
+    { "AmmoSMS",
+      "Sega Master System — File>Open .sms from C:\\SMS\\",
+      36, 11, Category::Games, RowType::Item },
+    { "AmmoGenesis",
+      "Sega Genesis — File>Open .md/.bin from C:\\GENESIS\\",
+      38, 11, Category::Games, RowType::Item },
+    { "AmmoSNES",
+      "Super Nintendo — File>Open .sfc/.smc, Options>SuperFX",
+      40, 11, Category::Games, RowType::Item },
 };
 
 inline void copyEntry(VisibleRow& row, const SourceEntry& e) noexcept {
@@ -188,8 +210,8 @@ inline void copyEntry(VisibleRow& row, const SourceEntry& e) noexcept {
     row.action = e.action;
     row.icon = e.icon;
     row.cat = e.cat;
-    std::snprintf(row.label, sizeof row.label, "%s", e.label);
-    std::snprintf(row.desc, sizeof row.desc, "%s", e.desc);
+    copyText(row.label, LABEL_LEN + 1, e.label);
+    copyText(row.desc, DESC_LEN + 1, e.desc);
 }
 
 inline void rebuildRoot() noexcept {
@@ -207,8 +229,8 @@ inline void rebuildRoot() noexcept {
         exitRow.type = RowType::Exit;
         exitRow.action = 99;
         exitRow.icon = static_cast<std::uint8_t>(FieldAmouranthTextures::IconSlot::Power);
-        std::snprintf(exitRow.label, sizeof exitRow.label, "Shut Down");
-        std::snprintf(exitRow.desc, sizeof exitRow.desc, "Exit AmmoOS gracefully");
+        copyText(exitRow.label, LABEL_LEN + 1, "Shut Down");
+        copyText(exitRow.desc, DESC_LEN + 1, "Exit AmmoOS gracefully");
     }
 }
 
@@ -445,7 +467,11 @@ struct ProgramTab {
 inline void packTaskbarRam(std::uint8_t* ram, const ProgramTab* tabs, int count,
         int focused, int hover, std::uint32_t minimizedMask) noexcept {
     if (!ram) return;
-    const int n = std::min(count, MAX_TABS);
+    int n = std::min(count, MAX_TABS);
+    if (tabs) {
+        while (n > 0 && tabs[n - 1].icon == 0u)
+            --n;
+    }
     writeRamByte(ram, TASKBAR_RAM, static_cast<std::uint8_t>(n));
     writeRamByte(ram, TASKBAR_RAM + 1u, static_cast<std::uint8_t>(focused));
     writeRamByte(ram, TASKBAR_RAM + 2u, static_cast<std::uint8_t>(hover));
@@ -456,15 +482,23 @@ inline void packTaskbarRam(std::uint8_t* ram, const ProgramTab* tabs, int count,
             writeRamStr(ram, base, tabs[i].title, TAB_STRIDE - 1);
             writeRamByte(ram, base + TAB_STRIDE - 1u, tabs[i].icon);
         } else {
-            for (int j = 0; j < TAB_STRIDE; ++j)
-                writeRamByte(ram, base + static_cast<std::uint32_t>(j), ' ');
+            writeRamByte(ram, base + TAB_STRIDE - 1u, 0u);
+            for (int j = 0; j < TAB_STRIDE - 1; ++j)
+                writeRamByte(ram, base + static_cast<std::uint32_t>(j), 0u);
         }
     }
 }
 
 inline void packClockDateRam(std::uint8_t* ram, const char* dateStr) noexcept {
     if (!ram || !dateStr) return;
-    writeRamStr(ram, CLOCK_DATE_RAM, dateStr, 24);
+    int len = 0;
+    while (dateStr[len] != '\0' && len < 24) ++len;
+    writeRamByte(ram, CLOCK_DATE_RAM, static_cast<std::uint8_t>(len));
+    for (int i = 0; i < 24; ++i) {
+        const char ch = (i < len) ? dateStr[i] : '\0';
+        writeRamByte(ram, CLOCK_DATE_RAM + 1u + static_cast<std::uint32_t>(i),
+            static_cast<std::uint8_t>(ch));
+    }
 }
 
 } // namespace FieldAmouranthMenu

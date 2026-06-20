@@ -360,6 +360,33 @@ inline const FieldRtxGui::MenuItem kHelpCommon[] = {
     {FieldRtxGui::ICO_BLOCK,"About",       'A', 402},
 };
 
+inline const FieldRtxGui::MenuItem kOptionsEmu[] = {
+    {FieldRtxGui::BOX_X, "Settings...",  'S', 501},
+    {FieldRtxGui::BOX_X, "Controls...",  'C', 502},
+};
+inline const FieldRtxGui::MenuItem kOptionsEmuSimple[] = {
+    {FieldRtxGui::BOX_X, "Settings...",  'S', 501},
+};
+
+constexpr int A_FILE_OPEN        = 102;
+constexpr int A_FILE_EXIT        = 109;
+constexpr int A_FILE_RECENT_BASE = 110;  // 110..117 recent ROM slots
+constexpr int A_FILE_RECENT_MAX  = 8;
+constexpr int A_FILE_CLEAR_RECENT = 119;
+
+constexpr int A_EMU_PAUSE      = 201;
+constexpr int A_EMU_RESUME     = 202;
+constexpr int A_EMU_RESET      = 203;
+constexpr int A_EMU_FRAME      = 204;
+constexpr int A_EMU_TURBO      = 205;
+constexpr int A_EMU_UNLIMITED  = 206;
+constexpr int A_EMU_MUTE       = 207;
+
+constexpr int A_OPT_SETTINGS = 501;
+constexpr int A_OPT_CONTROLS = 502;
+
+constexpr int A_HELP_ABOUT = 602;
+
 inline const FieldRtxGui::Menu kStdMenus[] = {
     {FieldRtxGui::ICO_FOLDER, "File", kFileCommon,  5},
     {FieldRtxGui::BOX_X,      "Edit", kEditCommon,  5},
@@ -367,5 +394,35 @@ inline const FieldRtxGui::Menu kStdMenus[] = {
     {FieldRtxGui::ICO_BOOK,   "Help", kHelpCommon,  2},
 };
 constexpr int kStdMenuCount = 4;
+
+inline const FieldRtxGui::Menu kEmuMenus[] = {
+    {FieldRtxGui::ICO_FOLDER, "File",    kFileCommon,       5},
+    {FieldRtxGui::BOX_X,      "Edit",    kEditCommon,       5},
+    {FieldRtxGui::ICO_BOOK,   "View",    kViewCommon,       4},
+    {FieldRtxGui::BOX_X,      "Options", kOptionsEmuSimple, 1},
+    {FieldRtxGui::ICO_BOOK,   "Help",    kHelpCommon,       2},
+};
+constexpr int kEmuMenuCount = 5;
+
+// AmmoNES builds menus at runtime (File / Recent / Emulation / Options / Help).
+inline const FieldRtxGui::MenuItem kNesFileStatic[] = {
+    {FieldRtxGui::ICO_FOLDER, "Open...", 'O', A_FILE_OPEN},
+    {FieldRtxGui::ICO_STOP,  "Exit",    'X', A_FILE_EXIT},
+};
+inline const FieldRtxGui::MenuItem kNesEmuStatic[] = {
+    {FieldRtxGui::BOX_X, "Pause",            'P', A_EMU_PAUSE},
+    {FieldRtxGui::BOX_X, "Resume",           'R', A_EMU_RESUME},
+    {FieldRtxGui::BOX_X, "Reset",            'T', A_EMU_RESET},
+    {FieldRtxGui::BOX_X, "Frame Advance",    'F', A_EMU_FRAME},
+    {FieldRtxGui::BOX_X, "Turbo",            'U', A_EMU_TURBO},
+    {FieldRtxGui::BOX_X, "Unlimited Speed",  'L', A_EMU_UNLIMITED},
+    {FieldRtxGui::BOX_X, "Mute Sound",       'M', A_EMU_MUTE},
+};
+inline const FieldRtxGui::MenuItem kNesHelpStatic[] = {
+    {FieldRtxGui::ICO_BLOCK, "About AmmoNES", 'A', A_HELP_ABOUT},
+};
+constexpr int kNesFileStaticCount = 2;
+constexpr int kNesEmuStaticCount  = 7;
+constexpr int kNesHelpStaticCount = 1;
 
 } // namespace FieldWinFrame

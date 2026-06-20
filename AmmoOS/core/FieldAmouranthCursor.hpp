@@ -71,6 +71,7 @@ inline SDL_Cursor* forWmHit(FieldAmouranthWm::ChromeHit h) noexcept {
     case FieldAmouranthWm::ChromeHit::ResizeNW: return curNW;
     case FieldAmouranthWm::ChromeHit::ResizeSE: return curSE;
     case FieldAmouranthWm::ChromeHit::ResizeSW: return curSW;
+    case FieldAmouranthWm::ChromeHit::AppIcon:
     case FieldAmouranthWm::ChromeHit::Close:
     case FieldAmouranthWm::ChromeHit::Minimize:
     case FieldAmouranthWm::ChromeHit::Maximize:
@@ -79,8 +80,8 @@ inline SDL_Cursor* forWmHit(FieldAmouranthWm::ChromeHit h) noexcept {
     }
 }
 
-inline void updateFromWm(bool panelVisible) noexcept {
-    if (!panelVisible) {
+inline void updateFromWm(bool wmActive) noexcept {
+    if (!wmActive) {
         apply(curDefault);
         return;
     }

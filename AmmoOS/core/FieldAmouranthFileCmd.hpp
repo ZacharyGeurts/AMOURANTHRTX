@@ -3,15 +3,21 @@
 // AmmoFiles — Nautilus-style dual-pane browser with context menus and extension launch.
 
 #include "FieldAmouranthLaunch.hpp"
+#include "FieldEmuRomPaths.hpp"
 #include "FieldExtensionMap.hpp"
 #include "FieldAmmoVfs.hpp"
 #include "FieldDrives.hpp"
 #include "FieldDos.hpp"
 #include "FieldExtensionEditor.hpp"
 #include "FieldExtensionMap.hpp"
+#include "FieldAosAppIdentity.hpp"
+#include "FieldAosAppJournal.hpp"
+
+#include "FieldRtxApp.hpp"
 #include "FieldRtxGui.hpp"
 #include "FieldRtxMouse.hpp"
 #include "FieldRtxVfs.hpp"
+#include "FieldAmouranthFolderView.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -107,10 +113,49 @@ inline void refresh() noexcept {
     selRow = 0;
 }
 
+inline void captureSnapshot(char* buf, int cap) noexcept {
+    if (!buf || cap <= 0) return;
+    std::snprintf(buf, static_cast<std::size_t>(cap), "L=%.20s,R=%.12s,p=%d",
+        pathL.c_str(), pathR.c_str(), pane);
+}
+
+inline void applyJournalSnapshot() noexcept {
+    const char* snap = FieldAosAppJournal::getAppSnapshot(
+        FieldAosAppIdentity::AppId::FileCmd);
+    if (!snap || !snap[0]) return;
+    char left[64]{};
+    char right[64]{};
+    int p = 0;
+    if (std::sscanf(snap, "L=%63[^,],R=%63[^,],p=%d", left, right, &p) < 3) {
+        if (const char* lp = std::strstr(snap, "L="))
+            std::sscanf(lp + 2, "%63[^,]", left);
+        if (const char* rp = std::strstr(snap, "R="))
+            std::sscanf(rp + 2, "%63[^,]", right);
+        if (const char* pp = std::strrchr(snap, 'p'))
+            if (pp[1] == '=')
+                p = std::atoi(pp + 2);
+    }
+    if (left[0]) pathL = left;
+    if (right[0]) pathR = right;
+    pane = std::clamp(p, 0, 1);
+}
+
 inline void open() noexcept {
     active = true;
-    pathL = "C:\\";
-    pathR = "E:\\";
+    if (!FieldAosAppJournal::getAppSnapshot(FieldAosAppIdentity::AppId::FileCmd)[0]) {
+        pathL = "C:\\";
+        pathR = "E:\\";
+    } else {
+        applyJournalSnapshot();
+    }
+    refresh();
+}
+
+inline void openRomLibrary(FieldAmmoEmu::Kind kind) noexcept {
+    active = true;
+    pathL = FieldAmmoEmu::profile(kind).romDir;
+    pathR = "E:\\HOST";
+    pane = 0;
     refresh();
 }
 
@@ -132,6 +177,10 @@ inline void execSel(std::uint8_t* ram) noexcept {
     const Entry& e = ents[static_cast<std::size_t>(selRow)];
     if (e.dir) return;
     const std::string p = fullPathFor(activePath(), e);
+    char detail[FieldAosAppJournal::TEXT_LEN + 1];
+    std::snprintf(detail, sizeof detail, ">%s", e.name.c_str());
+    FieldAosAppJournal::recordLinkedAction(FieldAosAppJournal::journalProgId,
+        FieldAosAppIdentity::AppId::FileCmd, "AmmoFiles", detail);
     FieldExtensionMap::launchFile(ram, p.c_str());
     close();
 }
@@ -148,8 +197,9 @@ inline void enterSel(std::uint8_t* ram) noexcept {
             else p = p.substr(0, 3);
         }
     } else if (e.dir) {
-        if (p.back() != '\\') p += '\\';
-        p += e.name;
+        std::string folder = fullPathFor(p, e);
+        FieldAmouranthFolderView::show(folder.c_str());
+        return;
     } else {
         execSel(ram);
         return;
@@ -238,46 +288,63 @@ inline void formatFooter(char* buf, std::size_t len) noexcept {
     const Entry* sel = (selRow >= 0 && selRow < total)
         ? &activeEntries()[static_cast<std::size_t>(selRow)] : nullptr;
     if (sel && sel->desc)
-        std::snprintf(buf, len, " %s | F4 run F6 extmap ", sel->desc);
+        std::snprintf(buf, len, " %s | F4 launch  F6 extmap ", sel->desc);
     else
-        std::snprintf(buf, len, " %d files row %d/%d | F4 run F6 extmap ",
+        std::snprintf(buf, len, " %d files row %d/%d | F4 launch  F6 extmap  NES/SNES/GEN quick paths ",
             total, selRow + 1, total);
 }
 
 inline void paint(std::uint8_t* ram) noexcept {
     if (!active) return;
-    FieldRtxGui::initTextMode(ram);
-    FieldRtxGui::drawFrame(ram, 2, 0, 20, 79, FieldRtxGui::ATTR_RTX,
-        " Field Commander — AmmoFiles | dbl-click | right-click | F4 run ");
-    paintPane(ram, COL_L0, COL_L1, pathL, entriesL, pane == 0);
-    paintPane(ram, COL_R0, COL_R1, pathR, entriesR, pane == 1);
-    FieldRtxGui::text(ram, 20, 2,
-        " Mouse: click select/dbl-run  Wheel: scroll  F4: run  F6: extension map editor ",
-        FieldRtxGui::ATTR_DIM, 76);
-    for (int row = 21; row < 25; ++row)
-        for (int col = 0; col < 80; ++col)
-            FieldRtxGui::put(ram, row, col, ' ', 0x07);
-    if (ctxOpen) {
-        static const char* kItems[] = {
-            " Open", " Copy", " Paste", " Delete", " Properties"
-        };
-        const int nItems = 5;
-        const int mRow0 = std::clamp(ctxMenuRow, 2, 18);
-        const int mCol0 = std::clamp(ctxCol, 2, 60);
-        FieldRtxGui::drawFrame(ram, mRow0, mCol0, mRow0 + nItems + 1, mCol0 + 22,
-            FieldRtxGui::ATTR_MENU, " Actions ");
-        for (int i = 0; i < nItems; ++i)
-            FieldRtxGui::text(ram, mRow0 + 1 + i, mCol0 + 1, kItems[i],
-                i == ctxSel ? FieldRtxGui::ATTR_MENU_SEL : FieldRtxGui::ATTR_EDITOR, 20);
+    FieldRtxApp::begin(ram, 7u);
+    auto& ui = FieldRtxApp::ui;
+    using namespace FieldRtxWidgets;
+    ui.panel(8, 8, 1016, 1016);
+    ui.label(24, uiRow(0), 560, uiRow(0) + UI_LABEL_H, "Field Commander - AmmoFiles", 1);
+    ui.button(560, uiRow(0), 640, uiRow(0) + UI_ROW_H, "NES", 60);
+    ui.button(648, uiRow(0), 728, uiRow(0) + UI_ROW_H, "SNES", 61);
+    ui.button(736, uiRow(0), 816, uiRow(0) + UI_ROW_H, "GEN", 62);
+    ui.button(824, uiRow(0), 888, uiRow(0) + UI_ROW_H, pane == 0 ? "C:" : "E:", 50);
+    ui.button(896, uiRow(0), 968, uiRow(0) + UI_ROW_H, "Run F4", 52);
+    FieldAosAppIdentity::paintAbout(ui, FieldAosAppIdentity::AppId::FileCmd, uiRow(1), uiRow(4));
+    FieldAosAppJournal::paintRecent(ui, FieldAosAppJournal::journalProgId, uiRow(4), uiRow(6));
+
+    char snap[FieldAosAppJournal::SNAPSHOT_LEN + 1];
+    captureSnapshot(snap, static_cast<int>(sizeof snap));
+    if (snap[0])
+        FieldAosAppJournal::setAppSnapshot(FieldAosAppIdentity::AppId::FileCmd, snap);
+
+    char pathLine[96];
+    std::snprintf(pathLine, sizeof pathLine, "Path: %s", activePath().c_str());
+    ui.label(24, uiRow(7), 1000, uiRow(7) + UI_LABEL_H, pathLine, 0);
+
+    auto& ents = activeEntries();
+    constexpr int kVis = 14;
+    FieldRtxApp::scrollMax = std::max(0, static_cast<int>(ents.size()) - kVis);
+    FieldRtxApp::scrollTop = std::clamp(scrollTop, 0, FieldRtxApp::scrollMax);
+    scrollTop = FieldRtxApp::scrollTop;
+
+    int y = uiRow(8);
+    for (int i = 0; i < kVis; ++i) {
+        const int ei = scrollTop + i;
+        if (ei >= static_cast<int>(ents.size())) break;
+        const Entry& e = ents[static_cast<std::size_t>(ei)];
+        char line[72];
+        if (e.dir)
+            std::snprintf(line, sizeof line, "%s", e.name.c_str());
+        else
+            std::snprintf(line, sizeof line, "%-20s  %8u", e.name.c_str(), e.size);
+        const std::uint8_t selFlags = (ei == selRow)
+            ? static_cast<std::uint8_t>(FieldRtxWidgets::Flag::Focus) : 0u;
+        ui.button(32, y, 960, y + UI_ROW_H, line, 100 + ei, selFlags);
+        y += UI_ROW_H;
     }
-    const int total = static_cast<int>(activeEntries().size());
-    if (total > ROWS_VIS) {
-        const int thumb = scrollTop * (ROWS_VIS - 1) / std::max(1, total - ROWS_VIS);
-        for (int r = 0; r < ROWS_VIS; ++r)
-            FieldRtxGui::put(ram, PANEL_ROW0 + 1 + r,
-                pane == 0 ? COL_L1 : COL_R1, r == thumb ? '\xDB' : '\xB0',
-                FieldRtxGui::ATTR_GOLD);
-    }
+    ui.vscroll(992, uiRow(8), 1016, uiRow(16), scrollTop, static_cast<int>(ents.size()));
+
+    char footer[96];
+    formatFooter(footer, sizeof footer);
+    ui.label(24, uiRow(17), 960, uiRow(17) + UI_LABEL_H, footer, 0);
+    FieldRtxApp::finish(ram);
 }
 
 inline void runContextAction(std::uint8_t* ram, int action) noexcept {
@@ -329,38 +396,39 @@ inline void scroll(int delta) noexcept {
 
 inline void handleMouseFrame(std::uint8_t* ram) noexcept {
     if (!active) return;
-    const auto mf = FieldRtxMouse::capture();
-    if (mf.visible) {
-        if (mf.col >= COL_L0 && mf.col < COL_L1) pane = 0;
-        else if (mf.col >= COL_R0 && mf.col < COL_R1) pane = 1;
-        int ei = 0;
-        if (hitPaneRow(mf.row, mf.col, ei)) {
-            selRow = ei;
-            if (selRow < scrollTop) scrollTop = selRow;
-            if (selRow >= scrollTop + ROWS_VIS) scrollTop = selRow - ROWS_VIS + 1;
-            if (mf.leftClick) {
-                if (ctxOpen) {
-                    runContextAction(ram, ctxSel);
-                } else {
-                    auto& ents = activeEntries();
-                    if (selRow >= 0 && selRow < static_cast<int>(ents.size()) && !ents[static_cast<std::size_t>(selRow)].dir)
-                        execSel(ram);
-                    else
-                        enterSel(ram);
-                }
+    int action = 0;
+    if (FieldRtxApp::pumpMouse(ram, action)) {
+        if (action == 109) { close(); return; }
+        if (action == 60) { openRomLibrary(FieldAmmoEmu::Kind::Nes); }
+        else if (action == 61) { openRomLibrary(FieldAmmoEmu::Kind::Snes); }
+        else if (action == 62) { openRomLibrary(FieldAmmoEmu::Kind::Genesis); }
+        else if (action == 50 || action == 51) {
+            pane = 1 - pane;
+            scrollTop = 0;
+            selRow = 0;
+        } else if (action == 52) {
+            execSel(ram);
+        } else if (action >= 100) {
+            const int ei = action - 100;
+            if (ei == selRow) {
+                enterSel(ram);
+            } else {
+                selRow = ei;
+                if (selRow < scrollTop) scrollTop = selRow;
+                if (selRow >= scrollTop + 18) scrollTop = selRow - 17;
             }
-            if (mf.rightClick) {
-                ctxOpen = true;
-                ctxRow = selRow;
-                ctxSel = 0;
-                ctxMenuRow = mf.row;
-                ctxCol = mf.col;
-                paint(ram);
-            }
+        } else if (FieldRtxApp::pumpScroll(action)) {
+            scrollTop = FieldRtxApp::scrollTop;
+            selRow = std::clamp(selRow, scrollTop, scrollTop + 17);
         }
-        FieldRtxMouse::paintPointer(ram, mf.col, mf.row);
+        paint(ram);
+        return;
     }
-    if (mf.wheel != 0) scroll(mf.wheel > 0 ? -1 : 1);
+    const auto mf = FieldRtxMouse::capture();
+    if (mf.wheel != 0) {
+        scroll(mf.wheel > 0 ? -1 : 1);
+        paint(ram);
+    }
 }
 
 inline bool handleKey(std::uint8_t* ram, std::uint16_t key) noexcept {
