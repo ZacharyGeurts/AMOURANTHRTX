@@ -4,6 +4,7 @@
 
 #include "FieldDos.hpp"
 #include "FieldPlatform.hpp"
+#include "FieldBios.hpp"
 #include "FieldX86Emu.hpp"
 
 #include <cstdio>

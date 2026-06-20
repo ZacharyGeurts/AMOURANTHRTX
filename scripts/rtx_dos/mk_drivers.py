@@ -8,26 +8,22 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-BIN = ROOT / "build/bin/Linux"
-LIB = ROOT / "build/libx86emu.a"
-QA_SRC = ROOT / "scripts/qa_drivers_build.cpp"
+BUILD = ROOT / "build"
+BIN = BUILD / "bin/Linux"
 QA_BIN = BIN / "qa_drivers_build"
 
 
 def ensure_qa_built() -> None:
-    if not LIB.is_file():
-        raise SystemExit("build libx86emu first: cmake --build build")
-    BIN.mkdir(parents=True, exist_ok=True)
+    cache = BUILD / "CMakeCache.txt"
+    if not cache.is_file():
+        raise SystemExit("configure cmake first: ./linux.sh  (or: cmake -S . -B build)")
     subprocess.run(
-        [
-            "g++-14", "-std=c++20", "-O2",
-            "-I", str(ROOT / "Navigator/engine"),
-            "-I", str(ROOT / "third_party/libx86emu/include"),
-            str(QA_SRC), str(LIB), "-o", str(QA_BIN),
-        ],
+        ["cmake", "--build", str(BUILD), "--target", "qa_drivers_build"],
         cwd=ROOT,
         check=True,
     )
+    if not QA_BIN.is_file():
+        raise SystemExit(f"qa_drivers_build missing after build — expected {QA_BIN}")
 
 
 def build_drivers(out: Path) -> None:

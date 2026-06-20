@@ -170,11 +170,11 @@ def main() -> int:
     (tools / "README.TXT").write_text(
         "RTX-AMMOS DevKit v4.0.2026\r\n"
         "Host GPU shell runs AMMOASM/AMMOSYS/AMMOCC/AMMOLINK/AMMODECOMP/AMMOZIP/AMMORUN/AMMODBG.\r\n"
-        "Field-layer .SYS drivers live in C:\\DRIVERS\\*.ASM — built with AMMOSYS, not stubs.\r\n"
+        "Field-layer .SYS drivers live in C:\\DRIVERS\\*.ASM - built with AMMOSYS, not stubs.\r\n"
         "\r\n"
         "  AMMOASM /?   AMMOSYS /?   AMMOCC /?   AMMOLINK /?   HELP BUILD\r\n"
         "  BUILD HELLO - one-shot from C:\\SAMPLES\\HELLO.ASM\r\n"
-        "  AMMOSYS C:\\DRIVERS\\RTXSB.ASM 160  — SB16 audio field driver\r\n"
+        "  AMMOSYS C:\\DRIVERS\\RTXSB.ASM 160  - SB16 audio field driver\r\n"
         "  BUILD DOOMBOOT - field-theory launcher (FIELD.H / FIELD.INC)\r\n"
         "  AMMOLINK UTIL.OBJ MAIN.OBJ\r\n"
         "  AMMORUN MULTI.COM   AMMODBG LOAD HELLO.COM\r\n"
