@@ -121,10 +121,11 @@ set(DOS_DIR            "${CMAKE_CURRENT_SOURCE_DIR}/dos")
 set(FIELD_DATA_DIR     "${AMMOOS_DIR}/data")
 set(SG_INCLUDE_DIRS    ${AMMOOS_DIR} ${AMMOOS_CORE} ${AMMOOS_WINDOWING} ${DOS_DIR} ${FIELD_DATA_DIR})
 if(EXISTS "${ASSETS_SRC}")
+    file(GLOB_RECURSE ASSETS_SHADER_SPV "${ASSETS_SRC}/shaders/*.spv")
     add_custom_command(OUTPUT "${ASSETS_DST}/.copied"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${ASSETS_SRC}" "${ASSETS_DST}"
         COMMAND ${CMAKE_COMMAND} -E touch "${ASSETS_DST}/.copied"
-        DEPENDS "${ASSETS_SRC}"
+        DEPENDS "${ASSETS_SRC}" ${ASSETS_SHADER_SPV}
         COMMENT "Copying assets"
     )
     add_custom_target(copy_assets ALL DEPENDS "${ASSETS_DST}/.copied")
@@ -141,8 +142,11 @@ if(NOT EMSCRIPTEN)
         message(FATAL_ERROR "Vulkan SDK >= 1.3.250 required")
     endif()
     find_package(OpenMP REQUIRED)
-    find_program(GLSLC glslc REQUIRED)
-    find_program(SPIRV_VAL spirv-val REQUIRED)
+    find_program(GLSLC glslc)
+    find_program(SPIRV_VAL spirv-val)
+    if(NOT GLSLC OR NOT SPIRV_VAL)
+        message(STATUS "glslc/spirv-val not required by CMake — SPIR-V built via Navigator/shaders/Makefile")
+    endif()
 else()
     message(STATUS "Web build: Using WebGPU instead of Vulkan")
     add_definitions(-DUSE_WEBGPU)
@@ -256,6 +260,12 @@ target_compile_definitions(field_x86 PUBLIC FIELD_X86_CORE=1)
 target_link_libraries(field_x86 PUBLIC m)
 set_source_files_properties(${FIELD_X86_CORE_SRCS} PROPERTIES COMPILE_OPTIONS "-w;-O2")
 set(LIBX86EMU_DIR "${FIELD_X86_CORE_DIR}")
+add_custom_command(TARGET field_x86 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+        "$<TARGET_FILE_NAME:field_x86>"
+        "${CMAKE_BINARY_DIR}/libx86emu.a"
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    COMMENT "Symlink libx86emu.a -> libfield_x86.a")
 
 
 
@@ -263,7 +273,8 @@ set(LIBX86EMU_DIR "${FIELD_X86_CORE_DIR}")
 # SOURCES + EXECUTABLE
 # =============================================================================
 set(OUR_SOURCES Navigator/main.cpp
-    Navigator/engine/FieldWebCore.cpp Navigator/engine/FieldBrowserHook.cpp)
+    Navigator/engine/FieldWebCore.cpp Navigator/engine/FieldBrowserHook.cpp
+    Navigator/engine/FieldCdRomHost.cpp)
 set(ALL_SOURCES ${OUR_SOURCES} ${TINYOBJLOADER_SRC})
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -298,26 +309,25 @@ if(FIELD_DOS_EMBED_HD AND NOT BUILD_FOR_WEB)
         DEPENDS "${DOS_SLICE_BIN}"
         COMMENT "Link dos_slice.bin as rodata"
         VERBATIM)
-    list(APPEND ALL_SOURCES
-        "${DOS_DIR}/FieldDosEmbed.cpp"
-        "${DOS_EMBED_OBJ}")
+    # Single owner for dos_slice.bin/obj — avoids parallel duplicate rules per target.
+    add_custom_target(dos_slice_embed DEPENDS "${DOS_EMBED_OBJ}")
 endif()
 
 function(field_embed_dos target)
     if(NOT FIELD_DOS_EMBED_HD OR BUILD_FOR_WEB)
         return()
     endif()
-    target_sources(${target} PRIVATE
-        "${DOS_DIR}/FieldDosEmbed.cpp"
-        "${DOS_EMBED_OBJ}")
+    target_sources(${target} PRIVATE "${DOS_DIR}/FieldDosEmbed.cpp")
+    target_link_libraries(${target} PRIVATE "${DOS_EMBED_OBJ}")
     target_compile_definitions(${target} PRIVATE
         FIELD_DOS_EMBED_HD=1 FIELD_DOS_EMBED_LINKED=1)
+    add_dependencies(${target} dos_slice_embed)
 endfunction()
 
 add_executable(amouranth_engine ${ALL_SOURCES})
 
 if(FIELD_DOS_EMBED_HD AND NOT BUILD_FOR_WEB)
-    target_compile_definitions(amouranth_engine PRIVATE FIELD_DOS_EMBED_HD=1 FIELD_DOS_EMBED_LINKED=1)
+    field_embed_dos(amouranth_engine)
 endif()
 
 set_target_properties(amouranth_engine PROPERTIES
@@ -452,90 +462,23 @@ elseif(TARGET_PLATFORM STREQUAL "Windows")
 endif()
 
 # =============================================================================
-# SHADERS
+# SHADERS — built by Navigator/shaders/Makefile before CMake (see linux.sh).
+# copy_assets stages assets/shaders/*.spv next to the binary; runtime loads .spv only.
 # =============================================================================
-if(GLSLC AND SPIRV_VAL)
-    set(SHADER_COMPUTE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute")
-    set(SYNC_CANVAS_SCRIPT "${SHADER_COMPUTE_DIR}/sync_canvas_shaders.py")
-    set(SYNC_CANVAS_STAMP "${CMAKE_CURRENT_BINARY_DIR}/sync_canvas_shaders.stamp")
-
-    add_custom_command(
-        OUTPUT "${SYNC_CANVAS_STAMP}"
-        COMMAND python3 "${SYNC_CANVAS_SCRIPT}"
-        COMMAND ${CMAKE_COMMAND} -E touch "${SYNC_CANVAS_STAMP}"
-        DEPENDS
-            "${SHADER_COMPUTE_DIR}/x86.comp"
-            "${SHADER_COMPUTE_DIR}/patch_canvas_aos.py"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sync_dos_viewport_shaders.py"
-            "${SYNC_CANVAS_SCRIPT}"
-        COMMENT "Syncing x86 comp compiler (CANVAS + DOS viewport)"
-        VERBATIM
-    )
-    add_custom_target(sync_canvas_shaders DEPENDS "${SYNC_CANVAS_STAMP}")
-
-    set(SHADER_INCLUDE_FLAGS
-        -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing"
-        -I"${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute"
-    )
-
-    if(CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
-        set(SHADER_OPT_FLAGS -g -O0)
-    else()
-        set(SHADER_OPT_FLAGS -O)
-    endif()
-
-    set(SPV_OUTPUTS "")
-
-    file(GLOB RAY_SHADERS "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/raytracing/*")
-    foreach(src ${RAY_SHADERS})
-        get_filename_component(fullname "${src}" NAME)
-        get_filename_component(base "${src}" NAME_WE)
-        set(out "${BIN_DIR}/assets/shaders/raytracing/${base}.spv")
-
-        add_custom_command(
-            OUTPUT "${out}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/assets/shaders/raytracing"
-            COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${SHADER_OPT_FLAGS}
-                    --target-spv=spv1.6 --target-env=vulkan1.4
-                    "${src}" -o "${out}"
-            COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${out}"
-            DEPENDS "${src}"
-            COMMENT "Compiling ${fullname}"
-            VERBATIM
-        )
-        list(APPEND SPV_OUTPUTS "${out}")
-    endforeach()
-
-    file(GLOB COMPUTE_SHADERS "${CMAKE_CURRENT_SOURCE_DIR}/Navigator/shaders/compute/*.comp")
-    foreach(src ${COMPUTE_SHADERS})
-        get_filename_component(fullname "${src}" NAME)
-        get_filename_component(base "${src}" NAME_WE)
-        set(out "${BIN_DIR}/assets/shaders/compute/${base}.spv")
-
-        add_custom_command(
-            OUTPUT "${out}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/assets/shaders/compute"
-            COMMAND ${GLSLC} ${SHADER_INCLUDE_FLAGS} ${SHADER_OPT_FLAGS}
-                    --target-spv=spv1.6 --target-env=vulkan1.4
-                    -fshader-stage=comp "${src}" -o "${out}"
-            COMMAND ${SPIRV_VAL} --target-env vulkan1.4 "${out}"
-            DEPENDS "${src}" "${SYNC_CANVAS_STAMP}"
-            COMMENT "Compiling ${fullname}"
-            VERBATIM
-        )
-        list(APPEND SPV_OUTPUTS "${out}")
-    endforeach()
-
-    add_custom_target(shaders ALL DEPENDS ${SPV_OUTPUTS})
-    add_dependencies(shaders sync_canvas_shaders)
-else()
-    message(WARNING "Skipping shader compilation - missing glslc or spirv-val")
+set(SHADER_SPV_STAMP "${ASSETS_SRC}/shaders/compute/x86.spv")
+if(NOT EXISTS "${SHADER_SPV_STAMP}")
+    message(WARNING
+        "SPIR-V shaders missing (${SHADER_SPV_STAMP}). "
+        "Run: make -C Navigator/shaders   or   ./linux.sh")
 endif()
 
 # =============================================================================
 # FINAL TARGET DEPENDENCIES + REPORT
 # =============================================================================
-add_dependencies(amouranth_engine shaders)
+
+if(TARGET dos_slice_embed)
+    add_dependencies(amouranth_engine dos_slice_embed)
+endif()
 if(TARGET copy_assets)
     add_dependencies(amouranth_engine copy_assets)
 endif()
@@ -545,7 +488,8 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     function(field_host_test_link target)
         target_sources(${target} PRIVATE
             "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldWebCore.cpp"
-            "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldBrowserHook.cpp")
+            "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldBrowserHook.cpp"
+            "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldCdRomHost.cpp")
         target_link_libraries(${target} PRIVATE field_x86 m pthread dl ZLIB::ZLIB)
         if(LIBCURL_FOUND)
             target_compile_definitions(${target} PRIVATE HAVE_LIBCURL=1)
@@ -576,6 +520,12 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_libx86emu PRIVATE ${LIBX86EMU_DIR}/include)
     set_target_properties(test_libx86emu PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
+    add_executable(qa_drivers_build scripts/qa_drivers_build.cpp)
+    target_include_directories(qa_drivers_build PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_drivers_build PRIVATE cxx_std_20)
+    field_host_test_link(qa_drivers_build)
+    set_target_properties(qa_drivers_build PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
+
     add_executable(qa_dos_int_test scripts/qa_dos_int_test.cpp)
     target_include_directories(qa_dos_int_test PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(qa_dos_int_test PRIVATE cxx_std_20)
@@ -599,6 +549,12 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     target_compile_features(qa_cmd_help_test PRIVATE cxx_std_20)
     field_host_test_link(qa_cmd_help_test)
     set_target_properties(qa_cmd_help_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_rtx_ammos_test scripts/qa_rtx_ammos_test.cpp)
+    target_include_directories(qa_rtx_ammos_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_rtx_ammos_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_rtx_ammos_test)
+    set_target_properties(qa_rtx_ammos_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
     add_executable(qa_dos_embed_test scripts/qa_dos_embed_test.cpp)
     target_include_directories(qa_dos_embed_test PRIVATE ${FIELD_ENGINE_INCLUDES})
@@ -645,7 +601,47 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_amouranthos_test)
     set_target_properties(qa_amouranthos_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+    add_executable(qa_taskbar_click_test scripts/qa_taskbar_click_test.cpp)
+    target_include_directories(qa_taskbar_click_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_taskbar_click_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_taskbar_click_test)
+    set_target_properties(qa_taskbar_click_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+    add_executable(qa_exit_shutdown_test scripts/qa_exit_shutdown_test.cpp)
+    target_include_directories(qa_exit_shutdown_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_exit_shutdown_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_exit_shutdown_test)
+    set_target_properties(qa_exit_shutdown_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_snes_test scripts/qa_snes_test.cpp)
+    target_include_directories(qa_snes_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_snes_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_snes_test)
+    set_target_properties(qa_snes_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_nes_cpu_test scripts/qa_nes_cpu_test.cpp)
+    target_include_directories(qa_nes_cpu_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_nes_cpu_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_nes_cpu_test)
+    set_target_properties(qa_nes_cpu_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_file_index_test scripts/qa_file_index_test.cpp)
+    target_include_directories(qa_file_index_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_file_index_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_file_index_test)
+    set_target_properties(qa_file_index_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_rtx_widgets_test scripts/qa_rtx_widgets_test.cpp)
+    target_include_directories(qa_rtx_widgets_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_rtx_widgets_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_rtx_widgets_test)
+    set_target_properties(qa_rtx_widgets_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_app_journal_test scripts/qa_app_journal_test.cpp)
+    target_include_directories(qa_app_journal_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_app_journal_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_app_journal_test)
+    set_target_properties(qa_app_journal_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
     add_executable(qa_audio_test scripts/qa_audio_test.cpp)
     target_include_directories(qa_audio_test PRIVATE ${FIELD_ENGINE_INCLUDES})
@@ -673,6 +669,12 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_registry_test)
     field_embed_dos(qa_registry_test)
     set_target_properties(qa_registry_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_memory_tier_test scripts/qa_memory_tier_test.cpp)
+    target_include_directories(qa_memory_tier_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_memory_tier_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_memory_tier_test)
+    set_target_properties(qa_memory_tier_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 endif()
 
