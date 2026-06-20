@@ -109,9 +109,11 @@ inline void paintChrome(std::uint8_t* ram) noexcept {
     if (!ram || useGpuChrome()) return;
     syncLayout();
     const FieldWinFrame::ScrollState sc = scrollState();
-    char title[80];
-    std::snprintf(title, sizeof title, " RTX Shell — %s ",
-        FieldRuntimeInfo::masterStatusLine());
+    char title[96];
+    title[0] = '\0';
+    std::strncpy(title, " RTX Shell — ", sizeof title - 1);
+    std::strncat(title, FieldRuntimeInfo::masterStatusLine(), sizeof title - std::strlen(title) - 2);
+    std::strncat(title, " ", sizeof title - std::strlen(title) - 1);
     char status[160];
     std::snprintf(status, sizeof status,
         " PgUp/Dn scroll | Wheel | %d lines | Log %zu | F1 help | Alt+F menus ",

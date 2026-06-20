@@ -3,6 +3,7 @@
 // RTX-DOS 7.0 GPU Super DOSBox — Microsoft MS-DOS MIT lineage + virtual C: HDD image.
 
 #include "FieldPlatform.hpp"
+#include "FieldRtxMemory.hpp"
 
 #ifdef FIELD_DOS_EMBED_HD
 #include "FieldDosEmbed.hpp"
@@ -651,8 +652,8 @@ inline bool loadHdIntoGuest(
         return false;
 
     auto* ram = guestRam(static_cast<std::uint8_t*>(fieldX86DieMapped), ramByteOffset);
-    /* Conventional + VGA text only — skip zeroing full 64 MiB die on every boot. */
-    constexpr std::uint32_t kBootClearBytes = 0x000C0000u;
+    /* Conventional tier only — skip zeroing full 64 MiB die on every boot. */
+    const std::uint32_t kBootClearBytes = FieldRtxMemory::bootClearBytes();
     std::memset(ram, 0, kBootClearBytes);
     mirrorHdToGuestGpu(fieldX86DieMapped, ramByteOffset);
 

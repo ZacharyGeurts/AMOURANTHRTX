@@ -2,7 +2,6 @@
 
 // RTX-LE — host-side LZEXE 0.91 expand + Watcom LE discovery (Keen / DOS4GW).
 
-#include "FieldBios.hpp"
 #include "FieldDpmi.hpp"
 #include "FieldPlatform.hpp"
 #include "FieldX86Emu.hpp"
@@ -10,6 +9,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+
+#include <x86emu.h>
+
+namespace FieldBios {
+void patchDos4gwCpuProbe(x86emu_t* e, std::uint32_t base, std::uint32_t loadSize) noexcept;
+}
 
 namespace FieldRtxLe {
 

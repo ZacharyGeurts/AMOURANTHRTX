@@ -2,7 +2,6 @@
 
 // RTX-PM — first-party protected-mode launcher (skip DOS/4GW extender stub).
 
-#include "FieldBios.hpp"
 #include "FieldDpmi.hpp"
 #include "FieldGpuFiles.hpp"
 #include "FieldGpuLaunch.hpp"
@@ -34,7 +33,7 @@ inline bool launchMzPm(void* mapped, std::size_t offset, std::uint8_t* ram,
     }
 
     FieldX86Emu::ensure(mapped, offset);
-    if (!FieldBios::launchMzExec(FieldX86Emu::emu, mz, dosPath))
+    if (!FieldBios::launchMzExec(FieldX86Emu::emu, mz, dosPath, 0x1000u))
         return false;
 
     const std::uint32_t staged = FieldGpuFiles::stageForLaunch(ram, dosPath);

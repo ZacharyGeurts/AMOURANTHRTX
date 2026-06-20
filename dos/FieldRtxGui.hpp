@@ -46,6 +46,7 @@ inline std::uint8_t ATTR_ASM      = 0x3A;
 inline std::uint8_t ATTR_DIRECTIVE= 0x5B;
 inline std::uint8_t ATTR_TYPE     = 0x6B;
 inline std::uint8_t ATTR_SPELL    = 0x4E;
+inline std::uint8_t ATTR_BUSINESS = 0xF0; /* black on light gray — AmouranthOS windows */
 
 // CP437 box + icons (Golden Era DOS look)
 constexpr char ICO_BLOCK   = '\xFE'; // ■

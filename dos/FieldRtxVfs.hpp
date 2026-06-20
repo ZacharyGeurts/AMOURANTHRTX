@@ -6,6 +6,7 @@
 #include "FieldAmmoVfs.hpp"
 #include "FieldCdRom.hpp"
 #include "FieldDos.hpp"
+#include "FieldRtxMemory.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -276,20 +277,16 @@ inline bool unmountIso() noexcept {
     const std::size_t before = mounts.size();
     mounts.erase(std::remove_if(mounts.begin(), mounts.end(),
         [](const ArchiveMount& x) { return x.isIso; }), mounts.end());
-    FieldCdRom::isoImage.clear();
-    FieldCdRom::ready = false;
-    FieldCdRom::isoPath.clear();
+    FieldCdRom::unload();
     const auto tmp = FieldDos::assetRoot() / ".rtx_mount_tmp.iso";
     std::error_code ec;
     std::filesystem::remove(tmp, ec);
-    return mounts.size() < before || FieldCdRom::ready == false;
+    return mounts.size() < before || !FieldCdRom::ready;
 }
 
 inline void unmountAll() noexcept {
     mounts.clear();
-    FieldCdRom::isoImage.clear();
-    FieldCdRom::ready = false;
-    FieldCdRom::isoPath.clear();
+    FieldCdRom::unload();
     const auto tmp = FieldDos::assetRoot() / ".rtx_mount_tmp.iso";
     std::error_code ec;
     std::filesystem::remove(tmp, ec);
@@ -349,7 +346,7 @@ inline std::uint32_t getFreeUmbMem() noexcept {
 }
 
 inline std::uint32_t getFreeConvMem() noexcept {
-    constexpr std::uint32_t total = static_cast<std::uint32_t>(FieldPlatform::CONVENTIONAL_KB) * 1024u;
+    const std::uint32_t total = static_cast<std::uint32_t>(FieldRtxMemory::conventionalKb) * 1024u;
     constexpr std::uint32_t shellTax = 28u * 1024u;
     return total > shellTax ? total - shellTax : total / 2u;
 }

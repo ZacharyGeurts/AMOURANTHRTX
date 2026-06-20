@@ -8,6 +8,7 @@
 #include "FieldLayerShell.hpp"
 #include "FieldMscdex.hpp"
 #include "FieldPlatform.hpp"
+#include "FieldRtxMemory.hpp"
 
 #include <cctype>
 #include <cstdint>
@@ -92,7 +93,7 @@ inline Fingerprint capture() noexcept {
     fp.fatMounted = FieldAmmoFat::mounted;
     fp.cdReady = FieldCdRom::ready;
     fp.cdBytes = FieldCdRom::ready
-        ? static_cast<std::uint32_t>(FieldCdRom::isoImage.size()) : 0u;
+        ? static_cast<std::uint32_t>(FieldCdRom::sectorCount()) * 2048u : 0u;
     fp.hostReady = hostReadyCached;
     fp.fatShell = FieldLayer::isShellActive(FieldLayer::LayerId::Fat);
     fp.mscdexShell = FieldLayer::isShellActive(FieldLayer::LayerId::Mscdex);
@@ -178,7 +179,7 @@ inline void refresh(bool force = false) noexcept {
         'E', Kind::HostBridge, FieldLayer::LayerId::Io, "RTXHOST.SYS",
         "RTXHOST", "L6-HOST", fp.hostReady, true, 0u, 0u, 0u};
 
-    if (FieldMscdex::installed && fp.cdReady && slots[3].ready)
+    if (FieldRtxMemory::mscdexLive() && fp.cdReady && slots[3].ready)
         FieldMscdex::install();
 
     setReadyMask();
@@ -270,7 +271,8 @@ inline const char* readyLetters() noexcept {
 }
 
 inline bool mountCd() noexcept {
-    if (!FieldCdRom::autoMount(FieldDos::assetRoot())) return false;
+    if (!FieldCdRom::mountAny(FieldDos::assetRoot())) return false;
+    FieldRtxMemory::growMscdexExtender();
     FieldMscdex::install();
     invalidate();
     refresh(true);

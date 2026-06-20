@@ -2,6 +2,7 @@
 
 // Legacy alias — RTX-AMMOS shell lives in FieldRtxShell.hpp.
 
+#include "FieldRtxAmmos.hpp"
 #include "FieldRtxShell.hpp"
 
 #include <x86emu.h>

@@ -74,6 +74,17 @@ inline float panelGlow      = 0.08f;
 inline float sharpen        = 0.55f;
 inline float wmPanelScale   = 1.f;
 inline float chromeTitleH   = 0.f;
+inline float emuLogicalW    = 0.f;
+inline float emuLogicalH    = 0.f;
+
+inline void setEmuViewport(float w, float h) noexcept {
+    emuLogicalW = std::max(w, 1.f);
+    emuLogicalH = std::max(h, 1.f);
+}
+
+inline void clearEmuViewport() noexcept {
+    emuLogicalW = emuLogicalH = 0.f;
+}
 
 struct Rect {
     float x0 = 0.f, y0 = 0.f, x1 = 0.f, y1 = 0.f;
@@ -91,17 +102,24 @@ inline bool isGraphicsMode() noexcept {
 }
 
 inline float dosLogicalW() noexcept {
+    if (emuLogicalW > 1.f) return emuLogicalW;
+    if (guestMode == 0x13u) return 640.f;
     return isGraphicsMode() ? DOS_GFX_W : static_cast<float>(textCols) * 8.f;
 }
 
 inline float dosLogicalH() noexcept {
+    if (emuLogicalH > 1.f) return emuLogicalH;
+    if (guestMode == 0x13u) return 400.f;
     return isGraphicsMode() ? DOS_GFX_H : static_cast<float>(textRows) * 16.f;
 }
 
 inline float stampDisplayScale() noexcept {
     if (panelStretch) return 1.f;
-    if (winW < 1920.f) return 1.f;
-    return std::clamp(std::min(winW / 1280.f, winH / 800.f), 1.f, 4.f);
+    if (emuLogicalW > 1.f) return 1.f;
+    const float refW = std::max(winW, renderW);
+    const float refH = std::max(winH, renderH);
+    if (refW < 1920.f) return 1.f;
+    return std::clamp(std::min(refW / 1280.f, refH / 800.f), 1.f, 3.5f);
 }
 
 inline float panelOuterW() noexcept {
@@ -112,9 +130,10 @@ inline float panelOuterH() noexcept {
     return (dosLogicalH() + DOS_HUD_H) * stampDisplayScale() * wmPanelScale;
 }
 
-inline void centerPanel() noexcept {
-    panelOx = (winW - panelOuterW()) * 0.5f;
-    panelOy = (winH - panelOuterH()) * 0.5f;
+inline void dockPanelTopLeft() noexcept {
+    constexpr float margin = 32.f;
+    panelOx = margin;
+    panelOy = margin;
     panelPositioned = true;
 }
 
@@ -131,7 +150,7 @@ inline Rect panelRect() noexcept {
     if (panelStretch)
         return {0.f, 0.f, winW, winH};
     if (!panelPositioned)
-        centerPanel();
+        dockPanelTopLeft();
     clampPanelPosition();
     const float pw = panelOuterW();
     const float ph = panelOuterH();
@@ -169,6 +188,21 @@ inline float coordScaleX() noexcept {
 
 inline float coordScaleY() noexcept {
     return renderH / std::max(winH, 1.f);
+}
+
+/* Panel bounds in render framebuffer space (matches chromePointerPixels + shader viewport). */
+inline Rect panelRectRender() noexcept {
+    if (panelStretch)
+        return {0.f, 0.f, std::max(renderW, 1.f), std::max(renderH, 1.f)};
+    const Rect r = panelRect();
+    const float sx = coordScaleX();
+    const float sy = coordScaleY();
+    return {r.x0 * sx, r.y0 * sy, r.x1 * sx, r.y1 * sy};
+}
+
+inline Rect contentRectRender() noexcept {
+    const Rect w = panelRectRender();
+    return {w.x0, w.y0 + chromeTitleH, w.x1, w.y1 - DOS_HUD_H};
 }
 
 inline void syncFromGuest(const std::uint8_t* ram) noexcept {
@@ -210,7 +244,8 @@ inline void mapMouse(float mx, float my, std::int32_t& outX, std::int32_t& outY)
     }
 }
 
-inline void packHudStats(const std::uint8_t* ram, std::uint32_t* bus) noexcept {
+inline void packHudStats(const std::uint8_t* ram, std::uint32_t* bus,
+                          std::size_t busCount) noexcept {
     if (!bus) return;
     std::uint32_t convKb = 640u;
     if (ram) {
@@ -230,7 +265,7 @@ inline void packHudStats(const std::uint8_t* ram, std::uint32_t* bus) noexcept {
             * static_cast<std::uint32_t>(FieldAmmoFat::geo.bps);
     }
     bus[59] = hdFree;
-    bus[62] = hdTotal;
+    if (busCount > 63u) bus[63] = hdTotal;
 }
 
 inline void packDataBus(std::uint32_t* bus, std::size_t count,
@@ -257,7 +292,7 @@ inline void packDataBus(std::uint32_t* bus, std::size_t count,
     bus[55] = static_cast<std::uint32_t>(panelGlow * 256.f);
     bus[56] = static_cast<std::uint32_t>(sharpen * 256.f);
     bus[58] = static_cast<std::uint32_t>(DOS_HUD_H);
-    packHudStats(ram, bus);
+    packHudStats(ram, bus, count);
     if (count >= 62) {
         /* FieldAmouranthWm::packIntoBus overwrites [60-61] with compositor packing when shell chrome is on. */
         bus[60] = static_cast<std::uint32_t>(win.w() * csx) & 0xFFFFu;

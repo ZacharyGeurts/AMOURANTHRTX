@@ -11,6 +11,7 @@
 #include "FieldRtxVfs.hpp"
 #include "FieldRuntimeInfo.hpp"
 #include "FieldRegistry.hpp"
+#include "FieldRtxMemory.hpp"
 #include "FieldRtxThemes.hpp"
 #include "FieldRtxTerm.hpp"
 #include "FieldRtxVgaText.hpp"
@@ -84,7 +85,7 @@ inline void paintVerbosePost(std::uint8_t* ram) noexcept {
         {"", 0x07},
         {" [OK] Vulkan x86 Field Die mapped — 64 MiB GPU fast RAM", 0x3B},
         {" [OK] BIOS E820 — 4096 MiB extended memory profile", 0x3B},
-        {" [OK] A20 gate enabled — conventional 640 KiB + XMS", 0x3B},
+        {" [OK] A20 gate enabled — conventional memory tier + XMS", 0x3B},
         {" [OK] INT 13h fixed disk C: — 2048 MiB RTXDOS FAT16", 0x3B},
         {" [OK] AMMOFAT.SYS L2 — GPU-native FAT + HD mirror hot set", 0x3B},
         {" [OK] MSCDEX 2.1 — ISO9660 CD-ROM redirector", 0x3B},
@@ -99,9 +100,16 @@ inline void paintVerbosePost(std::uint8_t* ram) noexcept {
         {"", 0x07},
     };
 
+    char memLine[81]{};
+    std::snprintf(memLine, sizeof memLine,
+        " [OK] A20 gate — %u KiB boot, grow %u KiB + XMS/EMM386/MSCDEX on demand",
+        static_cast<unsigned>(FieldRtxMemory::bootConventionalKb),
+        static_cast<unsigned>(FieldRtxMemory::maxConventionalKb));
+
     for (std::size_t i = 0; i < sizeof(kLines) / sizeof(kLines[0]); ++i) {
-        putLine(ram, static_cast<int>(i), kLines[i].text, kLines[i].attr);
-        if (kLines[i].text[0]) logBoot(kLines[i].text);
+        const char* text = (i == 4u) ? memLine : kLines[i].text;
+        putLine(ram, static_cast<int>(i), text, kLines[i].attr);
+        if (text[0]) logBoot(text);
     }
     char rt[96];
     FieldRuntimeInfo::refresh();
@@ -193,8 +201,6 @@ inline void seedGpuDos(void* mapped, std::size_t headerBytes, bool hdReady) {
     FieldRegistry::init();
     FieldRtxThemes::init();
     paintWelcome(ram);
-    if (FieldDosConfig::cfg.cdRomEnabled)
-        FieldCdRom::autoMount(FieldDos::assetRoot());
     logBoot("Boot handoff complete — interactive shell active");
 }
 

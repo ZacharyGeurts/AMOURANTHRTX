@@ -7,17 +7,24 @@
 #include "FieldRtxVfs.hpp"
 #include "FieldRtxThrottle.hpp"
 #include "FieldAmouranthFileCmd.hpp"
-#include "FieldAmouranthOs.hpp"
 #include "FieldDeviceViewer.hpp"
 #include "FieldExtensionEditor.hpp"
 #include "FieldExtensionMap.hpp"
 #include "FieldRegistry.hpp"
+#include "FieldRtxMemory.hpp"
+#include "FieldXms.hpp"
+#include "FieldEms.hpp"
+#include "FieldX86Emu.hpp"
 #include "FieldRegistryEditor.hpp"
 #include "FieldRaid.hpp"
 
 #include "FieldAmmoBrowser.hpp"
 #include "FieldAmmoCode.hpp"
 #include "FieldAmmoNes.hpp"
+#include "FieldAmmoA2600.hpp"
+#include "FieldAmmoSms.hpp"
+#include "FieldAmmoGenesis.hpp"
+#include "FieldAmmoSnes.hpp"
 #include "FieldPadTest.hpp"
 #include "FieldPorts.hpp"
 #include "FieldRuntimeInfo.hpp"
@@ -49,6 +56,7 @@ bool launchFromGuest(std::uint8_t* ram, const char* dosPath) noexcept;
 #include "OptionsMenu.hpp"
 #include "FieldPlatform.hpp"
 #include "FieldRtxAmmos.hpp"
+#include "FieldAmouranthOs.hpp"
 #include "FieldRtxTerm.hpp"
 
 namespace FieldRtxBoot {
@@ -769,6 +777,7 @@ inline void cmdHelp(std::uint8_t* ram, EchoFn echo, NewlineFn nl) noexcept {
         "  Field: DEVICES DRIVES DRIVERS FIELD LAYER AMMOFAT MSCDEX BIOS\r\n"
         "  DevKit: FIELDC AMMOASM AMMOSYS AMMOCC AMMOLINK AMMODECOMP AMMOZIP AMMORUN AMMODBG BUILD TOOLS\r\n"
         "  OS:    AMOURANTHOS / AOS — RTX WM desktop (Start, programs, clock)\r\n"
+        "         LAUNCHER — GUI program picker (AmmoCode, Doom, PADTEST…)\r\n"
         "         ERA WIN31 SETUP31 WIN98 LINUX AMMOS EXIT GRAPHICS\r\n"
         "  VFS:   DESCRIPT.ION metadata | MOUNT ZIP|ISO | colorful DIR\r\n"
         "  Speed: THROTTLE — deep MZ/PE analysis per program launch\r\n"
@@ -1082,7 +1091,7 @@ inline void cmdChkdsk(std::uint8_t* ram, EchoFn echo, NewlineFn nl) noexcept {
         totalB,
         totalB > freeB ? totalB - freeB : 0u, chk.filesChecked,
         freeB,
-        FieldPlatform::CONVENTIONAL_KB * 1024u,
+        static_cast<std::uint32_t>(FieldRtxMemory::conventionalKb) * 1024u,
         static_cast<std::uint32_t>(FieldPlatform::EXTENDED_KB) * 1024u,
         FieldDrives::readyLetters(), FieldDrives::currentLetter,
         FieldCdRom::ready ? FieldCdRom::volumeLabel.c_str() : "not mounted",
@@ -1105,7 +1114,9 @@ inline void cmdMemoryup(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
         "\r\nRTX MEMORYUP v7.0 — MemMaker-class optimizer (2026)\r\n"
         "  Conventional   %u KB total / %u KB free\r\n"
         "  Extended       %u KB below 16M\r\n"
-        "  XMS pool       %u KB reported\r\n"
+        "  XMS pool       %u KB (%s)\r\n"
+        "  EMM386/UMB     %s\r\n"
+        "  MSCDEX         %s\r\n"
         "  Field Die      %u MB fast RAM\r\n"
         "  Spill RAID     %llu bytes logical\r\n"
         "  Upper (UMB)    %u KB total / %u KB free\r\n"
@@ -1113,20 +1124,40 @@ inline void cmdMemoryup(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
         "  DOS=HIGH,UMB,UMBNOAUTO  FILES=255  BUFFERS=60,3\r\n"
         "  DEVICE=HIMEM.SYS  DEVICE=EMM386.EXE NOEMS\r\n"
         "  STACKS=18,512  LASTDRIVE=Z\r\n"
-        "  Note: >640K needs UMB/HMA/XMS — not more conventional RAM.\r\n",
-        FieldPlatform::CONVENTIONAL_KB,
+        "  Boot tier %uK — grow to %uK on demand (MEMORYUP /S)\r\n",
+        static_cast<unsigned>(FieldRtxMemory::conventionalKb),
         FieldRtxVfs::getFreeConvMem() / 1024u,
         static_cast<unsigned>(FieldPlatform::EXTENDED_KB),
-        static_cast<unsigned>(FieldPlatform::XMS_KB),
-        FieldPlatform::GUEST_RAM_BYTES / (1024u * 1024u),
+        FieldRtxMemory::activeXmsKb(),
+        FieldRtxMemory::xmsLive() ? "live" : "idle",
+        FieldRtxMemory::emmLive() ? "live" : "idle",
+        FieldRtxMemory::mscdexLive() ? "live" : "idle",
+        FieldRtxMemory::guestFastMb,
         static_cast<unsigned long long>(FieldPlatform::REPORTED_RAM_BYTES),
         static_cast<unsigned>(FieldPlatform::UMB_KB),
-        FieldRtxVfs::getFreeUmbMem() / 1024u);
+        FieldRtxVfs::getFreeUmbMem() / 1024u,
+        static_cast<unsigned>(FieldRtxMemory::bootConventionalKb),
+        static_cast<unsigned>(FieldRtxMemory::maxConventionalKb));
     shellPrint(ram, echo, nl, buf);
     if (opt) {
-        shellPrint(ram, echo, nl,
-            "\r\nMEMORYUP /S — optimal profile active (CONFIG.SYS already tuned).\r\n"
-            "  Upper memory blocks simulated via RTXHOST + AMMOFAT spill.\r\n");
+        const bool grew = FieldRtxMemory::growConventional(
+            FieldRtxMemory::maxConventionalKb, ram);
+        if (grew)
+            FieldRtxMemory::guestFastMb = std::max(FieldRtxMemory::guestFastMb, 8u);
+        FieldRtxMemory::popGuestFast(ram);
+        FieldRtxMemory::growExtenders(ram, FieldCdRom::ready);
+        FieldXms::activate(FieldX86Emu::emu);
+        FieldEms::activate(FieldX86Emu::emu);
+        if (FieldRtxMemory::mscdexLive())
+            FieldMscdex::install();
+        FieldRtxMemory::syncBios(ram);
+        char growBuf[160];
+        std::snprintf(growBuf, sizeof growBuf,
+            "\r\nMEMORYUP /S — %u KiB conv, %u MiB fast, XMS/EMM386/MSCDEX warm.\r\n"
+            "  Upper memory blocks simulated via RTXHOST + AMMOFAT spill.\r\n",
+            static_cast<unsigned>(FieldRtxMemory::conventionalKb),
+            FieldRtxMemory::guestFastMb);
+        shellPrint(ram, echo, nl, growBuf);
         FieldExtensionMap::appendJournal("MEMORYUP", "/S optimize");
     } else {
         shellPrint(ram, echo, nl, "\r\nRun MEMORYUP /S to apply optimal memory profile.\r\n");
@@ -1296,20 +1327,26 @@ inline void cmdMem(std::uint8_t* ram, EchoFn echo, NewlineFn nl) noexcept {
     char buf[512];
     std::snprintf(buf, sizeof buf,
         "\r\nMemory Status — RTX-AMMOS DOS 7:\r\n"
-        "  Conventional  %uK total, %uK free (640K is the hardware max)\r\n"
+        "  Conventional  %uK active (%uK boot / %uK max), %uK free\r\n"
         "  Upper (UMB)   %uK total, %uK free — load HIGH in CONFIG.SYS\r\n"
         "  HMA           %uK at FFFF0h (DOS=HIGH moves kernel here)\r\n"
         "  Extended      %u KB below 1M boundary\r\n"
-        "  XMS free      %u KB above 1M\r\n"
+        "  XMS free      %u KB above 1M (%s)\r\n"
+        "  EMM386/UMB    %s | MSCDEX %s\r\n"
         "  Reported RAM  %llu bytes\r\n"
         "  Throttle      %s (%u cycles/frame)\r\n",
-        static_cast<unsigned>(FieldPlatform::CONVENTIONAL_KB),
+        static_cast<unsigned>(FieldRtxMemory::conventionalKb),
+        static_cast<unsigned>(FieldRtxMemory::bootConventionalKb),
+        static_cast<unsigned>(FieldRtxMemory::maxConventionalKb),
         freeConv,
         static_cast<unsigned>(FieldPlatform::UMB_KB),
         freeUmb,
         static_cast<unsigned>(FieldPlatform::HMA_KB),
         static_cast<unsigned>(FieldPlatform::EXTENDED_KB),
-        static_cast<unsigned>(FieldPlatform::XMS_KB),
+        FieldRtxMemory::activeXmsKb(),
+        FieldRtxMemory::xmsLive() ? "live" : "idle",
+        FieldRtxMemory::emmLive() ? "live" : "idle",
+        FieldRtxMemory::mscdexLive() ? "live" : "idle",
         static_cast<unsigned long long>(FieldPlatform::REPORTED_RAM_BYTES),
         FieldRtxThrottle::activeLabel(),
         FieldRtxThrottle::activeCycles());
@@ -1534,16 +1571,19 @@ inline void cmdSound(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
 }
 
 inline void cmdCdRom(std::uint8_t* ram, EchoFn echo, NewlineFn nl) noexcept {
+    FieldRtxMemory::growMscdexExtender();
     FieldMscdex::install();
     shellPrint(ram, echo, nl, "\r\n");
     shellPrint(ram, echo, nl, FieldMscdex::statusLine().c_str());
     shellPrint(ram, echo, nl, "\r\n");
     if (!FieldCdRom::ready) {
-        shellPrint(ram, echo, nl, "  Drop .iso in assets/dos/incoming/cd/ then MOUNT CD\r\n");
+        shellPrint(ram, echo, nl,
+            "  Plug USB DVD (/dev/sr0) or drop .iso in assets/dos/incoming/cd/ then MOUNT CD\r\n");
         return;
     }
     char buf[256];
-    std::snprintf(buf, sizeof buf, "  ISO: %s\r\n  Sectors: %u (2048-byte)\r\n",
+    std::snprintf(buf, sizeof buf, "  %s: %s\r\n  Sectors: %u (2048-byte)\r\n",
+        FieldCdRom::isHostDevice() ? "Device" : "ISO",
         FieldCdRom::isoPath.c_str(), FieldCdRom::sectorCount());
     shellPrint(ram, echo, nl, buf);
     std::vector<std::string> names;
@@ -1568,7 +1608,7 @@ inline void cmdMount(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
             shellPrint(ram, echo, nl, buf);
         } else {
             shellPrint(ram, echo, nl,
-                "\r\nNo ISO in assets/dos/incoming/cd/\r\n");
+                "\r\nNo host optical drive and no ISO in assets/dos/incoming/cd/\r\n");
         }
         return;
     }
@@ -2112,6 +2152,52 @@ inline void cmdDoom(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
     execLine("DOOM.EXE", ram, echo, nl, defaultPrompt);
 }
 
+inline std::string emuCmdPath(const std::vector<std::string>& args, bool& setup) noexcept {
+    setup = !args.empty() && istreq(args[0].c_str(), "SETUP");
+    return setup ? FieldAmmoTools::dosPath(args, 1, "")
+                 : FieldAmmoTools::dosPath(args, 0, "");
+}
+
+inline void cmdSnes(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
+                    const std::vector<std::string>& args) noexcept {
+    (void)echo;
+    (void)nl;
+    bool setup = false;
+    const std::string path = emuCmdPath(args, setup);
+    if (!path.empty()) FieldSnes::open(ram, path.c_str(), setup);
+    else FieldSnes::open(ram, nullptr, setup);
+}
+
+inline void cmdGenesis(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
+                       const std::vector<std::string>& args) noexcept {
+    (void)echo;
+    (void)nl;
+    bool setup = false;
+    const std::string path = emuCmdPath(args, setup);
+    if (!path.empty()) FieldGenesis::open(ram, path.c_str(), setup);
+    else FieldGenesis::open(ram, nullptr, setup);
+}
+
+inline void cmdSms(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
+                   const std::vector<std::string>& args) noexcept {
+    (void)echo;
+    (void)nl;
+    bool setup = false;
+    const std::string path = emuCmdPath(args, setup);
+    if (!path.empty()) FieldSms::open(ram, path.c_str(), setup);
+    else FieldSms::open(ram, nullptr, setup);
+}
+
+inline void cmdA2600(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
+                     const std::vector<std::string>& args) noexcept {
+    (void)echo;
+    (void)nl;
+    bool setup = false;
+    const std::string path = emuCmdPath(args, setup);
+    if (!path.empty()) FieldA2600::open(ram, path.c_str(), setup);
+    else FieldA2600::open(ram, nullptr, setup);
+}
+
 inline void cmdNes(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
                    const std::vector<std::string>& args) noexcept {
     const auto req = FieldAmmoNesCli::parse(args);
@@ -2120,13 +2206,11 @@ inline void cmdNes(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
         return;
     }
     if (req.openSetup) {
-        FieldAmmoNesSetup::open(false);
-        FieldAmmoNesSetup::paint(ram);
+        FieldNes::open(ram, nullptr, nullptr, true, false);
         return;
     }
     if (req.openPadMap) {
-        FieldAmmoNesSetup::open(true);
-        FieldAmmoNesSetup::paint(ram);
+        FieldNes::open(ram, nullptr, nullptr, true, true);
         return;
     }
     if (req.applyOnly) {
@@ -2443,6 +2527,16 @@ inline void cmdFileCmd(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
     shellPrint(ram, echo, nl, "\r\nField Commander open — scroll with PgUp/Dn or wheel.\r\n");
 }
 
+inline void cmdLauncher(std::uint8_t* ram, EchoFn echo, NewlineFn nl) noexcept {
+    if (!FieldAmouranthOs::active)
+        FieldAmouranthOs::boot();
+    FieldAmouranthOs::consoleShell = false;
+    FieldAmouranthOs::openNewWindow(FieldAmouranthOs::AppId::Shell);
+    FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Shell);
+    shellPrint(ram, echo, nl,
+        "\r\nProgram Launcher — pick AmmoCode, Field Commander, Doom, etc.\r\n");
+}
+
 inline void cmdAmouranthOs(std::uint8_t* ram, EchoFn echo, NewlineFn nl,
                            const std::vector<std::string>& args) noexcept {
     if (args.size() >= 2 && FieldRtxGui::argIsHelp(args[1])) {
@@ -2664,6 +2758,14 @@ inline void execLine(const char* line, std::uint8_t* ram,
         cmdDoom(ram, echo, nl, args);
     else if (istreq(cmd.c_str(), "NES") || istreq(cmd.c_str(), "FAMICOM"))
         cmdNes(ram, echo, nl, args);
+    else if (istreq(cmd.c_str(), "SNES") || istreq(cmd.c_str(), "SUPERFAMICOM"))
+        cmdSnes(ram, echo, nl, args);
+    else if (istreq(cmd.c_str(), "GENESIS") || istreq(cmd.c_str(), "MEGADRIVE") || istreq(cmd.c_str(), "MD"))
+        cmdGenesis(ram, echo, nl, args);
+    else if (istreq(cmd.c_str(), "SMS") || istreq(cmd.c_str(), "MASTERSYSTEM"))
+        cmdSms(ram, echo, nl, args);
+    else if (istreq(cmd.c_str(), "A2600") || istreq(cmd.c_str(), "ATARI2600") || istreq(cmd.c_str(), "VCS"))
+        cmdA2600(ram, echo, nl, args);
     else if (istreq(cmd.c_str(), "AMMORUN"))
         cmdAmmoRun(ram, echo, nl, args);
     else if (istreq(cmd.c_str(), "AMMODBG"))
@@ -2723,12 +2825,18 @@ inline void execLine(const char* line, std::uint8_t* ram,
         cmdEra(ram, {"ERA", "WIN98"}, echo, nl);
     else if (istreq(cmd.c_str(), "LINUX"))
         cmdLinux(ram, echo, nl);
+    else if (istreq(cmd.c_str(), "LAUNCHER") || istreq(cmd.c_str(), "PROGRAMS")
+            || istreq(cmd.c_str(), "START"))
+        cmdLauncher(ram, echo, nl);
     else if (istreq(cmd.c_str(), "AMOURANTHOS") || istreq(cmd.c_str(), "AOS"))
         cmdAmouranthOs(ram, echo, nl, args);
     else if (istreq(cmd.c_str(), "FILECMD") || istreq(cmd.c_str(), "FILES"))
         cmdFileCmd(ram, echo, nl, args);
     else if (istreq(cmd.c_str(), "VSCODIUM") || istreq(cmd.c_str(), "CODE"))
         FieldAmouranthOs::launchVscodium();
+    else if (istreq(cmd.c_str(), "HOSTTERM") || istreq(cmd.c_str(), "MINTTERM")
+            || istreq(cmd.c_str(), "TERMINAL"))
+        FieldAmouranthOs::launchDosConsole();
     else if (istreq(cmd.c_str(), "AMMOS"))
         cmdAmmos(ram, echo, nl);
     else if (istreq(cmd.c_str(), "EXIT") || istreq(cmd.c_str(), "GRAPHICS")) {
@@ -2810,6 +2918,8 @@ inline void shellExec(std::uint8_t* ram, EchoFn echo, NewlineFn nl, PromptFn pro
     FieldRtxConsoleGui::afterShellOutput(ram);
 }
 
+inline void seedTerminalWelcome(std::uint8_t* ram) noexcept;
+
 inline void pumpInteractive(std::uint8_t* ram, std::uint32_t hostKey, bool keyDown) noexcept {
     static std::uint32_t prevKey = 0;
     if (!ram) return;
@@ -2883,6 +2993,54 @@ inline void pumpInteractive(std::uint8_t* ram, std::uint32_t hostKey, bool keyDo
         prevKey = hostKey;
         return;
     }
+    if (FieldAmmoA2600Setup::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldAmmoA2600Setup::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldAmmoA2600Setup::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
+    if (FieldAmmoSmsSetup::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldAmmoSmsSetup::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldAmmoSmsSetup::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
+    if (FieldAmmoGenesisSetup::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldAmmoGenesisSetup::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldAmmoGenesisSetup::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
+    if (FieldAmmoSnesSetup::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldAmmoSnesSetup::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldAmmoSnesSetup::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
     if (FieldPadTest::active) {
         const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
         FieldPadTest::pump(ram, key, keyDown && hostKey != 0u);
@@ -2897,6 +3055,54 @@ inline void pumpInteractive(std::uint8_t* ram, std::uint32_t hostKey, bool keyDo
         const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
         FieldNes::pump(ram, key, keyDown && hostKey != 0u);
         if (!FieldNes::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
+    if (FieldA2600::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldA2600::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldA2600::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
+    if (FieldSms::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldSms::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldSms::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
+    if (FieldGenesis::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldGenesis::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldGenesis::active) {
+            FieldRtxBoot::paintWelcome(ram);
+            defaultPrompt(ram);
+            shellLen = 0;
+            shellLine[0] = '\0';
+        }
+        prevKey = hostKey;
+        return;
+    }
+    if (FieldSnes::active) {
+        const std::uint16_t key = static_cast<std::uint16_t>(hostKey & 0xFFFFu);
+        FieldSnes::pump(ram, key, keyDown && hostKey != 0u);
+        if (!FieldSnes::active) {
             FieldRtxBoot::paintWelcome(ram);
             defaultPrompt(ram);
             shellLen = 0;
@@ -2999,6 +3205,8 @@ inline void pumpInteractive(std::uint8_t* ram, std::uint32_t hostKey, bool keyDo
         if (FieldRtxConsoleGui::pendingNewSession) {
             FieldRtxConsoleGui::pendingNewSession = false;
             FieldRtxConsoleGui::open(ram);
+            setCursor(ram, 0);
+            seedTerminalWelcome(ram);
             defaultPrompt(ram);
             FieldRtxTerm::syncLiveFromVga(ram);
             return;
@@ -3053,11 +3261,32 @@ inline void pumpInteractive(std::uint8_t* ram, std::uint32_t hostKey, bool keyDo
 
 namespace FieldRtxShell {
 
+inline void seedTerminalWelcome(std::uint8_t* ram) noexcept {
+    if (!ram) return;
+    FieldRuntimeInfo::refresh();
+    shellPrintAttr(ram, echoChar, defaultNewline,
+        " RTX-DOS 7.0 — AmouranthOS Golden Era command shell\r\n", 0x1Fu);
+    shellPrintAttr(ram, echoChar, defaultNewline,
+        " Type HELP for all commands  |  LAUNCHER for program picker\r\n", 0x17u);
+    char rt[96];
+    std::snprintf(rt, sizeof rt, " %.72s\r\n", FieldRuntimeInfo::masterStatusLine());
+    shellPrintAttr(ram, echoChar, defaultNewline, rt, 0x3Bu);
+    shellPrintAttr(ram, echoChar, defaultNewline,
+        " Quick: DIR  VER  AMOURANTHOS  AMMOCODE  FILECMD  PADTEST\r\n", 0x07u);
+    shellPrintAttr(ram, echoChar, defaultNewline,
+        " Games: DOOM  NES  |  F1 help  |  PgUp/Dn scroll history\r\n", 0x08u);
+    shellPrint(ram, echoChar, defaultNewline, "\r\n");
+}
+
 inline void paintTerminalShell(std::uint8_t* ram) noexcept {
     if (!ram) return;
     FieldRtxConsoleGui::open(ram);
+    setCursor(ram, 0);
+    seedTerminalWelcome(ram);
     defaultPrompt(ram);
     FieldRtxTerm::syncLiveFromVga(ram);
 }
 
 } // namespace FieldRtxShell
+
+#include "FieldAmouranthDeactivate.hpp"
