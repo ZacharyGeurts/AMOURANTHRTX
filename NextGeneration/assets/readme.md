@@ -28,16 +28,6 @@ NextGeneration/
 │           ├── getting_started/
 │           ├── glossary/
 │           └── build_and_run/
-│
-└── md/
-    ├── README.md             Wiki & articles index
-    ├── wiki/                 14 MD — tiered pages + _Sidebar
-    ├── info/                 5 MD — project · brain · license · comics
-    ├── meta/                 9 MD/PY — legends · manifest · tools
-    └── articles/
-        ├── README.md
-        ├── heroes/           3 MD — Issues 28–30 companions
-        └── companions/       13 MD — wiki deep dives
 ```
 
 ---
