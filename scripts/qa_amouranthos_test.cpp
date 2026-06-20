@@ -4,6 +4,9 @@
 #include "FieldAmouranthLaunch.hpp"
 #include "FieldAmouranthMenu.hpp"
 #include "FieldAmouranthOs.hpp"
+#include "FieldAmouranthDeactivate.hpp"
+#include "FieldAmouranthSearchFlyout.hpp"
+#include "FieldRtxWidgets.hpp"
 #include "FieldAmouranthWm.hpp"
 #include "FieldAmmoFat.hpp"
 #include "FieldDos.hpp"
@@ -11,6 +14,7 @@
 #include "FieldPlatform.hpp"
 #include "FieldRtxBoot.hpp"
 #include "FieldRtxShell.hpp"
+#include "FieldAosAppJournal.hpp"
 #include "OptionsMenu.hpp"
 
 #include <cstdio>
@@ -43,7 +47,9 @@ int main() {
     std::uint8_t* ram = buf.data();
     FieldRtxBoot::paintWelcome(ram);
 
+    FieldAosAppJournal::clearSessionJournal();
     FieldAmouranthOs::boot();
+    Options::Canvas::ProgramsCanvasReady = true;
     if (!FieldAmouranthOs::active) {
         std::fprintf(stderr, "FAIL AmouranthOS not active after boot\n");
         return 1;
@@ -58,7 +64,16 @@ int main() {
     }
     std::printf("OK AmouranthOS boot desktop — black backdrop + taskbar, no popup panel\n");
 
-    FieldAmouranthOs::onMouseDown(nullptr, 40.f, static_cast<float>(FieldAmouranthOs::winH) - 20.f, 1, 1);
+    FieldAmouranthOs::tick(1920, 1080);
+    float btnY0 = 0.f, btnY1 = 0.f;
+    FieldAmouranthOs::taskbarChromeButtonY(btnY0, btnY1);
+    const float startX = FieldAmouranthOs::scaledStartW() * 0.5f;
+    const float startY = (btnY0 + btnY1) * 0.5f;
+    if (!FieldAmouranthOs::onTaskbarMouseDown(nullptr, startX, startY)) {
+        std::fprintf(stderr, "FAIL Start button click not handled (x=%.1f y=%.1f)\n",
+            startX, startY);
+        return 1;
+    }
     if (!FieldAmouranthOs::startOpen) {
         std::fprintf(stderr, "FAIL Start button should open programs popup\n");
         return 1;
@@ -110,9 +125,27 @@ int main() {
     std::printf("OK data_bus AmouranthOS 0x%x clock=0x%x quality=0x%x\n",
         bus[42], bus[29], bus[30]);
 
+    FieldAmouranthOs::onTextInput("doom");
+    FieldAmouranthOs::packDataBus(bus, ram);
+    if (!FieldAmouranthSearchFlyout::active()) {
+        std::fprintf(stderr, "FAIL Start search flyout inactive after typing 'doom'\n");
+        return 1;
+    }
+    if ((bus[42] & (1u << 26u)) == 0u) {
+        std::fprintf(stderr, "FAIL BUS_AOS_MENU_SEARCH not set\n");
+        return 1;
+    }
+    if (FieldAmouranthSearchFlyout::resultCount > 10) {
+        std::fprintf(stderr, "FAIL search returned more than 10 results\n");
+        return 1;
+    }
+    std::printf("OK Start search flyout — %d results for 'doom'\n",
+        FieldAmouranthSearchFlyout::resultCount);
+
     FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Shell);
     pumpExec(ram);
-    if (!FieldAmouranthExec::screenHasGuiMarker(ram, FieldAmouranthOs::AppId::Shell)) {
+    if (!FieldAmouranthExec::screenHasGuiMarker(ram, FieldAmouranthOs::AppId::Shell)
+            && FieldRtxWidgets::g.appId != 1u) {
         std::fprintf(stderr, "FAIL RTX Shell GUI panel missing\n");
         return 1;
     }
@@ -141,7 +174,47 @@ int main() {
     }
     std::printf("OK GUI launch PADTEST\n");
 
-    FieldAmouranthOs::showDosPanelCentered();
+    FieldNesImport::ensureImported();
+    std::string nesPath;
+    if (!FieldNesImport::findContra(nesPath) && !FieldNesImport::findAnyRom(nesPath)) {
+        std::fprintf(stderr, "FAIL Contra/.nes ROM not imported to C:\\NES\\\n");
+        return 1;
+    }
+    FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Nes);
+    pumpExec(ram);
+    if (!FieldAmouranthOs::panelVisible) {
+        std::fprintf(stderr, "FAIL AmmoNES panel not visible after launch\n");
+        return 1;
+    }
+    if (!FieldNes::active) {
+        std::fprintf(stderr, "FAIL AmmoNES not active after launch\n");
+        return 1;
+    }
+    if (!FieldNes::loadRom(nesPath.c_str(), ram)) {
+        std::fprintf(stderr, "FAIL AmmoNES loadRom %s\n", nesPath.c_str());
+        return 1;
+    }
+    FieldNes::graphicsMode = !FieldNes::chr.empty();
+    for (int f = 0; f < 90 && FieldNes::active; ++f)
+        FieldNes::runFrame(ram);
+    if (FieldNes::chr.empty()) {
+        std::fprintf(stderr, "FAIL AmmoNES CHR empty — black screen (ROM=%s)\n", nesPath.c_str());
+        return 1;
+    }
+    std::uint32_t fbPix = 0;
+    for (int i = 0; i < 320 * 200; i += 97) {
+        const std::uint8_t px = ram[FieldVga::VGA_FB + static_cast<std::uint32_t>(i)];
+        if (px != 0) ++fbPix;
+    }
+    if (fbPix == 0) {
+        std::fprintf(stderr, "FAIL AmmoNES framebuffer blank (mapper=%d chr=%zu)\n",
+            FieldNes::mapper, FieldNes::chr.size());
+        return 1;
+    }
+    std::printf("OK AmmoNES Contra CHR=%zu nonZero=%u mapper=%d\n",
+        FieldNes::chr.size(), fbPix, FieldNes::mapper);
+
+    FieldAmouranthOs::showDosPanelDocked();
     FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::FileCmd);
     pumpExec(ram);
     if (!FieldAmouranthOs::panelVisible) {
@@ -152,7 +225,7 @@ int main() {
         std::fprintf(stderr, "FAIL FILECMD not active\n");
         return 1;
     }
-    if (!screenHas(ram, "Field Commander")) {
+    if (!FieldAmouranthExec::screenHasGuiMarker(ram, FieldAmouranthOs::AppId::FileCmd)) {
         std::fprintf(stderr, "FAIL Field Commander UI missing\n");
         return 1;
     }

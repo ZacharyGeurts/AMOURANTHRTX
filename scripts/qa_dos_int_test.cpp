@@ -14,6 +14,7 @@
 #include "FieldDpmi.hpp"
 #include "FieldInput.hpp"
 #include "FieldPlatform.hpp"
+#include "FieldRtxMemory.hpp"
 #include "FieldVga.hpp"
 #include "FieldX86Emu.hpp"
 
@@ -127,7 +128,7 @@ static void testInt11_12() {
     dispatch(0x11);
     check((g_emu->x86.R_EAX & 0xFFFFu) != 0u, "INT11 equipment");
     dispatch(0x12);
-    check((g_emu->x86.R_EAX & 0xFFFFu) == FieldPlatform::CONVENTIONAL_KB, "INT12 memory");
+    check((g_emu->x86.R_EAX & 0xFFFFu) == FieldRtxMemory::conventionalKb, "INT12 memory");
 }
 
 static void testInt13() {
@@ -278,6 +279,7 @@ static void testStubVectors() {
     check(dispatch(0x18) == 1, "INT18 ROM BASIC");
     check((g_emu->x86.R_EAX & 0xFFFFu) == 0x0003u, "INT18 no ROM BASIC");
 
+    FieldRtxMemory::popEms(g_buf.data());
     g_emu->x86.R_EAX = 0x4000u;
     check(dispatch(0x34) == 1, "INT34 EMM status");
     check((g_emu->x86.R_AL & 0x80u) != 0u, "INT34 EMM installed");

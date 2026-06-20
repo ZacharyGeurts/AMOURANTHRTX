@@ -247,6 +247,49 @@ def icon_ammotext() -> Image.Image:
     return img
 
 
+def icon_monitor() -> Image.Image:
+    img = blank_cell()
+    glass_back(img, (18, 28, 42, 225))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((14, 16, CELL - 14, CELL - 22), radius=4, outline=C_CYAN, width=2)
+    for i in range(4):
+        h = 12 + i * 10
+        d.line([(20, CELL - h), (28 + i * 8, h)], fill=C_ROSE if i % 2 else C_CYAN, width=2)
+    d.text((18, 18), "SYS", fill=C_STROKE)
+    return img
+
+
+def icon_browser_firefox() -> Image.Image:
+    img = blank_cell()
+    glass_back(img, (42, 18, 22, 220))
+    d = ImageDraw.Draw(img)
+    d.pieslice((10, 14, CELL - 10, CELL - 12), start=200, end=340, fill=(*C_ROSE[:3], 200), outline=C_STROKE, width=2)
+    d.pieslice((18, 22, CELL - 18, CELL - 20), start=30, end=160, fill=(*C_CYAN[:3], 180))
+    return img
+
+
+def icon_browser_chrome() -> Image.Image:
+    img = blank_cell()
+    glass_back(img)
+    d = ImageDraw.Draw(img)
+    cx, cy = CELL // 2, CELL // 2 + 2
+    d.ellipse((cx - 16, cy - 16, cx + 16, cy + 16), outline=C_STROKE, width=2)
+    d.pieslice((cx - 14, cy - 14, cx + 14, cy + 14), start=0, end=120, fill=(*C_ROSE[:3], 200))
+    d.pieslice((cx - 14, cy - 14, cx + 14, cy + 14), start=120, end=240, fill=(*C_CYAN[:3], 200))
+    d.pieslice((cx - 14, cy - 14, cx + 14, cy + 14), start=240, end=360, fill=(90, 200, 120, 200))
+    d.ellipse((cx - 6, cy - 6, cx + 6, cy + 6), fill=C_STROKE)
+    return img
+
+
+def icon_browser_edge() -> Image.Image:
+    img = blank_cell()
+    glass_back(img, (16, 36, 58, 220))
+    d = ImageDraw.Draw(img)
+    d.pieslice((12, 14, CELL - 12, CELL - 14), start=30, end=210, fill=(*C_CYAN[:3], 210), outline=C_STROKE, width=2)
+    d.polygon([(32, 20), (48, 32), (32, 44)], fill=C_STROKE)
+    return img
+
+
 def icon_display() -> Image.Image:
     img = blank_cell()
     glass_back(img, (22, 18, 48, 220))
@@ -279,6 +322,10 @@ ICON_SLOTS: list[tuple[str, callable]] = [
     ("desktop", icon_desktop),
     ("display", icon_display),
     ("ammotext", icon_ammotext),
+    ("monitor", icon_monitor),
+    ("browser_firefox", icon_browser_firefox),
+    ("browser_chrome", icon_browser_chrome),
+    ("browser_edge", icon_browser_edge),
 ]
 
 

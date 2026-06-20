@@ -162,8 +162,12 @@ def install(force: bool = False) -> int:
     run_py("ammo_format.py", str(HD))
 
     shutil.copy2(AMMO_DIR / "COMMAND.COM", COMMAND)
-    shutil.copy2(HD, DOS_DIR / HD_IMAGE)
-    shutil.copy2(FLOPPY, DOS_DIR / FLOPPY_IMAGE)
+    hd_dst = DOS_DIR / HD_IMAGE
+    floppy_dst = DOS_DIR / FLOPPY_IMAGE
+    if HD.resolve() != hd_dst.resolve():
+        shutil.copy2(HD, hd_dst)
+    if FLOPPY.resolve() != floppy_dst.resolve():
+        shutil.copy2(FLOPPY, floppy_dst)
 
     run_py("install_rtx_windows.py")
 

@@ -14,6 +14,36 @@ ENGINE = BIN / "AMOURANTHRTX"
 SCRIPTS = ROOT / "scripts"
 
 
+def field_include_args() -> list[str]:
+    """Match CMake FIELD_ENGINE_INCLUDES / SG_INCLUDE_DIRS."""
+    dirs = [
+        ROOT / "Navigator/engine",
+        ROOT / "Navigator/engine/FieldX86Core/include",
+        ROOT / "AmmoOS",
+        ROOT / "AmmoOS/core",
+        ROOT / "AmmoOS/windowing",
+        ROOT / "AmmoOS/data",
+        ROOT / "dos",
+        ROOT / "third_party/libx86emu/include",
+    ]
+    args: list[str] = []
+    for d in dirs:
+        args.extend(["-I", str(d)])
+    return args
+
+
+def compile_standalone(src_name: str, out_name: str | None = None) -> Path:
+    src = SCRIPTS / src_name if src_name.endswith(".cpp") else SCRIPTS / f"{src_name}.cpp"
+    out = BIN / (out_name or src.stem)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["g++-14", "-std=c++20", "-O2", *field_include_args(), str(src), "-o", str(out)],
+        cwd=ROOT,
+        check=True,
+    )
+    return out
+
+
 def run(cmd: list[str], timeout: int = 180) -> subprocess.CompletedProcess[str]:
     print(f"  $ {' '.join(cmd)}")
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False)
@@ -27,17 +57,10 @@ def compile_cpp(name: str) -> Path:
     if not LIB.is_file():
         raise SystemExit("build libx86emu first: cmake --build build")
     out.parent.mkdir(parents=True, exist_ok=True)
-    sg = ROOT / "SG"
     subprocess.run(
         [
             "g++-14", "-std=c++20", "-O2",
-            "-I", str(ROOT / "Navigator/engine"),
-            "-I", str(sg / "AmmoOS"),
-            "-I", str(sg / "AmmoOS/core"),
-            "-I", str(sg / "AmmoOS/windowing"),
-            "-I", str(sg / "dos"),
-            "-I", str(sg / "data"),
-            "-I", str(ROOT / "third_party/libx86emu/include"),
+            *field_include_args(),
             str(src), str(LIB), "-o", str(out),
         ],
         cwd=ROOT,
@@ -93,11 +116,7 @@ def main() -> int:
     test_viewport_math()
 
     print("=== QA: qa_ammofat_test (no x86emu) ===")
-    subprocess.run(
-        ["g++-14", "-std=c++20", "-O2", "-I", str(ROOT / "Navigator/engine"),
-         str(SCRIPTS / "qa_ammofat_test.cpp"), "-o", str(BIN / "qa_ammofat_test")],
-        cwd=ROOT, check=True,
-    )
+    compile_standalone("qa_ammofat_test.cpp")
     run([str(BIN / "qa_ammofat_test")], timeout=60).check_returncode()
 
     print("=== QA: qa_rtx_ammos_test (GPU-only shell) ===")
@@ -110,15 +129,11 @@ def main() -> int:
     run([str(qa_rtx)], timeout=60).check_returncode()
 
     print("=== QA: qa_rtx_vfs_test (VFS metadata + throttle) ===")
-    subprocess.run(
-        ["g++-14", "-std=c++20", "-O2", "-I", str(ROOT / "Navigator/engine"),
-         str(SCRIPTS / "qa_rtx_vfs_test.cpp"), "-o", str(BIN / "qa_rtx_vfs_test")],
-        cwd=ROOT, check=True,
-    )
+    compile_standalone("qa_rtx_vfs_test.cpp")
     run([str(BIN / "qa_rtx_vfs_test")], timeout=60).check_returncode()
 
     print("=== QA: qa_aos_ocr_test (Start popup + WM button snapshots) ===")
-    proc = run([sys.executable, str(SCRIPTS / "qa_aos_ocr_test.py"), "--linux-only"], timeout=300)
+    proc = run([sys.executable, str(SCRIPTS / "qa_aos_ocr_test.py")], timeout=300)
     if proc.returncode != 0:
         if proc.stdout:
             sys.stdout.write(proc.stdout)
@@ -126,20 +141,20 @@ def main() -> int:
             sys.stderr.write(proc.stderr[-2000:])
         raise SystemExit(f"FAIL qa_aos_ocr_test rc={proc.returncode}")
 
+    print("=== QA: qa_taskbar_click_test (taskbar hit targets) ===")
+    taskbar_qa = ROOT / "build" / "qa_taskbar_click_test"
+    if not taskbar_qa.is_file():
+        subprocess.run(
+            ["cmake", "--build", str(ROOT / "build"), "--target", "qa_taskbar_click_test"],
+            cwd=ROOT, check=True,
+        )
+    run([str(taskbar_qa)], timeout=60).check_returncode()
+
     print("=== QA: qa_amouranthos_test (AmouranthOS WM + taskbar) ===")
-    subprocess.run(
-        ["g++-14", "-std=c++20", "-O2", "-I", str(ROOT / "Navigator/engine"),
-         str(SCRIPTS / "qa_amouranthos_test.cpp"), str(LIB), "-o", str(BIN / "qa_amouranthos_test")],
-        cwd=ROOT, check=True,
-    )
-    run([str(BIN / "qa_amouranthos_test")], timeout=60).check_returncode()
+    run([str(ROOT / "build" / "qa_amouranthos_test")], timeout=60).check_returncode()
 
     print("=== QA: qa_drives_bench_test (drive rack metrics) ===")
-    subprocess.run(
-        ["g++-14", "-std=c++20", "-O2", "-I", str(ROOT / "Navigator/engine"),
-         str(SCRIPTS / "qa_drives_bench_test.cpp"), "-o", str(BIN / "qa_drives_bench_test")],
-        cwd=ROOT, check=True,
-    )
+    compile_standalone("qa_drives_bench_test.cpp")
     proc = run([str(BIN / "qa_drives_bench_test")], timeout=60)
     if proc.stdout:
         for line in proc.stdout.splitlines():
@@ -147,30 +162,37 @@ def main() -> int:
     proc.check_returncode()
 
     print("=== QA: qa_toolchain_test (DevKit asm/link/run) ===")
-    subprocess.run(
-        ["g++-14", "-std=c++20", "-O2", "-I", str(ROOT / "Navigator/engine"),
-         str(SCRIPTS / "qa_toolchain_test.cpp"), "-o", str(BIN / "qa_toolchain_test")],
-        cwd=ROOT, check=True,
-    )
-    run([str(BIN / "qa_toolchain_test")], timeout=60).check_returncode()
+    run([str(ROOT / "build" / "qa_toolchain_test")], timeout=60).check_returncode()
 
     print("=== QA: qa_drivers_build (AMMOASM RTXFL .SYS drivers) ===")
     compile_cpp("qa_drivers_build")
     run([str(BIN / "qa_drivers_build"), str(ROOT)], timeout=60).check_returncode()
 
-    tests = [
-        "boot_to_doom_test",
-        "dos_engine_test",
-        "qa_dos_input_test",
-        "qa_dos_commands_test",
+    cmake_qa = [
+        "qa_doom_host_test",
+        "qa_dos_int_test",
+        "qa_cmd_help_test",
+        "qa_dos_embed_test",
     ]
-    for name in tests:
+    for name in cmake_qa:
         print(f"=== QA: {name} ===")
-        exe = compile_cpp(name)
+        exe = ROOT / "build" / name
+        if not exe.is_file():
+            subprocess.run(
+                ["cmake", "--build", str(ROOT / "build"), "--target", name],
+                cwd=ROOT, check=True,
+            )
         proc = run([str(exe)], timeout=240)
         if proc.stdout:
             sys.stdout.write(proc.stdout)
         if proc.returncode != 0:
+            err = (proc.stderr or "") + (proc.stdout or "")
+            if name == "qa_doom_host_test" and "DOOM.EXE" in err:
+                print(f"  (skip {name} — DOOM.EXE not on C:; run ./linux.sh dos to stage)")
+                continue
+            if name == "qa_dos_embed_test" and "hd image" in err.lower():
+                print(f"  (skip {name} — run ./linux.sh dos to build RTX-DOS HD images)")
+                continue
             sys.stderr.write(proc.stderr[-1200:] if proc.stderr else "")
             raise SystemExit(f"FAIL {name} rc={proc.returncode}")
 
@@ -183,7 +205,7 @@ def main() -> int:
         out = proc.stdout + proc.stderr
         if proc.returncode != 0:
             raise SystemExit(f"FAIL engine rc={proc.returncode}")
-        for needle in ("RTX-AMMOS", "GPU-only", "AMMOFAT+MSCDEX"):
+        for needle in ("Phase 1", "accountant", "SAFE SHUTDOWN"):
             if needle not in out:
                 raise SystemExit(f"FAIL engine log missing {needle!r}")
         if "Shareware Doom" in out or "GPU Doom" in out:

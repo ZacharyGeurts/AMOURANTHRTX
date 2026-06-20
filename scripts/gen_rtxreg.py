@@ -15,8 +15,10 @@ if not EXTMAP.is_file():
 SECTIONS: dict[str, dict[str, str]] = {
     r"HKRTX\Machine\Memory": {
         "ReportedRamGB": "4",
-        "GuestFastMB": "64",
-        "ConventionalKB": "640",
+        "GuestFastMB": "1",
+        "BootConventionalKB": "512",
+        "ConventionalKB": "512",
+        "MaxConventionalKB": "640",
     },
     r"HKRTX\Machine\Storage": {
         "HdLogicalGB": "4",
