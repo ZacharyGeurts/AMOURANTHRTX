@@ -19,13 +19,18 @@ layout(binding = 13, rgba8) uniform readonly image2D aosStartTex;
 THEME_START = "ThemePal loadTheme(uint id) {"
 THEME_END = "uint themeIdFromControl()"
 
-AOS_START = "float aosUiScale(vec2 img) {"
-AOS_END = "vec3 renderHudFrac(vec2 panelPos"
+AOS_START = "vec2 aosViewport(vec2 storageImg) {"
+AOS_END = "void main()"
+
+INK_CONST = (
+    "const vec3 AOS_INK_BLACK = vec3(0.02, 0.02, 0.03);\n"
+    "const vec3 AOS_INK_TASKBAR = vec3(0.94, 0.90, 0.98);\n\n"
+)
 
 WM_START = "vec4 sampleAosIconRgba(uint slot, vec2 uv) {"
 WM_END = "vec3 rtxDosViewportColor(vec2 pix"
 
-RENDER_HOOK = """    if ((field.control & CTRL_RTXDOS) != 0u) {
+RENDER_HOOK = """    if (aosChromeActive()) {
         vec3 aos = amouranthOsBackdrop(panelPos, vec2(img), theme);
         if (aos.x >= 0.0)
             return finishHudColor(aos, panelPos, vec2(img), hud.puv, t, theme, hoverSec);
@@ -33,10 +38,10 @@ RENDER_HOOK = """    if ((field.control & CTRL_RTXDOS) != 0u) {
 """
 
 RAM_CONST_OLD = """const uint AOS_MENU_RAM = 0x000B8E00u;
-const uint AOS_MENU_FLYOUT_OFF = 0x10u + 24u * 96u;
-const uint AOS_MENU_ROW_STRIDE = 96u;
+const uint AOS_MENU_FLYOUT_OFF = 0x10u + 24u * 112u;
+const uint AOS_MENU_ROW_STRIDE = 112u;
 const uint AOS_MENU_LABEL_LEN = 36u;
-const uint AOS_MENU_DESC_LEN = 56u;
+const uint AOS_MENU_DESC_LEN = 72u;
 // Materials.hpp chrome indices
 const uint AOS_MAT_FRAME  = 37u;
 const uint AOS_MAT_TITLE  = 38u;
@@ -46,15 +51,18 @@ const uint AOS_TASKBAR_RAM = 0x000B92300u;
 const uint AOS_FOOTER_RAM = 0x000B8FA00u;"""
 
 RAM_CONST_NEW = """const uint AOS_MENU_RAM = 0x000B9100u;
-const uint AOS_MENU_FLYOUT_OFF = 0x10u + 24u * 96u;
-const uint AOS_MENU_ROW_STRIDE = 96u;
+const uint AOS_MENU_FLYOUT_OFF = 0x10u + 24u * 112u;
+const uint AOS_MENU_ROW_STRIDE = 112u;
 const uint AOS_MENU_LABEL_LEN = 36u;
-const uint AOS_MENU_DESC_LEN = 56u;
+const uint AOS_MENU_DESC_LEN = 72u;
 // Materials.hpp chrome indices
 const uint AOS_MAT_FRAME  = 37u;
 const uint AOS_MAT_TITLE  = 38u;
 const uint AOS_MAT_ACCENT = 1u;
 const uint AOS_MAT_PANEL  = 36u;
+const uint AOS_FILES_MENU_RAM = 0x000BA010u;
+const uint AOS_FILES_ROW_STRIDE = 24u;
+const uint AOS_FILES_LABEL_LEN = 8u;
 const uint AOS_TASKBAR_RAM = 0x000BA400u;
 const uint AOS_FOOTER_RAM = 0x000BA600u;"""
 
@@ -66,7 +74,17 @@ RENDER_HOOK_OLD = """    if ((field.control & CTRL_RTXDOS) != 0u) {
 """
 
 THEME_ID_OLD = "uint themeIdFromControl() { return (field.control >> 8u) & 7u; }"
-THEME_ID_NEW = "uint themeIdFromControl() { return 0u; }"
+
+SDF_INCLUDE = '#include "aos_sdf.inc"'
+SDF_ROUND_OLD = """float sdRoundBox(vec2 p, vec2 halfSize, float radius) {
+    vec2 q = abs(p) - halfSize + radius;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}"""
+SDF_ROUND_NEW = """#include "aos_sdf.inc"
+#include "aos_sdf_wm.inc"
+float sdRoundBox(vec2 p, vec2 halfSize, float radius) {
+    return aosSdRoundBox(p, halfSize, radius);
+}"""
 
 
 def extract(src: str, start: str, end: str) -> str:
@@ -100,6 +118,35 @@ def dedup_pre_rtx_dos(canvas: str) -> str:
     return canvas
 
 
+def ensure_sdf_include(canvas: str) -> str:
+    wm_inc = '#include "aos_sdf_wm.inc"'
+    if SDF_INCLUDE in canvas and wm_inc not in canvas:
+        canvas = canvas.replace(SDF_INCLUDE, SDF_INCLUDE + "\n" + wm_inc, 1)
+    if SDF_INCLUDE in canvas:
+        return canvas
+    if SDF_ROUND_OLD in canvas:
+        return canvas.replace(SDF_ROUND_OLD, SDF_ROUND_NEW, 1)
+    if "float sdRoundBox(vec2 p, vec2 halfSize, float radius) {" in canvas:
+        return canvas.replace(
+            "float sdRoundBox(vec2 p, vec2 halfSize, float radius) {",
+            SDF_ROUND_NEW + "\n",
+            1,
+        )
+    raise SystemExit("sdRoundBox block not found in CANVAS — cannot inject aos_sdf.inc")
+
+
+def ensure_doom_title_h(canvas: str) -> str:
+    old = "        titleH = 22.0 * max(img.x / 1920.0, 0.65);"
+    new = "        titleH = rtxWmTitleH(img);"
+    if old in canvas:
+        canvas = canvas.replace(old, new, 1)
+    marker = "DoomViewport doomViewportMap(vec2 pix, vec2 img) {"
+    fwd = "float rtxWmTitleH(vec2 img);\n\n"
+    if marker in canvas and fwd not in canvas:
+        canvas = canvas.replace(marker, fwd + marker, 1)
+    return canvas
+
+
 def strip_block(canvas: str, start: str, end: str) -> str:
     while start in canvas:
         i = canvas.find(start)
@@ -120,14 +167,28 @@ def main() -> None:
     theme = extract(x86, THEME_START, THEME_END)
     canvas = patch_theme(canvas, theme)
 
+    if "AOS_INK_TASKBAR" not in canvas:
+        if "AOS_INK_BLACK" in canvas:
+            canvas = canvas.replace(
+                "const vec3 AOS_INK_BLACK = vec3(0.02, 0.02, 0.03);\n",
+                INK_CONST,
+                1,
+            )
+        else:
+            canvas = canvas.replace(
+                "vec3 mixHudInk(vec3 base, float ink, float border, vec3 fg) {",
+                INK_CONST + "vec3 mixHudInk(vec3 base, float ink, float border, vec3 fg) {",
+                1,
+            )
+
     aos = extract(x86, AOS_START, AOS_END)
     wm = extract(x86, WM_START, WM_END)
 
-    canvas = strip_block(canvas, AOS_START, "vec3 renderHudFrac(vec2 panelPos")
+    canvas = strip_block(canvas, AOS_START, "void main()")
     for legacy in ("vec3 amouranthOsChrome(vec2 pix", "vec3 amouranthOsBackdrop(vec2 pix",
                    "vec3 amouranthOsOverlay(vec2 pix", "vec3 aosLayerChrome(vec3 base",
                    "vec3 finishHudColor(vec3 color", "vec3 aosStartButtonPanel(vec2 pix"):
-        canvas = strip_block(canvas, legacy, "vec3 renderHudFrac(vec2 panelPos")
+        canvas = strip_block(canvas, legacy, "void main()")
     for wm_mark in (WM_START, "vec3 sampleAosStart(vec2 uv) {", "float rtxWmTitleH(vec2 img) {"):
         canvas = strip_block(canvas, wm_mark, "vec3 rtxDosViewportColor(vec2 pix")
 
@@ -138,8 +199,21 @@ def main() -> None:
         canvas = canvas[:wm_at] + wm + canvas[wm_at:]
     canvas = dedup_pre_rtx_dos(canvas)
 
-    insert_at = canvas.find("vec3 renderHudFrac(vec2 panelPos")
+    insert_at = canvas.find("void main()")
+    if insert_at < 0:
+        raise SystemExit("void main() not found in CANVAS")
     canvas = canvas[:insert_at] + aos + canvas[insert_at:]
+
+    FS_OLD = """    float mouse_x;  // framebuffer UV 0..1, <0 = no loupe
+    float mouse_y;
+} field;"""
+    FS_NEW = """    float mouse_x;  // framebuffer UV 0..1, <0 = no loupe
+    float mouse_y;
+    float viewport_w;  // dispatched framebuffer width (may differ from storage image)
+    float viewport_h;  // dispatched framebuffer height — taskbar anchors here
+} field;"""
+    if FS_OLD in canvas:
+        canvas = canvas.replace(FS_OLD, FS_NEW, 1)
 
     if RENDER_HOOK.strip() not in canvas:
         if RENDER_HOOK_OLD.strip() in canvas:
@@ -199,10 +273,36 @@ def main() -> None:
         canvas = canvas.replace(old_fd, new_fd)
 
     if THEME_ID_OLD in canvas:
-        canvas = canvas.replace(THEME_ID_OLD, THEME_ID_NEW, 1)
+        theme_id = extract(x86, "uint themeIdFromControl()", "bool rtxOverlayOn()")
+        canvas = canvas.replace(THEME_ID_OLD, theme_id, 1)
+
+    canvas = ensure_sdf_include(canvas)
+    canvas = ensure_doom_title_h(canvas)
+
+    quick_const = (
+        "const float AOS_START_BTN_W = 156.0;\n"
+        "const float AOS_FOLDER_BTN_W = 44.0;\n"
+        "const float AOS_QUICK_BTN_W = 44.0;\n"
+        "const int AOS_QUICK_LAUNCH_N = 4;"
+    )
+    if "AOS_QUICK_LAUNCH_N" not in canvas and "const float AOS_FOLDER_BTN_W = 44.0;" in canvas:
+        canvas = canvas.replace(
+            "const float AOS_START_BTN_W = 156.0;\nconst float AOS_FOLDER_BTN_W = 44.0;",
+            quick_const,
+            1,
+        )
 
     if RAM_CONST_OLD in canvas:
         canvas = canvas.replace(RAM_CONST_OLD, RAM_CONST_NEW, 1)
+    elif "AOS_FILES_MENU_RAM" not in canvas and "const uint AOS_TASKBAR_RAM = 0x000BA400u;" in canvas:
+        canvas = canvas.replace(
+            "const uint AOS_TASKBAR_RAM = 0x000BA400u;",
+            """const uint AOS_FILES_MENU_RAM = 0x000BA010u;
+const uint AOS_FILES_ROW_STRIDE = 24u;
+const uint AOS_FILES_LABEL_LEN = 8u;
+const uint AOS_TASKBAR_RAM = 0x000BA400u;""",
+            1,
+        )
 
     ammo_block = """        if (isAmmoBoxCell(cell_y, cell_x)) {
             vec3 ammo = ammoBoxViz(sampleLp, t, theme);

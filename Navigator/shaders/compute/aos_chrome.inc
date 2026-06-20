@@ -551,7 +551,7 @@ vec3 aosFilesMenu(vec2 pix, vec2 img, float taskH, ThemePal th) {
     float hy = panelTop + 9.0 * scale;
     col = mixHudInk(col,
         dosHudRunGeom(pix, hx, hy, cell, 70u, 105u, 108u, 101u, 115u, 32u, 32u, 32u),
-        dosHudRunBorder(pix, hx, hy, cell, 70u, 105u, 108u, 101u, 115u, 32u, 32u, 32u),
+        dosHudRunBorder(pix, hx, hy, cell, 70u, 105u, 108u, 101u, 114u, 32u, 32u, 32u),
         AOS_INK_BLACK);
 
     uint hoverIdx = ramByte(AOS_FILES_MENU_RAM + 1u);
