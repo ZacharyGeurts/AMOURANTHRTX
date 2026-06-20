@@ -505,3 +505,521 @@ inline void clearStaleGuestFlags() noexcept {
             && !FieldGenesis::active && !FieldSnes::active)
         FieldEmuFileDialog::close();
 }
+
+inline void captureSnapshotFor(AppId app, char* buf, int cap) noexcept {
+    FieldAosAppSnapshot::capture(
+        FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(app)), buf, cap);
+}
+
+inline void persistOpenSession() noexcept {
+    if (programs.empty()) return;
+    FieldAosAppIdentity::AppId apps[FieldAosAppIdentity::MAX_TABS]{};
+    const char* snaps[FieldAosAppIdentity::MAX_TABS]{};
+    char snapBuf[FieldAosAppIdentity::MAX_TABS][FieldAosAppJournal::SNAPSHOT_LEN + 1]{};
+    int n = 0;
+    for (const auto& p : programs) {
+        if (!p.running || n >= FieldAosAppIdentity::MAX_TABS) continue;
+        apps[n] = FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app));
+        captureSnapshotFor(p.app, snapBuf[n], FieldAosAppJournal::SNAPSHOT_LEN + 1);
+        snaps[n] = snapBuf[n];
+        ++n;
+    }
+    FieldAosAppJournal::saveSession(apps, snaps, n,
+        FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(focusedApp)));
+}
+
+inline void focusProgram(int progId, bool restoreContent = true) noexcept {
+    if (progId <= 0) return;
+    const int prevId = focusedProgId;
+    if (prevId > 0 && prevId != progId)
+        saveFocusedPanelPos();
+    focusedProgId = progId;
+    for (auto& p : programs) {
+        if (p.id == progId) {
+            focusedApp = p.app;
+            p.minimized = false;
+            applyAppViewport(p.app);
+            if (p.panelOx < 0.f)
+                placeNewWindow(p);
+            applyProgramPanel(p);
+            panelVisible = true;
+            needsProgramCanvas = true;
+            FieldAosAppJournal::recordFocus(progId,
+                FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)),
+                p.title);
+            char snap[FieldAosAppJournal::SNAPSHOT_LEN + 1]{};
+            captureSnapshotFor(p.app, snap, static_cast<int>(sizeof snap));
+            if (snap[0] && !FieldAosAppJournal::restoringSession) {
+                FieldAosAppJournal::recordSnapshot(progId,
+                    FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)),
+                    p.title, snap);
+            }
+            break;
+        }
+    }
+    if (prevId != progId)
+        clearStaleGuestFlags();
+    FieldAmouranthWm::openMenu = FieldAmouranthWm::OpenMenu::None;
+    FieldAmouranthWm::menuItemHover = -1;
+    FieldAmouranthWm::raiseFocusedProgram();
+    if (restoreContent && focusedApp != AppId::None) {
+        bool openOpts = false;
+        if (Program* fp = findProgram(progId))
+            openOpts = fp->openOptionsOnRestore;
+        if (focusedApp == AppId::Shell && consoleShell)
+            FieldAmouranthLaunch::queueDosConsole(0);
+        else
+            FieldAmouranthLaunch::queueGui(guiAppFor(focusedApp), false, 0, openOpts);
+        if (Program* fp = findProgram(progId))
+            fp->openOptionsOnRestore = false;
+    }
+}
+
+inline Program& appendRestoredTab(AppId app) noexcept {
+    Program pr;
+    pr.id = nextProgId++;
+    pr.app = app;
+    pr.icon = appIcon(app);
+    pr.tooltip = appTooltip(app);
+    int same = 0;
+    for (const auto& p : programs)
+        if (p.app == app && p.running) ++same;
+    if (same > 0)
+        std::snprintf(pr.titleBuf, sizeof pr.titleBuf, "%s #%d", appTitle(app), same + 1);
+    else
+        std::snprintf(pr.titleBuf, sizeof pr.titleBuf, "%s", appTitle(app));
+    pr.title = pr.titleBuf;
+    pr.running = true;
+    pr.minimized = true;
+    pr.panelOx = -1.f;
+    pr.panelOy = -1.f;
+    programs.push_back(pr);
+    return programs.back();
+}
+
+inline Program& openNewWindow(AppId app) noexcept {
+    Program pr;
+    pr.id = nextProgId++;
+    pr.app = app;
+    pr.icon = appIcon(app);
+    pr.tooltip = appTooltip(app);
+    int same = 0;
+    for (const auto& p : programs)
+        if (p.app == app && p.running) ++same;
+    if (same > 0)
+        std::snprintf(pr.titleBuf, sizeof pr.titleBuf, "%s #%d", appTitle(app), same + 1);
+    else
+        std::snprintf(pr.titleBuf, sizeof pr.titleBuf, "%s", appTitle(app));
+    pr.title = pr.titleBuf;
+    pr.running = true;
+    pr.minimized = false;
+    programs.push_back(pr);
+    applyAppViewport(app);
+    if (consoleShell) {
+        FieldDosViewport::panelStretch = true;
+        Options::Canvas::DosPanelStretch = true;
+        Options::Canvas::ControlFlags |= Options::Canvas::ControlDosPanelStretch;
+        FieldDosViewport::panelOx = 0.f;
+        FieldDosViewport::panelOy = 0.f;
+        FieldDosViewport::panelPositioned = true;
+    } else {
+        FieldWmShell::applyCompactViewport();
+        placeNewWindow(programs.back());
+        applyProgramPanel(programs.back());
+    }
+    FieldWmShell::ensureWindowOpen();
+    focusProgram(programs.back().id, true);
+    FieldAosAppJournal::recordOpen(programs.back().id,
+        FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(app)),
+        programs.back().title);
+    panelVisible = true;
+    needsProgramCanvas = true;
+    infoPanelVisible = false;
+    FieldAmouranthInfo::visible = false;
+    pendingEmptyPanel = false;
+    Options::Canvas::DosInputFocused = true;
+    FieldAmouranthWm::raiseFocusedProgram();
+    growMemoryForApp(app);
+    return programs.back();
+}
+
+inline float desktopTopInset() noexcept {
+    return 0.f;
+}
+
+inline void showDosPanelDocked() noexcept {
+    if (focusedProgId > 0) {
+        if (Program* p = findProgram(focusedProgId)) {
+            if (p->panelOx < 0.f) placeNewWindow(*p);
+            applyProgramPanel(*p);
+        }
+    } else if (!programs.empty()) {
+        Program& pr = programs.back();
+        if (pr.panelOx < 0.f) placeNewWindow(pr);
+        applyProgramPanel(pr);
+    }
+    FieldDosViewport::panelStretch = false;
+    Options::Canvas::DosPanelStretch = false;
+    Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
+    FieldAmouranthWm::applyPanelScale();
+    panelVisible = true;
+    needsProgramCanvas = true;
+    infoPanelVisible = false;
+    FieldAmouranthInfo::visible = false;
+    Options::Canvas::DosInputFocused = true;
+}
+
+inline void removeProgramById(int progId) noexcept {
+    programs.erase(std::remove_if(programs.begin(), programs.end(),
+        [&](const Program& p) { return p.id == progId; }), programs.end());
+    ++FieldAmouranthWm::stackRevision;
+}
+
+inline void removeTopProgram() noexcept {
+    const int closedId = focusedProgId;
+    if (Program* p = findProgram(closedId)) {
+        FieldAosAppJournal::recordClose(p->id,
+            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)),
+            p.title);
+    }
+    if (closedId > 0)
+        removeProgramById(closedId);
+    else if (!programs.empty())
+        programs.pop_back();
+    focusedProgId = 0;
+    focusedApp = AppId::None;
+    if (!programs.empty())
+        focusProgram(programs.back().id);
+    else
+        FieldAosAppJournal::saveSession(nullptr, nullptr, 0, FieldAosAppIdentity::AppId::None);
+}
+
+inline void markFocusedMinimized() noexcept {
+    if (Program* p = findProgram(focusedProgId)) {
+        FieldAosAppJournal::recordMinimize(p->id,
+            FieldAosAppIdentity::fromOsApp(static_cast<std::uint8_t>(p.app)),
+            p.title);
+        p->minimized = true;
+    }
+}
+
+inline AppId remapRestoredApp(AppId app, bool& openOptions) noexcept {
+    openOptions = false;
+    switch (app) {
+    case AppId::NesSetup:     openOptions = true; return AppId::Nes;
+    case AppId::A2600Setup:   openOptions = true; return AppId::A2600;
+    case AppId::SmsSetup:     openOptions = true; return AppId::Sms;
+    case AppId::GenesisSetup: openOptions = true; return AppId::Genesis;
+    case AppId::SnesSetup:    openOptions = true; return AppId::Snes;
+    default: return app;
+    }
+}
+
+inline AppId appFromJournal(FieldAosAppIdentity::AppId app) noexcept {
+    return static_cast<AppId>(static_cast<std::uint8_t>(app));
+}
+
+inline void restoreSessionFromJournal() noexcept {
+    FieldAosAppJournal::loadConfigFromRegistry();
+    if (!FieldAosAppJournal::restoreEnabled()) return;
+    const FieldAosAppJournal::SessionPlan plan = FieldAosAppJournal::lastSession();
+    if (!plan.valid) return;
+
+    // Only restore the last focused app — not every entry in the journal strip.
+    int restoreIdx = -1;
+    if (plan.focusApp != FieldAosAppIdentity::AppId::None) {
+        for (int i = 0; i < plan.count; ++i) {
+            if (plan.apps[i] == plan.focusApp) {
+                restoreIdx = i;
+                break;
+            }
+        }
+    }
+    if (restoreIdx < 0) return;
+
+    FieldAosAppJournal::restoringSession = true;
+    AppId app = appFromJournal(plan.apps[restoreIdx]);
+    if (app == AppId::None || app == AppId::Vscodium) {
+        FieldAosAppJournal::restoringSession = false;
+        return;
+    }
+    bool wantOpts = false;
+    app = remapRestoredApp(app, wantOpts);
+    if (plan.snapshots[restoreIdx][0])
+        FieldAosAppJournal::setAppSnapshot(plan.apps[restoreIdx], plan.snapshots[restoreIdx]);
+    Program& pr = appendRestoredTab(app);
+    if (wantOpts)
+        pr.openOptionsOnRestore = true;
+    FieldAmouranthLaunch::clear();
+    focusedProgId = 0;
+    focusedApp = AppId::None;
+    panelVisible = false;
+    pendingEmptyPanel = false;
+    hideDosPanel();
+    FieldAosAppJournal::restoringSession = false;
+    FieldAosAppIdentity::AppId apps[1]{ plan.apps[restoreIdx] };
+    const char* snaps[1]{ plan.snapshots[restoreIdx][0] ? plan.snapshots[restoreIdx] : "" };
+    FieldAosAppJournal::saveSession(apps, snaps, 1, plan.apps[restoreIdx]);
+    std::fprintf(stderr,
+        "[AMOURANTHOS] Session journal — restored %s on taskbar (click to open)\n",
+        pr.title);
+}
+
+inline void syncDesktopState() noexcept {
+    if (qaHoldInfoDesktop) return;
+    if (!active && !consoleShell) return;
+    if (guestAppRunning() && panelVisible) return;
+    if (focusedProgId > 0 && panelVisible) return;
+    if (focusedProgId > 0) {
+        if (Program* p = findProgram(focusedProgId)) {
+            if (!p->minimized) {
+                if (p->panelOx < 0.f) placeNewWindow(*p);
+                applyProgramPanel(*p);
+                panelVisible = true;
+                needsProgramCanvas = true;
+                return;
+            }
+        }
+    }
+    if (needsProgramCanvas) return;
+    hideDosPanel();
+}
+
+inline bool launchVscodium() noexcept {
+    const char* bins[] = { "codium", "code", nullptr };
+    for (const char* b : bins) {
+        char probe[128];
+        std::snprintf(probe, sizeof probe, "command -v %s >/dev/null 2>&1", b);
+        const int probeRc = std::system(probe);
+        if (probeRc == 0) {
+            char run[160];
+            std::snprintf(run, sizeof run, "%s . >/dev/null 2>&1 &", b);
+            const int runRc = std::system(run);
+            (void)runRc;
+            openNewWindow(AppId::Vscodium);
+            return true;
+        }
+    }
+    std::fprintf(stderr, "[AMOURANTHOS] VSCodium/Code not on PATH\n");
+    return false;
+}
+
+inline void launchDosConsole() noexcept {
+    FieldAosAppJournal::recordAction(FieldAosAppIdentity::AppId::Shell,
+        "RTX Shell", "DOS command console");
+    FieldAmouranthLaunch::queueDosConsole();
+    showDosPanelDocked();
+}
+
+inline bool init(SDL_Window* window) noexcept {
+    hostWindow = window;
+    return true;
+}
+
+inline void shutdown() noexcept { deactivate(); }
+
+inline bool shellChromeActive() noexcept { return active || consoleShell; }
+
+inline void packStartLabel(std::uint8_t* ram) noexcept {
+    if (!ram) return;
+    const char* label = "Start";
+    const std::uint32_t base = FieldAmouranthHudRam::TASKBAR_RAM
+        + FieldAmouranthHudRam::START_LABEL_OFF;
+    for (int i = 0; label[i]; ++i)
+        ram[base + static_cast<std::uint32_t>(i)] =
+            static_cast<std::uint8_t>(label[i]);
+    ram[base + 5u] = 0u;
+}
+
+inline bool forceTaskbarChromeClick = false;
+
+inline bool onMouseDown(SDL_Window* window, float lx, float ly, Uint8 button, Uint8 clicks) noexcept;
+inline void packChromeRam(std::uint8_t* ram) noexcept;
+
+inline void boot() noexcept {
+    active = true;
+    consoleShell = false;
+    Options::Canvas::DosInputFocused = false;
+    FieldRtxWidgets::g.clear();
+    startOpen = false;
+    programs.clear();
+    nextProgId = 1;
+    focusedApp = AppId::None;
+    focusedProgId = 0;
+    pendingEmptyPanel = false;
+    Options::AmouranthOs::EnableDesktop = true;
+    Options::AmouranthOs::EnableTaskbar = true;
+    Options::SDL3::StartFullscreen = true;
+    Options::SDL3::PendingFullscreenApply = true;
+    FieldDosViewport::panelStretch = false;
+    Options::Canvas::DosPanelStretch = false;
+    Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
+    infoPanelVisible = false;
+    FieldAmouranthInfo::visible = false;
+    panelVisible = false;
+    FieldAmouranthWm::resetScale();
+    FieldAmouranthDesktop::boot();
+    hideDosPanel();
+    FieldAmouranthDesktop::applyDisplayScale(FieldAmouranthDesktop::displayScale);
+    Options::Canvas::ColorTheme = 0u;
+    Options::Canvas::DosCrispFont = true;
+    FieldDosViewport::crispFont = true;
+    FieldDosViewport::subpixelFont = false;
+    FieldDosViewport::sharpen = 0.55f;
+    FieldDosViewport::scanlines = false;
+    FieldDosViewport::scanlineMix = 0.02f;
+    FieldDosViewport::panelGlow = 0.04f;
+    FieldRegistry::ensure();
+    FieldRegistry::applyMemoryConfig();
+    FieldRtxThemes::applyIndex(FieldAosAppJournal::themeIndexFromRegistry());
+    FieldRuntimeInfo::refresh();
+    FieldAmouranthInfo::tick();
+    FieldAmouranthMenu::rebuildVisible();
+    FieldAosAppJournal::loadConfigFromRegistry();
+    FieldAosAppJournal::loadFromVfs();
+    wallpaperIndex = 8u;
+    programs.clear();
+    focusedProgId = 0;
+    focusedApp = AppId::None;
+    panelVisible = false;
+    if (FieldAosAppJournal::restoreEnabled()
+            && FieldAosAppJournal::lastSession().valid) {
+        restoreSessionFromJournal();
+    } else {
+        FieldAosAppJournal::clearStartupTaskbar();
+    }
+    FieldAosAppJournal::bootStamp();
+    if (FieldX86Emu::ramHost) {
+        FieldAmouranthHudRam::clearRegion(FieldX86Emu::ramHost);
+        packChromeRam(FieldX86Emu::ramHost);
+    }
+    FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Shell, false, 0);
+    std::fprintf(stderr,
+        "[AMOURANTHOS] RTX desktop — %s | RTX Shell at boot | Start for more\n",
+        FieldRtxThemes::kPresets[static_cast<std::size_t>(FieldRtxThemes::activeIndex)].name);
+    std::fprintf(stderr,
+        "[AMOURANTHOS] Chrome build 2026-06-19s — instant aos_load desktop, x86 hotswap background\n");
+}
+
+inline void bootShell() noexcept { boot(); }
+
+inline void prepareExitConfirmUi() noexcept;
+inline void applyShutdownState() noexcept;
+
+inline void sanitizeVgaTail(std::uint8_t* ram) noexcept {
+    if (!ram) return;
+    constexpr std::uint32_t vga = 0x000B8000u;
+    for (int row = 22; row < 25; ++row) {
+        for (int col = 0; col < 80; ++col) {
+            const std::uint32_t off = vga + static_cast<std::uint32_t>((row * 80 + col) * 2);
+            ram[off] = ' ';
+            ram[off + 1u] = 0x07u;
+        }
+    }
+}
+
+inline void tick(int w, int h) noexcept {
+    if (!shellChromeActive()) return;
+    if (FieldDosChrome::chromeUsesRenderSpace()) {
+        winW = static_cast<int>(FieldDosViewport::renderW);
+        winH = static_cast<int>(FieldDosViewport::renderH);
+    } else {
+        winW = w;
+        winH = h;
+    }
+    FieldAmouranthInfo::tick();
+    FieldAmouranthDnD::tick();
+    syncDesktopState();
+}
+
+inline bool pointIn(float px, float py, float x, float y, float fw, float fh) noexcept {
+    return px >= x && py >= y && px < x + fw && py < y + fh;
+}
+
+// Match aosUiScale() in x86.comp — max(w/1920, 0.75) * 1.35.
+inline float chromeLayoutW() noexcept {
+    if (FieldDosChrome::chromeUsesRenderSpace()) return FieldDosViewport::renderW;
+    if (FieldDosViewport::winW > 0.f) return FieldDosViewport::winW;
+    return static_cast<float>(winW > 0 ? winW : 1920);
+}
+
+inline float chromeLayoutH() noexcept {
+    if (FieldDosChrome::chromeUsesRenderSpace()) return FieldDosViewport::renderH;
+    if (winH > 0) return static_cast<float>(winH);
+    if (FieldDosViewport::winH > 0.f) return FieldDosViewport::winH;
+    return 1080.f;
+}
+
+// Match shader aosViewport() when chrome is live-synced; else AmouranthOS win metrics.
+inline float chromeViewportW() noexcept {
+    if (FieldDosChrome::chromeUsesRenderSpace() && FieldDosViewport::renderW > 1.f)
+        return FieldDosViewport::renderW;
+    if (winW > 0) return static_cast<float>(winW);
+    if (FieldDosViewport::winW > 1.f) return FieldDosViewport::winW;
+    return 1920.f;
+}
+
+inline float chromeViewportH() noexcept {
+    if (FieldDosChrome::chromeUsesRenderSpace() && FieldDosViewport::renderH > 1.f)
+        return FieldDosViewport::renderH;
+    if (winH > 0) return static_cast<float>(winH);
+    if (FieldDosViewport::winH > 1.f) return FieldDosViewport::winH;
+    return 1080.f;
+}
+
+inline float uiScale() noexcept {
+    const float base = chromeViewportW() / 1920.f;
+    return std::max(base, 0.75f) * UI_BOOST;
+}
+
+inline float scaledTaskbarH() noexcept { return TASKBAR_H * uiScale(); }
+inline float scaledStartW() noexcept { return START_W * uiScale(); }
+inline float scaledFolderBtnW() noexcept { return FOLDER_BTN_W * uiScale(); }
+inline float scaledQuickBtnW() noexcept { return FOLDER_BTN_W * uiScale(); }
+inline float scaledQuickLaunchStripW() noexcept {
+    return static_cast<float>(QUICK_LAUNCH_N) * scaledQuickBtnW()
+        + static_cast<float>(QUICK_LAUNCH_N - 1) * 4.f * uiScale();
+}
+inline FieldTaskbarLayout::Layout taskbarLayout() noexcept {
+    return FieldTaskbarLayout::compute(chromeViewportW(), chromeViewportH(), uiScale());
+}
+
+inline float taskTabsOriginX() noexcept {
+    return taskbarLayout().tabX;
+}
+inline float quickLaunchX(int idx) noexcept {
+    return FieldTaskbarLayout::quickLaunchX(taskbarLayout(), idx);
+}
+inline float scaledTabW() noexcept { return TAB_W * uiScale(); }
+inline float scaledClockW() noexcept { return CLOCK_W * uiScale(); }
+inline float scaledMenuW() noexcept { return MENU_W * uiScale(); }
+inline float scaledMenuFlyoutW() noexcept { return MENU_FLYOUT_W * uiScale(); }
+inline float scaledMenuFlyoutGap() noexcept { return MENU_FLYOUT_GAP * uiScale(); }
+inline float scaledMenuRowH() noexcept { return MENU_ROW_H * uiScale(); }
+inline float scaledMenuHeaderH() noexcept { return MENU_HEADER_H * uiScale(); }
+inline float scaledMenuPad() noexcept { return MENU_PAD * uiScale(); }
+
+inline float scaledMenuTotalW() noexcept {
+    float w = scaledMenuW() + scaledMenuPad() * 2.f;
+    if (FieldAmouranthMenu::flyoutOpen() && !FieldAmouranthSearchFlyout::active())
+        w += scaledMenuFlyoutGap() + scaledMenuFlyoutW();
+    if (FieldAmouranthSearchFlyout::active())
+        w += FieldAmouranthSearchFlyout::gap(uiScale())
+            + FieldAmouranthSearchFlyout::panelW(uiScale());
+    return w;
+}
+
+inline float scaledSearchPanelLeft() noexcept {
+    float left = scaledMenuPad() + scaledMenuW() + scaledMenuPad();
+    if (FieldAmouranthMenu::flyoutOpen() && !FieldAmouranthSearchFlyout::active())
+        left += scaledMenuFlyoutGap() + scaledMenuFlyoutW();
+    return left + FieldAmouranthSearchFlyout::gap(uiScale());
+}
+
+inline float scaledSearchPanelTop() noexcept {
+    return FieldAmouranthSearchFlyout::panelTop(chromeLayoutH(), scaledTaskbarH(), uiScale());
+}
+
+inline float scaledSearchPanelW() noexcept {
+    return FieldAmouranthSearchFlyout::panelW(uiScale());
+}
