@@ -8,10 +8,7 @@
 
 ```
 NextGeneration/
-├── README.md                 Site entry (2 files at root)
-├── STRUCTURE.md              This file
-├── .gitignore
-│
+
 ├── assets/
 │   ├── heroes/               3 PNG — Issues 28–30 main covers
 │   ├── ads/                  7 PNG — Issues 70–75 (+ .gitkeep)
