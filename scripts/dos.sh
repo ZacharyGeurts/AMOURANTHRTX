@@ -55,6 +55,19 @@ main() {
     esac
 
     echo -e "${WHT}RTX-DOS 7.0 — Microsoft MS-DOS 4.0 MIT -> GPU Super DOSBox${RST}"
+
+    ensure_cmake_build() {
+        local build="$ROOT/build"
+        if [[ ! -f "$build/CMakeCache.txt" ]]; then
+            echo -e "${WHT}  cmake configure (first-time build dir)${RST}"
+            mkdir -p "$build"
+            cmake -S "$ROOT" -B "$build" -DCMAKE_BUILD_TYPE=Debug
+        fi
+        echo -e "${WHT}  cmake --build field_x86 qa_drivers_build${RST}"
+        cmake --build "$build" --target field_x86 qa_drivers_build -j"$(nproc 2>/dev/null || echo 4)"
+    }
+    ensure_cmake_build
+
     python3 "$ROOT/scripts/gen_rtx_font.py"
     python3 "$INSTALLER" "$@"
     echo -e "${GRN}Done.${RST} Run ${WHT}./linux.sh run${RST}"

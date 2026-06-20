@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AMOURANTHRTX
+GenericName=RTX Field Die Emulator
+Comment=AmouranthOS RTX desktop — DOS shell, games, and GPU field engine
+Exec=AMOURANTHRTX_BIN
+Icon=AMOURANTHRTX_ROOT/assets/textures/ammo.png
+Terminal=false
+Categories=Game;Emulator;Development;
+StartupWMClass=com.amouranth.rtx
+Keywords=amouranth;dos;rtx;emulator;amouros;

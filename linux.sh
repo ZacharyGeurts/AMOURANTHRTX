@@ -134,6 +134,7 @@ clean_all() {
     rm -rf "$BUILD_DIR" "$BUILD_RELEASE_DIR" "$CROSS_BUILD_DIR" "$WEB_BUILD_DIR" \
            CMakeCache.txt CMakeFiles .shader_hash_cache compile_commands.json \
            build-*/ CMakeFiles-*/ CMakeCache-*.txt
+    make -C "$PROJECT_ROOT/Navigator/shaders" clean 2>/dev/null || true
     
     echo -e "${GLOW}        ALL BUILD REALMS PURGED — FRESH OCEAN AWAITS${X}"
     exit 0
@@ -177,8 +178,13 @@ echo -e "${WAVE}        SURFACING WITH $GENERATOR — $BUILD_JOBS THREADS RISING
 
 echo -e "${AQUA}        Generating AmouranthOS RTX icon atlas${X}"
 python3 "$PROJECT_ROOT/scripts/gen_amouranthos_icons.py"
+if [[ "$TARGET" == "linux" ]]; then
+    python3 "$PROJECT_ROOT/scripts/detect_browsers.py" 2>/dev/null || true
+fi
 echo -e "${AQUA}        x86 comp compiler — CANVAS + DOS viewport + field themes${X}"
 python3 "$PROJECT_ROOT/Navigator/shaders/compute/sync_canvas_shaders.py"
+echo -e "${AQUA}        SPIR-V shaders — Makefile (glslc → assets/shaders/)${X}"
+make -C "$PROJECT_ROOT/Navigator/shaders" BUILD_TYPE="${BUILD_VARIANT^}" -j"$BUILD_JOBS"
 
 mkdir -p "$BUILD_SUBDIR"
 cd "$BUILD_SUBDIR"
@@ -206,6 +212,15 @@ fi
 
 echo -e "${AQUA}        COMPILING — $BUILD_JOBS THREADS${X}"
 cmake --build . -j"$BUILD_JOBS"
+
+# Warm Vulkan pipeline cache (x86 compile ~3s with cache vs ~10min cold).
+CACHE_SRC="$PROJECT_ROOT/cache/vulkan_compute.cache"
+CACHE_DST="$PROJECT_ROOT/build/bin/Linux/cache/vulkan_compute.cache"
+if [[ -f "$CACHE_SRC" ]]; then
+    mkdir -p "$(dirname "$CACHE_DST")"
+    cp -f "$CACHE_SRC" "$CACHE_DST"
+    echo -e "${GLOW}        Vulkan pipeline cache ready — ${X}$(du -h "$CACHE_SRC" | cut -f1)"
+fi
 
 # ── BINARY ASCENSION ───────────────────────────────────────────────────────
 [[ ! -f "$SOURCE_BINARY" ]] && { echo -e "${CORAL}        FATAL: Binary drowned — $SOURCE_BINARY${X}"; exit 1; }
@@ -258,5 +273,14 @@ echo
 echo -e "        ${W}Current Realm:${X} ${GLOW}$TARGET ${BUILD_VARIANT^^}${X}"
 echo -e "        ${W}Binary Location:${X} ${GLOW}$FINAL_BINARY${X}"
 echo -e "        ${W}Dive Command:${X}   ${AQUA}./linux.sh${TARGET:+$TARGET}${BUILD_VARIANT:+$BUILD_VARIANT} run${X}"
+if [[ "$TARGET" == "linux" && -f "$PROJECT_ROOT/assets/AMOURANTHRTX.desktop" ]]; then
+    DESKTOP_DIR="$HOME/.local/share/applications"
+    mkdir -p "$DESKTOP_DIR"
+    sed -e "s|AMOURANTHRTX_BIN|$FINAL_BINARY|g" \
+        -e "s|AMOURANTHRTX_ROOT|$PROJECT_ROOT|g" \
+        "$PROJECT_ROOT/assets/AMOURANTHRTX.desktop" > "$DESKTOP_DIR/amouranthrtx.desktop"
+    chmod +x "$DESKTOP_DIR/amouranthrtx.desktop" 2>/dev/null || true
+    echo -e "        ${W}Mint launcher:${X}   ${GLOW}$DESKTOP_DIR/amouranthrtx.desktop${X}"
+fi
 echo
 echo -e "${GLOW}         — THE TIDE IS LOVE — ${X}"

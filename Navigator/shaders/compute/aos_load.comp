@@ -1,0 +1,75 @@
+#version 460 core
+#extension GL_EXT_scalar_block_layout : enable
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(rgba32f, binding = 0) uniform image2D resultImage;
+
+layout(push_constant) uniform FieldSocket {
+    float sealed_time;
+    uint control;
+    uint data_bus[64];
+    uint address_bus[16];
+    float maxwell_entropy_seed;
+    float mouse_x;
+    float mouse_y;
+    float viewport_w;
+    float viewport_h;
+} field;
+
+// Must match x86.comp register header (DIE_HEADER_UINTS=39) so ramByte() guest addresses align.
+layout(std430, binding = 1) buffer FieldX86Die {
+    uint EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP;
+    uint R8, R9, R10, R11, R12, R13, R14, R15;
+    uint CS, DS, ES, FS, GS, SS;
+    uint EIP;
+    uint EFLAGS;
+    uint CR0, CR2, CR3, CR4, CR8;
+    uint DR0, DR1, DR2, DR3, DR6, DR7;
+    uint GDTR, IDTR, LDTR, TR;
+    uint RAM[0x800000 / 4];
+} die;
+
+layout(binding = 2) readonly buffer ThermoAccountant { float entropyThisFrame; } thermoAccountant;
+layout(binding = 8, rgba32f) uniform image2D fieldPhi;
+layout(binding = 9, rgba32f) uniform image2D fieldThermo;
+layout(binding = 10, rgba32f) uniform image2D fieldFlow;
+layout(binding = 11, rgba8) uniform readonly image2D ammoTex;
+layout(binding = 12, rgba8) uniform readonly image2D aosWallTex;
+layout(binding = 13, rgba8) uniform readonly image2D aosStartTex;
+layout(binding = 14, rgba8) uniform readonly image2D rtxFontSdf;
+
+#include "aos_chrome.inc"
+#include "aos_sdf_wm.inc"
+#include "aos_program_render.inc"
+
+vec3 displayMap(vec3 c) {
+    c = max(c, vec3(0.0));
+    // HUD ink is authored HDR (fg*8); linear map keeps taskbar/menu text OCR-white.
+    vec3 reinhard = c / (c + vec3(1.0));
+    vec3 hud = clamp(c / 8.0, 0.0, 1.0);
+    return mix(reinhard, hud, step(vec3(1.2), c));
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(resultImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 storage = vec2(size);
+    vec2 vp = aosViewport(storage);
+    vec2 pix = vec2(coord) + 0.5;
+    float taskH = 56.0 * aosUiScale(vp);
+    ThemePal th = loadTheme(themeIdFromControl());
+    bool aosLive = aosChromeActive();
+
+    vec3 bg = vec3(0.02, 0.02, 0.03);
+    if (pix.y < vp.y - taskH) {
+        vec3 desk = aosDarkDesktop(pix, vp, taskH, th);
+        if (desk.x >= 0.0) bg = desk;
+        vec3 win = amouranthOsBackdrop(pix, vp, th);
+        if (win.x >= 0.0) bg = win;
+    }
+    if (aosLive)
+        bg = aosLayerChrome(bg, pix, vp, th);
+
+    imageStore(resultImage, coord, vec4(displayMap(bg), 1.0));
+}
