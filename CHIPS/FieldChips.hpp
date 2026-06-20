@@ -1,0 +1,27 @@
+#pragma once
+
+// FieldChips — shared emulator silicon for AmouranthOS.
+//
+//   Common/     — Golden Era CPUs & audio (6502, Z80, 68000, SN76489, YM2612, SID, …)
+//   Nes/        — Nintendo Entertainment System (2A03, 2C02, mappers)
+//   Atari2600/  — Atari VCS (6507, TIA, RIOT 6532)
+//   Sms/        — Sega Master System (Z80, VDP, SN76489)
+//   Genesis/    — Sega Genesis / Mega Drive (68000, Z80, YM2612, SN76489, VDP)
+//   Apple2/     — Apple II scaffold
+//   C64/        — Commodore 64 scaffold (6581 SID)
+//   Spectrum/   — ZX Spectrum scaffold
+//   Msx/        — MSX scaffold
+//   GameBoy/    — Nintendo Game Boy scaffold
+//   Snes/       — Super Nintendo scaffold
+
+#include "Common/FieldChipsCommon.hpp"
+#include "Nes/FieldNes.hpp"
+#include "Atari2600/FieldAtari2600.hpp"
+#include "Sms/FieldSms.hpp"
+#include "Genesis/FieldGenesis.hpp"
+#include "Apple2/FieldApple2.hpp"
+#include "C64/FieldC64.hpp"
+#include "Spectrum/FieldSpectrum.hpp"
+#include "Msx/FieldMsx.hpp"
+#include "GameBoy/FieldGameBoy.hpp"
+#include "Snes/FieldSnes.hpp"
