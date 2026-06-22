@@ -1,16 +1,9 @@
-# AMOURANTH RTX Stealth Security vS
+# Stealth Amouranth RTX Full AV + EDR Security v1.1
 
-**Invisible Background Protector**
+**Full antivirus + endpoint detection + hardening**
+- ClamAV + custom sigs + rkhunter real-time-ish
+- Behavior monitor, file integrity, auto-quarantine
+- Silent background, no impact on usability
+- WiFi/input fully functional
 
-`./stealth_install.sh` - Installs silently. Secures network, services, clipboard, privacy without any visible interference.
-
-**Changes from original:**
-- Completely silent, no GUI, no prompts
-- Mouse/keyboard fully preserved (HID exemptions)
-- Background systemd services for continuous protection
-- Hardens firewall, cleans services, scrubs data, secure clipboard
-- You never know it's there. Perfect usability.
-
-Run once: `cd Security && sudo bash stealth_install.sh`
-
-Grok fixed per request. Uploaded.
+Install: chmod +x * && ./full_av_install.sh
