@@ -10,23 +10,27 @@ on:
 jobs:
   linux-qa:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build \
-            libsdl3-dev libsdl3-image-dev libsdl3-ttf-dev libsdl3-mixer-dev \
+          sudo apt-get install -y build-essential cmake ninja-build git \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev libxext-dev \
             libvulkan-dev glslc spirv-tools python3-pil
 
       - name: Configure and build
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DFETCH_SDL3=ON
           cmake --build build --target amouranth_engine \
             qa_amouranthos_test qa_exit_shutdown_test qa_field_kilroy_test \
-            qa_doom_host_test qa_rtx_vfs_test -j"$(nproc)"
+            qa_doom_host_test qa_doom_gpu_test qa_rtx_vfs_test \
+            qa_taskbar_click_test qa_rtx_widgets_test qa_app_journal_test \
+            qa_registry_test qa_memory_tier_test qa_raid_test -j"$(nproc)"
 
       - name: Build shaders
         run: make -C Navigator/shaders all
@@ -51,6 +55,8 @@ jobs:
           ./build/qa_app_journal_test
           ./build/qa_registry_test
           ./build/qa_memory_tier_test
+          ./build/qa_raid_test
+          python3 scripts/qa_doom_test.py --skip-build
 
       - name: DOOM host QA (known PM32 title-screen gap)
         continue-on-error: true
