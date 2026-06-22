@@ -1,6 +1,9 @@
 // Boot RTX-DOS → exec DOOM.EXE on GPU x86 shader (+ host trap assist) → mode-13h metrics.
 #include "FieldBios.hpp"
 #include "FieldDoom.hpp"
+#include "FieldDoomGpu.hpp"
+#include "FieldDpmi.hpp"
+#include "FieldRtxPm.hpp"
 #include "FieldDpmi.hpp"
 #include "FieldDos.hpp"
 #include "FieldDosConfig.hpp"
@@ -114,6 +117,16 @@ int main(int argc, char** argv) {
                 static_cast<unsigned long long>(ctx.ticks));
         }
         if (mode == 0x13u && nz > 15000) break;
+    }
+
+    if ((bestMode != 0x13u || bestNz < 8000) && FieldX86Emu::emu
+            && FieldRtxPm::pm32TitleStalled(FieldX86Emu::emu, bestMode, bestNz)) {
+        std::fprintf(stderr, "PM32 title probe stalled — forceTitleBlit fallback\n");
+        if (FieldDoomGpu::forceTitleBlit(ram)) {
+            bestMode = ram[0x449u];
+            bestNz = countFbNz(ram, 0, 200);
+            bestRound = 99;
+        }
     }
 
     const auto ppm = outDir / "doom_title.ppm";

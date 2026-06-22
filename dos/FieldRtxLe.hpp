@@ -6,8 +6,10 @@
 #include "FieldPlatform.hpp"
 #include "FieldX86Emu.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include <x86emu.h>
@@ -97,8 +99,6 @@ inline bool seedLzexe91Load(x86emu_t* e, const std::vector<std::uint8_t>& img,
     for (std::uint32_t i = 0; i < loadSize; ++i)
         x86emu_write_byte(e, base + loadOff + i, img[hdrBytes + i]);
 
-    FieldBios::patchDos4gwCpuProbe(e, base + loadOff, loadSize);
-
     const std::uint16_t pspSeg = static_cast<std::uint16_t>(loadSeg - 0x10u);
     const std::uint32_t pspBase = static_cast<std::uint32_t>(pspSeg) << 4;
     for (std::uint32_t i = 0; i < 0x100u; ++i)
@@ -136,6 +136,200 @@ inline bool seedLzexe91Load(x86emu_t* e, const std::vector<std::uint8_t>& img,
     return true;
 }
 
+struct LzBitIn {
+    const std::uint8_t* data = nullptr;
+    std::size_t size = 0;
+    std::size_t pos = 0;
+    std::uint16_t buf = 0;
+    int count = 0;
+
+    bool readU16(std::uint16_t& out) noexcept {
+        if (pos + 2u > size) return false;
+        out = static_cast<std::uint16_t>(data[pos] | (data[pos + 1u] << 8));
+        pos += 2u;
+        return true;
+    }
+    bool readU8(std::uint8_t& out) noexcept {
+        if (pos >= size) return false;
+        out = data[pos++];
+        return true;
+    }
+    void initBits() noexcept {
+        count = 0x10;
+        readU16(buf);
+    }
+    int nextBit() noexcept {
+        const int b = buf & 1;
+        if (--count == 0) {
+            readU16(buf);
+            count = 0x10;
+        } else
+            buf >>= 1;
+        return b;
+    }
+};
+
+inline std::uint16_t rd16(const std::uint8_t* p) noexcept {
+    return static_cast<std::uint16_t>(p[0] | (p[1] << 8));
+}
+
+inline void wr16(std::uint8_t* p, std::uint16_t v) noexcept {
+    p[0] = static_cast<std::uint8_t>(v & 0xFFu);
+    p[1] = static_cast<std::uint8_t>((v >> 8) & 0xFFu);
+}
+
+/* Host-side LZEXE 0.91 expand (unlzexe algorithm) — avoids stub/DOS trap path. */
+inline bool hostExpandLzexe91(const std::vector<std::uint8_t>& packed,
+                              std::vector<std::uint8_t>& expanded) noexcept {
+    if (!isLzexe91(packed.data(), packed.size())) {
+        expanded = packed;
+        return true;
+    }
+    if (packed.size() < 0x200u) return false;
+
+    std::uint16_t ihead[0x10]{};
+    std::uint16_t ohead[0x10]{};
+    std::uint16_t inf[8]{};
+    std::memcpy(ihead, packed.data(), sizeof ihead);
+    std::memcpy(ohead, ihead, sizeof ohead);
+
+    const std::uint32_t entry =
+        ((static_cast<std::uint32_t>(ihead[4]) + static_cast<std::uint32_t>(ihead[0x0b])) << 4)
+        + ihead[0x0a];
+    if (entry + 0x100u > packed.size()) return false;
+
+    const std::uint32_t infoPos =
+        (static_cast<std::uint32_t>(ihead[0x0b]) + static_cast<std::uint32_t>(ihead[4])) << 4;
+    if (infoPos + 16u > packed.size()) return false;
+    for (int i = 0; i < 8; ++i)
+        inf[i] = rd16(packed.data() + infoPos + static_cast<std::size_t>(i) * 2u);
+
+    ohead[0x0a] = inf[0];
+    ohead[0x0b] = inf[1];
+    ohead[0x08] = inf[2];
+    ohead[0x07] = inf[3];
+    ohead[0x0c] = 0x1c;
+
+    std::vector<std::uint8_t> rel;
+    rel.reserve(4096u);
+    {
+        std::uint32_t relPos = infoPos + 0x158u;
+        if (relPos >= packed.size()) return false;
+        std::uint16_t relOff = 0, relSeg = 0;
+        while (relPos < packed.size()) {
+            std::uint8_t span8 = packed[relPos++];
+            std::uint16_t span = span8;
+            if (span == 0) {
+                if (relPos + 2u > packed.size()) return false;
+                span = rd16(packed.data() + relPos);
+                relPos += 2u;
+                if (span == 0) {
+                    relSeg = static_cast<std::uint16_t>(relSeg + 0x0fffu);
+                    continue;
+                }
+                if (span == 1) break;
+            }
+            relOff = static_cast<std::uint16_t>(relOff + span);
+            relSeg = static_cast<std::uint16_t>(relSeg + ((relOff & ~0x0fu) >> 4));
+            relOff &= 0x0fu;
+            std::uint8_t tmp[4];
+            wr16(tmp, relOff);
+            wr16(tmp + 2, relSeg);
+            rel.insert(rel.end(), tmp, tmp + 4);
+        }
+        ohead[3] = static_cast<std::uint16_t>(rel.size() / 4u);
+    }
+
+    std::size_t hdrEnd = 0x1cu + rel.size();
+    const int pad = static_cast<int>((0x200u - (hdrEnd & 0x1ffu)) & 0x1ffu);
+    hdrEnd += static_cast<std::size_t>(pad);
+    ohead[4] = static_cast<std::uint16_t>(hdrEnd >> 4);
+
+    const std::uint32_t inPos =
+        ((static_cast<std::uint32_t>(ihead[0x0b])
+            - static_cast<std::uint32_t>(inf[4])
+            + static_cast<std::uint32_t>(ihead[4])) << 4);
+    if (inPos >= packed.size()) return false;
+
+    expanded.assign(hdrEnd, 0);
+    std::memcpy(expanded.data(), ohead, 0x1cu);
+    if (!rel.empty())
+        std::memcpy(expanded.data() + 0x1cu, rel.data(), rel.size());
+
+    LzBitIn bits{packed.data(), packed.size(), inPos};
+    bits.initBits();
+    std::vector<std::uint8_t> window(0x4500u, 0);
+    std::vector<std::uint8_t> payload;
+    payload.reserve(packed.size() * 2u);
+    std::size_t winUsed = 0;
+    auto slideWindow = [&]() {
+        payload.insert(payload.end(), window.begin(), window.begin() + 0x2000);
+        winUsed -= 0x2000u;
+        std::memmove(window.data(), window.data() + 0x2000u, winUsed);
+    };
+    auto putByte = [&](std::uint8_t b) {
+        if (winUsed > 0x4000u) slideWindow();
+        window[winUsed++] = b;
+    };
+
+    for (;;) {
+        if (bits.nextBit()) {
+            std::uint8_t b = 0;
+            if (!bits.readU8(b)) return false;
+            putByte(b);
+            continue;
+        }
+        int len = 0;
+        std::int16_t span = 0;
+        if (!bits.nextBit()) {
+            len = bits.nextBit() << 1;
+            len |= bits.nextBit();
+            len += 2;
+            std::uint8_t b = 0;
+            if (!bits.readU8(b)) return false;
+            span = static_cast<std::int16_t>(static_cast<std::uint16_t>(b | 0xff00u));
+        } else {
+            std::uint8_t b0 = 0, b1 = 0;
+            if (!bits.readU8(b0) || !bits.readU8(b1)) return false;
+            span = static_cast<std::int16_t>(
+                static_cast<std::uint16_t>(b0 | ((static_cast<std::uint16_t>(b1 & 0xf8u)) << 5) | 0xe000u));
+            len = (b1 & 0x07) + 2;
+            if (len == 2) {
+                if (!bits.readU8(b0)) return false;
+                if (b0 == 0) break;
+                if (b0 == 1) continue;
+                len = b0 + 1;
+            }
+        }
+        for (int i = 0; i < len; ++i)
+            putByte(window[winUsed + span]);
+    }
+    if (winUsed)
+        payload.insert(payload.end(), window.begin(), window.begin() + static_cast<std::ptrdiff_t>(winUsed));
+    expanded.insert(expanded.end(), payload.begin(), payload.end());
+
+    const std::size_t loadSize = payload.size();
+    if (ihead[6] != 0) {
+        ohead[5] = static_cast<std::uint16_t>(ohead[5] - inf[5] - ((inf[6] + 16u - 1u) >> 4) - 9u);
+        if (ihead[6] != 0xffffu)
+            ohead[6] = static_cast<std::uint16_t>(ohead[6] - (ihead[5] - ohead[5]));
+    }
+    ohead[1] = static_cast<std::uint16_t>((loadSize + (static_cast<std::size_t>(ohead[4]) << 4)) & 0x1ffu);
+    ohead[2] = static_cast<std::uint16_t>((loadSize + (static_cast<std::size_t>(ohead[4]) << 4) + 0x1ffu) >> 9);
+    std::memcpy(expanded.data(), ohead, 0x1cu);
+
+    if (expanded.size() < 32u || expanded[0] != 'M' || expanded[1] != 'Z') {
+        std::fprintf(stderr, "[RTX-LE] host LZEXE expand: bad MZ (%zu bytes)\n", expanded.size());
+        return false;
+    }
+    std::size_t leOff = 0;
+    if (findLeOffset(expanded.data(), expanded.size(), leOff))
+        std::fprintf(stderr, "[RTX-LE] host LZEXE expanded %zu bytes LE@%zu\n", expanded.size(), leOff);
+    else
+        std::fprintf(stderr, "[RTX-LE] host LZEXE expanded %zu bytes (real-mode MZ)\n", expanded.size());
+    return true;
+}
+
 inline bool readGuestBlob(x86emu_t* e, std::uint32_t base, std::uint32_t bytes,
                           std::vector<std::uint8_t>& out) noexcept {
     if (!e || !bytes) return false;
@@ -145,18 +339,24 @@ inline bool readGuestBlob(x86emu_t* e, std::uint32_t base, std::uint32_t bytes,
     return true;
 }
 
-/* Run LZEXE 0.91 stub under live DOS traps; copy expanded MZ+LE image from guest. */
+/* LZEXE 0.91 expand — host decompress first; guest stub path retained as fallback. */
 inline bool expandLzexe91(x86emu_t* e, void* mapped, std::size_t offset,
                           const std::vector<std::uint8_t>& packed,
                           std::vector<std::uint8_t>& expanded,
                           FieldX86Emu::Ctx& ctx) noexcept {
-    if (!e || !mapped || packed.empty()) return false;
+    if (packed.empty()) return false;
     if (!isLzexe91(packed.data(), packed.size())) {
         expanded = packed;
         return true;
     }
+    if (hostExpandLzexe91(packed, expanded))
+        return true;
 
-    const std::uint32_t allocBytes = static_cast<std::uint32_t>(packed[0x0A] | (packed[0x0B] << 8)) * 16u;
+    if (!e || !mapped) return false;
+
+    const std::uint32_t minAllocBytes =
+        static_cast<std::uint32_t>(packed[0x0A] | (packed[0x0B] << 8)) * 16u;
+    const std::uint32_t scanBytes = std::max(minAllocBytes, 256u * 1024u);
     constexpr std::uint16_t kLoadSeg = 0x1000u;
     constexpr std::uint32_t kBase = static_cast<std::uint32_t>(kLoadSeg) << 4;
     if (!seedLzexe91Load(e, packed, kLoadSeg)) return false;
@@ -164,49 +364,46 @@ inline bool expandLzexe91(x86emu_t* e, void* mapped, std::size_t offset,
     FieldX86Emu::syncToDie(mapped);
     const bool prevSettled = FieldBios::guestBootSettled;
     const bool prevExec = FieldX86Emu::guestAppExecute;
-    FieldBios::guestBootSettled = true;
-    FieldX86Emu::guestAppExecute = true;
+    FieldBios::guestBootSettled = false;
+    FieldX86Emu::guestAppExecute = false;
     std::uint32_t leLin = 0;
-    for (int round = 0; round < 48; ++round) {
+    auto tryCapture = [&]() -> bool {
+        const std::uint32_t csBase = (static_cast<std::uint32_t>(e->x86.R_CS & 0xFFFFu) << 4);
+        const std::uint32_t bases[] = {
+            0x8000u, 0x10000u, 0x14000u, 0x18000u,
+            csBase, kBase, kBase + 0x4000u, kBase + 0x8000u,
+            kBase + 0xC000u, kBase + 0x10000u, kBase + 0x14000u, kBase + 0x18000u};
+        for (std::uint32_t scanBase : bases) {
+            if (!scanGuestLe(e, scanBase, scanBytes, leLin)) continue;
+            const std::uint32_t mzBase = leLin >= scanBase + 0x80u ? leLin - 0x80u : scanBase;
+            if (!readGuestBlob(e, mzBase, scanBytes, expanded)) return false;
+            std::size_t leOff = 0;
+            if (!findLeOffset(expanded.data(), expanded.size(), leOff)) return false;
+            std::fprintf(stderr, "[RTX-LE] LZEXE expanded %zu bytes LE@%zu (guest@%05x)\n",
+                expanded.size(), leOff, leLin);
+            return true;
+        }
+        return false;
+    };
+
+    for (int round = 0; round < 64; ++round) {
         FieldX86Emu::syncToDie(mapped);
         FieldX86Emu::runMapped(mapped, offset, FieldPlatform::FIELD_X86_DIE_CYCLE_OFFSET,
             ctx, 2'000'000u);
-        const std::uint32_t csBase = (static_cast<std::uint32_t>(e->x86.R_CS & 0xFFFFu) << 4);
-        const std::uint32_t bases[] = {
-            csBase, 0x8000u, kBase, kBase + 0x4000u, kBase + 0x8000u, kBase + 0xBF00u};
-        for (std::uint32_t scanBase : bases) {
-            if (!scanGuestLe(e, scanBase, allocBytes, leLin)) continue;
-            const std::uint32_t mzBase = leLin >= scanBase + 0x80u ? leLin - 0x80u : scanBase;
-            if (!readGuestBlob(e, mzBase, allocBytes, expanded)) return false;
-            std::size_t leOff = 0;
-            if (!findLeOffset(expanded.data(), expanded.size(), leOff)) return false;
-            std::fprintf(stderr, "[RTX-LE] LZEXE expanded %zu bytes LE@%zu (guest@%05x round=%d)\n",
-                expanded.size(), leOff, leLin, round);
-            return true;
-        }
+        if (tryCapture()) return true;
+
         const std::uint16_t ip = static_cast<std::uint16_t>(e->x86.R_EIP & 0xFFFFu);
         const std::uint16_t cs = static_cast<std::uint16_t>(e->x86.R_CS & 0xFFFFu);
         if (round % 8 == 0)
             std::fprintf(stderr, "[RTX-LE] lz round=%d cs=%04x ip=%04x\n", round,
                 static_cast<unsigned>(cs), static_cast<unsigned>(ip));
-        if (round > 0 && cs == 0x0800u && ip == 0x0100u)
-            break;
+        if (cs == 0u && ip == 0u && round >= 40)
+            seedLzexe91Load(e, packed, kLoadSeg);
     }
     FieldBios::guestBootSettled = prevSettled;
     FieldX86Emu::guestAppExecute = prevExec;
 
-    const std::uint32_t csBase = (static_cast<std::uint32_t>(e->x86.R_CS & 0xFFFFu) << 4);
-    const std::uint32_t bases[] = {csBase, 0x8000u, kBase};
-    for (std::uint32_t scanBase : bases) {
-        if (!scanGuestLe(e, scanBase, allocBytes, leLin)) continue;
-        const std::uint32_t mzBase = leLin >= scanBase + 0x80u ? leLin - 0x80u : scanBase;
-        if (!readGuestBlob(e, mzBase, allocBytes, expanded)) return false;
-        std::size_t leOff = 0;
-        if (!findLeOffset(expanded.data(), expanded.size(), leOff)) return false;
-        std::fprintf(stderr, "[RTX-LE] LZEXE expanded %zu bytes LE@%zu (guest@%05x)\n",
-            expanded.size(), leOff, leLin);
-        return true;
-    }
+    if (tryCapture()) return true;
 
     std::fprintf(stderr, "[RTX-LE] LZEXE expand failed\n");
     return false;

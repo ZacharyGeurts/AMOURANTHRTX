@@ -274,12 +274,14 @@ inline bool parseDosName(const char* path, char& drive, char stem[9], char ext[4
         }
     }
     while (*p == '\\' || *p == '/') ++p;
+    const char* base = p;
+    for (const char* q = p; *q; ++q)
+        if (*q == '\\' || *q == '/')
+            base = q + 1;
     char file[13]{};
     int fi = 0;
-    while (*p && *p != ' ' && *p != '\t' && fi < 12) {
-        if (*p == '\\' || *p == '/') break;
-        file[fi++] = static_cast<char>(std::toupper(static_cast<unsigned char>(*p++)));
-    }
+    for (p = base; *p && *p != ' ' && *p != '\t' && fi < 12; ++p)
+        file[fi++] = static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
     if (!fi) return false;
     std::memset(stem, ' ', 8);
     std::memset(ext, ' ', 3);
@@ -306,6 +308,18 @@ inline bool pathHasSubdir(const char* path) noexcept {
 
 inline bool readLooseAsset(const char* stem, const char* ext, std::vector<std::uint8_t>& out) noexcept;
 
+inline bool lzexe91InfoLooksValid(const std::vector<std::uint8_t>& img) noexcept {
+    if (img.size() < 0x200u || img[0] != 'M' || img[1] != 'Z' || img[28] != 'L' || img[31] != '1')
+        return true;
+    const std::uint16_t hdrPar = static_cast<std::uint16_t>(img[8] | (img[9] << 8));
+    const std::uint16_t eCs = static_cast<std::uint16_t>(img[0x16] | (img[0x17] << 8));
+    const std::uint32_t infoPos = (static_cast<std::uint32_t>(eCs) + hdrPar) << 4;
+    if (infoPos + 10u >= img.size()) return false;
+    const std::uint16_t inf4 = static_cast<std::uint16_t>(
+        img[infoPos + 8u] | (img[infoPos + 9u] << 8));
+    return inf4 == eCs;
+}
+
 inline bool readHostFile(const char* path, std::vector<std::uint8_t>& out) noexcept {
     char drive = 'A';
     char stem[9]{}, ext[4]{};
@@ -316,10 +330,12 @@ inline bool readHostFile(const char* path, std::vector<std::uint8_t>& out) noexc
             const auto* vol = hdImage.data() + HD_PART_LBA * HD_SECTOR_BYTES;
             const std::size_t volBytes = hdImage.size() - HD_PART_LBA * HD_SECTOR_BYTES;
             if (pathHasSubdir(path)) {
-                if (readFat16Path(vol, volBytes, path, out)) return true;
-            } else if (readFat16File(vol, volBytes, stem, ext, out)) {
+                if (readFat16Path(vol, volBytes, path, out) && lzexe91InfoLooksValid(out))
+                    return true;
+            } else if (readFat16File(vol, volBytes, stem, ext, out) && lzexe91InfoLooksValid(out)) {
                 return true;
             }
+            out.clear();
         }
         if (readLooseAsset(stem, ext, out)) return true;
         return false;
@@ -593,7 +609,7 @@ inline bool readLooseAsset(const char* stem, const char* ext, std::vector<std::u
     if (std::filesystem::is_directory(games)) {
         for (const auto& ent : std::filesystem::recursive_directory_iterator(games)) {
             if (!ent.is_regular_file()) continue;
-            if (ent.path().filename().string().size() >= 8) continue;
+            if (ent.path().filename().string().size() > 13u) continue;
             std::string fn = ent.path().filename().string();
             for (auto& c : fn) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
             const auto dot = fn.find('.');

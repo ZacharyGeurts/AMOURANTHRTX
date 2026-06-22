@@ -1958,6 +1958,8 @@ inline int handleInt(x86emu_t* e, u8 num, std::uint32_t hostKey, bool keyDown, s
     }
 
     if (num == 0x67) {
+        if (FieldRtxMemory::emmLive() && FieldEms::handleInt34(e))
+            return 1;
         const std::uint8_t ah67 = static_cast<std::uint8_t>(e->x86.R_EAX >> 8);
         if (pmExecActive && ah67 != 0x00u && ah67 != 0x05u && ah67 != 0x08u && ah67 != 0x10u) {
             e->x86.R_EAX &= 0xFFFF00FFu;

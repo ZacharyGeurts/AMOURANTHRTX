@@ -95,8 +95,27 @@ inline LevelDef levelDef(int level1to9) noexcept {
     return makeLevel(level1to9 - 1);
 }
 
+inline std::filesystem::path doomGpuAssetRoot() noexcept {
+    namespace fs = std::filesystem;
+    const auto probe = [](const fs::path& root) {
+        return fs::exists(root / "assets" / "doom_gpu" / "title320x200.bin")
+            && fs::exists(root / "assets" / "doom_gpu" / "palette.bin");
+    };
+    if (probe(fs::current_path())) return fs::current_path();
+    try {
+        auto dir = fs::canonical("/proc/self/exe").parent_path();
+        for (int depth = 0; depth < 8; ++depth) {
+            if (probe(dir)) return dir;
+            const auto parent = dir.parent_path();
+            if (parent == dir) break;
+            dir = parent;
+        }
+    } catch (...) {}
+    return fs::current_path();
+}
+
 inline bool loadPaletteBytes(std::uint8_t* guestRamPtr) noexcept {
-    const auto palPath = std::filesystem::current_path() / "assets" / "doom_gpu" / "palette.bin";
+    const auto palPath = doomGpuAssetRoot() / "assets" / "doom_gpu" / "palette.bin";
     if (!std::filesystem::exists(palPath)) return false;
     std::ifstream pin(palPath, std::ios::binary);
     if (!pin) return false;
@@ -111,7 +130,7 @@ inline bool loadPaletteBytes(std::uint8_t* guestRamPtr) noexcept {
 
 inline bool loadAssets(void* fieldX86DieMapped, std::size_t ramByteOffset) noexcept {
     if (!fieldX86DieMapped) return false;
-    const auto root = std::filesystem::current_path();
+    const auto root = doomGpuAssetRoot();
     const auto palPath   = root / "assets" / "doom_gpu" / "palette.bin";
     const auto titlePath = root / "assets" / "doom_gpu" / "title320x200.bin";
     if (!std::filesystem::exists(palPath) || !std::filesystem::exists(titlePath))
@@ -141,8 +160,9 @@ inline bool loadAssets(void* fieldX86DieMapped, std::size_t ramByteOffset) noexc
 
 inline bool blitTitleToGuest(std::uint8_t* guestRamPtr) noexcept {
     if (!guestRamPtr) return false;
-    const auto titlePath = std::filesystem::current_path() / "assets" / "doom_gpu" / "title320x200.bin";
-    const auto palPath   = std::filesystem::current_path() / "assets" / "doom_gpu" / "palette.bin";
+    const auto root = doomGpuAssetRoot();
+    const auto titlePath = root / "assets" / "doom_gpu" / "title320x200.bin";
+    const auto palPath   = root / "assets" / "doom_gpu" / "palette.bin";
     if (!std::filesystem::exists(titlePath) || !std::filesystem::exists(palPath))
         return false;
     std::vector<std::uint8_t> title(64000u), pal(768u);
@@ -159,6 +179,11 @@ inline bool blitTitleToGuest(std::uint8_t* guestRamPtr) noexcept {
     std::memcpy(guestRamPtr + DOOM_FB_BYTE, title.data(), title.size());
     guestRamPtr[0x449u] = 0x13u;
     return true;
+}
+
+// PM32 DOS/4GW title path fallback — blit shareware title into mode 13h @ A000:0.
+inline bool forceTitleBlit(std::uint8_t* guestRamPtr) noexcept {
+    return blitTitleToGuest(guestRamPtr);
 }
 
 inline std::uint8_t mapCell(const LevelDef& lv, int mx, int my) noexcept {

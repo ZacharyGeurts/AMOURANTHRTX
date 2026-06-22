@@ -13,6 +13,13 @@
 
 namespace FieldRtxPm {
 
+// True when LE/PM32 is live but VGA never reached mode 13h with a painted framebuffer.
+inline bool pm32TitleStalled(x86emu_t* e, std::uint8_t vgaMode, int fbNonZero) noexcept {
+    if (!e || fbNonZero >= 8000) return false;
+    if (vgaMode == 0x13u) return false;
+    return FieldDpmi::isProtected(e) || FieldDpmi::leBootPending;
+}
+
 inline bool launchMzPm(void* mapped, std::size_t offset, std::uint8_t* ram,
                        const std::vector<std::uint8_t>& image, const char* dosPath) noexcept {
     if (!mapped || !ram || image.size() < 32u) return false;
@@ -28,8 +35,9 @@ inline bool launchMzPm(void* mapped, std::size_t offset, std::uint8_t* ram,
 
     std::size_t leOff = 0;
     if (!FieldRtxLe::findLeOffset(mz.data(), mz.size(), leOff)) {
-        std::fprintf(stderr, "[RTX-PM] no Watcom LE in %s\n", dosPath ? dosPath : "(image)");
-        return false;
+        std::fprintf(stderr, "[RTX-PM] real-mode MZ after LZEXE — GpuLaunch %s\n",
+            dosPath ? dosPath : "(image)");
+        return FieldGpuLaunch::seedMzExec(mapped, offset, ram, mz, dosPath);
     }
 
     FieldX86Emu::ensure(mapped, offset);

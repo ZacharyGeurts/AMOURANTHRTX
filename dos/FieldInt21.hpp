@@ -4,6 +4,7 @@
 
 #include "FieldDos.hpp"
 #include "FieldDpmi.hpp"
+#include "FieldRtxMemory.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -51,8 +52,23 @@ inline bool hostDosEligible(x86emu_t* e, bool pmExecActive) noexcept {
     return (e->x86.R_CS & 0xFFFFu) >= 0x0700u;
 }
 
+inline bool isEmsDevicePath(const char* path) noexcept {
+    if (!path) return false;
+    char upper[32]{};
+    for (int i = 0; path[i] && i < 31; ++i)
+        upper[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(path[i])));
+    return std::strstr(upper, "EMMXXXX0") != nullptr;
+}
+
 inline bool readHostPath(const char* path, std::vector<std::uint8_t>& out) noexcept {
     if (!path || !path[0]) return false;
+    if (isEmsDevicePath(path) && FieldRtxMemory::emmLive()) {
+        static const std::uint8_t kEmsDevice[] = {
+            'E', 'M', 'M', 'X', 'X', 'X', 'X', '0', 0x1Au, 0x00u, 0x4Cu, 0x49u, 0x4Du, 0x20u, 0x45u, 0x4Du, 0x53u
+        };
+        out.assign(std::begin(kEmsDevice), std::end(kEmsDevice));
+        return true;
+    }
     if (path[0] != 'C' && path[0] != 'c' && path[0] != 'A' && path[0] != 'a') {
         char full[128];
         std::snprintf(full, sizeof full, "%c:\\%s", hostDrive, path);

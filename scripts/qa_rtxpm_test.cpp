@@ -2,6 +2,8 @@
 #include "FieldAmmoExec.hpp"
 #include "FieldBios.hpp"
 #include "FieldDos.hpp"
+#include "FieldEms.hpp"
+#include "FieldRtxMemory.hpp"
 #include "FieldDosConfig.hpp"
 #include "FieldDpmi.hpp"
 #include "FieldPlatform.hpp"
@@ -59,6 +61,10 @@ int main(int argc, char** argv) {
 
     if (!bootToPrompt(buf, ram, ctx)) return 1;
 
+    FieldRtxMemory::popEms(ram);
+    FieldX86Emu::ensure(buf.data(), FieldPlatform::DIE_HEADER_UINTS * 4);
+    FieldEms::activate(FieldX86Emu::emu);
+
     const char* keenPath = "C:\\GAMES\\KEEN4\\KEEN4E.EXE";
     std::vector<std::uint8_t> image;
     if (!FieldDos::readHostFile(keenPath, image) || image.empty()) {
@@ -90,7 +96,7 @@ int main(int argc, char** argv) {
     for (int round = 0; round < 32; ++round) {
         FieldAmmoExec::pump(ram, buf.data(), FieldPlatform::DIE_HEADER_UINTS * 4, 0u, false, cycles);
         const std::uint8_t mode = ram[0x449u];
-        const int nz = (mode == 0x13u || mode == 0x0Du) ? countFbNz(ram, 0, 200) : 0;
+        const int nz = countFbNz(ram, 0, 200);
         if (nz > bestNz) {
             bestNz = nz;
             bestRound = round;
