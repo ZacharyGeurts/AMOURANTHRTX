@@ -22,6 +22,18 @@
         "COSMO.ZIP"
       ],
       "extract_hint": "AMMOZIP C:\\GAMES\\COSMO\\COSMO.ZIP"
+    },
+    {
+      "id": "doom",
+      "title": "Doom (shareware)",
+      "zip": null,
+      "exe": "DOOM.EXE",
+      "dos_path": "C:\\GAMES\\DOOM\\DOOM.EXE",
+      "files": [
+        "DOOM.EXE",
+        "DOOM1.WAD"
+      ],
+      "extract_hint": "Run DOOM.EXE from C:\\GAMES\\DOOM"
     }
   ]
 }

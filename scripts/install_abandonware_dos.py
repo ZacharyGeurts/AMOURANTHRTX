@@ -88,6 +88,26 @@ def install_cosmo(force: bool) -> dict | None:
         return stage_zip("cosmo", "Cosmo's Cosmic Adventure", "COSMO.ZIP", zpath)
 
 
+def install_doom_from_disk() -> dict | None:
+    dest = GAMES_DIR / "doom"
+    exe = dest / "DOOM.EXE"
+    wad = dest / "DOOM1.WAD"
+    if not exe.is_file():
+        return None
+    files = ["DOOM.EXE"]
+    if wad.is_file():
+        files.append("DOOM1.WAD")
+    return {
+        "id": "doom",
+        "title": "Doom (shareware)",
+        "zip": None,
+        "exe": "DOOM.EXE",
+        "dos_path": "C:\\GAMES\\DOOM\\DOOM.EXE",
+        "files": files,
+        "extract_hint": "Run DOOM.EXE from C:\\GAMES\\DOOM",
+    }
+
+
 def entry_from_disk(id_: str, title: str, zip_name: str) -> dict | None:
     dest = GAMES_DIR / id_
     zf = dest / zip_name.upper()
@@ -120,6 +140,11 @@ def install(force: bool = False) -> int:
                 entries.append(ent)
         except Exception as exc:  # noqa: BLE001
             print(f"  FAIL {fn.__name__}: {exc}")
+
+    doom = install_doom_from_disk()
+    if doom:
+        entries.append(doom)
+        print(f"  staged Doom: DOOM.EXE ({(GAMES_DIR / 'doom' / 'DOOM.EXE').stat().st_size} bytes)")
 
     if not entries:
         print("No game ZIPs installed — check network mirrors")

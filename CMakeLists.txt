@@ -547,6 +547,11 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_dos_int_test)
     set_target_properties(qa_dos_int_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+    add_executable(qa_rtx_vfs_test scripts/qa_rtx_vfs_test.cpp)
+    target_include_directories(qa_rtx_vfs_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_rtx_vfs_test PRIVATE cxx_std_20)
+    set_target_properties(qa_rtx_vfs_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
+
     add_executable(qa_doom_host_test scripts/qa_doom_host_test.cpp)
     target_include_directories(qa_doom_host_test PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(qa_doom_host_test PRIVATE cxx_std_20)

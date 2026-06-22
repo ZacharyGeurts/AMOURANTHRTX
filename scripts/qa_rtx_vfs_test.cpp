@@ -2,6 +2,7 @@
 #include "FieldAmmoFat.hpp"
 #include "FieldDos.hpp"
 #include "FieldPlatform.hpp"
+#include "FieldRtxMemory.hpp"
 #include "FieldRtxThrottle.hpp"
 #include "FieldRtxVfs.hpp"
 
@@ -79,8 +80,11 @@ int main() {
     std::printf("OK colorful DIR %zu entries with metadata\n", entries.size());
 
     const std::uint32_t freeK = FieldRtxVfs::getFreeConvMem() / 1024u;
-    if (freeK < 500u || freeK > 640u) {
-        std::fprintf(stderr, "FAIL conv mem freeK=%u\n", freeK);
+    const std::uint32_t bootK = FieldRtxMemory::bootConventionalKb;
+    const std::uint32_t minFree = bootK > 28u ? bootK - 28u : bootK / 2u;
+    if (freeK < minFree || freeK > FieldRtxMemory::maxConventionalKb) {
+        std::fprintf(stderr, "FAIL conv mem freeK=%u (bootK=%u min=%u)\n",
+            freeK, bootK, minFree);
         return 1;
     }
     std::printf("OK conv mem %uK free\n", freeK);
