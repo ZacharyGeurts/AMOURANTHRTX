@@ -46,6 +46,11 @@ jobs:
         run: |
           ./build/bin/Linux/qa_field_kilroy_test
           ./build/bin/Linux/qa_rtx_vfs_test
+          ./build/qa_taskbar_click_test
+          ./build/qa_rtx_widgets_test
+          ./build/qa_app_journal_test
+          ./build/qa_registry_test
+          ./build/qa_memory_tier_test
 
       - name: DOOM host QA (known PM32 title-screen gap)
         continue-on-error: true
