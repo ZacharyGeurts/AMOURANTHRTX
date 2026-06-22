@@ -75,6 +75,7 @@ jobs:
           ./build/qa_fieldstorage_test
           python3 scripts/team_drive_test.py
           python3 scripts/bench_storage.py
+          python3 scripts/zero_cost_audit.py --skip-qa
 
   windows-fieldstorage:
     runs-on: ubuntu-latest
