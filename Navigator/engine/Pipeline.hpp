@@ -48,6 +48,7 @@
 #include "FieldAmmoA2600.hpp"
 #include "FieldAmmoSms.hpp"
 #include "FieldAmmoGenesis.hpp"
+#include "FieldAmmoPs1.hpp"
 #include "FieldAmmoSnes.hpp"
 #include "FieldAosNesTest.hpp"
 #include "FieldSnapDump.hpp"
@@ -2377,6 +2378,10 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                     if (INPUT.mixerReady())
                         FieldSnes::Audio::pump();
                 }
+                if (FieldPs1::active
+                        && (std::getenv("AMOURANTHRTX_CHIPS_PS1")
+                            || std::getenv("AMOURANTHRTX_FIELD_EMULATOR")))
+                    FieldPs1::tick(gr, keys);
                 if (FieldAosNesTest::enabled() && gr) {
                     if (const char* snap = std::getenv("AMOURANTHRTX_NES_FB_SNAP")) {
                         int want = 240;
@@ -2411,7 +2416,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                 FieldRtxTerm::syncLiveFromVga(gr);
             }
             if (!FieldNes::active && !FieldA2600::active && !FieldSms::active
-                    && !FieldGenesis::active && !FieldSnes::active)
+                    && !FieldGenesis::active && !FieldSnes::active && !FieldPs1::active)
                 FieldRtxTerm::applyView(gr);
             if (FieldAmouranthWm::pendingMenuAction) {
                 const int act = FieldAmouranthWm::pendingMenuAction;

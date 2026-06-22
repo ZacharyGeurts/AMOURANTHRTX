@@ -13,6 +13,10 @@
 //   Msx/        — MSX scaffold
 //   GameBoy/    — Nintendo Game Boy scaffold
 //   Snes/       — Super Nintendo scaffold
+//   PS1/        — Sony PlayStation (MIPS R3000, GTE, FieldDie GPU wave)
+//   N64/        — Nintendo 64 scaffold
+//   Dreamcast/  — Sega Dreamcast scaffold
+//   PS2/        — PlayStation 2 scaffold
 
 #include "Common/FieldChipsCommon.hpp"
 #include "Nes/FieldNes.hpp"
@@ -25,3 +29,7 @@
 #include "Msx/FieldMsx.hpp"
 #include "GameBoy/FieldGameBoy.hpp"
 #include "Snes/FieldSnes.hpp"
+#include "PS1/FieldPS1.hpp"
+#include "N64/FieldN64.hpp"
+#include "Dreamcast/FieldDreamcast.hpp"
+#include "PS2/FieldPs2.hpp"

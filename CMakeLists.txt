@@ -673,6 +673,12 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_snes_test)
     set_target_properties(qa_snes_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+    add_executable(qa_ps1_test scripts/qa_ps1_test.cpp)
+    target_include_directories(qa_ps1_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_ps1_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_ps1_test)
+    set_target_properties(qa_ps1_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
     add_executable(qa_nes_cpu_test scripts/qa_nes_cpu_test.cpp)
     target_include_directories(qa_nes_cpu_test PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(qa_nes_cpu_test PRIVATE cxx_std_20)

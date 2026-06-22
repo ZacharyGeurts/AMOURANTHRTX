@@ -101,6 +101,8 @@ show_help() {
   ./linux.sh field-storage    → FieldStorage v2 bench + multi-FS QA
   ./linux.sh run --dual --dual-host --team-drive --field-storage-v2
                               → dual Linux/Windows + TEAM + FieldStorage v2 flags
+  ./linux.sh run --infinite --chips --chips-ps1 --field-emulator
+                              → infinite SDF wave + CHIPS PS1 GPU die emulation
   ./linux.sh win31            → Windows 3.1 MCSE+I setup checklist
   ./linux.sh win31 --stage    → stage incoming/win31 + rebuild C:
   ./linux.sh os               → full KILROY Field OS (engine + kernel + rootfs + boot ISO)
@@ -171,6 +173,10 @@ EXTENDED_FIELD=false
 DUAL_HOST=false
 TEAM_DRIVE=false
 FIELD_STORAGE_V2=false
+INFINITE_SDF=false
+CHIPS_EXPANSION=false
+CHIPS_PS1=false
+FIELD_EMULATOR=false
 
 for arg in "$@"; do
     case "${arg,,}" in
@@ -183,6 +189,10 @@ for arg in "$@"; do
         dual|--dual|dual-host|--dual-host) DUAL_HOST=true ;;
         team-drive|--team-drive) TEAM_DRIVE=true ;;
         field-storage|--field-storage|field-storage-v2|--field-storage-v2) FIELD_STORAGE_V2=true ;;
+        infinite|--infinite) INFINITE_SDF=true ;;
+        chips|--chips) CHIPS_EXPANSION=true ;;
+        chips-ps1|--chips-ps1) CHIPS_PS1=true; CHIPS_EXPANSION=true ;;
+        field-emulator|--field-emulator) FIELD_EMULATOR=true ;;
         windows|release|web) ;; # already handled
         --help|-h|/h|/help|-help|help|"") show_help ;;
         *)          echo -e "${CORAL}UNKNOWN CURRENT: $arg${X}"; show_help ;;
@@ -201,6 +211,18 @@ if $TEAM_DRIVE; then
 fi
 if $FIELD_STORAGE_V2; then
     export AMOURANTHRTX_FIELD_STORAGE_V2=1
+fi
+if $INFINITE_SDF; then
+    export AMOURANTHRTX_INFINITE=1
+fi
+if $CHIPS_EXPANSION; then
+    export AMOURANTHRTX_CHIPS=1
+fi
+if $CHIPS_PS1; then
+    export AMOURANTHRTX_CHIPS_PS1=1
+fi
+if $FIELD_EMULATOR; then
+    export AMOURANTHRTX_FIELD_EMULATOR=1
 fi
 
 # ── CROSS-COMPILE / EMSCRIPTEN TOOLCHAIN CHECK ──────────────────────────────

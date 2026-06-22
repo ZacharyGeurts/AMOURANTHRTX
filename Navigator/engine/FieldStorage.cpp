@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -30,8 +31,21 @@ void appendMount(FsKind fs, const std::string& path, const std::string& hostPath
 
 } // namespace
 
+void enableInfiniteMode(bool on) noexcept {
+    infiniteMode = on;
+    if (on) {
+        sdf.logicalBase = 8ull * 1024u * 1024u * 1024u;
+        sdf.amplitude = 2.5;
+        sdf.logicalBytes = sdfLogicalCapacity();
+        std::fprintf(stderr, "[FieldStorage] infinite SDF wave ON logical=%.2f GiB\n",
+            static_cast<double>(sdf.logicalBytes) / (1024.0 * 1024.0 * 1024.0));
+    }
+}
+
 bool mountMultiFS(const char* projectRoot) noexcept {
     dismissAll();
+    if (std::getenv("AMOURANTHRTX_INFINITE"))
+        enableInfiniteMode(true);
     const auto root = projectRoot && projectRoot[0] ? std::filesystem::path(projectRoot)
                                                       : FieldDos::assetRoot();
     std::error_code ec;
@@ -56,6 +70,9 @@ bool mountMultiFS(const char* projectRoot) noexcept {
         }
     }
     appendMount(FsKind::Team, "T:\\", teamImg.string(), std::filesystem::exists(teamImg));
+
+    const auto chips = root / "assets" / "chips";
+    appendMount(FsKind::Vfs, "P:\\", chips.string(), std::filesystem::is_directory(chips));
 
     bo.phi = 1.0;
     bo.harmonic = 1.6180339887;

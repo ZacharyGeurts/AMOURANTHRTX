@@ -57,8 +57,10 @@ inline std::vector<MountPoint> mounts;
 inline BoState bo{};
 inline SdfWave sdf{};
 inline bool teamDriveLive = false;
+inline bool infiniteMode = false;
 inline std::string teamDriveDev = "/dev/nvme2n1";
 
+void enableInfiniteMode(bool on = true) noexcept;
 bool mountMultiFS(const char* projectRoot = ".") noexcept;
 bool mountTeamDrive(const char* devPath, bool allowInit = false) noexcept;
 void dismissAll() noexcept;
