@@ -40,16 +40,17 @@ def compile_host_bench() -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
-            "g++-14", "-std=c++20", "-O3",
-            "-I", str(ROOT / "Navigator/engine"),
-            "-I", str(ROOT / "third_party/libx86emu/include"),
-            str(SCRIPTS / "bench_x86_host.cpp"),
-            str(LIB),
-            "-o", str(out),
+            "cmake", "--build", str(ROOT / "build"),
+            "--target", "bench_x86_host",
+            "-j", str(os.cpu_count() or 4),
         ],
         cwd=ROOT,
         check=True,
     )
+    if not out.is_file():
+        alt = ROOT / "build/bench_x86_host"
+        if alt.is_file():
+            return alt
     return out
 
 

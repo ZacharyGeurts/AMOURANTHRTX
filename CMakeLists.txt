@@ -536,6 +536,13 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_libx86emu PRIVATE ${LIBX86EMU_DIR}/include)
     set_target_properties(test_libx86emu PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
+    add_executable(bench_x86_host scripts/bench_x86_host.cpp)
+    target_include_directories(bench_x86_host PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(bench_x86_host PRIVATE cxx_std_20)
+    target_compile_options(bench_x86_host PRIVATE -O3)
+    field_host_test_link(bench_x86_host)
+    set_target_properties(bench_x86_host PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
+
     add_executable(qa_drivers_build scripts/qa_drivers_build.cpp)
     target_include_directories(qa_drivers_build PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(qa_drivers_build PRIVATE cxx_std_20)
