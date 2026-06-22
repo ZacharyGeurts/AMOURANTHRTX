@@ -1,9 +1,10 @@
 RTX-AMMOS DevKit v4.0.2026
-Host GPU shell runs AMMOASM/AMMOCC/AMMOLINK/AMMODECOMP/AMMORUN/AMMODBG.
-These .COM stubs launch from DOS; real logic is in the Field Die engine.
+Host GPU shell runs AMMOASM/AMMOSYS/AMMOCC/AMMOLINK/AMMODECOMP/AMMOZIP/AMMORUN/AMMODBG.
+Field-layer .SYS drivers live in C:\DRIVERS\*.ASM - built with AMMOSYS, not stubs.
 
-  AMMOASM /?   AMMOCC /?   AMMOLINK /?   HELP BUILD
+  AMMOASM /?   AMMOSYS /?   AMMOCC /?   AMMOLINK /?   HELP BUILD
   BUILD HELLO - one-shot from C:\SAMPLES\HELLO.ASM
+  AMMOSYS C:\DRIVERS\RTXSB.ASM 160  - SB16 audio field driver
   BUILD DOOMBOOT - field-theory launcher (FIELD.H / FIELD.INC)
   AMMOLINK UTIL.OBJ MAIN.OBJ
   AMMORUN MULTI.COM   AMMODBG LOAD HELLO.COM

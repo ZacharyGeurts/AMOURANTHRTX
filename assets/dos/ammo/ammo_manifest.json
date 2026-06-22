@@ -1,9 +1,13 @@
 {
   "product": "RTX-DOS 7.0",
   "files": {
+    "AMMOCODE/README.TXT": {
+      "bytes": 123,
+      "sha256": "3a956fe3f7faedcfb6936b1ce870deef7b026eb26b28863de2ae88ed94cff05e"
+    },
     "AMMOFAT.SYS": {
-      "bytes": 159,
-      "sha256": "5b938fef57efb7c39e6f60c19fde5a9916a8cebe8ab6070b2214d03b98d4f741"
+      "bytes": 160,
+      "sha256": "40a48f0c8e22a7ee35e8c947a060c251494f5b163c3027f75379430b571007b7"
     },
     "AMMOFAT.TXT": {
       "bytes": 138,
@@ -29,9 +33,13 @@
       "bytes": 1222,
       "sha256": "7b65cad90595c84e1ab60513f4dc7e1fdc41e4ca214a5c39414c4bdce6ab7fad"
     },
+    "AMMOTEXT.HLP": {
+      "bytes": 1301,
+      "sha256": "16ca6206e63a3729d92696680b288e882a9e830527dab835beee3b7bfe091365"
+    },
     "AUTOEXEC.BAT": {
-      "bytes": 658,
-      "sha256": "c922e228dbc1aff8244877a9af89504d498492cfb0930f8545bbe5e8e576ad0d"
+      "bytes": 759,
+      "sha256": "0d3d0d2bedb4423803f26fa83a270d2aaf876a705b33778518a62d5cd5873f8e"
     },
     "BOOT31.BAT": {
       "bytes": 561,
@@ -58,12 +66,12 @@
       "sha256": "ba8e5804862b001dcf1d17f2964296c0d464aa0f739d924d4f078e492d384d90"
     },
     "COMMAND.TXT": {
-      "bytes": 1214,
-      "sha256": "2e20678592c3c56d0dc9fb8a41e61985d7489a6cb2fe98679f4f5ff605bdb4b5"
+      "bytes": 1209,
+      "sha256": "d46f1e0b2552c436606300e5a3fcf18303436e0d671327f088064f110d73be8e"
     },
     "CONFIG.SYS": {
-      "bytes": 1222,
-      "sha256": "6fc559dc145d75ee9b5be26e4e4792370e763d089916b75762836bc77a7832ec"
+      "bytes": 1343,
+      "sha256": "6872cabbf9738fb1cecae99918e9c6cb08c89483de278d21b8f0c9ba09c5087b"
     },
     "COUNTRY.SYS": {
       "bytes": 76,
@@ -109,6 +117,10 @@
       "bytes": 11616,
       "sha256": "14d93877eeea0e5d505daeb634425bf1865378d4f15c81ade462a72cd458d51c"
     },
+    "DOS/MEMORYUP.COM": {
+      "bytes": 340,
+      "sha256": "b8faf89040c9de51a23ca02e06712a567e1fcea4e4e99e56b17b863349356a28"
+    },
     "DOS/MORE.COM": {
       "bytes": 4364,
       "sha256": "56830889fef22d56ef5938df0394bf30a8416cc06225b8dc35adc74bb13416b7"
@@ -121,9 +133,53 @@
       "bytes": 2277,
       "sha256": "115a2a262579d1c8831bd6ffaed8ea31e2d156ad5ba399fc365a0ab7d843e8d2"
     },
+    "DOS/REGEDIT.COM": {
+      "bytes": 321,
+      "sha256": "dd4a542a7c0fb8ddce910b50f2012d4c6c21b6c6500e34d39ad2407603f9e8db"
+    },
+    "DOS/SCANDISK.COM": {
+      "bytes": 332,
+      "sha256": "fb35340eee18f87de364299217f5f4d01316226fa97badc65cd4908ba1307e42"
+    },
     "DOS/SYS.COM": {
       "bytes": 4766,
       "sha256": "bd7cec1824eef6c0a9d7d9447d59f999ccc0e9014a6a01abe36d454e2aacb23b"
+    },
+    "DRIVERS/AMMOFAT.ASM": {
+      "bytes": 515,
+      "sha256": "7cd57c34feb76ad08e10f90c52964388b6463bf7334c1202e7aa5bc168746f71"
+    },
+    "DRIVERS/HIMEM.ASM": {
+      "bytes": 491,
+      "sha256": "1f7d1786ce290db532b585f76b833c7e822aad287af533fce939330e163be448"
+    },
+    "DRIVERS/RTXCD.ASM": {
+      "bytes": 517,
+      "sha256": "2cebc38033c3e315d5120ed8d02607946501478f4a2de4ab1d59070a87ed962e"
+    },
+    "DRIVERS/RTXDRV.ASM": {
+      "bytes": 517,
+      "sha256": "f517fc540917fba711a04c8edc3cbc3b3e3eb3fdbb8836437383b693f0cbb2c6"
+    },
+    "DRIVERS/RTXFLHDR.INC": {
+      "bytes": 260,
+      "sha256": "2d2dec177c2995b12baa17e4072b2689244a1ea37a3e1fba7c78d90c2e6675dc"
+    },
+    "DRIVERS/RTXHOST.ASM": {
+      "bytes": 515,
+      "sha256": "6c1797148b5c3770e5289fb04faa38288e3b8f52250475ac39c7a9ecb0b60f46"
+    },
+    "DRIVERS/RTXKERNEL.ASM": {
+      "bytes": 469,
+      "sha256": "b17351d30e3b9d2f4c8103a8df843221f71e70bfba22d41893f8b01758506bd6"
+    },
+    "DRIVERS/RTXSB.ASM": {
+      "bytes": 526,
+      "sha256": "11055231986cb1418ff3566c3f5ed0cacb1754049994effd63a0567417dfc496"
+    },
+    "DRIVERS/RTXVGA.ASM": {
+      "bytes": 521,
+      "sha256": "81e06f69c0ff1df57b43f48a403c47c3e79eb8a1bc6a429b796fd2ee9c199d53"
     },
     "DRIVES.TXT": {
       "bytes": 300,
@@ -149,137 +205,29 @@
       "bytes": 11616,
       "sha256": "14d93877eeea0e5d505daeb634425bf1865378d4f15c81ade462a72cd458d51c"
     },
-    "GAMES/COSMO/CATALOG.EXE": {
-      "bytes": 27307,
-      "sha256": "4d370f7eef5daad86ca913f31e24ef8f2b729b6dd0cd6c38c60c1187f806fb26"
+    "GAMES/COSMO/COSMO.ZIP": {
+      "bytes": 1883376,
+      "sha256": "0546ff97dc8859bf16c4c5a2b0d95857645e5a725ac6606f4f252f466be20aee"
     },
-    "GAMES/COSMO/COSMO.DAT": {
-      "bytes": 271,
-      "sha256": "33e8bb0881f346fe942389c4ac62a30cc3679c80ce18a79b8078bd919519041f"
-    },
-    "GAMES/COSMO/COSMO1.EXE": {
-      "bytes": 62081,
-      "sha256": "9babfd342683bffea1cc272805f3beda54c2b1f2620c167688b6ac8bf38f6047"
-    },
-    "GAMES/COSMO/COSMO1.STN": {
-      "bytes": 607004,
-      "sha256": "55963b5331a7159fe6ca134e9ab807e59e6ef798057fc28a1081c1e6a273ff52"
-    },
-    "GAMES/COSMO/COSMO1.VOL": {
-      "bytes": 1359939,
-      "sha256": "f578a1b72423e83b363c5c019faac5b96124f39bc4a2ec4ee09cabc29f3a63fd"
-    },
-    "GAMES/COSMO/COSMO2.CFG": {
-      "bytes": 136,
-      "sha256": "1f8d87f2e6398e36c7ac4e1dbceb787d25fa42d8792b9ac5028d4bde174b2f7c"
-    },
-    "GAMES/COSMO/COSMO2.EXE": {
-      "bytes": 58805,
-      "sha256": "fa8eef3bf8ba32897f8ae9a72391dff2fa87fcf314a7df1f6d6d44c78c7792f5"
-    },
-    "GAMES/COSMO/COSMO2.STN": {
-      "bytes": 607004,
-      "sha256": "55963b5331a7159fe6ca134e9ab807e59e6ef798057fc28a1081c1e6a273ff52"
-    },
-    "GAMES/COSMO/COSMO2.VOL": {
-      "bytes": 1308939,
-      "sha256": "c4c463989f2992cf8f5b6cc200a8041e4a4f06eebaa5a5f75daa5ff66396e462"
-    },
-    "GAMES/COSMO/COSMO3.EXE": {
-      "bytes": 119078,
-      "sha256": "2a42557dc1f3b6ab2d5c85f7d42d1319fa16a9367047e447ecf0a9d5f2d4a389"
-    },
-    "GAMES/COSMO/COSMO3.STN": {
-      "bytes": 607004,
-      "sha256": "55963b5331a7159fe6ca134e9ab807e59e6ef798057fc28a1081c1e6a273ff52"
-    },
-    "GAMES/COSMO/COSMO3.VOL": {
-      "bytes": 1267305,
-      "sha256": "94ca7287946861f3413fda1aba43feaa5539bc53389594b125644e6b84ae960f"
-    },
-    "GAMES/COSMO/DEICE.EXE": {
-      "bytes": 17303,
-      "sha256": "4f77c1fee9c6e579ee325e83b0fc9d79254bb4837be950d06059260395fb4569"
-    },
-    "GAMES/COSMO/INSTALL.BAT": {
-      "bytes": 79,
-      "sha256": "4a6ca98fda73af48d3f5df87733f240b232068e27d505427a706ef550cb49fe8"
-    },
-    "GAMES/DOOM/DOOM.EXE": {
-      "bytes": 709905,
-      "sha256": "b8020523561a5ad9706e009a52d61c578f37faafd85ac471962308406292ce27"
-    },
-    "GAMES/DOOM/DOOM1.WAD": {
-      "bytes": 4196020,
-      "sha256": "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771"
-    },
-    "GAMES/KEEN4/AUDIO.CK4": {
-      "bytes": 33325,
-      "sha256": "66dcf6070a4bc5c8933815b15dab7145ddcccb959f8f43af2a0449b085a04366"
-    },
-    "GAMES/KEEN4/CONFIG.CK4": {
-      "bytes": 543,
-      "sha256": "f7b7616d17229a37cba2c0a992aad99c6049ef190a66301d82392ec000595cc6"
-    },
-    "GAMES/KEEN4/EGAGRAPH.CK4": {
-      "bytes": 487332,
-      "sha256": "b424f8b18bdd0ca78794dca7bc887a7d2e77924807bb797cdbdf07e21a002069"
-    },
-    "GAMES/KEEN4/GAMEMAPS.CK4": {
-      "bytes": 99040,
-      "sha256": "01186f8cb99257b69a4f475186deb9ba79b872ed52378131c79c21f6344753ea"
-    },
-    "GAMES/KEEN4/KEEN4E.EXE": {
-      "bytes": 102355,
-      "sha256": "e4c433af6ceda12daf166b488ff7bf7006e2f0e4aedc206c9b39d2633087b9fb"
-    },
-    "GAMES/WOLF3D/AUDIOHED.WL1": {
-      "bytes": 1156,
-      "sha256": "39351624ae6f8eef4b873e060c1a6f3e5ee7e81c4939c485275a89b145336338"
-    },
-    "GAMES/WOLF3D/AUDIOT.WL1": {
-      "bytes": 132613,
-      "sha256": "1e2c9ae30398a14c61a4ddd39aabaa0dbcc984cc4924a3e51df75574c259cfb9"
-    },
-    "GAMES/WOLF3D/GAMEMAPS.WL1": {
-      "bytes": 27425,
-      "sha256": "a6a6654b342f2c027bcb22bfce0a41f9fc0063b775e9e4da0c771970e53e11aa"
-    },
-    "GAMES/WOLF3D/MAPHEAD.WL1": {
-      "bytes": 402,
-      "sha256": "3458f661c9b875bca99ea22a7267771fad8f2a33c699ea732cf7c3322909bf8c"
-    },
-    "GAMES/WOLF3D/VGADICT.WL1": {
-      "bytes": 1024,
-      "sha256": "59878fec65f033b00dbb1240317d1793f5858213dc8013b4d68f9ac8b45b0c80"
-    },
-    "GAMES/WOLF3D/VGAGRAPH.WL1": {
-      "bytes": 326568,
-      "sha256": "d5176f843c53415132db199c19f38591eaf3cedd35a4f7eb2698c1865d83030d"
-    },
-    "GAMES/WOLF3D/VGAHEAD.WL1": {
-      "bytes": 471,
-      "sha256": "f4cc800dc8444373092d4eaa5d6ab59d63d23a510a9d38b73ca9b3dbb700d18b"
-    },
-    "GAMES/WOLF3D/VSWAP.WL1": {
-      "bytes": 742912,
-      "sha256": "698f217257e2cbb951a4d110ba09140291f38d0121b3784d1d6be59c03a6b47b"
-    },
-    "GAMES/WOLF3D/WOLF3D.EXE": {
-      "bytes": 109959,
-      "sha256": "75bd63f1db75be77a9dfd317144fec2a86d2a409dd3b6847a251a2565b646280"
+    "GAMES/WOLF3D/WOLF3D.ZIP": {
+      "bytes": 670522,
+      "sha256": "76ee5e73e7d6341aefff620989bb5f828e9d295982afd5415b62dee7fe54eb64"
     },
     "GOLDEN.TXT": {
       "bytes": 957,
       "sha256": "b2eb55f4bb15fdebbe3152429e6c7b432bd0f9f4bc16f6775561a3c2f7996821"
     },
     "HIMEM.SYS": {
-      "bytes": 159,
-      "sha256": "de6cf91c6a7e7fade71ce9f8d78914fdec117d52fca78e208c8cd9343e1f35ed"
+      "bytes": 160,
+      "sha256": "3b56636ad750b8a1f2942207d6e0a231659ca44319443dcb2b8a3cbf0cb0a6b8"
     },
     "IO.SYS": {
       "bytes": 12363,
       "sha256": "436e064a5ee71fcdce4c20a8bb149bce3d74599b4fc6e1db8340bfab5048c645"
+    },
+    "MEMORYUP.COM": {
+      "bytes": 340,
+      "sha256": "b8faf89040c9de51a23ca02e06712a567e1fcea4e4e99e56b17b863349356a28"
     },
     "MORE.COM": {
       "bytes": 4364,
@@ -297,6 +245,10 @@
       "bytes": 3808,
       "sha256": "b17575ff302d64ba92ec5c26d80355775652eef073c5a3fe099d951553886492"
     },
+    "QBASIC/README.TXT": {
+      "bytes": 128,
+      "sha256": "598396d57088f1acab6e6bd378bb97ea295a512ba93db788816926634d0fdd04"
+    },
     "README.TXT": {
       "bytes": 428,
       "sha256": "3a7917310d48578cd2ffb7786facd692ab6aeb57c9746513140336724147b051"
@@ -305,33 +257,49 @@
       "bytes": 2277,
       "sha256": "115a2a262579d1c8831bd6ffaed8ea31e2d156ad5ba399fc365a0ab7d843e8d2"
     },
+    "REGEDIT.COM": {
+      "bytes": 321,
+      "sha256": "dd4a542a7c0fb8ddce910b50f2012d4c6c21b6c6500e34d39ad2407603f9e8db"
+    },
     "RTXCD.SYS": {
-      "bytes": 159,
-      "sha256": "d00b5a13a170d9ee0486abb96f1a02b35132ae2c65aeefa59fe76e1ed6939b14"
+      "bytes": 160,
+      "sha256": "96f119f913b3267af75db56f86683863feb11f22d1debfee068c26bc796a6aa8"
     },
     "RTXDRV.SYS": {
-      "bytes": 159,
-      "sha256": "0ca38bf24cb6d038d1e255539d3d19f06acd4cbafe6d7550459148bf70ada016"
+      "bytes": 160,
+      "sha256": "314d1b0b79356284b33559793c19b762997967778c8b3f870c681b1adf112f29"
     },
     "RTXHOST.SYS": {
-      "bytes": 159,
-      "sha256": "bdce0612c5046d518c8c481a9738b9f85dbd76a3c9f22f465af2cc1dabfc54dc"
+      "bytes": 160,
+      "sha256": "79f9eed308d78a4e59533420978f2c357a68d09c3b880c0c1bde576f8c424d2b"
     },
     "RTXKERNEL.SYS": {
-      "bytes": 255,
-      "sha256": "319edd3dfab46b5d143ce10b06d2f6564a1acb93d5757b8bc835e155a66b84d9"
+      "bytes": 256,
+      "sha256": "45e911093ffa31623df236113de148b3f31b1fe27e8f15f2b319501fb4b4c1a7"
+    },
+    "RTXSB.SYS": {
+      "bytes": 160,
+      "sha256": "f926599da0d10419d7dcd9cadae1424eeb00f13e9852de5d26e46d50dd38ec68"
+    },
+    "RTXVGA.SYS": {
+      "bytes": 160,
+      "sha256": "a770e5e3b2caa3ffaeb6e21666e9fbba97007330d486c7fe99ef7b23d689380c"
+    },
+    "SAMPLES/AMMOZIP.C": {
+      "bytes": 312,
+      "sha256": "803265bbfb2ffb0a3453b1960628f2ad4acc25e4bc9cb9b1c05fff665e5e6075"
     },
     "SAMPLES/BUILD.DOOM": {
       "bytes": 168,
       "sha256": "064fbda5af507ac01ae4ffc36d9e5afce8e8d1c84709e401ef30cafe2c9cf167"
     },
     "SAMPLES/DOOMBOOT.ASM": {
-      "bytes": 464,
-      "sha256": "10f1ff2ca29547f3d1a95465ec56389307eb81072b0d04dd5efa5a3edc541597"
+      "bytes": 460,
+      "sha256": "f66d0c6cb40f695610de0062aae27796eaf7b105c3a6377fc6561ef4a92e2ff5"
     },
     "SAMPLES/DOOMBOOT.C": {
-      "bytes": 457,
-      "sha256": "20248737d5ff2df3a86f5d6087383a3f895f038aacc547736406a84ea441b7ba"
+      "bytes": 360,
+      "sha256": "57a5ef18bd25a4900a3b2daa148d2deff3ae9bf4e880ed1bb1e96044815837e7"
     },
     "SAMPLES/HELLO.ASM": {
       "bytes": 163,
@@ -353,9 +321,17 @@
       "bytes": 92,
       "sha256": "5abb1e979b6d2d3e11898fa0561b2138d65ba4607e8c401efe15f97ee98620bf"
     },
+    "SCANDISK.COM": {
+      "bytes": 332,
+      "sha256": "fb35340eee18f87de364299217f5f4d01316226fa97badc65cd4908ba1307e42"
+    },
     "SMARTDRV.EXE": {
       "bytes": 17,
       "sha256": "9f99bec93cc33608c8aaa891a7ef28ea62390004bf92e917d393bdedde67c20b"
+    },
+    "SOUND/README.TXT": {
+      "bytes": 112,
+      "sha256": "b3b7bfc9d955911e8c284a6b15b26797d7b3b7ac1b2ddb1f3f7d0f46a8c55d89"
     },
     "SYS.COM": {
       "bytes": 4766,
@@ -385,17 +361,29 @@
       "bytes": 318,
       "sha256": "3c40d1358937190d8ada177d676d18a678733351672cf995b40e293dfe679abb"
     },
+    "TOOLS/AMMOZIP.COM": {
+      "bytes": 328,
+      "sha256": "5ace9f114cc18d9c766eef635be3a6ee88f1be42e767b1c25ec51e8dd8e5e5bf"
+    },
+    "TOOLS/EXTMAP.TXT": {
+      "bytes": 1100,
+      "sha256": "b88db28d656aeb4a9f6af656f60864142a88d7ef67b387936b3b92d9537c7033"
+    },
     "TOOLS/FIELDC.COM": {
       "bytes": 318,
       "sha256": "01993ba074b348ed657d440a6d81e68305befcdbad24f3b398859c89c3454c08"
     },
     "TOOLS/README.TXT": {
-      "bytes": 467,
-      "sha256": "ad2a05299572a2155984d46027a89c15c3ff2caf2fc7d6b3d4b957c66957eb77"
+      "bytes": 569,
+      "sha256": "1016480f40cd9ba2ce02aecdf1fcc47ea100f8bc3c35cfba34ec2f86ada53a7f"
+    },
+    "TOOLS/RTXREG.INI": {
+      "bytes": 2787,
+      "sha256": "c58726e8af47521e9410eadf4291598ea1a62f8b324515d74b253a27d8268299"
     },
     "VERSION.TXT": {
-      "bytes": 90,
-      "sha256": "c29f23723a9c5971d7dd66bad8f5dbebf4fbd5450c8115a2feb60a0cd6598092"
+      "bytes": 121,
+      "sha256": "12f7a7e8986658383889370c1aee610e5f3e2d53119b14cfeb9c395a343b638a"
     },
     "WIN/BOOT31.BAT": {
       "bytes": 561,

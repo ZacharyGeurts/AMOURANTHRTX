@@ -2,9 +2,7 @@
 
 // WM compositor — SURFACE_RAM layout and data_bus packing for GPU chrome.
 
-#include "FieldDosChrome.hpp"
 #include "FieldWmChrome.hpp"
-#include "FieldWmDock.hpp"
 #include "FieldWmInput.hpp"
 
 #include <algorithm>
@@ -13,12 +11,8 @@
 namespace FieldAmouranthOs {
 extern bool panelVisible;
 extern int focusedProgId;
-extern float uiScale() noexcept;
-extern float desktopTopInset() noexcept;
 bool shellChromeActive() noexcept;
 } // fwd
-
-namespace FieldNes { extern bool active; }
 
 namespace FieldWmCompositor {
 
@@ -68,29 +62,17 @@ inline void packSurfaceRam(std::uint8_t* ram) noexcept {
         float sc = FieldWmInput::panelScale;
         const bool isFocus = p.id == FieldAmouranthOs::focusedProgId;
         const bool visible = FieldAmouranthOs::panelVisible && isFocus && !p.minimized;
-        float pw = FieldDosViewport::panelOuterW();
-        float ph = FieldDosViewport::panelOuterH();
         if (visible) {
-            const FieldDosViewport::Rect r = FieldDosChrome::chromeUsesRenderSpace()
-                ? FieldDosViewport::panelRectRender()
-                : FieldDosViewport::panelRect();
-            ox = r.x0;
-            oy = r.y0;
-            pw = r.w();
-            ph = r.h();
+            ox = FieldDosViewport::panelOx;
+            oy = FieldDosViewport::panelOy;
             sc = FieldWmInput::panelScale;
         } else if (p.panelOx >= 0.f) {
             ox = p.panelOx;
             oy = p.panelOy;
             sc = p.panelScale > 0.f ? p.panelScale : FieldWmInput::panelScale;
-        } else {
-            const float s = FieldAmouranthOs::uiScale();
-            const float margin = FieldWmDock::MARGIN_PX * s;
-            const float cascade = FieldWmDock::CASCADE_PX * s;
-            ox = margin + cascade * static_cast<float>(tab % 6);
-            oy = FieldAmouranthOs::desktopTopInset() + margin
-                + cascade * static_cast<float>(tab % 6);
         }
+        const float pw = FieldDosViewport::panelOuterW();
+        const float ph = FieldDosViewport::panelOuterH();
         writeRamU16(ram, base, static_cast<std::uint16_t>(std::clamp(ox, 0.f, 65534.f)));
         writeRamU16(ram, base + 2u, static_cast<std::uint16_t>(std::clamp(oy, 0.f, 65534.f)));
         writeRamU16(ram, base + 4u, static_cast<std::uint16_t>(std::clamp(pw, 1.f, 65535.f)));
@@ -120,9 +102,7 @@ inline void packCompositorBus(std::uint32_t* bus) noexcept {
         bus[61] = 0u;
         return;
     }
-    const FieldDosViewport::Rect win = FieldDosChrome::chromeUsesRenderSpace()
-        ? FieldDosViewport::panelRectRender()
-        : FieldDosViewport::panelRect();
+    const FieldDosViewport::Rect win = FieldWmChrome::windowRect();
     const float csx = FieldDosViewport::coordScaleX();
     const float csy = FieldDosViewport::coordScaleY();
     const std::uint32_t rw = static_cast<std::uint32_t>(win.w() * csx) & 0xFFFFu;
@@ -144,15 +124,8 @@ inline void packCompositorBus(std::uint32_t* bus) noexcept {
             | rh;
 }
 
-inline void syncMenuProfile() noexcept {
-    FieldWmChrome::menuProfile = FieldNes::active
-        ? FieldWmChrome::MenuProfile::NesEmu
-        : FieldWmChrome::MenuProfile::Standard;
-}
-
 inline void packIntoBus(std::uint32_t* bus) noexcept {
     if (!bus || !FieldAmouranthOs::shellChromeActive()) return;
-    syncMenuProfile();
     FieldWmChrome::syncViewport(FieldWmInput::panelScale);
     bus[52] = static_cast<std::uint32_t>(FieldWmChrome::hover) & 0xFu;
     if (FieldWmInput::dragging) bus[52] |= 1u << 4;
@@ -163,14 +136,9 @@ inline void packIntoBus(std::uint32_t* bus) noexcept {
         bus[52] |= (static_cast<std::uint32_t>(FieldWmChrome::openMenu) & 7u) << 8;
         if (FieldWmChrome::menuItemHover >= 0)
             bus[52] |= (static_cast<std::uint32_t>(FieldWmChrome::menuItemHover) & 0xFu) << 11;
-        if (FieldWmChrome::openMenu == FieldWmChrome::OpenMenu::System)
-            bus[52] |= (static_cast<std::uint32_t>(
-                FieldWmChrome::systemMenuScroll) & 0xFu) << 17;
     }
     if (FieldWmChrome::chromeSkin == FieldWmChrome::ChromeSkin::Gnome)
         bus[52] |= BUS_CHROME_SKIN_MASK;
-    if (FieldWmChrome::menuProfile == FieldWmChrome::MenuProfile::NesEmu)
-        bus[52] |= 1u << 16;
     bus[53] = static_cast<std::uint32_t>(FieldWmInput::panelScale * 256.f) & 0xFFFFu;
     packCompositorBus(bus);
 }

@@ -23,5 +23,5 @@ ok:
 .DATA
 msg db 'DOOMBOOT RTX-DOS 7.0 Field Die',13,10,'$'
 bad db 'Tesla valve mismatch',13,10,'$'
-go  db 'Launch: C:\GAMES\DOOM\DOOM.EXE',13,10,'$'
+go  db 'Launch GAMES/DOOM/DOOM.EXE',13,10,'$'
 END start

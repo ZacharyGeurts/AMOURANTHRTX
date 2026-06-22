@@ -13,4 +13,3 @@ RTX_EXIT MACRO code:=0
     mov ax,4C00h + code
     int 21h
 ENDM
-INCLUDE SUPERCORE.INC
