@@ -529,7 +529,8 @@ inline void launchGui(FieldAmouranthOs::AppId app, std::uint8_t* ram, void* mapp
         launchNesGui(ram);
         break;
     case FieldAmouranthOs::AppId::NesSetup:
-        launchNesGui(ram);
+        FieldAmmoNesSetup::open(false, false);
+        FieldAmmoNesSetup::paint(ram);
         break;
     case FieldAmouranthOs::AppId::A2600:
         FieldA2600::open(ram, nullptr, FieldAmouranthLaunch::pendingOpenOptions);

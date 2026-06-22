@@ -1,5 +1,6 @@
 // QA: AmouranthOS taskbar hit tests — Start, quick-launch, tab slots, clean boot RAM.
 #include "FieldAosAppJournal.hpp"
+#include "FieldRegistry.hpp"
 #include "FieldAmouranthLaunch.hpp"
 #include "FieldAmouranthMenu.hpp"
 #include "FieldAmouranthOs.hpp"
@@ -37,14 +38,10 @@ static void quickLaunchCenter(int qi, float& x, float& y) noexcept {
 }
 
 static void tabSlotCenter(int tabSlot, float& x, float& y) noexcept {
-    const float ty = FieldAmouranthOs::taskbarY();
-    const float th = FieldAmouranthOs::scaledTaskbarH();
-    const float inset = 7.f * FieldAmouranthOs::uiScale();
-    const float tabH = th - 14.f * FieldAmouranthOs::uiScale();
-    const float tx = FieldAmouranthOs::taskTabsOriginX()
-        + static_cast<float>(tabSlot) * (FieldAmouranthOs::scaledTabW() + 6.f * FieldAmouranthOs::uiScale());
-    x = tx + FieldAmouranthOs::scaledTabW() * 0.5f;
-    y = ty + inset + tabH * 0.5f;
+    const auto L = FieldAmouranthOs::taskbarLayout();
+    const float tx = FieldTaskbarLayout::tabX(L, tabSlot);
+    x = tx + L.tabW * 0.5f;
+    y = L.tabY + L.tabH * 0.5f;
 }
 
 static bool clickTaskbar(float x, float y) noexcept {
@@ -74,6 +71,10 @@ int main() {
     const char* pollutedSnaps[] = { "scr=0", "", "raw=0", "", "L=C:\\,R=E:\\,p=0" };
     FieldAosAppJournal::saveSession(pollutedApps, pollutedSnaps, 5,
         FieldAosAppIdentity::AppId::FileCmd);
+
+    FieldRegistry::init();
+    FieldRegistry::setValue("HKRTX\\User\\Desktop", "RestoreSession", "0");
+    FieldAosAppJournal::loadConfigFromRegistry();
 
     FieldAmouranthOs::boot();
     FieldAmouranthOs::tick(1920, 1080);

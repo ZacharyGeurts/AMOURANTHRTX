@@ -98,12 +98,14 @@ int main() {
     FieldAmouranthOs::tick(1920, 1080);
     FieldDosViewport::winW = 1920.f;
     FieldDosViewport::winH = 1080.f;
+    FieldDosViewport::renderW = FieldDosViewport::winW;
+    FieldDosViewport::renderH = FieldDosViewport::winH;
     FieldAmouranthOs::showDosPanelDocked();
     FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Shell);
     pump(ram);
     FieldAmouranthExec::paintRtxShellGui(ram);
 
-    const FieldDosViewport::Rect win = FieldDosViewport::panelRect();
+    const FieldDosViewport::Rect win = FieldDosViewport::panelRectRender();
     const float titleH = FieldDosViewport::chromeTitleH;
     const float hudH = FieldDosViewport::DOS_HUD_H;
     const float left = 4.f;

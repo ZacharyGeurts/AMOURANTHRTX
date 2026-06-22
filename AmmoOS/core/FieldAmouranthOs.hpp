@@ -1084,8 +1084,14 @@ inline void taskbarChromeButtonY(float& y0, float& y1) noexcept {
     y1 = L.barY1 - L.pad;
 }
 
+// Match aosTbStartBounds / aosStartMenu rootTop (menu hangs from Start button top).
+inline float startMenuAnchorY() noexcept {
+    const auto L = taskbarLayout();
+    return L.barY0 + L.pad - L.lift;
+}
+
 inline float scaledMenuRootTop() noexcept {
-    return taskbarY() - scaledMenuRootHeight();
+    return startMenuAnchorY() - scaledMenuRootHeight();
 }
 
 // Root menu rows start at rootTop + headH in aos_chrome.inc (no extra pad before rows).
@@ -1097,7 +1103,7 @@ inline void exitConfirmPanelBounds(float& x0, float& y0, float& w, float& h) noe
 inline int exitConfirmButtonAt(float mx, float my) noexcept;
 
 inline float scaledMenuFlyoutTop() noexcept {
-    return taskbarY() - scaledMenuFlyoutHeight();
+    return startMenuAnchorY() - scaledMenuFlyoutHeight();
 }
 
 inline float scaledFilesCellW() noexcept { return 88.f * uiScale(); }
@@ -1241,8 +1247,6 @@ inline HitZone hitTest(float mx, float my) noexcept {
         if (pointIn(mx, my, px, py, pw, ph))
             return HitZone::FolderView;
     }
-    if (FieldAmouranthDesktop::iconAt(mx, my) >= 0)
-        return HitZone::Desktop;
     if (startOpen) {
         const float rootSy = scaledMenuRootTop();
         const float rootH = scaledMenuRootHeight();
@@ -1264,6 +1268,8 @@ inline HitZone hitTest(float mx, float my) noexcept {
         if (pointIn(mx, my, scaledMenuPad(), rootSy, scaledMenuW(), rootH))
             return HitZone::StartMenu;
     }
+    if (FieldAmouranthDesktop::iconAt(mx, my) >= 0)
+        return HitZone::Desktop;
     return HitZone::Desktop;
 }
 
