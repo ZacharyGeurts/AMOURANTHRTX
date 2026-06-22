@@ -30,7 +30,7 @@ jobs:
           cmake --build build --target amouranth_engine \
             qa_amouranthos_test qa_exit_shutdown_test qa_field_kilroy_test \
             qa_doom_host_test qa_doom_gpu_test qa_keen_host_test qa_rtxpm_test qa_rtx_vfs_test \
-            qa_taskbar_click_test qa_rtx_widgets_test qa_app_journal_test \
+            qa_fieldstorage_test qa_taskbar_click_test qa_rtx_widgets_test qa_app_journal_test \
             qa_registry_test qa_memory_tier_test qa_raid_test -j"$(nproc)"
 
       - name: Build shaders
@@ -63,7 +63,35 @@ jobs:
         run: ./build/qa_doom_host_test
 
       - name: Keen LZEXE host QA
-        continue-on-error: true
         run: |
           ./build/qa_keen_host_test
           ./build/qa_rtxpm_test
+
+      - name: FieldStorage v2 + dual-host QA
+        run: |
+          ./build/qa_fieldstorage_test
+          python3 scripts/team_drive_test.py
+          python3 scripts/bench_storage.py
+
+  windows-fieldstorage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build git \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev libxext-dev \
+            libfreetype6-dev libcurl4-openssl-dev python3
+
+      - name: Dual-host FieldStorage matrix
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DFETCH_SDL3=ON
+          cmake --build build --target qa_fieldstorage_test -j"$(nproc)"
+          AMOURANTHRTX_DUAL_HOST=1 AMOURANTHRTX_FIELD_STORAGE_V2=1 \
+            ./build/qa_fieldstorage_test
+          python3 scripts/team_drive_test.py
