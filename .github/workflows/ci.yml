@@ -17,13 +17,13 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build git \
+          sudo apt-get install -y build-essential cmake ninja-build git pkg-config \
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
-            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
-            libxkbcommon-dev libwayland-dev libx11-dev libxext-dev \
-            libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxcomposite-dev libxdamage-dev \
-            libxinerama-dev libxxf86vm-dev \
+            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dev \
+            libglib2.0-dev libpipewire-0.3-dev libwayland-dev libdecor-0-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libxinerama-dev libxxf86vm-dev \
+            libxrender-dev libxcomposite-dev libxdamage-dev \
             libfreetype6-dev libcurl4-openssl-dev \
             libvulkan-dev glslc spirv-tools python3-pil
 
@@ -85,13 +85,13 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build git \
+          sudo apt-get install -y build-essential cmake ninja-build git pkg-config \
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
-            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
-            libxkbcommon-dev libwayland-dev libx11-dev libxext-dev \
-            libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxcomposite-dev libxdamage-dev \
-            libxinerama-dev libxxf86vm-dev \
+            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dev \
+            libglib2.0-dev libpipewire-0.3-dev libwayland-dev libdecor-0-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libxinerama-dev libxxf86vm-dev \
+            libxrender-dev libxcomposite-dev libxdamage-dev \
             libfreetype6-dev libcurl4-openssl-dev \
             libvulkan-dev glslc spirv-tools python3-pil
 
