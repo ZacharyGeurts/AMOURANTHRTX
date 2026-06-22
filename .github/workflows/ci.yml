@@ -21,6 +21,7 @@ jobs:
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
             libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
             libxkbcommon-dev libwayland-dev libx11-dev libxext-dev \
+            libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev \
             libfreetype6-dev libcurl4-openssl-dev \
             libvulkan-dev glslc spirv-tools python3-pil
 
@@ -86,7 +87,9 @@ jobs:
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
             libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
             libxkbcommon-dev libwayland-dev libx11-dev libxext-dev \
-            libfreetype6-dev libcurl4-openssl-dev python3
+            libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev \
+            libfreetype6-dev libcurl4-openssl-dev \
+            libvulkan-dev glslc spirv-tools python3-pil
 
       - name: Dual-host FieldStorage matrix
         run: |
