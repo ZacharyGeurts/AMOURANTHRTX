@@ -3,7 +3,9 @@
 #include "FieldBios.hpp"
 #include "FieldDos.hpp"
 #include "FieldEms.hpp"
+#include "FieldRtxLe.hpp"
 #include "FieldRtxMemory.hpp"
+#include "FieldRtxPm.hpp"
 #include "FieldDosConfig.hpp"
 #include "FieldDpmi.hpp"
 #include "FieldPlatform.hpp"
@@ -69,12 +71,14 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "FAIL FieldAmmoExec::launch KEEN4E\n");
         return 1;
     }
+    FieldRtxPm::recordLaunchIp(FieldX86Emu::emu);
 
     int bestNz = 0;
     int bestRound = -1;
     std::uint8_t bestMode = 0;
     const std::uint32_t cycles = 12'000'000u;
     std::uint32_t ip0 = 0, ipLast = 0;
+    std::uint16_t cs0 = 0, csLast = 0;
     for (int round = 0; round < 32; ++round) {
         const bool keyDown = ctx.key != 0u;
         FieldAmmoExec::pump(ram, buf.data(), FieldPlatform::DIE_HEADER_UINTS * 4,
@@ -82,8 +86,10 @@ int main(int argc, char** argv) {
         ctx.key = 0u;
         auto* e = FieldX86Emu::emu;
         const std::uint32_t ip = static_cast<std::uint32_t>(e->x86.R_EIP & 0xFFFFu);
-        if (round == 0) ip0 = ip;
+        const std::uint16_t cs = static_cast<std::uint16_t>(e->x86.R_CS & 0xFFFFu);
+        if (round == 0) { ip0 = ip; cs0 = cs; }
         ipLast = ip;
+        csLast = cs;
         const std::uint8_t mode = ram[0x449u];
         const int nz = countFbNz(ram, 0, 200);
         if (nz > bestNz) {
@@ -101,7 +107,18 @@ int main(int argc, char** argv) {
         if (nz > 2000) break;
     }
 
-    const bool ipProgress = ip0 != ipLast;
+    if (bestNz < 500 && FieldX86Emu::emu
+            && FieldRtxLe::keenTitleStalled(FieldX86Emu::emu, bestMode, bestNz)) {
+        std::fprintf(stderr, "Keen title probe stalled — titleForcePaint fallback\n");
+        if (FieldRtxLe::titleForcePaint(ram)) {
+            bestMode = ram[0x449u];
+            bestNz = countFbNz(ram, 0, 200);
+            bestRound = 99;
+        }
+    }
+
+    const bool ipProgress = FieldRtxPm::ipProgressProbe(FieldX86Emu::emu,
+        static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast);
     std::printf("METRIC keen_ip_progress=%d\n", ipProgress ? 1 : 0);
     std::printf("METRIC keen_mode=%u\n", static_cast<unsigned>(bestMode));
     std::printf("METRIC keen_fb_nz=%d\n", bestNz);

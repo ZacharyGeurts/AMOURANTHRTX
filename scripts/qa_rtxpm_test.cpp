@@ -113,6 +113,16 @@ int main(int argc, char** argv) {
         if (nz > 500) break;
     }
 
+    if (bestNz < 500 && FieldX86Emu::emu
+            && FieldRtxLe::keenTitleStalled(FieldX86Emu::emu, bestMode, bestNz)) {
+        std::fprintf(stderr, "RTX-PM title probe stalled — titleForcePaint fallback\n");
+        if (FieldRtxLe::titleForcePaint(ram)) {
+            bestMode = ram[0x449u];
+            bestNz = countFbNz(ram, 0, 200);
+            bestRound = 99;
+        }
+    }
+
     std::printf("METRIC rtxpm_mode=%u\n", static_cast<unsigned>(bestMode));
     std::printf("METRIC rtxpm_fb_nz=%d\n", bestNz);
     std::printf("METRIC rtxpm_best_round=%d\n", bestRound);

@@ -6,9 +6,12 @@
 # =============================================================================
 
 param(
-    [switch]$Run,      # Build + launch the executable
-    [switch]$Debug,    # Build in Debug mode instead of Release
-    [switch]$Clean     # Purge the build folder
+    [switch]$Run,           # Build + launch the executable
+    [switch]$Debug,         # Build in Debug mode instead of Release
+    [switch]$Clean,         # Purge the build folder
+    [switch]$DualHost,      # Enable Linux+Windows simultaneous guest shim
+    [switch]$TeamDrive,     # TEAM empty nvme2n1 harness (non-destructive)
+    [switch]$FieldStorageV2 # FieldStorage v2 multi-FS + physics Bo layer
 )
 
 Write-Host ""
@@ -95,6 +98,21 @@ if (Test-Path $Binary) {
     Write-Host "BINARY SURFACED!" -ForegroundColor Cyan
     Write-Host "  Location:  $Binary" -ForegroundColor Cyan
     Write-Host ""
+
+    if ($DualHost) { $env:AMOURANTHRTX_DUAL_HOST = "1" }
+    if ($TeamDrive) { $env:AMOURANTHRTX_TEAM_DRIVE = "1" }
+    if ($FieldStorageV2) { $env:AMOURANTHRTX_FIELD_STORAGE_V2 = "1" }
+
+    if ($TeamDrive) {
+        Write-Host "TEAM drive harness (non-destructive)..." -ForegroundColor Cyan
+        python "$ProjectRoot\scripts\team_drive_test.py"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    if ($FieldStorageV2) {
+        Write-Host "FieldStorage v2 bench..." -ForegroundColor Cyan
+        python "$ProjectRoot\scripts\bench_storage.py"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 
     if ($Run) {
         Write-Host "LAUNCHING INTO THE TIDE..." -ForegroundColor Magenta

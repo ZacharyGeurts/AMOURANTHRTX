@@ -30,6 +30,12 @@ for arg in "$@"; do
         bench)
             exec python3 "$PROJECT_ROOT/scripts/bench_dos_suite.py" "${@:2}"
             ;;
+        team-drive|team_drive)
+            exec python3 "$PROJECT_ROOT/scripts/team_drive_test.py" "${@:2}"
+            ;;
+        field-storage|field_storage)
+            exec python3 "$PROJECT_ROOT/scripts/bench_storage.py" "${@:2}"
+            ;;
         win31)
             exec python3 "$PROJECT_ROOT/scripts/setup_win31.py" "${@:2}"
             ;;
@@ -91,6 +97,10 @@ show_help() {
   ./linux.sh dos --force      → re-download and rebuild RTX-DOS images
   ./linux.sh qa               → full DOS/Windows QA suite
   ./linux.sh bench            → CPU/GPU perf (add --dosbox for DOSBox ref, --quick to skip extras)
+  ./linux.sh team-drive       → TEAM empty nvme2n1 harness (non-destructive)
+  ./linux.sh field-storage    → FieldStorage v2 bench + multi-FS QA
+  ./linux.sh run --dual-host --team-drive --field-storage-v2
+                              → dual Linux/Windows + TEAM + FieldStorage v2 flags
   ./linux.sh win31            → Windows 3.1 MCSE+I setup checklist
   ./linux.sh win31 --stage    → stage incoming/win31 + rebuild C:
   ./linux.sh os               → full KILROY Field OS (engine + kernel + rootfs + boot ISO)
@@ -158,6 +168,9 @@ GENERATOR="Unix Makefiles"
 LAUNCH_MODE="normal"
 WINE_RUN=false
 EXTENDED_FIELD=false
+DUAL_HOST=false
+TEAM_DRIVE=false
+FIELD_STORAGE_V2=false
 
 for arg in "$@"; do
     case "${arg,,}" in
@@ -167,6 +180,9 @@ for arg in "$@"; do
         clean)      clean_all ;;
         ninja|--ninja) GENERATOR="Ninja" ;;
         extended-field|--extended-field) EXTENDED_FIELD=true ;;
+        dual-host|--dual-host) DUAL_HOST=true ;;
+        team-drive|--team-drive) TEAM_DRIVE=true ;;
+        field-storage|--field-storage|field-storage-v2|--field-storage-v2) FIELD_STORAGE_V2=true ;;
         windows|release|web) ;; # already handled
         --help|-h|/h|/help|-help|help|"") show_help ;;
         *)          echo -e "${CORAL}UNKNOWN CURRENT: $arg${X}"; show_help ;;
@@ -175,6 +191,16 @@ done
 
 if $EXTENDED_FIELD; then
     export AMOURANTHRTX_EXTENDED_FIELD=1
+fi
+if $DUAL_HOST; then
+    export AMOURANTHRTX_DUAL_HOST=1
+fi
+if $TEAM_DRIVE; then
+    export TEAM_DRIVE_DEV="${TEAM_DRIVE_DEV:-/dev/nvme2n1}"
+    export AMOURANTHRTX_TEAM_DRIVE=1
+fi
+if $FIELD_STORAGE_V2; then
+    export AMOURANTHRTX_FIELD_STORAGE_V2=1
 fi
 
 # ── CROSS-COMPILE / EMSCRIPTEN TOOLCHAIN CHECK ──────────────────────────────

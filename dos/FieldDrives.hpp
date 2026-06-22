@@ -3,6 +3,7 @@
 // RTX-AMMOS field drive rack — A: floppy B: (reserved) C: AMMOFAT D: MSCDEX E: host bridge.
 
 #include "FieldAmmoFat.hpp"
+#include "FieldStorage.hpp"
 #include "FieldCdRom.hpp"
 #include "FieldDos.hpp"
 #include "FieldLayerShell.hpp"
@@ -135,6 +136,11 @@ inline void invalidate() noexcept {
 }
 
 inline void refresh(bool force = false) noexcept {
+    static bool storageMounted = false;
+    if (!storageMounted) {
+        FieldStorage::mountMultiFS();
+        storageMounted = true;
+    }
     if (FieldDos::hdReady && !FieldAmmoFat::mounted)
         FieldAmmoFat::mount();
 

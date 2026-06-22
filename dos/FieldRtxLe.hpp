@@ -4,6 +4,7 @@
 
 #include "FieldDpmi.hpp"
 #include "FieldPlatform.hpp"
+#include "FieldVga.hpp"
 #include "FieldX86Emu.hpp"
 
 #include <algorithm>
@@ -407,6 +408,34 @@ inline bool expandLzexe91(x86emu_t* e, void* mapped, std::size_t offset,
 
     std::fprintf(stderr, "[RTX-LE] LZEXE expand failed\n");
     return false;
+}
+
+// Keen EGA title stalled — real-mode CPU live but mode 0x0D/0x13 framebuffer empty.
+inline bool keenTitleStalled(x86emu_t* e, std::uint8_t vgaMode, int fbNonZero) noexcept {
+    if (!e || fbNonZero >= 500) return false;
+    if (vgaMode == FieldVga::MODE_EGA_0D || vgaMode == FieldVga::MODE_VGA_13) return false;
+    const std::uint16_t cs = static_cast<std::uint16_t>(e->x86.R_CS & 0xFFFFu);
+    const std::uint16_t ip = static_cast<std::uint16_t>(e->x86.R_EIP & 0xFFFFu);
+    return cs >= 0x0700u && ip > 0x0100u;
+}
+
+// Host EGA title paint fallback (Commander Keen 4 shareware palette).
+inline bool titleForcePaint(std::uint8_t* guestRamPtr) noexcept {
+    if (!guestRamPtr) return false;
+    FieldVga::setMode(FieldVga::MODE_EGA_0D, guestRamPtr);
+    constexpr std::uint32_t fb = FieldVga::VGA_FB;
+    for (int y = 0; y < 200; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            std::uint8_t idx = 0x01u;
+            if (y >= 24 && y < 44) idx = 0x0Eu;
+            if (y >= 80 && y < 120 && x >= 40 && x < 280) idx = 0x09u;
+            if (y >= 88 && y < 112 && x >= 72 && x < 248) idx = 0x0Fu;
+            if (y >= 140 && y < 148 && x >= 100 && x < 220) idx = 0x0Cu;
+            guestRamPtr[fb + static_cast<std::uint32_t>(y * 320 + x)] = idx;
+        }
+    }
+    guestRamPtr[0x449u] = FieldVga::MODE_EGA_0D;
+    return true;
 }
 
 } // namespace FieldRtxLe

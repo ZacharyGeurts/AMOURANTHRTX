@@ -278,7 +278,7 @@ add_custom_command(TARGET field_x86 POST_BUILD
 # =============================================================================
 set(OUR_SOURCES Navigator/main.cpp
     Navigator/engine/FieldWebCore.cpp Navigator/engine/FieldBrowserHook.cpp
-    Navigator/engine/FieldCdRomHost.cpp
+    Navigator/engine/FieldCdRomHost.cpp Navigator/engine/FieldStorage.cpp
     FieldKilroy/FieldKilroyBridge.cpp FieldKilroy/FieldKilroyKernel.cpp)
 set(ALL_SOURCES ${OUR_SOURCES} ${TINYOBJLOADER_SRC})
 
@@ -501,6 +501,7 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
             "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldWebCore.cpp"
             "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldBrowserHook.cpp"
             "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldCdRomHost.cpp"
+            "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldStorage.cpp"
             "${CMAKE_SOURCE_DIR}/FieldKilroy/FieldKilroyBridge.cpp"
             "${CMAKE_SOURCE_DIR}/FieldKilroy/FieldKilroyKernel.cpp")
         target_link_libraries(${target} PRIVATE field_x86 m pthread dl ZLIB::ZLIB)
@@ -609,6 +610,12 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_keen_build_test)
     field_embed_dos(qa_keen_build_test)
     set_target_properties(qa_keen_build_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+    add_executable(qa_fieldstorage_test scripts/qa_fieldstorage_test.cpp Navigator/engine/FieldStorage.cpp)
+    target_include_directories(qa_fieldstorage_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_fieldstorage_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_fieldstorage_test)
+    set_target_properties(qa_fieldstorage_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
     add_executable(qa_keen_host_test scripts/qa_keen_host_test.cpp)
     target_include_directories(qa_keen_host_test PRIVATE ${FIELD_ENGINE_INCLUDES})
