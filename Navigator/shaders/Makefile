@@ -38,7 +38,7 @@ all: $(ALL_OUTS)
 $(OUT_COMPUTE)/%.spv: compute/%.comp
 	@mkdir -p $(OUT_COMPUTE)
 	@echo "glslc: $<"
-	$(GLSLC) $(INCLUDE) $(if $(filter aos_load,$*),-O,$(OPT)) $(SPIRV_ENV) \
+	$(GLSLC) $(INCLUDE) $(if $(filter aos_load,$*),-O,$(if $(filter CANVAS x86,$*),-g -O0,$(OPT))) $(SPIRV_ENV) \
 		-fshader-stage=comp "$<" -o "$@"
 	$(SPIRV_VAL) --target-env vulkan1.4 "$@"
 

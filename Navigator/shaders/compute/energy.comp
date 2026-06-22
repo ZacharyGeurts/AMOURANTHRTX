@@ -80,10 +80,19 @@ void main() {
     ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
     vec2 uv = vec2(gid) / vec2(imageSize(outputImage));
 
+    // Extended field peaks (padField) — non-point lead-in/lead-out parallel slots
+    float leadIn  = pc.padField[0];
+    float leadOut = pc.padField[1];
+    float leadInEnv  = pc.padField[2];
+    float leadOutEnv = pc.padField[3];
+
     // Sample analog fabric
     float thermo = (fabric.ZMM1024[gid.y % 32][gid.x % 32] & 0xFFFFu) / 65535.0;
     float phi    = (fabric.ZMM1024[(gid.y + 11) % 32][(gid.x + 7) % 32] >> 16) / 65535.0;
     float flow   = hash(uv + pc.analogTime);
+    thermo += leadIn * leadInEnv * 0.12;
+    phi    += leadOut * leadOutEnv * 0.09;
+    flow   += (leadIn - leadOut) * 0.05;
 
     // Derive energy values from fabric + push constants (no extra buffers needed)
     float entropy          = thermo * 0.8 + pc.entropyFloor;           // approximate from thermo

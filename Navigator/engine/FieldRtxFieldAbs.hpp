@@ -36,7 +36,8 @@ constexpr std::uint8_t BUS_RAM         = 2;
 constexpr std::uint8_t BUS_VGA         = 8;
 constexpr std::uint8_t BUS_FAT         = 12;
 constexpr std::uint8_t BUS_MSCDEX      = 24;
-constexpr std::uint8_t BUS_TESLA       = 31;  // TeslaBiasStrength mirror
+constexpr std::uint8_t BUS_TESLA       = 31;  // TeslaBiasStrength mirror (shares slot w/ Linux syscall count when active)
+constexpr std::uint8_t BUS_LINUX_BASE  = 29;  // FieldKilroy layer: active, pid, syscall_count
 
 // Tesla valve flow resistance (CANVAS.comp teslaR)
 constexpr float TESLA_R_FORWARD   = 0.18f;

@@ -8,7 +8,7 @@
       "label": "Firefox",
       "binary": "/usr/bin/firefox",
       "argv0": "firefox",
-      "version": "Mozilla Firefox 151.0.4",
+      "version": "Mozilla Firefox 152.0.1",
       "default": true
     }
   ]

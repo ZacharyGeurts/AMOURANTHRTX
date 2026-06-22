@@ -34,6 +34,7 @@
 
 #include "include/x86emu_int.h"
 #include "include/fpu.h"
+#include "include/mem.h"
 
 #define LINE_LEN 16
 

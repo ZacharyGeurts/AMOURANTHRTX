@@ -493,6 +493,7 @@ namespace Options::Canvas
     inline constexpr uint32_t ControlDosPanelFs      = 256u;
     inline constexpr uint32_t ControlDosPanelStretch = 512u;
     inline constexpr uint32_t ControlFieldDebugHud   = 2048u;  // x86 field-die monitor (off in production)
+    inline constexpr uint32_t ControlExtendedField   = 4096u;  // non-point wave dispatch (lead-in/out peaks)
     inline bool DosImmersiveMode  = false;
     inline bool DosPanelStretch   = false;
     inline bool BootRtxDos = true;

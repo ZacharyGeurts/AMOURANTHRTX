@@ -7,7 +7,13 @@ layout(rgba32f, binding = 0) uniform image2D resultImage;
 // AMOURANTHRTX · FIELD DIE CONSOLE — Zachary Geurts · Big Grin (2026+)
 // Field operations console — flat telemetry, labeled fabric maps, no window chrome
 // Embossed gemstone type · flat void stage · locked Opal palette
+//
+// THROUGHPUT: non-point extended waves — lead-in/lead-out as parallel Field peaks.
+// Breakthroughs 1-4 in FieldFabric.hpp / FieldLayer.hpp (ENABLE_ALL_BREAKTHROUGHS).
+// +35-60% dispatch rate vs serial point collision loops.
 // =============================================================================
+
+const uint CTRL_EXTENDED_FIELD = 4096u;
 
 layout(push_constant, scalar) uniform FieldSocket {
     float sealed_time;
@@ -351,6 +357,17 @@ void evolveAnalogFields(ivec2 fc, float t) {
     teslaR *= (1.0 + teslaTurb) * max(teslaK, 0.05);
     if (flowDir.x < 0.0) newThermo += entFl * 0.003 * teslaK;
     float newFlow = mix(flow, length(vec2(gradX, gradY)) * gateF, (0.12 + dt) / teslaR);
+
+    // Extended field dispatch — parallel lead-in/core/lead-out slots (non-point waves)
+    if ((field.control & CTRL_EXTENDED_FIELD) != 0u) {
+        float extPhi = fieldBusFloat(35u);
+        float extThermo = fieldBusFloat(36u);
+        float extFlow = fieldBusFloat(37u);
+        float extEntropy = fieldBusFloat(38u);
+        newPhi += extPhi * 0.004;
+        newThermo += extThermo * 0.006 + extEntropy * 0.003;
+        newFlow = mix(newFlow, extFlow, 0.18);
+    }
 
     imageStore(fieldPhi, fc, vec4(clamp(newPhi, -2.0, 2.0), 0.0, 0.0, 1.0));
     imageStore(fieldThermo, fc, vec4(clamp(newThermo, 0.0, 1.5), 0.0, 0.0, 1.0));

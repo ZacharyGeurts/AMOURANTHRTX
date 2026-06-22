@@ -13,6 +13,8 @@
 #include "FieldBios.hpp"
 #include "FieldGpuLaunch.hpp"
 #include "FieldRtxPm.hpp"
+#include "FieldKilroyLoader.hpp"
+#include "FieldRtxAmmos.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -153,10 +155,22 @@ inline bool launch(void* mapped, std::size_t offset, std::uint8_t* ram,
     case Format::DosMz:
     case Format::DosCom:
         return launchDos(mapped, offset, ram, dosPath, image, fmt);
-    case Format::Elf:
+    case Format::Elf: {
+        const auto loaded = FieldKilroy::loadFromVector(ram, image);
+        if (!loaded.ok) {
+            std::fprintf(stderr, "[FieldKilroy] ELF load failed: %s\n", loaded.error);
+            return false;
+        }
+        FieldRtxAmmos::activeEra = FieldRtxAmmos::Era::Linux;
+        Options::Canvas::ControlFlags |= Options::Canvas::ControlAmmoExec
+            | Options::Canvas::ControlHostCpu;
+        storePath(dosPath);
+        launchedFormat = Format::Elf;
         std::fprintf(stderr,
-            "[AmmoDOS] ELF detected — AmmoDOS Linux layer not wired yet (use DOS MZ/COM today)\n");
-        return false;
+            "[FieldKilroy] ELF launched entry=0x%llx — RTX kernel compat active (ABI %s)\n",
+            static_cast<unsigned long long>(loaded.entry), FieldKilroy::KERNEL_ABI);
+        return true;
+    }
     case Format::MachO:
         std::fprintf(stderr,
             "[AmmoDOS] Mach-O detected — AmmoDOS Mac layer not wired yet (use DOS MZ/COM today)\n");

@@ -20,11 +20,13 @@
 
 #include "FieldRtxHelp.hpp"
 #include "FieldPlatformChrome.hpp"
+#include "EngineCompat.hpp"
 
 #include <memory>
 #include <format>
 #include <chrono>
 #include <cstdlib>  // getenv for AMOURANTHRTX_HEADLESS / debug mode
+#include <cstring>
 #include <csignal>
 #include <unistd.h>
 
@@ -83,6 +85,12 @@ inline int navigator_main(int argc, char* argv[]) {
         FieldRtxHelp::printBinaryHelp();
         return 0;
     }
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i] && std::strcmp(argv[i], "--extended-field") == 0)
+            amx::gOptions.extendedFieldDispatch = true;
+    }
+    if (std::getenv("AMOURANTHRTX_EXTENDED_FIELD") != nullptr)
+        amx::gOptions.extendedFieldDispatch = true;
     install_apocalypse_handler();
     std::signal(SIGTERM, onGracefulSignal);
     std::signal(SIGINT, onGracefulSignal);
