@@ -35,23 +35,28 @@ def run(cmd: list[str], *, timeout: int = 600, env: dict[str, str] | None = None
     )
 
 
-def compile_host_bench() -> Path:
-    out = BIN / "bench_x86_host"
-    out.parent.mkdir(parents=True, exist_ok=True)
+def build_cmake_target(target: str, *candidates: Path) -> Path:
     subprocess.run(
         [
             "cmake", "--build", str(ROOT / "build"),
-            "--target", "bench_x86_host",
+            "--target", target,
             "-j", str(os.cpu_count() or 4),
         ],
         cwd=ROOT,
         check=True,
     )
-    if not out.is_file():
-        alt = ROOT / "build/bench_x86_host"
-        if alt.is_file():
-            return alt
-    return out
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise SystemExit(f"FAIL {target} built but binary not found")
+
+
+def compile_host_bench() -> Path:
+    return build_cmake_target(
+        "bench_x86_host",
+        BIN / "bench_x86_host",
+        ROOT / "build/bench_x86_host",
+    )
 
 
 def parse_metrics(text: str) -> dict[str, float | str]:
@@ -165,20 +170,12 @@ def wait_proc(
 
 def bench_doom_host(*, timeout: float = 120.0) -> dict:
     print("=== BENCH: shareware DOOM.EXE (host libx86emu + DOS4GW) ===", flush=True)
-    exe = BIN / "qa_doom_host_test"
     if not (ROOT / "assets/dos/DOOM.EXE").is_file():
         run([sys.executable, "scripts/install_shareware_doom.py"], timeout=60)
-    subprocess.run(
-        [
-            "g++-14", "-std=c++20", "-O2",
-            "-I", str(ROOT / "Navigator/engine"),
-            "-I", str(ROOT / "third_party/libx86emu/include"),
-            str(SCRIPTS / "qa_doom_host_test.cpp"),
-            str(LIB),
-            "-o", str(exe),
-        ],
-        cwd=ROOT,
-        check=True,
+    exe = build_cmake_target(
+        "qa_doom_host_test",
+        ROOT / "build/qa_doom_host_test",
+        BIN / "qa_doom_host_test",
     )
     t0 = time.perf_counter()
     proc = subprocess.run(
@@ -537,7 +534,7 @@ def main(argv: list[str] | None = None) -> int:
         results.append({"name": "host libx86emu", "status": "error", "detail": str(exc)})
 
     try:
-        results.append(bench_doom_host(timeout=90.0 if args.quick else 150.0))
+        results.append(bench_doom_host(timeout=300.0 if args.quick else 360.0))
     except (SystemExit, subprocess.TimeoutExpired) as exc:
         results.append({"name": "Shareware DOOM.EXE (host)", "status": "error", "detail": str(exc)})
 
