@@ -2,6 +2,7 @@
 """Play through Shareware Episode 1 (S1E1) — retry until success."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,19 +15,20 @@ MAX_ATTEMPTS = 8
 
 
 def build() -> None:
-    if not LIB.is_file():
-        raise SystemExit("Missing build/libx86emu.a — run: cmake --build build")
-    OUT.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
-            "g++-14", "-std=c++20", "-O2",
-            "-I", str(ROOT / "Navigator/engine"),
-            "-I", str(ROOT / "third_party/libx86emu/include"),
-            str(SRC), str(LIB), "-o", str(OUT),
+            "cmake", "--build", str(ROOT / "build"),
+            "--target", "play_s1e1_test",
+            "-j", str(os.cpu_count() or 4),
         ],
         cwd=ROOT,
         check=True,
     )
+    if not OUT.is_file():
+        alt = ROOT / "build/play_s1e1_test"
+        if alt.is_file():
+            return
+        raise SystemExit(f"FAIL play_s1e1_test not found ({OUT})")
 
 
 def run_once() -> tuple[int, str]:

@@ -543,6 +543,13 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(bench_x86_host)
     set_target_properties(bench_x86_host PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
 
+    add_executable(play_s1e1_test scripts/play_s1e1_test.cpp)
+    target_include_directories(play_s1e1_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(play_s1e1_test PRIVATE cxx_std_20)
+    target_compile_options(play_s1e1_test PRIVATE -O2)
+    field_host_test_link(play_s1e1_test)
+    set_target_properties(play_s1e1_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
+
     add_executable(qa_drivers_build scripts/qa_drivers_build.cpp)
     target_include_directories(qa_drivers_build PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(qa_drivers_build PRIVATE cxx_std_20)
