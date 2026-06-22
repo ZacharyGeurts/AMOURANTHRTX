@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 namespace FieldStorage {
 namespace {
@@ -57,6 +58,9 @@ bool mountMultiFS(const char* projectRoot) noexcept {
 
     bo.phi = 1.0;
     bo.harmonic = 1.6180339887;
+    sdf.phase = 0.0;
+    sdf.amplitude = 1.0;
+    sdf.logicalBytes = sdfLogicalCapacity();
     const std::size_t liveCount = std::count_if(mounts.begin(), mounts.end(),
         [](const MountPoint& m) { return m.live; });
     std::fprintf(stderr, "[FieldStorage] mountMultiFS %zu mounts %zu live (resident cap %u MiB)\n",
@@ -99,7 +103,9 @@ void dismissAll() noexcept {
 
 bool readPath(const char* path, std::vector<std::uint8_t>& out) noexcept {
     if (!path) return false;
-    boLeadIn(static_cast<std::uint32_t>(std::strlen(path) & 0xFFu));
+    const auto block = static_cast<std::uint32_t>(std::strlen(path) & 0xFFu);
+    boLeadIn(block);
+    sdfFoldBlock(block);
     if (FieldDos::readHostFile(path, out)) {
         bo.prefetchHits++;
         return true;
@@ -115,6 +121,7 @@ bool readPath(const char* path, std::vector<std::uint8_t>& out) noexcept {
 
 bool writePath(const char* path, const std::uint8_t* data, std::size_t size) noexcept {
     if (!path || !data || !size) return false;
+    sdfFoldBlock(static_cast<std::uint32_t>(size / kBlock));
     const auto p = storageRoot() / std::filesystem::path(path).filename();
     std::ofstream out(p, std::ios::binary);
     if (!out) return false;
@@ -187,6 +194,47 @@ bool activateWindows(std::uint8_t* guestRam, std::size_t ramBytes) noexcept {
     std::fprintf(stderr, "[FieldStorage] Windows host ctx slot=1 resident=%u MiB ram=%zu\n",
         windowsCtx.residentMiB, ramBytes);
     return true;
+}
+
+std::uint64_t sdfLogicalCapacity() noexcept {
+    const double resonance = 1.0 + std::sin(sdf.phase) * sdf.amplitude;
+    const double fold = boGain() * resonance;
+    const long double logical = static_cast<long double>(sdf.logicalBase) * fold;
+    if (logical > static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+        return std::numeric_limits<std::uint64_t>::max();
+    return static_cast<std::uint64_t>(logical);
+}
+
+double sdfWavePhase(std::uint32_t blockIndex) noexcept {
+    return sdf.phase + static_cast<double>(blockIndex) * 0.0001 * bo.harmonic;
+}
+
+void sdfFoldBlock(std::uint32_t blockIndex) noexcept {
+    sdf.phase = sdfWavePhase(blockIndex);
+    sdf.foldedBlocks++;
+    sdf.logicalBytes = sdfLogicalCapacity();
+    boLeadIn(blockIndex);
+}
+
+bool vfsBridgeRead(const char* vfsPath, std::vector<std::uint8_t>& out) noexcept {
+    if (!vfsPath || !vfsPath[0]) return false;
+    if (!FieldRtxVfs::initialized) FieldRtxVfs::vfsReload();
+    const std::string key = FieldRtxVfs::upperKey(vfsPath);
+    const auto it = FieldRtxVfs::metadata.find(key);
+    if (it != FieldRtxVfs::metadata.end()) {
+        out.assign(it->second.longDesc.begin(), it->second.longDesc.end());
+        bo.prefetchHits++;
+        return !out.empty();
+    }
+    return readPath(vfsPath, out);
+}
+
+bool vfsBridgeWrite(const char* vfsPath, const std::uint8_t* data, std::size_t size) noexcept {
+    if (!vfsPath || !data || !size) return false;
+    if (!FieldRtxVfs::initialized) FieldRtxVfs::vfsReload();
+    FieldRtxVfs::metadata[FieldRtxVfs::upperKey(vfsPath)] = FieldRtxVfs::FileMeta{
+        std::string(reinterpret_cast<const char*>(data), size), ""};
+    return writePath(vfsPath, data, size);
 }
 
 } // namespace FieldStorage

@@ -47,6 +47,29 @@ int main() {
     std::printf("METRIC bench_write_bps=%llu\n", static_cast<unsigned long long>(wBps));
     std::printf("METRIC bench_read_bps=%llu\n", static_cast<unsigned long long>(rBps));
     std::printf("METRIC bo_gain=%.3f\n", FieldStorage::boGain());
+    std::printf("METRIC sdf_logical_gb=%.2f\n",
+        static_cast<double>(FieldStorage::sdf.logicalBytes) / (1024.0 * 1024.0 * 1024.0));
+    std::printf("METRIC wave_phase=%.6f\n", FieldStorage::sdf.phase);
+    std::printf("METRIC sdf_folded_blocks=%llu\n",
+        static_cast<unsigned long long>(FieldStorage::sdf.foldedBlocks));
+
+    const char* vfsProbe = "VFS:\\probe.sdf";
+    if (!FieldStorage::vfsBridgeWrite(vfsProbe,
+            reinterpret_cast<const std::uint8_t*>("sdf_wave"), 8u)) {
+        std::fprintf(stderr, "FAIL vfsBridgeWrite\n");
+        return 1;
+    }
+    std::vector<std::uint8_t> vfsRead;
+    if (!FieldStorage::vfsBridgeRead(vfsProbe, vfsRead) || vfsRead.empty()) {
+        std::fprintf(stderr, "FAIL vfsBridgeRead\n");
+        return 1;
+    }
+    std::printf("METRIC vfs_bridge_ok=1\n");
+
+    if (FieldStorage::sdf.logicalBytes < 2ull * 1024u * 1024u * 1024u) {
+        std::fprintf(stderr, "FAIL sdf logical below 2GB anchor\n");
+        return 1;
+    }
 
     if (wBps < 1024u || rBps < 1024u) {
         std::fprintf(stderr, "FAIL bench throughput\n");
