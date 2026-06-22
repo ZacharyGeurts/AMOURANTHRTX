@@ -878,7 +878,7 @@ public:
                 Swapchain::updateRefreshEstimate(TotalTime::get().seconds());
                 measuredRefreshRateHz_ = 1.0 / Swapchain::getSmoothedRefresh();
                 if (FieldAmouranthOs::shellChromeActive() && !headless_)
-                    FieldAmouranthOs::tick(window_width_, window_height_);
+                    FieldAmouranthOs::tick(render_width_, render_height_);
             } else if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
                 needsRecreate_ = true;
             } else if (pres != VK_SUCCESS) {
@@ -1183,11 +1183,6 @@ private:
                 window_width_, window_height_,
                 SDL_GetWindowDisplayScale(window_), dispW, dispH, logW, logH);
         }
-        FieldDosDisplay::syncViewport(window_width_, window_height_,
-            render_width_, render_height_);
-        char disp[192]{};
-        FieldDosDisplay::formatStatus(disp, sizeof disp);
-        LOG_INFO_CAT("WINDOW", "DOS display: {}", disp);
         double newArea = static_cast<double>(window_width_) * window_height_;
         bool windowGrewSignificantly = (newArea > oldArea * 1.08);
 
@@ -1207,6 +1202,11 @@ private:
         }
 
         updateRenderResolution();
+        FieldDosDisplay::syncViewport(window_width_, window_height_,
+            render_width_, render_height_);
+        char disp[192]{};
+        FieldDosDisplay::formatStatus(disp, sizeof disp);
+        LOG_INFO_CAT("WINDOW", "DOS display: {}", disp);
         destroyHDRResources();
         destroyAnalogFieldFabric();
         createPersistentHDR();
@@ -1272,7 +1272,8 @@ private:
     }
 
     void updateRenderResolution() noexcept {
-        if (!Options::Rendering::EnableAdaptiveResolution) {
+        if (FieldAmouranthOs::shellChromeActive()
+                || !Options::Rendering::EnableAdaptiveResolution) {
             render_width_  = window_width_;
             render_height_ = window_height_;
             return;

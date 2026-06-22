@@ -61,7 +61,7 @@ bool aosTbOnStrip(vec2 pix, AosTbLayout L) {
 
 void aosTbStartBounds(AosTbLayout L, out vec2 b0, out vec2 b1) {
     b0 = vec2(L.startX, L.barY0 + L.pad - L.lift);
-    b1 = vec2(L.startX + L.startW, b0.y + L.startH);
+    b1 = vec2(L.startX + L.startW, L.barY1 - L.pad);
 }
 
 void aosTbQuickBounds(AosTbLayout L, int idx, out vec2 b0, out vec2 b1) {

@@ -29,9 +29,9 @@ inline int themeIndexFromRegistry() noexcept {
         if (v >= 0 && v < FieldRtxThemes::kPresetCount) return v;
     }
     const std::string name = FieldRegistry::getValue(
-        "HKRTX\\User\\Desktop", "Theme", "Dark Chrome");
+        "HKRTX\\User\\Desktop", "Theme", "Ammo Void");
     const int byName = FieldRtxThemes::indexByName(name.c_str());
-    return byName >= 0 ? byName : FieldRtxThemes::indexByName("Dark Chrome");
+    return byName >= 0 ? byName : FieldRtxThemes::indexByName("Ammo Void");
 }
 
 } // namespace FieldAosAppJournal

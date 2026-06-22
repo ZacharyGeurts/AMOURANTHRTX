@@ -7,10 +7,10 @@ vec3 aosSdfTaskbarRail(vec2 pix, AosTbLayout L, ThemePal th) {
     if (!aosTbOnStrip(pix, L)) return vec3(-1.0);
     vec2 b0 = vec2(0.0, L.barY0);
     vec2 b1 = vec2(L.vpW, L.barY1);
-    vec3 face = vec3(0.07, 0.08, 0.10);
+    vec3 face = mix(th.pcb, th.panel, 0.22);
     vec3 col = aosSdWin31Raised(pix, b0, b1, face, 2.5 * L.scale);
     float topGloss = smoothstep(L.barY0, L.barY0 + 6.0 * L.scale, pix.y);
-    col = mix(col, vec3(0.11, 0.12, 0.15), topGloss * 0.35);
+    col = mix(col, mix(th.accent * 0.12, th.border, 0.55), topGloss * 0.28);
     return col;
 }
 
@@ -22,7 +22,7 @@ vec3 aosTaskbarClock(vec2 pix, vec2 vp, ThemePal th) {
     float scale = L.scale;
     vec2 pill0 = vec2(L.clockX0, L.barY0 + 6.0 * scale);
     vec2 pill1 = vec2(L.clockX1, L.barY1 - 6.0 * scale);
-    vec3 pillCol = aosSdWin31Sunken(pix, pill0, pill1, vec3(0.05, 0.06, 0.08), 1.5 * scale);
+    vec3 pillCol = aosSdWin31Sunken(pix, pill0, pill1, mix(th.pcb, th.panel, 0.18), 1.5 * scale);
     if (pillCol.x < 0.0) return pillCol;
 
     uint clk = field.data_bus[29];
@@ -68,7 +68,7 @@ vec3 aosStartButtonPanel(vec2 pix, vec2 vp, ThemePal th, bool menuOpen) {
         vec3(0.0, 0.0, 0.0), 0.72);
     if (shadow.x >= 0.0 && !aosInStartButton(pix, vp))
         return shadow;
-    vec3 face = menuOpen ? vec3(0.06, 0.07, 0.10) : vec3(0.14, 0.15, 0.18);
+    vec3 face = menuOpen ? mix(th.pcb, th.panel, 0.15) : mix(th.panel, th.border, 0.12);
     vec3 col = aosSdWin31Raised(pix, b0, b1, face, bevel);
     if (col.x < 0.0) return col;
     if (menuOpen)
@@ -175,8 +175,8 @@ vec3 aosQuickLaunchButton(vec2 pix, vec2 b0, vec2 b1, uint iconSlot,
     if (!all(greaterThanEqual(pix, b0)) || !all(lessThan(pix, b1)))
         return vec3(-1.0);
     float bevel = 2.0 * scale;
-    vec3 face = pressed ? vec3(0.05, 0.06, 0.08)
-        : (hovered ? vec3(0.15, 0.16, 0.20) : vec3(0.10, 0.11, 0.14));
+    vec3 face = pressed ? mix(th.pcb, th.panel, 0.12)
+        : (hovered ? mix(th.panel, th.accent, 0.18) : mix(th.pcb, th.panel, 0.35));
     vec3 col = pressed
         ? aosSdWin31Sunken(pix, b0, b1, face, bevel)
         : aosSdWin31Raised(pix, b0, b1, face, bevel);

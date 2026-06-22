@@ -36,8 +36,9 @@ constexpr std::uint8_t BUS_RAM         = 2;
 constexpr std::uint8_t BUS_VGA         = 8;
 constexpr std::uint8_t BUS_FAT         = 12;
 constexpr std::uint8_t BUS_MSCDEX      = 24;
-constexpr std::uint8_t BUS_TESLA       = 31;  // TeslaBiasStrength mirror (shares slot w/ Linux syscall count when active)
-constexpr std::uint8_t BUS_LINUX_BASE  = 29;  // FieldKilroy layer: active, pid, syscall_count
+constexpr std::uint8_t BUS_CLOCK       = 29;  // AOS clock pack (hr<<16|mn<<8|sec); Kilroy overlays when active
+constexpr std::uint8_t BUS_HOST_HEAT   = 33;  // FieldSocket hostHeat float (Pipeline thermo path)
+constexpr std::uint8_t BUS_TESLA       = 34;  // FieldSocket TeslaBiasStrength float
 
 // Tesla valve flow resistance (CANVAS.comp teslaR)
 constexpr float TESLA_R_FORWARD   = 0.18f;

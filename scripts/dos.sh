@@ -69,6 +69,7 @@ main() {
     ensure_cmake_build
 
     python3 "$ROOT/scripts/gen_rtx_font.py"
+    python3 "$ROOT/scripts/gen_rtx_sdf_font.py"
     python3 "$INSTALLER" "$@"
     echo -e "${GRN}Done.${RST} Run ${WHT}./linux.sh run${RST}"
 }

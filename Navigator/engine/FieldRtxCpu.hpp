@@ -51,13 +51,9 @@ inline ThermoField thermoFromCycles(std::uint32_t cycles) noexcept {
 inline void publishThermoToBus(std::uint32_t cycles) noexcept {
     cyclesLastFrame = cycles;
     totalCycles += cycles;
-    const ThermoField t = thermoFromCycles(cycles);
-    auto packF = [](float v) -> std::uint32_t {
-        union { float f; std::uint32_t u; } u{v};
-        return u.u;
-    };
-    Options::Canvas::DataBus[29] = packF(t.hostHeat);
-    Options::Canvas::DataBus[31] = packF(Options::AnalogFields::TeslaBiasStrength);
+    // Host thermo floats are published on FieldSocket by Pipeline::dispatch_canvas
+    // (data_bus[33]/[34]). Do not stomp AOS clock [29] or display scale [31].
+    (void)thermoFromCycles(cycles);
 }
 
 inline std::uint64_t runPm(x86emu_t* e, std::uint64_t budget,

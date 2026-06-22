@@ -804,6 +804,9 @@ inline void save_pipeline_cache() noexcept {
 
     const std::size_t spirvKiB = (last_loaded_spirv_bytes + 1023) / 1024;
     LOG_INFO_CAT("CANVAS", "Creating {} Vk pipeline from prebuilt SPIR-V ({} KiB)", shaderName, spirvKiB);
+    if (spirvKiB > 2048)
+        LOG_WARNING_CAT("CANVAS", "{} SPIR-V is {} KiB — rebuild with Navigator/shaders/Makefile (-g -O0 for aos_load); large blobs freeze some GPU drivers",
+            shaderName, spirvKiB);
     const auto compileT0 = std::chrono::steady_clock::now();
 
     if (pipeline_shutting_down.load(std::memory_order_acquire)
@@ -1970,7 +1973,8 @@ inline void create_canvas_pipeline(const std::string& shaderName = Options::Canv
 
     pump_startup_events();
     const bool headlessPrebuilt = hotswap_skipped_by_env();
-    if (shaderName == LOAD_SHADER || headlessPrebuilt) {
+    // aos_load must not block the main thread — 5 MiB SPIR-V (-O) can freeze AMD drivers for 40+ min.
+    if (headlessPrebuilt) {
         canvas_pipeline = compile_compute_pipeline(shaderName, layout);
     } else {
         canvas_pipeline = compile_compute_pipeline_pumped(shaderName, layout);
@@ -2443,6 +2447,8 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
         sync_aos_textures();
         if (gr && !Options::SDL3::RequestQuit && FieldAmouranthLaunch::hasPending())
             FieldAmouranthExec::execPending(gr, fieldX86DieMapped, FIELD_X86_DIE_HEADER_BYTES);
+        if (FieldAmouranthOs::shellChromeActive())
+            FieldAmouranthInfo::packDataBus(Options::Canvas::DataBus);
 
         Options::Canvas::ControlFlags &= ~Options::Canvas::ControlFieldDebugHud;
         if (std::getenv("AMOURANTHRTX_FIELD_DEBUG"))
@@ -2555,8 +2561,10 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
         }
 
         if (width > 0 && height > 0) {
-            fs.mouse_x = mx / static_cast<f32>(width);
-            fs.mouse_y = my / static_cast<f32>(height);
+            const f32 normX = aosChrome ? pmx : mx;
+            const f32 normY = aosChrome ? pmy : my;
+            fs.mouse_x = normX / static_cast<f32>(width);
+            fs.mouse_y = normY / static_cast<f32>(height);
             fs.viewport_w = static_cast<f32>(width);
             fs.viewport_h = static_cast<f32>(height);
         } else {

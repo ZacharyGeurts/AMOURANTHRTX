@@ -15,7 +15,7 @@ layout(push_constant) uniform FieldSocket {
     float viewport_h;
 } field;
 
-// Must match x86.comp register header (DIE_HEADER_UINTS=39) so ramByte() guest addresses align.
+// Descriptor layout must match x86.comp for hotswap (no relayout).
 layout(std430, binding = 1) buffer FieldX86Die {
     uint EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP;
     uint R8, R9, R10, R11, R12, R13, R14, R15;
@@ -37,17 +37,7 @@ layout(binding = 12, rgba8) uniform readonly image2D aosWallTex;
 layout(binding = 13, rgba8) uniform readonly image2D aosStartTex;
 layout(binding = 14, rgba8) uniform readonly image2D rtxFontSdf;
 
-#include "aos_chrome.inc"
-#include "aos_sdf_wm.inc"
-#include "aos_program_render.inc"
-
-vec3 displayMap(vec3 c) {
-    c = max(c, vec3(0.0));
-    // HUD ink is authored HDR (fg*8); linear map keeps taskbar/menu text OCR-white.
-    vec3 reinhard = c / (c + vec3(1.0));
-    vec3 hud = clamp(c / 8.0, 0.0, 1.0);
-    return mix(reinhard, hud, step(vec3(1.2), c));
-}
+#include "aos_load_shell.inc"
 
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
@@ -57,9 +47,8 @@ void main() {
     vec2 storage = vec2(size);
     vec2 vp = aosViewport(storage);
     vec2 pix = vec2(coord) + 0.5;
-    float taskH = 56.0 * aosUiScale(vp);
+    float taskH = aosTbTaskH(vp);
     ThemePal th = loadTheme(themeIdFromControl());
-    bool aosLive = aosChromeActive();
 
     vec3 bg = vec3(0.02, 0.02, 0.03);
     if (pix.y < vp.y - taskH) {
@@ -68,8 +57,9 @@ void main() {
         vec3 win = amouranthOsBackdrop(pix, vp, th);
         if (win.x >= 0.0) bg = win;
     }
-    if (aosLive)
+    if (aosChromeActive())
         bg = aosLayerChrome(bg, pix, vp, th);
 
-    imageStore(resultImage, coord, vec4(displayMap(bg), 1.0));
+    bg = max(bg, vec3(0.0));
+    imageStore(resultImage, coord, vec4(bg / (bg + vec3(1.0)), 1.0));
 }

@@ -63,23 +63,18 @@ inline void pointerPixels(SDL_Window* window, float lx, float ly, float& px, flo
     const float flogH = logH > 0 ? static_cast<float>(logH) : static_cast<float>(pixH);
     const float fpixW = pixW > 0 ? static_cast<float>(pixW) : flogW;
     const float fpixH = pixH > 0 ? static_cast<float>(pixH) : flogH;
-    // SDL3 window coords are logical on macOS (HDPI) and pixel-native on X11/Windows.
-    const bool coordsLookLikePixels = (flogW > 1.f && flogH > 1.f)
-        && (lx > flogW + 2.f || ly > flogH + 2.f);
+    // SDL3 mouse events are window-relative (SDL_GetWindowSize space). Map logical → pixels
+    // via window size ratio only — SDL_GetWindowPixelDensity double-scales on Linux fullscreen.
+    const float scaleX = flogW > 1.f ? (fpixW / flogW) : 1.f;
+    const float scaleY = flogH > 1.f ? (fpixH / flogH) : 1.f;
+    const bool coordsLookLikePixels = (lx > flogW + 2.f || ly > flogH + 2.f);
     if (coordsLookLikePixels) {
         px = lx;
         py = ly;
-        return;
+    } else {
+        px = lx * scaleX;
+        py = ly * scaleY;
     }
-    float density = 1.f;
-    if (window) {
-        density = SDL_GetWindowPixelDensity(window);
-        if (density < 0.01f) density = 1.f;
-    } else if (flogW > 0.f && fpixW > 0.f) {
-        density = fpixW / flogW;
-    }
-    px = lx * density;
-    py = ly * density;
     if (fpixW > 1.f) px = std::clamp(px, 0.f, fpixW - 1.f);
     if (fpixH > 1.f) py = std::clamp(py, 0.f, fpixH - 1.f);
 }

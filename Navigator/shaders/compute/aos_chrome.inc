@@ -59,6 +59,21 @@ ThemePal loadTheme(uint id) {
         t.silicon = vec3(0.09, 0.10, 0.13);
         t.pcb = vec3(0.05, 0.06, 0.09);
     }
+    if (id == 7u) {
+        t.void_ = vec3(0.01, 0.01, 0.012);
+        t.panel = vec3(0.06, 0.06, 0.065);
+        t.zebra = vec3(0.04, 0.04, 0.045);
+        t.border = vec3(0.12, 0.12, 0.14);
+        t.title = vec3(0.90, 0.90, 0.92);
+        t.section = vec3(0.35, 0.35, 0.38);
+        t.label = vec3(0.58, 0.58, 0.62);
+        t.value = vec3(0.74, 0.74, 0.78);
+        t.accent = vec3(0.42, 0.58, 0.88);
+        t.gemTint = vec3(0.32, 0.45, 0.68);
+        t.mem = vec3(0.30, 0.48, 0.82);
+        t.silicon = vec3(0.05, 0.05, 0.055);
+        t.pcb = vec3(0.02, 0.02, 0.022);
+    }
     if (id == 8u) {
         t.void_ = vec3(0.05, 0.05, 0.06);
         t.panel = vec3(0.12, 0.12, 0.13);
@@ -733,40 +748,25 @@ vec2 aosFocusedSurfaceSize() {
     return vec2(pw, ph);
 }
 
+#include "aos_chrome_layers.inc"
+
 vec3 aosLayerChrome(vec3 base, vec2 pix, vec2 vp, ThemePal th) {
     AosTbLayout L = aosTbLayout(vp);
     float taskH = L.taskH;
     uint bits = field.data_bus[42];
     bool menuOpen = (bits & (1u << 20u)) != 0u;
-    vec3 color = base;
-
-    vec3 strip = aosTaskbarStrip(pix, vp, th);
-    if (strip.x >= 0.0) color = strip;
-
-    vec3 quick = aosQuickLaunchStrip(pix, vp, th);
-    if (quick.x >= 0.0) color = quick;
-
-    if (menuOpen) {
-        vec3 menu = aosStartMenu(pix, vp, taskH, th);
-        if (menu.x >= 0.0) color = menu;
-        vec3 search = aosSearchFlyout(pix, vp, taskH, th);
-        if (search.x >= 0.0) color = search;
-    }
-
-    vec3 dnd = aosDnDGhost(pix, vp, taskH, th);
-    if (dnd.x >= 0.0) color = dnd;
-
     bool filesOpen = (bits & (1u << 23u)) != 0u;
-    if (filesOpen) {
-        vec3 files = aosFilesMenu(pix, vp, taskH, th);
-        if (files.x >= 0.0) color = files;
-    }
-
-    vec3 start = aosStartButtonPanel(pix, vp, th, menuOpen);
-    if (start.x >= 0.0) color = start;
-
-    vec3 exitDlg = aosExitConfirmModal(pix, vp, taskH, th);
-    if (exitDlg.x >= 0.0) color = exitDlg;
-
-    return color;
+    vec3 menu = menuOpen ? aosStartMenu(pix, vp, taskH, th) : vec3(-1.0);
+    vec3 search = menuOpen ? aosSearchFlyout(pix, vp, taskH, th) : vec3(-1.0);
+    vec3 files = filesOpen ? aosFilesMenu(pix, vp, taskH, th) : vec3(-1.0);
+    return aosChromeComposite(base,
+        aosTaskbarStrip(pix, vp, th),
+        aosQuickLaunchStrip(pix, vp, th),
+        menu,
+        search,
+        files,
+        aosDnDGhost(pix, vp, taskH, th),
+        vec3(-1.0),
+        aosStartButtonPanel(pix, vp, th, menuOpen),
+        aosExitConfirmModal(pix, vp, taskH, th));
 }

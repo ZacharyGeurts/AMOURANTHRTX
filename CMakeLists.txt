@@ -500,7 +500,9 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
         target_sources(${target} PRIVATE
             "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldWebCore.cpp"
             "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldBrowserHook.cpp"
-            "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldCdRomHost.cpp")
+            "${CMAKE_SOURCE_DIR}/Navigator/engine/FieldCdRomHost.cpp"
+            "${CMAKE_SOURCE_DIR}/FieldKilroy/FieldKilroyBridge.cpp"
+            "${CMAKE_SOURCE_DIR}/FieldKilroy/FieldKilroyKernel.cpp")
         target_link_libraries(${target} PRIVATE field_x86 m pthread dl ZLIB::ZLIB)
         if(LIBCURL_FOUND)
             target_compile_definitions(${target} PRIVATE HAVE_LIBCURL=1)
@@ -524,6 +526,8 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     set(FIELD_ENGINE_INCLUDES
         ${CMAKE_SOURCE_DIR}/Navigator/engine
         ${CMAKE_SOURCE_DIR}/Navigator/engine/FieldX86Core/include
+        ${glm_SOURCE_DIR}
+        ${FIELD_KILROY_DIR}
         ${SG_INCLUDE_DIRS})
 
     add_executable(test_libx86emu scripts/test_libx86emu.c)

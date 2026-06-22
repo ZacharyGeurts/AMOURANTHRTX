@@ -343,8 +343,8 @@ void evolveAnalogFields(ivec2 fc, float t) {
     float tR = imageLoad(fieldThermo, clamp(fc + ivec2(1, 0), ivec2(0), fs - ivec2(1))).r;
     float tU = imageLoad(fieldThermo, clamp(fc + ivec2(0, -1), ivec2(0), fs - ivec2(1))).r;
     float tD = imageLoad(fieldThermo, clamp(fc + ivec2(0, 1), ivec2(0), fs - ivec2(1))).r;
-    float hostHeat = fieldBusFloat(29u);
-    float teslaK = fieldBusFloat(31u);
+    float hostHeat = fieldBusFloat(33u);
+    float teslaK = fieldBusFloat(34u);
     float newThermo = thermo + thermoA * dt * (tL + tR + tU + tD - 4.0 * thermo) + entFl * 0.001;
     newThermo += abs(lap) * couple * 0.004 + hostHeat * 0.08;
 
@@ -5365,49 +5365,30 @@ vec3 amouranthOsBackdrop(vec2 pix, vec2 img, ThemePal th) {
     return aosDarkDesktop(pix, img, taskH, th);
 }
 
-// Layered top chrome: taskbar → Start menu → Start panel (topmost).
+#include "aos_chrome_layers.inc"
+
+// Layered top chrome: strip → flyouts → Start (topmost).
 vec3 aosLayerChrome(vec3 base, vec2 pix, vec2 vp, ThemePal th) {
     AosTbLayout L = aosTbLayout(vp);
     float taskH = L.taskH;
     uint bits = field.data_bus[42];
     bool menuOpen = (bits & (1u << 20u)) != 0u;
-    vec3 color = base;
-
-    vec3 strip = aosTaskbarStrip(pix, vp, th);
-    if (strip.x >= 0.0) color = strip;
-
-    vec3 quick = aosQuickLaunchStrip(pix, vp, th);
-    if (quick.x >= 0.0) color = quick;
-
-    if (menuOpen) {
-        vec3 menu = aosStartMenu(pix, vp, taskH, th);
-        if (menu.x >= 0.0) color = menu;
-        vec3 search = aosSearchFlyout(pix, vp, taskH, th);
-        if (search.x >= 0.0) color = search;
-    }
-
-    vec3 dnd = aosDnDGhost(pix, vp, taskH, th);
-    if (dnd.x >= 0.0) color = dnd;
-
     bool filesOpen = (bits & (1u << 23u)) != 0u;
-    if (filesOpen) {
-        vec3 files = aosFilesMenu(pix, vp, taskH, th);
-        if (files.x >= 0.0) color = files;
-    }
-
     bool folderOpen = (bits & (1u << 30u)) != 0u;
-    if (folderOpen) {
-        vec3 folder = aosFolderView(pix, vp, taskH, th);
-        if (folder.x >= 0.0) color = folder;
-    }
-
-    vec3 start = aosStartButtonPanel(pix, vp, th, menuOpen);
-    if (start.x >= 0.0) color = start;
-
-    vec3 exitDlg = aosExitConfirmModal(pix, vp, taskH, th);
-    if (exitDlg.x >= 0.0) color = exitDlg;
-
-    return color;
+    vec3 menu = menuOpen ? aosStartMenu(pix, vp, taskH, th) : vec3(-1.0);
+    vec3 search = menuOpen ? aosSearchFlyout(pix, vp, taskH, th) : vec3(-1.0);
+    vec3 files = filesOpen ? aosFilesMenu(pix, vp, taskH, th) : vec3(-1.0);
+    vec3 folder = folderOpen ? aosFolderView(pix, vp, taskH, th) : vec3(-1.0);
+    return aosChromeComposite(base,
+        aosTaskbarStrip(pix, vp, th),
+        aosQuickLaunchStrip(pix, vp, th),
+        menu,
+        search,
+        files,
+        aosDnDGhost(pix, vp, taskH, th),
+        folder,
+        aosStartButtonPanel(pix, vp, th, menuOpen),
+        aosExitConfirmModal(pix, vp, taskH, th));
 }
 
 vec3 finishHudColor(vec3 color, vec2 panelPos, vec2 img, vec2 puv, float t, ThemePal theme, uint hoverSec) {

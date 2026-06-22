@@ -55,7 +55,7 @@ inline Layout compute(float vpW, float vpH, float uiSc) noexcept {
     L.barY0 = L.vpH - L.taskH;
     L.startX = L.pad;
     L.startW = START_W_PX * uiSc;
-    L.startH = L.taskH - L.pad + L.lift;
+    L.startH = L.taskH - L.pad * 2.f + L.lift;
     L.quickGap = 4.f * uiSc;
     L.quickW = QUICK_BTN_W_PX * uiSc;
     L.quickX = L.startX + L.startW + L.quickGap;
