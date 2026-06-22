@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,16 +27,27 @@ def run(cmd: list[str], *, timeout: int = 120) -> subprocess.CompletedProcess[st
 
 def build_gpu_test() -> None:
     BIN.mkdir(parents=True, exist_ok=True)
+    candidates = [
+        ROOT / "build" / "qa_doom_gpu_test",
+        ROOT / "build" / "bin" / "Linux" / "qa_doom_gpu_test",
+    ]
+    for built in candidates:
+        if built.is_file():
+            shutil.copy2(built, GPU_TEST)
+            return
     subprocess.run(
         [
-            "g++-14", "-std=c++20", "-O2",
-            "-I", str(ROOT / "Navigator/engine"),
-            str(ROOT / "scripts/qa_doom_gpu_test.cpp"),
-            "-o", str(GPU_TEST),
+            "cmake", "--build", str(ROOT / "build"),
+            "--target", "qa_doom_gpu_test", "-j", str(os.cpu_count() or 4),
         ],
         cwd=ROOT,
         check=True,
     )
+    for built in candidates:
+        if built.is_file():
+            shutil.copy2(built, GPU_TEST)
+            return
+    raise SystemExit("FAIL qa_doom_gpu_test binary missing after cmake build")
 
 
 def ppm_to_rgb(path: Path) -> tuple[int, int, list[tuple[int, int, int]]]:

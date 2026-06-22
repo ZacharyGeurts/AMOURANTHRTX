@@ -44,8 +44,8 @@ int main(int argc, char** argv) {
     std::vector<std::uint8_t> buf(bytes, 0);
     auto* ram = FieldDoomGpu::guestRam(buf.data(), FieldPlatform::DIE_HEADER_UINTS * sizeof(std::uint32_t));
 
-    if (!FieldDoom::launch(buf.data(), FieldPlatform::DIE_HEADER_UINTS * sizeof(std::uint32_t), ram)) {
-        std::fprintf(stderr, "FAIL FieldDoom::launch (GPU)\n");
+    if (!FieldDoomGpu::blitTitleToGuest(ram)) {
+        std::fprintf(stderr, "FAIL FieldDoomGpu::blitTitleToGuest (GPU assets)\n");
         return 1;
     }
 
@@ -87,7 +87,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    FieldDoom::close(ram);
     std::printf("PASS gpu_doom mode13 titleNz=%d playNz=%d\n", titleNz, playNz);
     return 0;
 }

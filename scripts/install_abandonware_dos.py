@@ -88,6 +88,23 @@ def install_cosmo(force: bool) -> dict | None:
         return stage_zip("cosmo", "Cosmo's Cosmic Adventure", "COSMO.ZIP", zpath)
 
 
+def install_keen4_from_disk() -> dict | None:
+    dest = GAMES_DIR / "keen4"
+    exe = dest / "KEEN4E.EXE"
+    if not exe.is_file():
+        return None
+    files = sorted(p.name for p in dest.iterdir() if p.is_file())
+    return {
+        "id": "keen4",
+        "title": "Commander Keen 4 (shareware)",
+        "zip": None,
+        "exe": "KEEN4E.EXE",
+        "dos_path": "C:\\GAMES\\KEEN4\\KEEN4E.EXE",
+        "files": files,
+        "extract_hint": "Run KEEN4E.EXE from C:\\GAMES\\KEEN4",
+    }
+
+
 def install_doom_from_disk() -> dict | None:
     dest = GAMES_DIR / "doom"
     exe = dest / "DOOM.EXE"
@@ -140,6 +157,11 @@ def install(force: bool = False) -> int:
                 entries.append(ent)
         except Exception as exc:  # noqa: BLE001
             print(f"  FAIL {fn.__name__}: {exc}")
+
+    keen = install_keen4_from_disk()
+    if keen:
+        entries.append(keen)
+        print(f"  staged Keen4: KEEN4E.EXE ({(GAMES_DIR / 'keen4' / 'KEEN4E.EXE').stat().st_size} bytes)")
 
     doom = install_doom_from_disk()
     if doom:

@@ -24,6 +24,21 @@
       "extract_hint": "AMMOZIP C:\\GAMES\\COSMO\\COSMO.ZIP"
     },
     {
+      "id": "keen4",
+      "title": "Commander Keen 4 (shareware)",
+      "zip": null,
+      "exe": "KEEN4E.EXE",
+      "dos_path": "C:\\GAMES\\KEEN4\\KEEN4E.EXE",
+      "files": [
+        "AUDIO.CK4",
+        "CONFIG.CK4",
+        "EGAGRAPH.CK4",
+        "GAMEMAPS.CK4",
+        "KEEN4E.EXE"
+      ],
+      "extract_hint": "Run KEEN4E.EXE from C:\\GAMES\\KEEN4"
+    },
+    {
       "id": "doom",
       "title": "Doom (shareware)",
       "zip": null,

@@ -558,6 +558,12 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_doom_host_test)
     set_target_properties(qa_doom_host_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+    add_executable(qa_doom_gpu_test scripts/qa_doom_gpu_test.cpp)
+    target_include_directories(qa_doom_gpu_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_doom_gpu_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_doom_gpu_test)
+    set_target_properties(qa_doom_gpu_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BIN_DIR}")
+
     add_executable(qa_toolchain_test scripts/qa_toolchain_test.cpp)
     target_include_directories(qa_toolchain_test PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(qa_toolchain_test PRIVATE cxx_std_20)
