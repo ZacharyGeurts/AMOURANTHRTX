@@ -9,6 +9,7 @@ param(
     [switch]$Run,           # Build + launch the executable
     [switch]$Debug,         # Build in Debug mode instead of Release
     [switch]$Clean,         # Purge the build folder
+    [switch]$Dual,          # Alias: --dual (same as -DualHost)
     [switch]$DualHost,      # Enable Linux+Windows simultaneous guest shim
     [switch]$TeamDrive,     # TEAM empty nvme2n1 harness (non-destructive)
     [switch]$FieldStorageV2 # FieldStorage v2 multi-FS + physics Bo layer
@@ -99,7 +100,7 @@ if (Test-Path $Binary) {
     Write-Host "  Location:  $Binary" -ForegroundColor Cyan
     Write-Host ""
 
-    if ($DualHost) { $env:AMOURANTHRTX_DUAL_HOST = "1" }
+    if ($Dual -or $DualHost) { $env:AMOURANTHRTX_DUAL_HOST = "1" }
     if ($TeamDrive) { $env:AMOURANTHRTX_TEAM_DRIVE = "1" }
     if ($FieldStorageV2) { $env:AMOURANTHRTX_FIELD_STORAGE_V2 = "1" }
 

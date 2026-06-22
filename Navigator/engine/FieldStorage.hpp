@@ -1,6 +1,6 @@
 #pragma once
 
-// FieldStorage v2 — multi-FS mount, dual-host shim, physics Bo layer (entropy fold + prefetch).
+// FieldStorage v2 — infinite SDF wave storage, dual-host shim, FieldAmmoVfs bridge, Bo physics.
 
 #include "FieldPlatform.hpp"
 
@@ -80,6 +80,8 @@ bool activateWindows(std::uint8_t* guestRam, std::size_t ramBytes) noexcept;
 std::uint64_t sdfLogicalCapacity() noexcept;
 double sdfWavePhase(std::uint32_t blockIndex) noexcept;
 void sdfFoldBlock(std::uint32_t blockIndex) noexcept;
+bool ammoVfsBridgeRead(const char* dosPath, std::vector<std::uint8_t>& out) noexcept;
+bool ammoVfsBridgeWrite(const char* dosPath, const std::uint8_t* data, std::size_t size) noexcept;
 bool vfsBridgeRead(const char* vfsPath, std::vector<std::uint8_t>& out) noexcept;
 bool vfsBridgeWrite(const char* vfsPath, const std::uint8_t* data, std::size_t size) noexcept;
 

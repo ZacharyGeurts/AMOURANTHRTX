@@ -1,6 +1,7 @@
 #include "FieldStorage.hpp"
 
 #include "FieldAmmoFat.hpp"
+#include "FieldAmmoVfs.hpp"
 #include "FieldDos.hpp"
 #include "FieldRtxVfs.hpp"
 
@@ -216,8 +217,29 @@ void sdfFoldBlock(std::uint32_t blockIndex) noexcept {
     boLeadIn(blockIndex);
 }
 
+bool ammoVfsBridgeRead(const char* dosPath, std::vector<std::uint8_t>& out) noexcept {
+    if (!dosPath || !dosPath[0]) return false;
+    if (!FieldAmmoFat::mounted && !FieldAmmoFat::mount()) return false;
+    sdfFoldBlock(static_cast<std::uint32_t>(std::strlen(dosPath) & 0xFFu));
+    if (FieldAmmoVfs::readPath(dosPath, out) && !out.empty()) {
+        bo.prefetchHits++;
+        return true;
+    }
+    return false;
+}
+
+bool ammoVfsBridgeWrite(const char* dosPath, const std::uint8_t* data, std::size_t size) noexcept {
+    if (!dosPath || !data || !size) return false;
+    if (!FieldAmmoFat::mounted && !FieldAmmoFat::mount()) return false;
+    sdfFoldBlock(static_cast<std::uint32_t>(size / kBlock));
+    return FieldAmmoVfs::writePath(dosPath, data, size);
+}
+
 bool vfsBridgeRead(const char* vfsPath, std::vector<std::uint8_t>& out) noexcept {
     if (!vfsPath || !vfsPath[0]) return false;
+    if ((vfsPath[0] == 'C' || vfsPath[0] == 'c') && vfsPath[1] == ':') {
+        if (ammoVfsBridgeRead(vfsPath, out)) return true;
+    }
     if (!FieldRtxVfs::initialized) FieldRtxVfs::vfsReload();
     const std::string key = FieldRtxVfs::upperKey(vfsPath);
     const auto it = FieldRtxVfs::metadata.find(key);
@@ -231,6 +253,9 @@ bool vfsBridgeRead(const char* vfsPath, std::vector<std::uint8_t>& out) noexcept
 
 bool vfsBridgeWrite(const char* vfsPath, const std::uint8_t* data, std::size_t size) noexcept {
     if (!vfsPath || !data || !size) return false;
+    if ((vfsPath[0] == 'C' || vfsPath[0] == 'c') && vfsPath[1] == ':') {
+        if (ammoVfsBridgeWrite(vfsPath, data, size)) return true;
+    }
     if (!FieldRtxVfs::initialized) FieldRtxVfs::vfsReload();
     FieldRtxVfs::metadata[FieldRtxVfs::upperKey(vfsPath)] = FieldRtxVfs::FileMeta{
         std::string(reinterpret_cast<const char*>(data), size), ""};

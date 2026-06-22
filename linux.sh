@@ -99,7 +99,7 @@ show_help() {
   ./linux.sh bench            → CPU/GPU perf (add --dosbox for DOSBox ref, --quick to skip extras)
   ./linux.sh team-drive       → TEAM empty nvme2n1 harness (non-destructive)
   ./linux.sh field-storage    → FieldStorage v2 bench + multi-FS QA
-  ./linux.sh run --dual-host --team-drive --field-storage-v2
+  ./linux.sh run --dual --dual-host --team-drive --field-storage-v2
                               → dual Linux/Windows + TEAM + FieldStorage v2 flags
   ./linux.sh win31            → Windows 3.1 MCSE+I setup checklist
   ./linux.sh win31 --stage    → stage incoming/win31 + rebuild C:
@@ -180,7 +180,7 @@ for arg in "$@"; do
         clean)      clean_all ;;
         ninja|--ninja) GENERATOR="Ninja" ;;
         extended-field|--extended-field) EXTENDED_FIELD=true ;;
-        dual-host|--dual-host) DUAL_HOST=true ;;
+        dual|--dual|dual-host|--dual-host) DUAL_HOST=true ;;
         team-drive|--team-drive) TEAM_DRIVE=true ;;
         field-storage|--field-storage|field-storage-v2|--field-storage-v2) FIELD_STORAGE_V2=true ;;
         windows|release|web) ;; # already handled
