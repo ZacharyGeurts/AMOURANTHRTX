@@ -42,6 +42,14 @@ for arg in "$@"; do
         release-2.0|release_2_0|release)
             exec python3 "$PROJECT_ROOT/scripts/release_checklist_2_0.py" "${@:2}"
             ;;
+        seetests|tests|test-menu)
+            chmod +x "$PROJECT_ROOT/seetests.sh" 2>/dev/null || true
+            exec "$PROJECT_ROOT/seetests.sh" "${@:2}"
+            ;;
+        publish-release|publish_release|github-release)
+            chmod +x "$PROJECT_ROOT/scripts/publish_github_release.sh" 2>/dev/null || true
+            exec "$PROJECT_ROOT/scripts/publish_github_release.sh" "${@:2}"
+            ;;
         win31)
             exec python3 "$PROJECT_ROOT/scripts/setup_win31.py" "${@:2}"
             ;;

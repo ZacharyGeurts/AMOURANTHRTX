@@ -50,6 +50,8 @@ def main() -> int:
         ("team_drive_test.py", ()),
         ("bench_storage.py", ()),
     )
+    py_extra = ("qa_ocr_click_test.py",)
+
     bin_steps = (
         "qa_field_persist_test",
         "qa_rtx_density_test",
@@ -62,6 +64,12 @@ def main() -> int:
 
     for script, args in py_steps:
         if run_py(script, *args) != 0:
+            print(f"FAIL release_checklist {script}", file=sys.stderr)
+            return 1
+        print(f"OK release_checklist {script}")
+
+    for script in py_extra:
+        if run_py(script) != 0:
             print(f"FAIL release_checklist {script}", file=sys.stderr)
             return 1
         print(f"OK release_checklist {script}")
