@@ -52,6 +52,7 @@
 #include "FieldAmmoXbox360.hpp"
 #include "FieldAmmoAmiga.hpp"
 #include "FieldAmmoSnes.hpp"
+#include "FieldStorage.hpp"
 #include "FieldAosNesTest.hpp"
 #include "FieldSnapDump.hpp"
 #include "FieldVga.hpp"
@@ -2106,6 +2107,24 @@ inline void updateHardwareFromAnalogFields(float avgThermo, float avgPhi, float 
 }
 
 // ────────────────────────────────────────────────
+// END GAME bootstrap — Love of EVERYTHING canvas + full CHIPS wave (one-shot)
+// ────────────────────────────────────────────────
+inline void bootstrapEndGameOnce(std::uint8_t* guestRam) noexcept {
+    static bool booted = false;
+    if (booted || !std::getenv("AMOURANTHRTX_END_GAME")) return;
+    booted = true;
+    FieldStorage::enableEndGameMode(true);
+    FieldAmiga::open(true);
+    FieldPs1::open();
+    FieldXbox360::open();
+    std::vector<std::uint8_t> kick(8192, 0x4Eu);
+    (void)FieldChips::Amiga::loadKickstart(FieldAmiga::chip, kick.data(), kick.size());
+    (void)guestRam;
+    std::fprintf(stderr,
+        "[Pipeline] END GAME — Amiga love canvas + PS1 + Xbox360 CHIPS wave active\n");
+}
+
+// ────────────────────────────────────────────────
 // MAIN DISPATCH — hybrid compute vs hardware RT (no freeze on toggle)
 // ────────────────────────────────────────────────
 inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float totalTime) noexcept {
@@ -2380,18 +2399,22 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                     if (INPUT.mixerReady())
                         FieldSnes::Audio::pump();
                 }
+                bootstrapEndGameOnce(gr);
                 if (FieldPs1::active
                         && (std::getenv("AMOURANTHRTX_CHIPS_PS1")
                             || std::getenv("AMOURANTHRTX_CHIPS_ALL")
-                            || std::getenv("AMOURANTHRTX_FIELD_EMULATOR")))
+                            || std::getenv("AMOURANTHRTX_FIELD_EMULATOR")
+                            || std::getenv("AMOURANTHRTX_END_GAME")))
                     FieldPs1::tick(gr, keys);
                 if (FieldXbox360::active
                         && (std::getenv("AMOURANTHRTX_XBOX360")
-                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")))
+                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")
+                            || std::getenv("AMOURANTHRTX_END_GAME")))
                     FieldXbox360::tick(gr, keys);
                 if (FieldAmiga::active
                         && (std::getenv("AMOURANTHRTX_AMIGA_LOVE")
-                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")))
+                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")
+                            || std::getenv("AMOURANTHRTX_END_GAME")))
                     FieldAmiga::tick(gr, keys);
                 if (FieldAosNesTest::enabled() && gr) {
                     if (const char* snap = std::getenv("AMOURANTHRTX_NES_FB_SNAP")) {

@@ -12,12 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
 
 
-def run_qa(bin_name: str, timeout: int = 180) -> tuple[int, dict[str, str]]:
+def run_qa(bin_name: str, timeout: int = 180, env: dict[str, str] | None = None) -> tuple[int, dict[str, str]]:
     exe = BUILD / bin_name
     if not exe.is_file():
         return 1, {}
     proc = subprocess.run(
         [str(exe)], cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False,
+        env={**dict(__import__("os").environ), **(env or {})},
     )
     metrics: dict[str, str] = {}
     for line in (proc.stdout + proc.stderr).splitlines():
@@ -42,6 +43,8 @@ def audit_gated_probes() -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-qa", action="store_true", help="Only static gate checks")
+    parser.add_argument("--end-game", action="store_true", help="End-game matrix (fast, skips doom)")
+    parser.add_argument("--with-doom", action="store_true", help="Include doom QA even in end-game mode")
     args = parser.parse_args()
 
     if not audit_gated_probes():
@@ -51,25 +54,52 @@ def main() -> int:
         print("OK zero_cost_audit static gates")
         return 0
 
-    checks = (
-        ("qa_fieldstorage_test", "hyper_breakthroughs", lambda v: v == "1", 60),
-        ("qa_ps1_test", "ps1_gpu_wave", lambda v: v == "1", 30),
-        ("qa_xbox360_test", "xbox360_gpu_wave", lambda v: v == "1", 30),
-        ("qa_amiga_test", "amiga_love_score", lambda v: int(v) >= 10, 30),
-        ("qa_keen_host_test", "keen_fb_nz", lambda v: int(v) >= 500, 120),
-        ("qa_doom_host_test", "doom_fb_nz", lambda v: int(v) >= 5000, 300),
-    )
-    for bin_name, metric, pred, timeout in checks:
-        rc, metrics = run_qa(bin_name, timeout=timeout)
+    end_env = {"AMOURANTHRTX_END_GAME": "1"} if args.end_game else None
+
+    if args.end_game:
+        suites: tuple[tuple[str, int, tuple[tuple[str, object], ...]], ...] = (
+            ("qa_fieldstorage_test", 60, (
+                ("vfs_bridge_ok", lambda v: v == "1"),
+                ("dual_host", lambda v: v == "1"),
+                ("hyper_breakthroughs", lambda v: v == "1"),
+                ("hyper_fabric_scale", lambda v: float(v) > 1.0),
+            )),
+            ("qa_ps1_test", 30, (("ps1_gpu_wave", lambda v: v == "1"),)),
+            ("qa_xbox360_test", 30, (("xbox360_gpu_wave", lambda v: v == "1"),)),
+            ("qa_amiga_test", 30, (("amiga_love_score", lambda v: int(v) >= 10),)),
+            ("qa_keen_host_test", 120, (
+                ("keen_ip_progress", lambda v: v == "1"),
+                ("keen_fb_nz", lambda v: int(v) >= 500),
+            )),
+        )
+        if args.with_doom:
+            suites = (*suites, ("qa_doom_host_test", 300, (("doom_fb_nz", lambda v: int(v) >= 5000),)))
+    else:
+        suites = (
+            ("qa_fieldstorage_test", 60, (("hyper_breakthroughs", lambda v: v == "1"),)),
+            ("qa_ps1_test", 30, (("ps1_gpu_wave", lambda v: v == "1"),)),
+            ("qa_xbox360_test", 30, (("xbox360_gpu_wave", lambda v: v == "1"),)),
+            ("qa_amiga_test", 30, (("amiga_love_score", lambda v: int(v) >= 10),)),
+            ("qa_keen_host_test", 120, (("keen_fb_nz", lambda v: int(v) >= 500),)),
+            ("qa_doom_host_test", 300, (("doom_fb_nz", lambda v: int(v) >= 5000),)),
+        )
+
+    for bin_name, timeout, metric_checks in suites:
+        rc, metrics = run_qa(bin_name, timeout=timeout, env=end_env)
         if rc != 0:
             print(f"FAIL {bin_name} exit={rc}", file=sys.stderr)
             return 1
-        if metric not in metrics or not pred(metrics[metric]):
-            print(f"FAIL {bin_name} metric {metric}={metrics.get(metric)}", file=sys.stderr)
-            return 1
-        print(f"METRIC audit_{metric}={metrics[metric]}")
+        for metric, pred in metric_checks:
+            if metric not in metrics or not pred(metrics[metric]):
+                print(f"FAIL {bin_name} metric {metric}={metrics.get(metric)}", file=sys.stderr)
+                return 1
+            print(f"METRIC audit_{metric}={metrics[metric]}")
 
-    print("OK zero_cost_audit gates + QA metrics")
+    if args.end_game:
+        print("METRIC end_game_mode=1")
+        print("OK zero_cost_audit end-game gates + QA metrics GREEN ALL")
+    else:
+        print("OK zero_cost_audit gates + QA metrics")
     return 0
 
 

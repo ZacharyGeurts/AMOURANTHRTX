@@ -89,13 +89,34 @@ void enableInfiniteMode(bool on) noexcept {
     }
 }
 
+void enableEndGameMode(bool on) noexcept {
+    endGameActive = on;
+    if (!on) return;
+    enableInfiniteMode(true);
+    enableAllBreakthroughs(true);
+    sdf.logicalBase = 16ull * 1024u * 1024u * 1024u;
+    sdf.amplitude = 4.0;
+    bo.phi = std::min(10.0, bo.phi + 1.618);
+    bo.harmonic = std::min(10.0, bo.harmonic * 1.618);
+    sdf.logicalBytes = sdfLogicalCapacity();
+    std::fprintf(stderr,
+        "[FieldStorage] END GAME MODE — infinite SDF + hyper physics logical=%.2f GiB scale=%.3f\n",
+        static_cast<double>(sdf.logicalBytes) / (1024.0 * 1024.0 * 1024.0), hyper.fabricScale);
+}
+
+bool endGameMode() noexcept { return endGameActive; }
+
 bool mountMultiFS(const char* projectRoot) noexcept {
     dismissAll();
-    if (std::getenv("AMOURANTHRTX_INFINITE"))
-        enableInfiniteMode(true);
-    if (std::getenv("AMOURANTHRTX_ALL_BREAKTHROUGHS")
-            || std::getenv("AMOURANTHRTX_EXTENDED_FIELD"))
-        enableAllBreakthroughs(true);
+    if (std::getenv("AMOURANTHRTX_END_GAME"))
+        enableEndGameMode(true);
+    else {
+        if (std::getenv("AMOURANTHRTX_INFINITE"))
+            enableInfiniteMode(true);
+        if (std::getenv("AMOURANTHRTX_ALL_BREAKTHROUGHS")
+                || std::getenv("AMOURANTHRTX_EXTENDED_FIELD"))
+            enableAllBreakthroughs(true);
+    }
     const auto root = projectRoot && projectRoot[0] ? std::filesystem::path(projectRoot)
                                                       : FieldDos::assetRoot();
     std::error_code ec;

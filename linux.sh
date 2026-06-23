@@ -36,6 +36,9 @@ for arg in "$@"; do
         field-storage|field_storage)
             exec python3 "$PROJECT_ROOT/scripts/bench_storage.py" "${@:2}"
             ;;
+        end-game|end_game)
+            exec python3 "$PROJECT_ROOT/scripts/end_game_audit.py" "${@:2}"
+            ;;
         win31)
             exec python3 "$PROJECT_ROOT/scripts/setup_win31.py" "${@:2}"
             ;;
@@ -107,6 +110,9 @@ show_help() {
                               → Love of EVERYTHING: PS1+N64 tier+Xbox360+Amiga canvas
   ./linux.sh run --all-breakthroughs --extended-field --infinite
                               → hyper physics 1-4 + phi-thermo fabric + infinite SDF
+  ./linux.sh run --end-game
+                              → END OF EVERYTHING: infinite + dual + TEAM + CHIPS-all + hyper physics
+  ./linux.sh end-game           → full end-game QA matrix (fast, skips doom)
   ./linux.sh win31            → Windows 3.1 MCSE+I setup checklist
   ./linux.sh win31 --stage    → stage incoming/win31 + rebuild C:
   ./linux.sh os               → full KILROY Field OS (engine + kernel + rootfs + boot ISO)
@@ -185,6 +191,7 @@ AMIGA_LOVE=false
 XBOX360=false
 ALL_BREAKTHROUGHS=false
 FIELD_EMULATOR=false
+END_GAME=false
 
 for arg in "$@"; do
     case "${arg,,}" in
@@ -205,6 +212,7 @@ for arg in "$@"; do
         amiga-love|--amiga-love) AMIGA_LOVE=true; CHIPS_EXPANSION=true ;;
         xbox360|--xbox360) XBOX360=true; CHIPS_EXPANSION=true ;;
         field-emulator|--field-emulator) FIELD_EMULATOR=true ;;
+        end-game|--end-game) END_GAME=true ;;
         windows|release|web) ;; # already handled
         --help|-h|/h|/help|-help|help|"") show_help ;;
         *)          echo -e "${CORAL}UNKNOWN CURRENT: $arg${X}"; show_help ;;
@@ -250,6 +258,23 @@ if $ALL_BREAKTHROUGHS; then
 fi
 if $CHIPS_ALL || $EXTENDED_FIELD; then
     export AMOURANTHRTX_CHIPS_FABRIC=1
+fi
+if $END_GAME; then
+    export AMOURANTHRTX_END_GAME=1
+    export AMOURANTHRTX_INFINITE=1
+    export AMOURANTHRTX_DUAL_HOST=1
+    export AMOURANTHRTX_TEAM_DRIVE=1
+    export AMOURANTHRTX_FIELD_STORAGE_V2=1
+    export AMOURANTHRTX_CHIPS=1
+    export AMOURANTHRTX_CHIPS_PS1=1
+    export AMOURANTHRTX_CHIPS_ALL=1
+    export AMOURANTHRTX_AMIGA_LOVE=1
+    export AMOURANTHRTX_XBOX360=1
+    export AMOURANTHRTX_ALL_BREAKTHROUGHS=1
+    export AMOURANTHRTX_EXTENDED_FIELD=1
+    export AMOURANTHRTX_CHIPS_FABRIC=1
+    export AMOURANTHRTX_FIELD_EMULATOR=1
+    export TEAM_DRIVE_DEV="${TEAM_DRIVE_DEV:-/dev/nvme2n1}"
 fi
 
 # ── CROSS-COMPILE / EMSCRIPTEN TOOLCHAIN CHECK ──────────────────────────────

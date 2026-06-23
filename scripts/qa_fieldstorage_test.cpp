@@ -73,6 +73,7 @@ int main() {
     std::printf("METRIC hyper_lead_out=%.4f\n", FieldStorage::hyperLeadOutPeak());
     std::printf("METRIC hyper_entropy_fold=%.4f\n", FieldStorage::hyperEntropyFold());
     std::printf("METRIC hyper_fabric_scale=%.4f\n", FieldStorage::chipsFabricScale());
+    std::printf("METRIC end_game_mode=%d\n", FieldStorage::endGameMode() ? 1 : 0);
     if (!FieldStorage::hyperEnabled() || FieldStorage::chipsFabricScale() < 1.0) {
         std::fprintf(stderr, "FAIL hyper breakthroughs not active\n");
         return 1;

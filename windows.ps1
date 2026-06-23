@@ -21,7 +21,8 @@ param(
     [switch]$AmigaLove     # Amiga Love of EVERYTHING canvas
     [switch]$Xbox360       # Xbox 360 Xenos die wave
     [switch]$AllBreakthroughs # Hyper physics breakthroughs 1-4
-    [switch]$Infinite      # Infinite SDF wave
+    [switch]$ExtendedField  # Extended non-point wave dispatch
+    [switch]$EndGame       # END OF EVERYTHING — all flags + full QA matrix
 )
 
 Write-Host ""
@@ -120,7 +121,30 @@ if (Test-Path $Binary) {
     if ($AmigaLove) { $env:AMOURANTHRTX_AMIGA_LOVE = "1" }
     if ($Xbox360) { $env:AMOURANTHRTX_XBOX360 = "1" }
     if ($AllBreakthroughs) { $env:AMOURANTHRTX_ALL_BREAKTHROUGHS = "1"; $env:AMOURANTHRTX_EXTENDED_FIELD = "1" }
+    if ($ExtendedField) { $env:AMOURANTHRTX_EXTENDED_FIELD = "1" }
     if ($Infinite) { $env:AMOURANTHRTX_INFINITE = "1" }
+    if ($EndGame) {
+        $env:AMOURANTHRTX_END_GAME = "1"
+        $env:AMOURANTHRTX_INFINITE = "1"
+        $env:AMOURANTHRTX_DUAL_HOST = "1"
+        $env:AMOURANTHRTX_TEAM_DRIVE = "1"
+        $env:AMOURANTHRTX_FIELD_STORAGE_V2 = "1"
+        $env:AMOURANTHRTX_CHIPS = "1"
+        $env:AMOURANTHRTX_CHIPS_PS1 = "1"
+        $env:AMOURANTHRTX_CHIPS_ALL = "1"
+        $env:AMOURANTHRTX_AMIGA_LOVE = "1"
+        $env:AMOURANTHRTX_XBOX360 = "1"
+        $env:AMOURANTHRTX_ALL_BREAKTHROUGHS = "1"
+        $env:AMOURANTHRTX_EXTENDED_FIELD = "1"
+        $env:AMOURANTHRTX_CHIPS_FABRIC = "1"
+        $env:AMOURANTHRTX_FIELD_EMULATOR = "1"
+    }
+
+    if ($EndGame) {
+        Write-Host "End-game QA matrix (fast)..." -ForegroundColor Cyan
+        python "$ProjectRoot\scripts\end_game_audit.py"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 
     if ($TeamDrive) {
         Write-Host "TEAM drive harness (non-destructive)..." -ForegroundColor Cyan

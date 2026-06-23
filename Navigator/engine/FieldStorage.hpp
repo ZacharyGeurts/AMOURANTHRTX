@@ -58,10 +58,13 @@ inline BoState bo{};
 inline SdfWave sdf{};
 inline bool teamDriveLive = false;
 inline bool infiniteMode = false;
+inline bool endGameActive = false;
 inline std::string teamDriveDev = "/dev/nvme2n1";
 
 void enableInfiniteMode(bool on = true) noexcept;
 void enableAllBreakthroughs(bool on = true) noexcept;
+void enableEndGameMode(bool on = true) noexcept;
+bool endGameMode() noexcept;
 double chipsFabricScale() noexcept;
 bool hyperEnabled() noexcept;
 double hyperLeadInPeak() noexcept;
