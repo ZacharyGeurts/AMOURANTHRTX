@@ -3,6 +3,7 @@
 // Headless/visual QA driver for AmouranthOS — env AMOURANTHRTX_AOS_TEST=1
 
 #include "FieldAmouranthMenu.hpp"
+#include "FieldAmouranthLaunch.hpp"
 #include "FieldAmouranthOs.hpp"
 #include "FieldAmouranthExec.hpp"
 #include "FieldAmouranthFileCmd.hpp"
@@ -91,8 +92,13 @@ inline void tickFrame(std::uint64_t frame, int w, int h) noexcept {
         FieldAmouranthOs::boot();
     FieldAmouranthOs::tick(w, h);
 
-    if (frame == 10u && FieldX86Emu::ramHost && !FieldAmouranthOs::hasShellProgram())
-        FieldAmouranthExec::launchGui(FieldAmouranthOs::AppId::Shell, FieldX86Emu::ramHost);
+    if (frame == 10u) {
+        if (shellLaunchTest() && !FieldAmouranthOs::hasShellProgram()) {
+            FieldAmouranthOs::openNewWindow(FieldAmouranthOs::AppId::Shell);
+            FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Shell, false, 0);
+        } else if (FieldX86Emu::ramHost && !FieldAmouranthOs::hasShellProgram())
+            FieldAmouranthExec::launchGui(FieldAmouranthOs::AppId::Shell, FieldX86Emu::ramHost);
+    }
 
     if (frame == 24u) {
         if (folderLaunchTest())
@@ -128,6 +134,18 @@ inline void tickFrame(std::uint64_t frame, int w, int h) noexcept {
                 FieldAmouranthFileCmd::active ? 1 : 0,
                 FieldAmouranthOs::focusedProgId,
                 FieldDosViewport::panelOx, FieldDosViewport::panelOy);
+        }
+        return;
+    }
+
+    if (shellLaunchTest()) {
+        if (frame >= 32u && (frame % 8u) == 0u) {
+            std::fprintf(stderr,
+                "[AOS_TEST] frame=%llu panel=%d shell=%d prog=%d\n",
+                static_cast<unsigned long long>(frame),
+                FieldAmouranthOs::panelVisible ? 1 : 0,
+                FieldAmouranthOs::hasShellProgram() ? 1 : 0,
+                FieldAmouranthOs::focusedProgId);
         }
         return;
     }
