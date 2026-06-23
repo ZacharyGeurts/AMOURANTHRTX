@@ -3,6 +3,9 @@
 #ifndef AOS_SDF_CHROME_INC
 #define AOS_SDF_CHROME_INC
 
+// Standalone helpers — CANVAS/x86 include this without full aos_chrome.inc.
+vec2 aosSdfHudTextCellSm(float sc) { return vec2(8.0 * sc, 14.0 * sc); }
+
 vec4 aosTaskbarTimePack(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc) {
     vec4 pack = vec4(0.0);
     float x = x0;
@@ -47,7 +50,7 @@ vec3 aosTaskbarClock(vec2 pix, vec2 vp, ThemePal th) {
     uint hr = (clk >> 16u) & 0xFFu;
     uint mn = (clk >> 8u) & 0xFFu;
     uint sc = clk & 0xFFu;
-    vec2 cell = aosHudTextCellSm(scale);
+    vec2 cell = aosSdfHudTextCellSm(scale);
     float timeX = L.clockX0 + 10.0 * scale;
     float timeY = L.barY0 + 18.0 * scale;
     vec4 timePack = aosTaskbarTimePack(pix, timeX, timeY, cell, hr, mn, sc);
@@ -101,7 +104,7 @@ vec3 aosStartButtonPanel(vec2 pix, vec2 vp, ThemePal th, bool menuOpen) {
 
     float labelX = icon0.x + iconSide + 8.0 * scale;
     float labelY = b0.y + (b1.y - b0.y) * 0.5 - 6.0 * scale;
-    vec2 cell = aosHudTextCellSm(scale);
+    vec2 cell = aosSdfHudTextCellSm(scale);
     vec4 labelPack = vec4(0.0);
     float lx = labelX;
     for (uint li = 0u; li < 8u; ++li) {
