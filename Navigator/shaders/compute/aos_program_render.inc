@@ -347,7 +347,7 @@ vec3 aosBackgroundWindowBody(vec2 winLocal, vec2 winSize, float titleH, float hu
         uint iconSlot = uint(ramByte(titleBase + AOS_TAB_STRIDE - 1u));
         col = mix(col, aosBlendIcon(col, sampleAosIconRgba(iconSlot, il)), 0.92);
     }
-    col = mixHudInk(col, ink, inkB, vec3(0.08, 0.08, 0.10));
+    col = mixHudInkDark(col, vec4(ink, 0.0, 0.0, 0.0), inkB);
     return max(col, vec3(0.0));
 }
 

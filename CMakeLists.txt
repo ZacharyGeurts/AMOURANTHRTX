@@ -667,6 +667,10 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_aos_gui_test)
     set_target_properties(qa_aos_gui_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+    add_executable(qa_font_sdf_test scripts/qa_font_sdf_test.cpp)
+    target_compile_features(qa_font_sdf_test PRIVATE cxx_std_20)
+    set_target_properties(qa_font_sdf_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
     add_executable(qa_exit_shutdown_test scripts/qa_exit_shutdown_test.cpp)
     target_include_directories(qa_exit_shutdown_test PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(qa_exit_shutdown_test PRIVATE cxx_std_20)

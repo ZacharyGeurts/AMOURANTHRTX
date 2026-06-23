@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Rasterize TTF into a 256-glyph (0..255) signed-distance-field atlas for RTX shaders.
+"""Rasterize professional fixed-width TTF into a 256-glyph SDF atlas for RTX shaders.
 
-Default font: assets/fonts/font.ttf (Brass Mono)
+Default font: assets/fonts/JetBrainsMono-Regular.ttf
 Outputs:
   assets/textures/rtx_font_sdf.png  — R8 SDF atlas (0.5 = edge)
   Navigator/shaders/compute/rtx_font_meta.inc — layout constants
@@ -17,7 +17,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 SHADERS = ROOT / "Navigator" / "shaders" / "compute"
-DEFAULT_FONT = ROOT / "assets" / "fonts" / "font.ttf"
+DEFAULT_FONT = ROOT / "assets" / "fonts" / "JetBrainsMono-Regular.ttf"
+FALLBACK_FONT = ROOT / "assets" / "fonts" / "font.ttf"
 OUT_PNG = ROOT / "assets" / "textures" / "rtx_font_sdf.png"
 OUT_META = SHADERS / "rtx_font_meta.inc"
 
@@ -32,7 +33,8 @@ PAD_X = (CELL_W - GLYPH_W) // 2
 PAD_Y = (CELL_H - GLYPH_H) // 2
 ATLAS_W = GRID_COLS * CELL_W
 ATLAS_H = GRID_ROWS * CELL_H
-SDF_SPREAD = 10.0
+SDF_SPREAD = 6.0
+SUPER = 4
 
 
 def find_font_size(path: Path) -> int:
@@ -49,22 +51,45 @@ def find_font_size(path: Path) -> int:
     return 12
 
 
-def rasterize_glyph(ch: str, font: ImageFont.FreeTypeFont) -> list[list[bool]]:
-    img = Image.new("L", (GLYPH_W, GLYPH_H), 0)
+def rasterize_glyph_hires(ch: str, font: ImageFont.FreeTypeFont, scale: int) -> list[list[bool]]:
+    sw, sh = GLYPH_W * scale, GLYPH_H * scale
+    img = Image.new("L", (sw, sh), 0)
     draw = ImageDraw.Draw(img)
     bbox = draw.textbbox((0, 0), ch, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
-    x = (GLYPH_W - tw) // 2 - bbox[0]
-    y = (GLYPH_H - th) // 2 - bbox[1] - 1
+    x = (sw - tw) // 2 - bbox[0]
+    y = (sh - th) // 2 - bbox[1] - scale
     draw.text((x, y), ch, fill=255, font=font)
     rows: list[list[bool]] = []
-    for py in range(GLYPH_H):
+    for py in range(sh):
         row: list[bool] = []
-        for px in range(GLYPH_W):
-            row.append(img.getpixel((px, py)) > 96)
+        for px in range(sw):
+            row.append(img.getpixel((px, py)) > 112)
         rows.append(row)
     return rows
+
+
+def downsample_mask(hires: list[list[bool]], scale: int) -> list[list[bool]]:
+    h = len(hires)
+    w = len(hires[0]) if h else 0
+    out: list[list[bool]] = []
+    for gy in range(GLYPH_H):
+        row: list[bool] = []
+        for gx in range(GLYPH_W):
+            hits = 0
+            total = 0
+            for sy in range(scale):
+                for sx in range(scale):
+                    py = gy * scale + sy
+                    px = gx * scale + sx
+                    if py < h and px < w:
+                        total += 1
+                        if hires[py][px]:
+                            hits += 1
+            row.append(hits * 2 >= total if total else False)
+        out.append(row)
+    return out
 
 
 def dt_1d(f: list[float]) -> list[float]:
@@ -105,20 +130,16 @@ def edt_2d(mask: list[list[bool]]) -> list[list[float]]:
     w = len(mask[0]) if h else 0
     inf = 1e20
     grid = [[0.0 if mask[y][x] else inf for x in range(w)] for y in range(h)]
-    buf = [0.0] * max(w, h)
-
     for y in range(h):
         row = [grid[y][x] for x in range(w)]
         dist = dt_1d(row)
         for x in range(w):
             grid[y][x] = dist[x]
-
     for x in range(w):
         col = [grid[y][x] for y in range(h)]
         dist = dt_1d(col)
         for y in range(h):
             grid[y][x] = math.sqrt(dist[y])
-
     return grid
 
 
@@ -136,8 +157,6 @@ def signed_distance_cell(glyph: list[list[bool]]) -> list[list[float]]:
     for y in range(CELL_H):
         row: list[float] = []
         for x in range(CELL_W):
-            # dist_in: distance to nearest ink pixel (0 on stroke interior).
-            # dist_out: distance to nearest background pixel (0 outside the glyph).
             if cell[y][x]:
                 row.append(-dist_out[y][x])
             else:
@@ -171,8 +190,9 @@ def glyph_char(code: int) -> str:
 def build_atlas(font_path: Path) -> Image.Image:
     if not font_path.is_file():
         raise SystemExit(f"font not found: {font_path}")
-    size = find_font_size(font_path)
-    font = ImageFont.truetype(str(font_path), size)
+    base_size = find_font_size(font_path)
+    hi_size = base_size * SUPER
+    hi_font = ImageFont.truetype(str(font_path), hi_size)
     atlas = Image.new("L", (ATLAS_W, ATLAS_H), 0)
 
     for code in range(GLYPH_COUNT):
@@ -180,15 +200,16 @@ def build_atlas(font_path: Path) -> Image.Image:
         row = code // GRID_COLS
         ox = col * CELL_W
         oy = row * CELL_H
-        glyph = rasterize_glyph(glyph_char(code), font)
+        hires = rasterize_glyph_hires(glyph_char(code), hi_font, SUPER)
+        glyph = downsample_mask(hires, SUPER)
         enc = encode_sdf(signed_distance_cell(glyph))
         for y in range(CELL_H):
             for x in range(CELL_W):
                 atlas.putpixel((ox + x, oy + y), enc[y][x])
 
     print(
-        f"SDF atlas {font_path.name} @ {size}px — {GLYPH_COUNT} glyphs "
-        f"{GLYPH_W}x{GLYPH_H} in {CELL_W}x{CELL_H} cells → {ATLAS_W}x{ATLAS_H}"
+        f"SDF atlas {font_path.name} @ {base_size}px ({SUPER}x SSAA) — {GLYPH_COUNT} glyphs "
+        f"{GLYPH_W}x{GLYPH_H} in {CELL_W}x{CELL_H} cells → {ATLAS_W}x{ATLAS_H} spread={SDF_SPREAD}"
     )
     return atlas
 
@@ -213,6 +234,8 @@ const float FONT_SDF_SPREAD = {SDF_SPREAD:.1f};
 
 def main() -> int:
     font_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_FONT
+    if not font_path.is_file() and font_path == DEFAULT_FONT and FALLBACK_FONT.is_file():
+        font_path = FALLBACK_FONT
     atlas = build_atlas(font_path)
     OUT_PNG.parent.mkdir(parents=True, exist_ok=True)
     atlas.save(OUT_PNG)

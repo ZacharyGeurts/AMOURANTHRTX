@@ -159,16 +159,20 @@ const uint AOS_SEARCH_ROW_STRIDE = 80u;
 const uint AOS_DND_RAM = 0x000BD500u;
 const uint AOS_DND_PATH_LEN = 64u;
 
-vec3 dosHudRamStrGeom(vec2 uv, float x0, float rowY, vec2 cell, uint ramBase, uint maxChars) {
-    vec3 ink = vec3(0.0);
+vec4 dosHudRamStrPack(vec2 uv, float x0, float rowY, vec2 cell, uint ramBase, uint maxChars) {
+    vec4 pack = vec4(0.0);
     float x = x0;
     for (uint i = 0u; i < maxChars; ++i) {
         uint ch = ramByte(ramBase + i);
         if (ch == 0u || ch < 32u) break;
-        ink = max(ink, fontGlyphGeom(ch, uv, x, rowY, cell));
+        pack = max(pack, fontGlyphPack(ch, uv, x, rowY, cell));
         x += cell.x;
     }
-    return ink;
+    return pack;
+}
+
+vec3 dosHudRamStrGeom(vec2 uv, float x0, float rowY, vec2 cell, uint ramBase, uint maxChars) {
+    return dosHudRamStrPack(uv, x0, rowY, cell, ramBase, maxChars).xyz;
 }
 
 float dosHudRamStr(vec2 uv, float x0, float rowY, vec2 cell, uint ramBase, uint maxChars) {
@@ -202,9 +206,10 @@ float dosHudRunBorder(vec2 uv, float x0, float rowY, vec2 cell,
     return border;
 }
 
-const vec3 AOS_INK_BLACK = vec3(0.97, 0.98, 1.0);
+const vec3 AOS_INK_BLACK = FONT_INK_LIGHT;
 const vec3 AOS_INK_DIM = vec3(0.76, 0.78, 0.84);
-const vec3 AOS_INK_TASKBAR = vec3(0.97, 0.98, 1.0);
+const vec3 AOS_INK_TASKBAR = FONT_INK_LIGHT;
+const vec3 AOS_INK_PANEL = FONT_INK_DARK;
 
 float vgaGlyphBorder(uint ch, vec2 cell, uint px, uint py) {
     float b = 0.0;
@@ -329,26 +334,29 @@ float aosTaskbarClockWidth(float scale) {
     return AOS_CLOCK_W * scale;
 }
 
+vec4 aosTaskbarTimePack(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc) {
+    vec4 pack = vec4(0.0);
+    float x = x0;
+    pack = max(pack, fontGlyphPack(48u + (hr / 10u) % 10u, pix, x, rowY, cell));
+    pack = max(pack, fontGlyphPack(48u + hr % 10u, pix, x + cell.x, rowY, cell));
+    x += cell.x * 2.0 + cell.x * 0.3;
+    pack = max(pack, fontGlyphPack(58u, pix, x, rowY, cell));
+    x += cell.x;
+    pack = max(pack, fontGlyphPack(48u + (mn / 10u) % 10u, pix, x, rowY, cell));
+    pack = max(pack, fontGlyphPack(48u + mn % 10u, pix, x + cell.x, rowY, cell));
+    x += cell.x * 2.0 + cell.x * 0.3;
+    pack = max(pack, fontGlyphPack(58u, pix, x, rowY, cell));
+    x += cell.x;
+    pack = max(pack, fontGlyphPack(48u + (sc / 10u) % 10u, pix, x, rowY, cell));
+    pack = max(pack, fontGlyphPack(48u + sc % 10u, pix, x + cell.x, rowY, cell));
+    return pack;
+}
+
 vec3 aosTaskbarTimeInkGeom(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc,
         out float inkB) {
-    vec3 ink = vec3(0.0);
-    inkB = 0.0;
-    float x = x0;
-    ink = max(ink, aosHudTimePartGeom(pix, x, rowY, cell, hr));
-    inkB = max(inkB, aosHudTimePartBorder(pix, x, rowY, cell, hr));
-    x += cell.x * 2.0 + cell.x * 0.3;
-    ink = max(ink, fontGlyphGeom(58u, pix, x, rowY, cell));
-    inkB = max(inkB, dosHudRunBorder(pix, x, rowY, cell, 58u, 32u, 32u, 32u, 32u, 32u, 32u, 32u));
-    x += cell.x;
-    ink = max(ink, aosHudTimePartGeom(pix, x, rowY, cell, mn));
-    inkB = max(inkB, aosHudTimePartBorder(pix, x, rowY, cell, mn));
-    x += cell.x * 2.0 + cell.x * 0.3;
-    ink = max(ink, fontGlyphGeom(58u, pix, x, rowY, cell));
-    inkB = max(inkB, dosHudRunBorder(pix, x, rowY, cell, 58u, 32u, 32u, 32u, 32u, 32u, 32u, 32u));
-    x += cell.x;
-    ink = max(ink, aosHudTimePartGeom(pix, x, rowY, cell, sc));
-    inkB = max(inkB, aosHudTimePartBorder(pix, x, rowY, cell, sc));
-    return ink;
+    vec4 pack = aosTaskbarTimePack(pix, x0, rowY, cell, hr, mn, sc);
+    inkB = pack.w;
+    return pack.xyz;
 }
 
 float aosTaskbarTimeInk(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc,
@@ -429,20 +437,19 @@ vec3 aosMenuDrawRow(vec2 pix, vec3 base, vec2 panelOrigin, float panelW, float r
         col = aosBlendIcon(col, sampleAosIconRgba(icon, iuv));
 
     float tx = icon0.x + iconSz + 6.0 * scale;
-    vec3 inkGeom = dosHudRamStrGeom(pix, tx, rowMidY, cell, rowBase + 4u, AOS_MENU_LABEL_LEN);
-    float inkBorder = dosHudRamStrBorder(pix, tx, rowMidY, cell, rowBase + 4u, AOS_MENU_LABEL_LEN);
-    vec3 inkCol = (rowType == 3u) ? mix(th.warn, vec3(0.98, 0.92, 0.88), 0.35) : AOS_INK_BLACK;
-    col = mixHudInk(col, inkGeom, inkBorder, inkCol);
+    vec4 inkPack = dosHudRamStrPack(pix, tx, rowMidY, cell, rowBase + 4u, AOS_MENU_LABEL_LEN);
+    if (rowType == 3u)
+        col = mixHudInkPolar(col, inkPack, 0.0, mix(th.warn, vec3(0.98, 0.92, 0.88), 0.35), true);
+    else
+        col = mixHudInkLight(col, inkPack, 0.0);
 
     if (showDesc && rowType == 1u) {
         float descY = rowY0 + 28.0 * scale;
-        vec3 descGeom = dosHudRamStrGeom(pix, tx, descY, cell,
-            rowBase + 4u + AOS_MENU_LABEL_LEN, AOS_MENU_DESC_LEN);
-        float descBorder = dosHudRamStrBorder(pix, tx, descY, cell,
+        vec4 descPack = dosHudRamStrPack(pix, tx, descY, cell,
             rowBase + 4u + AOS_MENU_LABEL_LEN, AOS_MENU_DESC_LEN);
         float descFade = hov ? 0.75 : 0.50;
-        descGeom *= descFade;
-        col = mixHudInk(col, descGeom, descBorder, AOS_INK_DIM);
+        descPack.xyz *= descFade;
+        col = mixHudInkPolar(col, descPack, 0.0, AOS_INK_DIM, true);
     }
     return max(col, vec3(0.0));
 }

@@ -116,6 +116,6 @@ int main() {
     }
     std::printf("OK 4K taskbar tab click\n");
 
-    std::printf("AOS GUI QA passed (v2.01)\n");
+    std::printf("AOS GUI QA passed (v2.02)\n");
     return 0;
 }

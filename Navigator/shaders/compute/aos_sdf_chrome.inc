@@ -32,9 +32,8 @@ vec3 aosTaskbarClock(vec2 pix, vec2 vp, ThemePal th) {
     vec2 cell = aosHudTextCellSm(scale);
     float timeX = L.clockX0 + 10.0 * scale;
     float timeY = L.barY0 + 18.0 * scale;
-    float inkB = 0.0;
-    vec3 inkGeom = aosTaskbarTimeInkGeom(pix, timeX, timeY, cell, hr, mn, sc, inkB);
-    return mixHudInk(pillCol, inkGeom, inkB, AOS_INK_TASKBAR);
+    vec4 timePack = aosTaskbarTimePack(pix, timeX, timeY, cell, hr, mn, sc);
+    return mixHudInkLight(pillCol, timePack, 0.0);
 }
 
 void aosStartButtonBounds(vec2 vp, out vec2 b0, out vec2 b1) {
@@ -85,20 +84,15 @@ vec3 aosStartButtonPanel(vec2 pix, vec2 vp, ThemePal th, bool menuOpen) {
     float labelX = icon0.x + iconSide + 8.0 * scale;
     float labelY = b0.y + (b1.y - b0.y) * 0.5 - 6.0 * scale;
     vec2 cell = aosHudTextCellSm(scale);
-    vec3 labelGeom = vec3(0.0);
-    float labelBorder = 0.0;
+    vec4 labelPack = vec4(0.0);
     float lx = labelX;
     for (uint li = 0u; li < 8u; ++li) {
         uint ch = ramByte(AOS_TASKBAR_RAM + AOS_START_LABEL_OFF + li);
         if (ch == 0u || ch < 32u) break;
-        labelGeom = max(labelGeom, fontGlyphGeom(ch, pix, lx, labelY, cell));
-        labelBorder = max(labelBorder, fontGlyphInk(ch, pix + vec2(-1.0, 0.0), lx, labelY, cell));
-        labelBorder = max(labelBorder, fontGlyphInk(ch, pix + vec2(1.0, 0.0), lx, labelY, cell));
-        labelBorder = max(labelBorder, fontGlyphInk(ch, pix + vec2(0.0, -1.0), lx, labelY, cell));
-        labelBorder = max(labelBorder, fontGlyphInk(ch, pix + vec2(0.0, 1.0), lx, labelY, cell));
+        labelPack = max(labelPack, fontGlyphPack(ch, pix, lx, labelY, cell));
         lx += cell.x;
     }
-    col = mixHudInk(col, labelGeom, labelBorder, AOS_INK_TASKBAR);
+    col = mixHudInkLight(col, labelPack, 0.0);
     return max(col, vec3(0.0));
 }
 

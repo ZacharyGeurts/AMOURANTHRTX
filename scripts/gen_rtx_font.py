@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rasterize a fixed-width terminal TTF into 8x16 VGA bitmap atlas for Field Die shaders.
 
-Default: Brass Mono (SIL OFL) — assets/fonts/font.ttf
+Default: JetBrains Mono (SIL OFL) — assets/fonts/JetBrainsMono-Regular.ttf
 Outputs FONT_ATLAS in CANVAS.comp and syncs to *.comp variants + rtx_font.inc.
 """
 
@@ -16,7 +16,8 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 CANVAS = ROOT / "Navigator" / "shaders" / "compute" / "CANVAS.comp"
 SHADERS = ROOT / "Navigator" / "shaders" / "compute"
-DEFAULT_FONT = ROOT / "assets" / "fonts" / "font.ttf"
+DEFAULT_FONT = ROOT / "assets" / "fonts" / "JetBrainsMono-Regular.ttf"
+FALLBACK_FONT = ROOT / "assets" / "fonts" / "font.ttf"
 
 FONT_W = 8
 FONT_H = 16
@@ -133,6 +134,8 @@ def sync_font_to_comp(path: Path, atlas_block: str) -> bool:
 
 def main() -> int:
     font_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_FONT
+    if not font_path.is_file() and font_path == DEFAULT_FONT and FALLBACK_FONT.is_file():
+        font_path = FALLBACK_FONT
     nums = build_atlas(font_path)
     block = format_atlas(nums, font_path.stem)
     (SHADERS / "rtx_font.inc").write_text(block + "\n", encoding="utf-8")

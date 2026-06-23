@@ -55,6 +55,7 @@ def main() -> int:
         "qa_rtx_density_test",
         "qa_love_demo_test",
         "qa_aos_gui_test",
+        "qa_font_sdf_test",
         "qa_taskbar_click_test",
         "qa_amouranthos_test",
     )
