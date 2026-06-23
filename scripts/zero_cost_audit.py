@@ -54,6 +54,8 @@ def main() -> int:
     checks = (
         ("qa_fieldstorage_test", "vfs_bridge_ok", lambda v: v == "1", 60),
         ("qa_ps1_test", "ps1_gpu_wave", lambda v: v == "1", 30),
+        ("qa_xbox360_test", "xbox360_gpu_wave", lambda v: v == "1", 30),
+        ("qa_amiga_test", "amiga_love_score", lambda v: int(v) >= 10, 30),
         ("qa_keen_host_test", "keen_fb_nz", lambda v: int(v) >= 500, 120),
         ("qa_doom_host_test", "doom_fb_nz", lambda v: int(v) >= 5000, 300),
     )

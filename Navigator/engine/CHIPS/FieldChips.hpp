@@ -17,6 +17,8 @@
 //   N64/        — Nintendo 64 scaffold
 //   Dreamcast/  — Sega Dreamcast scaffold
 //   PS2/        — PlayStation 2 scaffold
+//   Xbox360/    — Microsoft Xbox 360 (Xenon + Xenos FieldDie wave)
+//   Amiga/      — Commodore Amiga 68000 + Paula + Denise/AGA
 
 #include "Common/FieldChipsCommon.hpp"
 #include "Nes/FieldNes.hpp"
@@ -33,3 +35,5 @@
 #include "N64/FieldN64.hpp"
 #include "Dreamcast/FieldDreamcast.hpp"
 #include "PS2/FieldPs2.hpp"
+#include "Xbox360/FieldXbox360.hpp"
+#include "Amiga/FieldAmiga.hpp"

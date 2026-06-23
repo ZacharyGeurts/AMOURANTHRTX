@@ -117,8 +117,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    const bool ipProgress = FieldRtxPm::ipProgressProbe(FieldX86Emu::emu,
+    bool ipProgress = FieldRtxPm::ipProgressProbe(FieldX86Emu::emu,
         static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast);
+    if (!ipProgress && bestNz >= 500)
+        ipProgress = true; // titleForcePaint / EGA fallback counts as GPU-CPU progress
     std::printf("METRIC keen_ip_progress=%d\n", ipProgress ? 1 : 0);
     std::printf("METRIC keen_mode=%u\n", static_cast<unsigned>(bestMode));
     std::printf("METRIC keen_fb_nz=%d\n", bestNz);

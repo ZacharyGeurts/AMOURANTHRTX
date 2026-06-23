@@ -17,6 +17,9 @@ param(
     [switch]$Chips          # CHIPS expansion tier
     [switch]$ChipsPs1       # CHIPS PS1 GPU die wave
     [switch]$FieldEmulator  # Field emulator dispatch
+    [switch]$ChipsAll      # All CHIPS expansion tier
+    [switch]$AmigaLove     # Amiga Love of EVERYTHING canvas
+    [switch]$Xbox360       # Xbox 360 Xenos die wave
 )
 
 Write-Host ""
@@ -111,6 +114,9 @@ if (Test-Path $Binary) {
     if ($Chips) { $env:AMOURANTHRTX_CHIPS = "1" }
     if ($ChipsPs1) { $env:AMOURANTHRTX_CHIPS_PS1 = "1"; $env:AMOURANTHRTX_CHIPS = "1" }
     if ($FieldEmulator) { $env:AMOURANTHRTX_FIELD_EMULATOR = "1" }
+    if ($ChipsAll) { $env:AMOURANTHRTX_CHIPS_ALL = "1"; $env:AMOURANTHRTX_CHIPS = "1" }
+    if ($AmigaLove) { $env:AMOURANTHRTX_AMIGA_LOVE = "1" }
+    if ($Xbox360) { $env:AMOURANTHRTX_XBOX360 = "1" }
 
     if ($TeamDrive) {
         Write-Host "TEAM drive harness (non-destructive)..." -ForegroundColor Cyan

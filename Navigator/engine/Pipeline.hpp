@@ -49,6 +49,8 @@
 #include "FieldAmmoSms.hpp"
 #include "FieldAmmoGenesis.hpp"
 #include "FieldAmmoPs1.hpp"
+#include "FieldAmmoXbox360.hpp"
+#include "FieldAmmoAmiga.hpp"
 #include "FieldAmmoSnes.hpp"
 #include "FieldAosNesTest.hpp"
 #include "FieldSnapDump.hpp"
@@ -2380,8 +2382,17 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                 }
                 if (FieldPs1::active
                         && (std::getenv("AMOURANTHRTX_CHIPS_PS1")
+                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")
                             || std::getenv("AMOURANTHRTX_FIELD_EMULATOR")))
                     FieldPs1::tick(gr, keys);
+                if (FieldXbox360::active
+                        && (std::getenv("AMOURANTHRTX_XBOX360")
+                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")))
+                    FieldXbox360::tick(gr, keys);
+                if (FieldAmiga::active
+                        && (std::getenv("AMOURANTHRTX_AMIGA_LOVE")
+                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")))
+                    FieldAmiga::tick(gr, keys);
                 if (FieldAosNesTest::enabled() && gr) {
                     if (const char* snap = std::getenv("AMOURANTHRTX_NES_FB_SNAP")) {
                         int want = 240;
@@ -2416,7 +2427,8 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                 FieldRtxTerm::syncLiveFromVga(gr);
             }
             if (!FieldNes::active && !FieldA2600::active && !FieldSms::active
-                    && !FieldGenesis::active && !FieldSnes::active && !FieldPs1::active)
+                    && !FieldGenesis::active && !FieldSnes::active && !FieldPs1::active
+                    && !FieldXbox360::active && !FieldAmiga::active)
                 FieldRtxTerm::applyView(gr);
             if (FieldAmouranthWm::pendingMenuAction) {
                 const int act = FieldAmouranthWm::pendingMenuAction;

@@ -31,6 +31,8 @@ def run_target(target: str) -> tuple[int, dict[str, str]]:
 def main() -> int:
     checks = [
         ("qa_ps1_test", "ps1_gpu_wave", lambda v: v == "1"),
+        ("qa_xbox360_test", "xbox360_gpu_wave", lambda v: v == "1"),
+        ("qa_amiga_test", "amiga_love_score", lambda v: int(v) >= 10),
         ("qa_nes_cpu_test", None, None),
         ("qa_snes_test", None, None),
     ]
