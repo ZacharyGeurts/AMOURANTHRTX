@@ -77,7 +77,12 @@ int main() {
     std::printf("METRIC hyper_phase_in=%.4f\n", FieldStorage::hyper.phaseVelocityIn);
     std::printf("METRIC hyper_phase_out=%.4f\n", FieldStorage::hyper.phaseVelocityOut);
     std::printf("METRIC hyper_resonance=%.4f\n", FieldStorage::hyper.resonanceCoupling);
+    std::printf("METRIC hyper_phi_super=%.4f\n", FieldStorage::hyperPhiSuperposition());
     std::printf("METRIC end_game_mode=%d\n", FieldStorage::endGameMode() ? 1 : 0);
+    if (FieldStorage::hyperPhiSuperposition() <= 0.0) {
+        std::fprintf(stderr, "FAIL phi superposition not active\n");
+        return 1;
+    }
     if (!FieldStorage::hyperEnabled() || FieldStorage::chipsFabricScale() < 1.0) {
         std::fprintf(stderr, "FAIL hyper breakthroughs not active\n");
         return 1;

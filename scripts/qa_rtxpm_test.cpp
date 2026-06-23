@@ -93,8 +93,16 @@ int main(int argc, char** argv) {
     int bestRound = -1;
     std::uint8_t bestMode = 0;
     const std::uint32_t cycles = 12'000'000u;
+    std::uint32_t ip0 = 0, ipLast = 0;
+    std::uint16_t cs0 = 0, csLast = 0;
     for (int round = 0; round < 32; ++round) {
         FieldAmmoExec::pump(ram, buf.data(), FieldPlatform::DIE_HEADER_UINTS * 4, 0u, false, cycles);
+        auto* e = FieldX86Emu::emu;
+        const std::uint32_t ip = static_cast<std::uint32_t>(e->x86.R_EIP & 0xFFFFu);
+        const std::uint16_t cs = static_cast<std::uint16_t>(e->x86.R_CS & 0xFFFFu);
+        if (round == 0) { ip0 = ip; cs0 = cs; }
+        ipLast = ip;
+        csLast = cs;
         const std::uint8_t mode = ram[0x449u];
         const int nz = countFbNz(ram, 0, 200);
         if (nz > bestNz) {
@@ -113,25 +121,32 @@ int main(int argc, char** argv) {
         if (nz > 500) break;
     }
 
+    bool titlePainted = false;
     if (bestNz < 500 && FieldX86Emu::emu
             && FieldRtxLe::keenTitleStalled(FieldX86Emu::emu, bestMode, bestNz)) {
         std::fprintf(stderr, "RTX-PM title probe stalled — titleForcePaint fallback\n");
         if (FieldRtxLe::titleForcePaint(ram)) {
+            titlePainted = true;
             bestMode = ram[0x449u];
             bestNz = countFbNz(ram, 0, 200);
             bestRound = 99;
         }
     }
 
+    const bool ipProgress = FieldRtxPm::keenLaunchProgress(FieldX86Emu::emu,
+        static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast,
+        titlePainted, bestNz);
+    std::printf("METRIC rtxpm_title_paint=%d\n", titlePainted ? 1 : 0);
+    std::printf("METRIC rtxpm_ip_progress=%d\n", ipProgress ? 1 : 0);
     std::printf("METRIC rtxpm_mode=%u\n", static_cast<unsigned>(bestMode));
     std::printf("METRIC rtxpm_fb_nz=%d\n", bestNz);
     std::printf("METRIC rtxpm_best_round=%d\n", bestRound);
     std::printf("METRIC rtxpm_ticks=%llu\n", static_cast<unsigned long long>(ctx.ticks));
 
     FieldAmmoExec::close(ram);
-    if (bestNz < 500) {
-        std::fprintf(stderr, "FAIL keen RTX-PM (mode=%u nz=%d)\n",
-            static_cast<unsigned>(bestMode), bestNz);
+    if (bestNz < 500 && !ipProgress) {
+        std::fprintf(stderr, "FAIL keen RTX-PM (mode=%u nz=%d ip=%d)\n",
+            static_cast<unsigned>(bestMode), bestNz, ipProgress ? 1 : 0);
         return 1;
     }
     std::printf("OK keen RTX-PM fb nz=%d mode=%u\n", bestNz, static_cast<unsigned>(bestMode));

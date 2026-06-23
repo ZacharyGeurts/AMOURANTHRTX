@@ -63,6 +63,7 @@ def main() -> int:
                 ("dual_host", lambda v: v == "1"),
                 ("hyper_breakthroughs", lambda v: v == "1"),
                 ("hyper_fabric_scale", lambda v: float(v) > 1.0),
+                ("hyper_phi_super", lambda v: float(v) > 0.0),
             )),
             ("qa_ps1_test", 30, (("ps1_gpu_wave", lambda v: v == "1"),)),
             ("qa_xbox360_test", 30, (("xbox360_gpu_wave", lambda v: v == "1"),)),

@@ -13,6 +13,7 @@ struct HyperState {
     double phaseVelocityIn = 1.15;
     double phaseVelocityOut = 0.87;
     double resonanceCoupling = 0.22;
+    double phiSuperposition = 0.0;
 };
 
 extern HyperState hyper;

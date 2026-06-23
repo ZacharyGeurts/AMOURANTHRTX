@@ -45,6 +45,9 @@ def main() -> int:
         print("FAIL end_game build", file=sys.stderr)
         return 1
 
+    if run_py("monolith_audit.py") != 0:
+        return 1
+
     audit_args = ["--end-game"]
     if args.with_doom:
         audit_args.append("--with-doom")

@@ -48,10 +48,14 @@ void enableAllBreakthroughs(bool on) noexcept {
     hyper.phaseVelocityIn = 1.15 + hyper.leadInPeak * 0.08;
     hyper.phaseVelocityOut = 0.87 + hyper.leadOutPeak * 0.06;
     hyper.resonanceCoupling = 0.22 + hyper.entropyFold * 0.05;
+    hyper.phiSuperposition = static_cast<double>(FieldFabric::gDispatch.phi)
+        + static_cast<double>(FieldFabric::gDispatch.thermo) * 0.618
+        + static_cast<double>(FieldFabric::gDispatch.flow) * 0.382;
     hyper.fabricScale = 1.0 + hyper.leadInPeak * hyper.phaseVelocityIn * 0.31
         + hyper.leadOutPeak * hyper.phaseVelocityOut * 0.18
-        + hyper.entropyFold * 0.12 + hyper.resonanceCoupling * 0.08;
-    bo.phi = std::min(10.0, bo.phi + hyper.leadInPeak * 0.5);
+        + hyper.entropyFold * 0.12 + hyper.resonanceCoupling * 0.08
+        + hyper.phiSuperposition * 0.15;
+    bo.phi = std::min(10.0, bo.phi + hyper.leadInPeak * 0.5 + hyper.phiSuperposition * 0.1);
     bo.harmonic = std::min(10.0, bo.harmonic + hyper.leadOutPeak * 0.3);
     bo.entropyFold += static_cast<std::uint64_t>(hyper.entropyFold * 512.0);
     sdf.amplitude = std::min(4.0, sdf.amplitude + hyper.leadOutPeak * 0.25);
@@ -69,6 +73,7 @@ bool hyperEnabled() noexcept { return hyper.enabled; }
 double hyperLeadInPeak() noexcept { return hyper.leadInPeak; }
 double hyperLeadOutPeak() noexcept { return hyper.leadOutPeak; }
 double hyperEntropyFold() noexcept { return hyper.entropyFold; }
+double hyperPhiSuperposition() noexcept { return hyper.phiSuperposition; }
 
 void hyperTick(std::uint32_t blockIndex) noexcept {
     if (!hyper.enabled) return;
@@ -82,9 +87,13 @@ void hyperTick(std::uint32_t blockIndex) noexcept {
     hyper.phaseVelocityIn = 1.15 + hyper.leadInPeak * 0.08;
     hyper.phaseVelocityOut = 0.87 + hyper.leadOutPeak * 0.06;
     hyper.resonanceCoupling = 0.22 + hyper.entropyFold * 0.05;
+    hyper.phiSuperposition = static_cast<double>(FieldFabric::gDispatch.phi)
+        + static_cast<double>(FieldFabric::gDispatch.thermo) * 0.618
+        + static_cast<double>(FieldFabric::gDispatch.flow) * 0.382;
     hyper.fabricScale = 1.0 + hyper.leadInPeak * hyper.phaseVelocityIn * 0.31
         + hyper.leadOutPeak * hyper.phaseVelocityOut * 0.18
-        + hyper.entropyFold * 0.12 + hyper.resonanceCoupling * 0.08;
+        + hyper.entropyFold * 0.12 + hyper.resonanceCoupling * 0.08
+        + hyper.phiSuperposition * 0.15;
     bo.entropyFold += static_cast<std::uint64_t>(FieldFabric::gEntropyFold * 4.0);
 }
 

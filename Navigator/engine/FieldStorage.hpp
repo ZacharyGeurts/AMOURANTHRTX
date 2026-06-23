@@ -70,6 +70,7 @@ bool hyperEnabled() noexcept;
 double hyperLeadInPeak() noexcept;
 double hyperLeadOutPeak() noexcept;
 double hyperEntropyFold() noexcept;
+double hyperPhiSuperposition() noexcept;
 bool mountMultiFS(const char* projectRoot = ".") noexcept;
 bool mountTeamDrive(const char* devPath, bool allowInit = false) noexcept;
 void dismissAll() noexcept;
