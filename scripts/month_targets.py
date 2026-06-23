@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AMOURANTHRTX monthly target matrix — CEO SuperIntelligence validation gate."""
+"""AMOURANTHRTX monthly target matrix — Hostess 7 leadership validation gate."""
 from __future__ import annotations
 
 import os

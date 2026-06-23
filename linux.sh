@@ -39,9 +39,9 @@ for arg in "$@"; do
         super|superintel|field-super)
             exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" "${@:2}"
             ;;
-        ceo|leadership)
+        hostess|hostess7|ceo|leadership)
             if [[ $# -lt 2 ]]; then
-                exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" ceo
+                exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" hostess
             else
                 exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" "${@:2}"
             fi
