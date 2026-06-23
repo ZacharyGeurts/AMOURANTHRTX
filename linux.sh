@@ -52,6 +52,9 @@ for arg in "$@"; do
         batch|fix-batch)
             exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" batch "${@:2}"
             ;;
+        turnover|turn-over|phase0)
+            exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" turnover "${@:2}"
+            ;;
         month-targets|month_targets)
             exec python3 "$PROJECT_ROOT/scripts/month_targets.py" "${@:2}"
             ;;

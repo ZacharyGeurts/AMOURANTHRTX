@@ -41,6 +41,7 @@
 #include "FieldAosStatusBar.hpp"
 #include "FieldWmStatusBar.hpp"
 #include "FieldKilroyLayer.hpp"
+#include "FieldHostess7.hpp"
 #include "FieldRtxBoot.hpp"
 #include "FieldRtxShell.hpp"
 #include "FieldRtxConsoleGui.hpp"
@@ -2471,6 +2472,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
 
             FieldWmStatusBar::packFooter(gr);
         }
+        FieldHostess7::tick(Options::Canvas::DataBus);
         FieldDosViewport::packDataBus(Options::Canvas::DataBus, 64u, gr);
         FieldNes::packDataBus(Options::Canvas::DataBus);
         FieldWebPanel::packDataBus(Options::Canvas::DataBus);

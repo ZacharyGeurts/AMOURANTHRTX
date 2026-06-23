@@ -5,7 +5,7 @@ from __future__ import annotations
 
 PRODUCT = "RTX-DOS"
 VERSION = "7.0"
-AMOURANTHRTX_VERSION = "2.1.1"
+AMOURANTHRTX_VERSION = "2.2.0"
 AMOURANTHRTX_CODENAME = "Field Everything"
 VERSION_FULL = f"{PRODUCT} {VERSION}"
 CODENAME = "Field Die"

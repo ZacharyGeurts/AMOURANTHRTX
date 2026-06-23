@@ -65,6 +65,7 @@ def main() -> int:
         "qa_font_sdf_test",
         "qa_taskbar_click_test",
         "qa_amouranthos_test",
+        "qa_hostess_native_test",
     )
 
     for script, args in py_steps:
@@ -84,6 +85,11 @@ def main() -> int:
         return 1
     print("OK release_checklist field_superintelligence evaluate")
 
+    if run_py("field_superintelligence.py", "turnover") != 0:
+        print("FAIL release_checklist field_superintelligence turnover", file=sys.stderr)
+        return 1
+    print("OK release_checklist field_superintelligence turnover")
+
     for step in bin_steps:
         subprocess.run(
             ["cmake", "--build", str(BUILD), "--target", step, "-j", "8"],
@@ -93,6 +99,8 @@ def main() -> int:
         if step == "qa_love_demo_test":
             env.setdefault("AMOURANTHRTX_EVERYTHING_EVERYWHERE", "1")
             env.setdefault("AMOURANTHRTX_FIELD_PERSIST", "1")
+        if step == "qa_hostess_native_test":
+            env.setdefault("AMOURANTHRTX_HOSTESS", "1")
         rc = subprocess.run([str(BUILD / step)], cwd=ROOT, check=False, env=env).returncode
         if rc != 0:
             print(f"FAIL release_checklist {step}", file=sys.stderr)

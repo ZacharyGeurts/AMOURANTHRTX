@@ -23,13 +23,23 @@ MONOLITHS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Navigator/engine/Pipeline.hpp", (
         "bootstrapEndGameOnce", "ENABLE_ALL_BREAKTHROUGHS", "FieldAmiga::tick",
+        "FieldHostess7::tick",
+    )),
+    ("Navigator/engine/FieldHostess7.hpp", (
+        "BUS_HOSTESS_LIVE", "hostess_native", "packDataBus",
+    )),
+    ("docs/HOSTESS7_V33.md", (
+        "Hostess 7", "Turn Over", "presumption",
+    )),
+    ("scripts/field_superintelligence.py", (
+        "turnover", "protocol_v33", "TURNOVER_QUESTIONS",
     )),
     ("dos/FieldRtxPm.hpp", ("keenLaunchProgress", "ipProgressProbe")),
     ("dos/FieldRtxLe.hpp", ("forceTitleBlit", "keenTitleBlitProbe", "keenTitleStalled")),
     ("Navigator/engine/FieldGpuLaunch.hpp", ("seedKeenMzExec", "keenTitleBlitSeeded", "forceTitleBlit")),
     ("AmmoOS/core/FieldAosChipsWave.hpp", ("openAmigaLove", "openLoveOfEverything")),
     ("Navigator/engine/CHIPS/Common/FieldChipFabricScale.hpp", ("scaledDieCycles",)),
-    ("linux.sh", ("--end-game", "end-game", "AMOURANTHRTX_END_GAME", "everything-everywhere", "AMOURANTHRTX_FIELD_PERSIST")),
+    ("linux.sh", ("--end-game", "end-game", "AMOURANTHRTX_END_GAME", "everything-everywhere", "AMOURANTHRTX_FIELD_PERSIST", "turnover")),
     ("scripts/end_game_audit.py", ("zero_cost_audit", "end_game_mode")),
     ("scripts/zero_cost_audit.py", ("keen_ip_progress", "hyper_breakthroughs")),
 )

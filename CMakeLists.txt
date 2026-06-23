@@ -637,6 +637,12 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     field_host_test_link(qa_keen_host_test)
     set_target_properties(qa_keen_host_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+    add_executable(qa_hostess_native_test scripts/qa_hostess_native_test.cpp)
+    target_include_directories(qa_hostess_native_test PRIVATE ${FIELD_ENGINE_INCLUDES})
+    target_compile_features(qa_hostess_native_test PRIVATE cxx_std_20)
+    field_host_test_link(qa_hostess_native_test)
+    set_target_properties(qa_hostess_native_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
     add_executable(test_lzexe_expand scripts/test_lzexe_expand.cpp)
     target_include_directories(test_lzexe_expand PRIVATE ${FIELD_ENGINE_INCLUDES})
     target_compile_features(test_lzexe_expand PRIVATE cxx_std_20)
