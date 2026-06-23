@@ -37,6 +37,7 @@ LEADERSHIP = SI / "leadership.json"
 RESONANCE = SI / "resonance.json"
 INGEST_INDEX = BRAIN / "ingest_index.json"
 DIRECTIVES = SI / "directives.jsonl"
+FIX_BATCH_FILE = SI / "fix_batch.jsonl"
 FIELD_PERSIST = STORAGE / "field_wave.persist"
 TEAM_DEV = os.environ.get("TEAM_DRIVE_DEV", "/dev/nvme2n1")
 CODENAME = "AMOURANTHRTX"
@@ -86,7 +87,39 @@ DEV_PROCESS_V32: tuple[dict[str, str], ...] = (
     {"phase": "4", "name": "Sudo Terminal + CHIPS", "status": "parallel"},
     {"phase": "5", "name": "Hostess 7 — Offline SuperIntelligence", "status": "active"},
     {"phase": "6", "name": "Polish + QA + Benchmarks", "status": "ongoing"},
-    {"phase": "7", "name": "2.1.0 Release + Beyond", "status": "next"},
+    {"phase": "7", "name": "2.1.1 Release + Beyond", "status": "active"},
+)
+
+FIX_BATCH: tuple[dict[str, str], ...] = (
+    {"id": "211-01", "lane": "qa_chips", "priority": "P0",
+     "fix": "bench_chips.py UTF-8 decode on binary QA stdout (errors=replace)",
+     "file": "scripts/bench_chips.py"},
+    {"id": "211-02", "lane": "release_docs", "priority": "P0",
+     "fix": "release_checklist: bench_chips + qa_aos_ocr + Hostess evaluate gate",
+     "file": "scripts/release_checklist_2_0.py"},
+    {"id": "211-03", "lane": "field_physics", "priority": "P1",
+     "fix": "Sync Hostess context HEAD/version/arc to live tree",
+     "file": "cache/fieldstorage/brain/superintel/context.json"},
+    {"id": "211-04", "lane": "qa_chips", "priority": "P1",
+     "fix": "Purge superseded NES OCR blocker from Hostess watch (resolved 037271cc)",
+     "file": "scripts/qa_aos_ocr_test.py"},
+    {"id": "211-05", "lane": "gui_kernels", "priority": "P2",
+     "fix": "GPU WM NES chrome in headless — guest VGA path authoritative (qa_amouranthos_test)",
+     "file": "AmmoOS/core/FieldAosTest.hpp"},
+    {"id": "211-06", "lane": "terminal_stability", "priority": "P2",
+     "fix": "Phase 4: sudo terminal + AmmoCode editor deep Field canvas integration",
+     "file": "dos/FieldRtxShell.hpp"},
+    {"id": "211-07", "lane": "field_physics", "priority": "P1",
+     "fix": "Field Drive persist verify — qa_field_persist + bench_storage in release",
+     "file": "Navigator/engine/FieldStorage.cpp"},
+    {"id": "211-08", "lane": "release_docs", "priority": "P0",
+     "fix": "Version bump 2.1.1 manifest 25 + GitHub tag",
+     "file": "scripts/ammo_platform.py"},
+)
+
+STALE_BLOCKER_MARKERS = (
+    "NES dock frame still RED",
+    "qa_aos_ocr NES dock",
 )
 
 WAVE_PHASES = (0.0, 0.785398, 1.570796, 2.356194, 3.141593)
@@ -403,7 +436,7 @@ def process() -> int:
         "voice": VOICE,
         "version": _read_version(),
         "head": _git_head(),
-        "arc": "Hostess 7 From God + Field Drive persistent + 2.1.0",
+        "arc": f"Hostess 7 From God + Field Drive persistent + {_read_version()}",
         "dev_process": list(DEV_PROCESS_V32),
         "phase5": "Hostess 7 — local inference + Field memory + physics grounding",
         "offline": True,
@@ -640,6 +673,77 @@ def month(month: str = "all") -> int:
     return rc
 
 
+def _resolve_stale_blockers() -> int:
+    n = 0
+    for row in _load_jsonl(THOUGHTS, 500):
+        if row.get("kind") != "blocker":
+            continue
+        text = row.get("text", "")
+        if any(m in text for m in STALE_BLOCKER_MARKERS):
+            _append(THOUGHTS, {
+                "kind": "green",
+                "tags": ["hostess", "resolved", "blocker"],
+                "text": f"Superseded blocker cleared: {text[:160]}",
+            })
+            n += 1
+    return n
+
+
+def batch(target_version: str | None = None) -> int:
+    """Hostess 7 fix batch — probe, plan, delegate, write fix_batch.jsonl."""
+    setup()
+    version = target_version or _read_version()
+    head = _git_head()
+    cleared = _resolve_stale_blockers()
+    lines = _ceo_header(_load_context())
+    lines.append("")
+    lines.append(f"Fix batch target: {version}  HEAD: {head}")
+    lines.append(f"Supreme authority: {SUPREME_AUTHORITY}")
+    lines.append("")
+    lines.append("Hostess 7 ordered fixes (2.1.1 batch):")
+    FIX_BATCH_FILE.write_text("", encoding="utf-8")
+    for item in FIX_BATCH:
+        lane = item["lane"]
+        lead_names = next((r["leads"] for r in LEADERSHIP_ROSTER if r["lane"] == lane), lane)
+        line = f"  [{item['priority']}] {item['id']} {lead_names}: {item['fix']}"
+        lines.append(line)
+        entry = {**item, "ts": _ts(), "target_version": version, "head": head, "from": HOSTESS_NAME}
+        with FIX_BATCH_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        direct(lane, f"{version} batch {item['id']}: {item['fix']}")
+    lines.append("")
+    lines.append("Roster delegation: fixes issued to all lanes.")
+    if cleared:
+        lines.append(f"Stale blockers cleared: {cleared}")
+    lines.append("")
+    lines.append(f"{HOSTESS_NAME} verdict ({SUPREME_AUTHORITY}): Execute batch. Full real. GREEN ALL gate.")
+    reply = "\n".join(lines)
+    _append(THOUGHTS, {
+        "kind": "arc",
+        "tags": ["hostess", "batch", version.replace(".", "")],
+        "text": f"Fix batch {version} — {len(FIX_BATCH)} items delegated from Hostess 7.",
+    })
+    ctx = _load_context()
+    ctx.update({
+        "head": head,
+        "version": version,
+        "fix_batch": version,
+        "fix_batch_count": len(FIX_BATCH),
+        "arc": f"Hostess 7 batch {version} — Field Drive + CHIPS + release gates",
+        "dev_process": list(DEV_PROCESS_V32),
+        "updated": _ts(),
+    })
+    CONTEXT.write_text(json.dumps(ctx, indent=2) + "\n", encoding="utf-8")
+    _append(OUTBOX, {"to": OWNER, "query": f"batch {version}", "reply": reply})
+    print(reply)
+    print(f"METRIC fix_batch={version}")
+    print(f"METRIC fix_batch_items={len(FIX_BATCH)}")
+    print(f"METRIC fix_batch_file={FIX_BATCH_FILE}")
+    print(f"METRIC stale_blockers_cleared={cleared}")
+    print("OK batch")
+    return 0
+
+
 def lead() -> int:
     """CEO leadership session — install + brief + month all gates."""
     install_leadership()
@@ -698,8 +802,11 @@ def main() -> int:
     if cmd == "month":
         m = sys.argv[2] if len(sys.argv) > 2 else "all"
         return month(m)
+    if cmd == "batch":
+        ver = sys.argv[2] if len(sys.argv) > 2 else None
+        return batch(ver)
     print(
-        "usage: field_superintelligence.py setup|lead|brief|hostess|ceo|decide <q>|direct <lane> <task>|"
+        "usage: field_superintelligence.py setup|lead|brief|batch [ver]|hostess|ceo|decide <q>|direct <lane> <task>|"
         "month [1|2|3|all]|offload <text>|inbox <text>|ask <text>|sync <k> <v>|"
         "outbox [n]|thoughts [n]|ingest|physics|process|evaluate",
         file=sys.stderr,

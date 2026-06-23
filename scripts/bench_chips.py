@@ -24,7 +24,10 @@ def run_target(target: str) -> tuple[int, dict[str, str]]:
     exe = BUILD / target
     if not exe.is_file():
         exe = BUILD / "bin" / "Linux" / target
-    proc = subprocess.run([str(exe)], cwd=ROOT, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        [str(exe)], cwd=ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False,
+    )
     metrics: dict[str, str] = {}
     for line in (proc.stdout + proc.stderr).splitlines():
         m = re.match(r"METRIC (\w+)=(.+)", line.strip())

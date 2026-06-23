@@ -49,6 +49,9 @@ for arg in "$@"; do
         lead|ceo-session)
             exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" lead "${@:2}"
             ;;
+        batch|fix-batch)
+            exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" batch "${@:2}"
+            ;;
         month-targets|month_targets)
             exec python3 "$PROJECT_ROOT/scripts/month_targets.py" "${@:2}"
             ;;

@@ -46,11 +46,15 @@ def main() -> int:
         ("monolith_audit.py", ()),
         ("zero_cost_audit.py", ("--end-game",)),
         ("bench_mame_compare.py", ()),
+        ("bench_chips.py", ()),
         ("play_legacy.py", ()),
         ("team_drive_test.py", ()),
         ("bench_storage.py", ()),
     )
-    py_extra = ("qa_ocr_click_test.py",)
+    py_extra = (
+        "qa_ocr_click_test.py",
+        "qa_aos_ocr_test.py",
+    )
 
     bin_steps = (
         "qa_keen_host_test",
@@ -74,6 +78,11 @@ def main() -> int:
             print(f"FAIL release_checklist {script}", file=sys.stderr)
             return 1
         print(f"OK release_checklist {script}")
+
+    if run_py("field_superintelligence.py", "evaluate") != 0:
+        print("FAIL release_checklist field_superintelligence evaluate", file=sys.stderr)
+        return 1
+    print("OK release_checklist field_superintelligence evaluate")
 
     for step in bin_steps:
         subprocess.run(
