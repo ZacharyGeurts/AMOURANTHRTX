@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
     const bool titleMatch = FieldRtxLe::keenTitleBlitProbe(ram);
     const bool ipProgress = FieldRtxPm::keenLaunchProgress(FieldX86Emu::emu,
         static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast,
-        titleBlitActive, bestNz);
+        titleBlitActive, bestNz, bestMode, ram);
     std::printf("METRIC keen_gpu_blit=%d\n", gpuTitleBlit ? 1 : 0);
     std::printf("METRIC keen_title_native=%d\n", (gpuTitleBlit && !titleFallback) ? 1 : 0);
     std::printf("METRIC keen_title_match=%d\n", titleMatch ? 1 : 0);
@@ -142,6 +142,11 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 80 * 25; ++i)
             text[i] = static_cast<char>(ram[0xB8000u + static_cast<std::uint32_t>(i * 2)]);
         std::fprintf(stderr, "VGA text tail:\n%.80s\n", text + 80 * 20);
+    }
+
+    if (titleBlitActive && !titleMatch) {
+        std::fprintf(stderr, "FAIL keen title paint probe mismatch @ line 119 path\n");
+        return 1;
     }
 
     FieldAmmoExec::close(ram);

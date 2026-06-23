@@ -6,6 +6,7 @@
 #include "FieldGpuFiles.hpp"
 #include "FieldGpuLaunch.hpp"
 #include "FieldRtxLe.hpp"
+#include "FieldVga.hpp"
 #include "FieldX86Emu.hpp"
 
 #include <cstdio>
@@ -37,11 +38,15 @@ inline bool ipProgressProbe(x86emu_t* e, std::uint16_t roundIp0, std::uint16_t r
     return linearIp(roundCsLast, roundIpLast) != linearIp(launchSeedCs, launchSeedIp);
 }
 
-// Keen P1 — CPU IP motion OR GpuLaunch title blit / painted framebuffer = GPU-CPU progress.
+// Keen P1 — CPU IP motion OR GpuLaunch title blit / EGA path / painted framebuffer = progress.
 inline bool keenLaunchProgress(x86emu_t* e, std::uint16_t roundIp0, std::uint16_t roundIpLast,
                                std::uint16_t roundCs0, std::uint16_t roundCsLast,
-                               bool titleBlitActive, int fbNonZero) noexcept {
+                               bool titleBlitActive, int fbNonZero,
+                               std::uint8_t vgaMode = 0u,
+                               const std::uint8_t* guestRam = nullptr) noexcept {
     if (titleBlitActive || fbNonZero >= 500) return true;
+    if (vgaMode == FieldVga::MODE_EGA_0D && fbNonZero > 0) return true;
+    if (guestRam && FieldRtxLe::keenTitleBlitProbe(guestRam)) return true;
     return ipProgressProbe(e, roundIp0, roundIpLast, roundCs0, roundCsLast);
 }
 

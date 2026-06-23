@@ -197,7 +197,13 @@ inline void viewportSync(const std::uint8_t* ram) noexcept {
     FieldDosViewport::syncFromGuest(ram);
 }
 
-inline void viewportTick(std::uint8_t* /*ram*/, float /*dt*/) noexcept {}
+inline void viewportTick(std::uint8_t* /*ram*/, float /*dt*/) noexcept {
+    if (FieldDosViewport::renderW < 1920.f || FieldDosViewport::renderH < 1080.f) {
+        FieldDosViewport::winW = FieldDosViewport::renderW = 3840.f;
+        FieldDosViewport::winH = FieldDosViewport::renderH = 2160.f;
+        FieldDosViewport::autoZoom4K = true;
+    }
+}
 
 inline void viewportPack(std::uint32_t* bus, std::size_t /*off*/) noexcept {
     FieldDosViewport::packDataBus(bus, BusMap::BUS_COUNT);

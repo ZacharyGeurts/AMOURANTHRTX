@@ -50,6 +50,6 @@ int main() {
 
     std::printf("OK font SDF meta spread=6.0 atlas=512x768\n");
     std::printf("OK font render dual-polarity fringe (light+dark ink)\n");
-    std::printf("Font SDF QA passed (v2.03)\n");
+    std::printf("Font SDF QA passed (v2.0.4)\n");
     return 0;
 }

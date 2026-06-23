@@ -53,6 +53,7 @@ def main() -> int:
     py_extra = ("qa_ocr_click_test.py",)
 
     bin_steps = (
+        "qa_keen_host_test",
         "qa_field_persist_test",
         "qa_rtx_density_test",
         "qa_love_demo_test",

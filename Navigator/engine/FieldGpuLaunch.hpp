@@ -66,7 +66,7 @@ inline bool seedKeenMzExec(void* mapped, std::size_t offset, std::uint8_t* ram,
     FieldX86Emu::syncToDie(mapped);
     auto* d = static_cast<FieldX86Emu::DieView*>(mapped);
     d->EFLAGS &= ~EFLAGS_HALTED;
-    keenTitleBlitSeeded = FieldRtxLe::forceTitleBlit(ram);
+    keenTitleBlitSeeded = FieldRtxLe::titleForcePaint(ram);
     if (keenTitleBlitSeeded) {
         FieldVga::mode = FieldVga::MODE_EGA_0D;
         FieldX86Emu::syncVideoMode(mapped);

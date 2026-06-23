@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
 
     const bool ipProgress = FieldRtxPm::keenLaunchProgress(FieldX86Emu::emu,
         static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast,
-        titlePainted, bestNz);
+        titlePainted, bestNz, bestMode, ram);
     std::printf("METRIC rtxpm_title_paint=%d\n", titlePainted ? 1 : 0);
     std::printf("METRIC rtxpm_ip_progress=%d\n", ipProgress ? 1 : 0);
     std::printf("METRIC rtxpm_mode=%u\n", static_cast<unsigned>(bestMode));

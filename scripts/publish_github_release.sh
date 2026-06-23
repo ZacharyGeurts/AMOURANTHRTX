@@ -25,15 +25,16 @@ cat > "$NOTES_TMP" <<EOF
 # AMOURANTHRTX ${VERSION}
 
 ## Highlights
-- Professional JetBrains Mono SDF font — crisp raised strokes, dual-polarity fringe
-- 4K default viewport (3840×2160) with live taskbar clock + click fixes
-- OCR click calibration toolkit (\`scripts/ocr_click_toolkit.py\`)
-- Interactive test browser: \`./seetests.sh\`
+- Keen LZEXE EGA path — GpuLaunch titleForcePaint + ip_progress probe (KEEN4E.EXE)
+- 4K default viewport (3840×2160) — live taskbar clock, 40px tab hits, OCR alignment
+- FieldStorage wave resonance persist — powered-off hold + infinite 12 GiB SDF density
+- CHIPS expansion (PS1/N64/DC/PS2/Xbox360/Amiga) — full real, MAME superiority benches
+- JetBrains Mono SDF font + interactive test browser (\`./seetests.sh\`)
 
 ## QA
-- \`./linux.sh release-2.0\` — GREEN ALL
+- \`./linux.sh release-2.0\` — GREEN ALL (includes qa_keen_host_test)
+- \`./build/qa_keen_host_test\` — keen_title_paint=1 keen_ip_progress=1
 - \`./seetests.sh aos\` — AOS + OCR visual suite
-- \`python3 scripts/qa_ocr_click_test.py\` — 4K OCR click alignment
 
 ## Run
 \`\`\`bash
