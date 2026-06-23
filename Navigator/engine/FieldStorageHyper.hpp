@@ -10,6 +10,9 @@ struct HyperState {
     double leadOutPeak = 0.0;
     double entropyFold = 0.0;
     double fabricScale = 1.0;
+    double phaseVelocityIn = 1.15;
+    double phaseVelocityOut = 0.87;
+    double resonanceCoupling = 0.22;
 };
 
 extern HyperState hyper;

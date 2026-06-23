@@ -12,7 +12,7 @@ HD_SIZE_GB = 4
 HD_BUILD_MB = 512
 HD_SIZE_MB = HD_BUILD_MB  # mk_ammo_hd physical allocation
 FLOPPY_BYTES = 737280
-MANIFEST_VERSION = 13
+MANIFEST_VERSION = 15
 
 # Legacy aliases (install scripts)
 FLOPPY_PATH = FLOPPY_IMAGE

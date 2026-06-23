@@ -1,5 +1,6 @@
 #include "FieldDos.hpp"
 #include "FieldStorage.hpp"
+#include "FieldStorageHyper.hpp"
 #include "FieldPlatform.hpp"
 
 #include <cstdio>
@@ -73,6 +74,9 @@ int main() {
     std::printf("METRIC hyper_lead_out=%.4f\n", FieldStorage::hyperLeadOutPeak());
     std::printf("METRIC hyper_entropy_fold=%.4f\n", FieldStorage::hyperEntropyFold());
     std::printf("METRIC hyper_fabric_scale=%.4f\n", FieldStorage::chipsFabricScale());
+    std::printf("METRIC hyper_phase_in=%.4f\n", FieldStorage::hyper.phaseVelocityIn);
+    std::printf("METRIC hyper_phase_out=%.4f\n", FieldStorage::hyper.phaseVelocityOut);
+    std::printf("METRIC hyper_resonance=%.4f\n", FieldStorage::hyper.resonanceCoupling);
     std::printf("METRIC end_game_mode=%d\n", FieldStorage::endGameMode() ? 1 : 0);
     if (!FieldStorage::hyperEnabled() || FieldStorage::chipsFabricScale() < 1.0) {
         std::fprintf(stderr, "FAIL hyper breakthroughs not active\n");

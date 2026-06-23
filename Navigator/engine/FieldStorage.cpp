@@ -45,7 +45,12 @@ void enableAllBreakthroughs(bool on) noexcept {
     hyper.leadInPeak = FieldFabric::gPeaks.leadInPeak.w;
     hyper.leadOutPeak = FieldFabric::gPeaks.leadOutPeak.w;
     hyper.entropyFold = FieldFabric::gEntropyFold;
-    hyper.fabricScale = 1.0 + hyper.leadInPeak * 0.35 + hyper.entropyFold * 0.12;
+    hyper.phaseVelocityIn = 1.15 + hyper.leadInPeak * 0.08;
+    hyper.phaseVelocityOut = 0.87 + hyper.leadOutPeak * 0.06;
+    hyper.resonanceCoupling = 0.22 + hyper.entropyFold * 0.05;
+    hyper.fabricScale = 1.0 + hyper.leadInPeak * hyper.phaseVelocityIn * 0.31
+        + hyper.leadOutPeak * hyper.phaseVelocityOut * 0.18
+        + hyper.entropyFold * 0.12 + hyper.resonanceCoupling * 0.08;
     bo.phi = std::min(10.0, bo.phi + hyper.leadInPeak * 0.5);
     bo.harmonic = std::min(10.0, bo.harmonic + hyper.leadOutPeak * 0.3);
     bo.entropyFold += static_cast<std::uint64_t>(hyper.entropyFold * 512.0);
@@ -74,7 +79,12 @@ void hyperTick(std::uint32_t blockIndex) noexcept {
     hyper.leadInPeak = FieldFabric::gPeaks.leadInPeak.w;
     hyper.leadOutPeak = FieldFabric::gPeaks.leadOutPeak.w;
     hyper.entropyFold = FieldFabric::gEntropyFold;
-    hyper.fabricScale = 1.0 + hyper.leadInPeak * 0.35 + hyper.entropyFold * 0.12;
+    hyper.phaseVelocityIn = 1.15 + hyper.leadInPeak * 0.08;
+    hyper.phaseVelocityOut = 0.87 + hyper.leadOutPeak * 0.06;
+    hyper.resonanceCoupling = 0.22 + hyper.entropyFold * 0.05;
+    hyper.fabricScale = 1.0 + hyper.leadInPeak * hyper.phaseVelocityIn * 0.31
+        + hyper.leadOutPeak * hyper.phaseVelocityOut * 0.18
+        + hyper.entropyFold * 0.12 + hyper.resonanceCoupling * 0.08;
     bo.entropyFold += static_cast<std::uint64_t>(FieldFabric::gEntropyFold * 4.0);
 }
 

@@ -203,6 +203,12 @@ static const SourceEntry kCatalog[] = {
     { "AmmoSNES",
       "Super Nintendo — File>Open .sfc/.smc, Options>SuperFX",
       40, 11, Category::Games, RowType::Item },
+    { "Amiga Love",
+      "Commodore Amiga 68000 — Love of EVERYTHING canvas (Paula + Denise AGA)",
+      42, 11, Category::Games, RowType::Item },
+    { "CHIPS Wave",
+      "PS1 + Xbox360 + Amiga GPU die — one canvas, infinite field storage",
+      43, 14, Category::Games, RowType::Item },
 };
 
 inline void copyEntry(VisibleRow& row, const SourceEntry& e) noexcept {

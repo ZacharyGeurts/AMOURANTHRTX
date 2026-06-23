@@ -107,20 +107,22 @@ int main(int argc, char** argv) {
         if (nz > 2000) break;
     }
 
+    bool titlePainted = false;
     if (bestNz < 500 && FieldX86Emu::emu
             && FieldRtxLe::keenTitleStalled(FieldX86Emu::emu, bestMode, bestNz)) {
         std::fprintf(stderr, "Keen title probe stalled — titleForcePaint fallback\n");
         if (FieldRtxLe::titleForcePaint(ram)) {
+            titlePainted = true;
             bestMode = ram[0x449u];
             bestNz = countFbNz(ram, 0, 200);
             bestRound = 99;
         }
     }
 
-    bool ipProgress = FieldRtxPm::ipProgressProbe(FieldX86Emu::emu,
-        static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast);
-    if (!ipProgress && bestNz >= 500)
-        ipProgress = true; // titleForcePaint / EGA fallback counts as GPU-CPU progress
+    const bool ipProgress = FieldRtxPm::keenLaunchProgress(FieldX86Emu::emu,
+        static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast,
+        titlePainted, bestNz);
+    std::printf("METRIC keen_title_paint=%d\n", titlePainted ? 1 : 0);
     std::printf("METRIC keen_ip_progress=%d\n", ipProgress ? 1 : 0);
     std::printf("METRIC keen_mode=%u\n", static_cast<unsigned>(bestMode));
     std::printf("METRIC keen_fb_nz=%d\n", bestNz);

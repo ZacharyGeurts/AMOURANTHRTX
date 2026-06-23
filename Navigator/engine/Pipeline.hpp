@@ -2400,21 +2400,11 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
                         FieldSnes::Audio::pump();
                 }
                 bootstrapEndGameOnce(gr);
-                if (FieldPs1::active
-                        && (std::getenv("AMOURANTHRTX_CHIPS_PS1")
-                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")
-                            || std::getenv("AMOURANTHRTX_FIELD_EMULATOR")
-                            || std::getenv("AMOURANTHRTX_END_GAME")))
+                if (FieldPs1::active)
                     FieldPs1::tick(gr, keys);
-                if (FieldXbox360::active
-                        && (std::getenv("AMOURANTHRTX_XBOX360")
-                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")
-                            || std::getenv("AMOURANTHRTX_END_GAME")))
+                if (FieldXbox360::active)
                     FieldXbox360::tick(gr, keys);
-                if (FieldAmiga::active
-                        && (std::getenv("AMOURANTHRTX_AMIGA_LOVE")
-                            || std::getenv("AMOURANTHRTX_CHIPS_ALL")
-                            || std::getenv("AMOURANTHRTX_END_GAME")))
+                if (FieldAmiga::active)
                     FieldAmiga::tick(gr, keys);
                 if (FieldAosNesTest::enabled() && gr) {
                     if (const char* snap = std::getenv("AMOURANTHRTX_NES_FB_SNAP")) {

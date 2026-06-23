@@ -73,6 +73,7 @@ void closeAllGuestApps(std::uint8_t* ram) noexcept;
 
 #include "FieldAosMonitor.hpp"
 #include "FieldAmmoBrowser.hpp"
+#include "FieldAosChipsWave.hpp"
 
 namespace FieldAmouranthOs {
 
@@ -1472,6 +1473,16 @@ inline void dispatchAction(int action) noexcept {
     case 41:
         openNewWindow(AppId::Snes);
         FieldAmouranthLaunch::queueGui(FieldAmouranthLaunch::GuiApp::Snes, false, 2, true);
+        break;
+    case 42:
+        openNewWindow(AppId::Shell);
+        showDosPanelDocked();
+        FieldAosChipsWave::openAmigaLove();
+        break;
+    case 43:
+        openNewWindow(AppId::Shell);
+        showDosPanelDocked();
+        FieldAosChipsWave::openLoveOfEverything();
         break;
     case 99:
         FieldAmouranthExitConfirm::show();

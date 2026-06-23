@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CHIPS/Amiga/FieldAmiga.hpp"
-#include "FieldAmouranthOs.hpp"
 #include "FieldVga.hpp"
 
 namespace FieldAmiga {
@@ -31,8 +30,6 @@ inline void runFrame(std::uint8_t* guestRam) noexcept {
             guestRam[FieldVga::VGA_FB + static_cast<std::size_t>(y * 320 + x)] =
                 static_cast<std::uint8_t>((px >> 8) & 0xFFu);
         }
-    if (loveMode && FieldAmouranthOs::infoPanelVisible)
-        FieldAmouranthOs::infoPanelVisible = false;
 }
 
 inline void tick(std::uint8_t* ram, const bool*) noexcept { runFrame(ram); }
