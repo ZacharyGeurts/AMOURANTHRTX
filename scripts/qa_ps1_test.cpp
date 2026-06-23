@@ -1,4 +1,4 @@
-// QA: CHIPS PS1 core — PS-X EXE detect, FieldDie GPU wave, GTE, N64/DC/PS2 tier stubs.
+// QA: CHIPS PS1 core — PS-X EXE detect, FieldDie GPU wave, GTE + N64/DC/PS2 full wave.
 #include "CHIPS/PS1/FieldPS1.hpp"
 #include "CHIPS/N64/FieldN64.hpp"
 #include "CHIPS/Dreamcast/FieldDreamcast.hpp"
@@ -65,17 +65,28 @@ int main() {
         return 1;
     }
 
+    std::vector<std::uint8_t> blob(8192, 0xA5u);
     auto n64 = std::make_unique<FieldChips::N64::State>();
     auto dc = std::make_unique<FieldChips::Dreamcast::State>();
     auto ps2 = std::make_unique<FieldChips::Ps2::State>();
-    if (!FieldChips::N64::loadStub(*n64) || !FieldChips::Dreamcast::loadStub(*dc)
-            || !FieldChips::Ps2::loadStub(*ps2)) {
-        std::fprintf(stderr, "FAIL next-console tier stubs\n");
+    if (!FieldChips::N64::loadCart(*n64, blob.data(), blob.size())
+            || !FieldChips::Dreamcast::loadCart(*dc, blob.data(), blob.size())
+            || !FieldChips::Ps2::loadCart(*ps2, blob.data(), blob.size())) {
+        std::fprintf(stderr, "FAIL N64/DC/PS2 loadCart\n");
         return 1;
     }
-    std::printf("METRIC chips_n64_tier=%d\n", n64->tier);
-    std::printf("METRIC chips_dc_tier=%d\n", dc->tier);
-    std::printf("METRIC chips_ps2_tier=%d\n", ps2->tier);
-    std::printf("OK qa_ps1_test CHIPS PS1 + tier scaffolds\n");
+    for (int f = 0; f < 24; ++f) {
+        FieldChips::N64::runFrame(*n64);
+        FieldChips::Dreamcast::runFrame(*dc);
+        FieldChips::Ps2::runFrame(*ps2);
+    }
+    std::printf("METRIC chips_n64_wave=%d\n", n64->rsp.waveActive ? 1 : 0);
+    std::printf("METRIC chips_dc_wave=%d\n", dc->pvr.waveActive ? 1 : 0);
+    std::printf("METRIC chips_ps2_wave=%d\n", ps2->gs.waveActive ? 1 : 0);
+    if (!n64->rsp.waveActive || !dc->pvr.waveActive || !ps2->gs.waveActive) {
+        std::fprintf(stderr, "FAIL CHIPS wave inactive\n");
+        return 1;
+    }
+    std::printf("OK qa_ps1_test CHIPS PS1 + N64 + DC + PS2 FieldDie waves\n");
     return 0;
 }

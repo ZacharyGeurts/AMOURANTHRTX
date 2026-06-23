@@ -10,9 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 MONOLITHS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Navigator/engine/FieldStorage.hpp", (
         "enableEndGameMode", "enableAllBreakthroughs", "sdfFoldBlock", "dualHostReady",
+        "persistFieldState", "restoreFieldState",
     )),
     ("Navigator/engine/FieldStorage.cpp", (
-        "phiSuperposition", "mountMultiFS", "hyperTick",
+        "phiSuperposition", "mountMultiFS", "hyperTick", "persistFieldState", "restoreFieldState",
+    )),
+    ("Navigator/engine/FieldEverything.hpp", (
+        "Everything Everywhere", "seedChips", "persistFieldState", "no load",
     )),
     ("Navigator/engine/FieldFabric.hpp", (
         "dispatchExtended", "entropyFabricPredict", "processLeadIn", "gEntropyFold",
@@ -24,7 +28,7 @@ MONOLITHS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dos/FieldRtxLe.hpp", ("titleForcePaint", "keenTitleStalled")),
     ("AmmoOS/core/FieldAosChipsWave.hpp", ("openAmigaLove", "openLoveOfEverything")),
     ("Navigator/engine/CHIPS/Common/FieldChipFabricScale.hpp", ("scaledDieCycles",)),
-    ("linux.sh", ("--end-game", "end-game", "AMOURANTHRTX_END_GAME")),
+    ("linux.sh", ("--end-game", "end-game", "AMOURANTHRTX_END_GAME", "everything-everywhere", "AMOURANTHRTX_FIELD_PERSIST")),
     ("scripts/end_game_audit.py", ("zero_cost_audit", "end_game_mode")),
     ("scripts/zero_cost_audit.py", ("keen_ip_progress", "hyper_breakthroughs")),
 )

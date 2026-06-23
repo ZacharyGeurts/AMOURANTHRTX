@@ -14,9 +14,9 @@
 //   GameBoy/    — Nintendo Game Boy scaffold
 //   Snes/       — Super Nintendo scaffold
 //   PS1/        — Sony PlayStation (MIPS R3000, GTE, FieldDie GPU wave)
-//   N64/        — Nintendo 64 scaffold
-//   Dreamcast/  — Sega Dreamcast scaffold
-//   PS2/        — PlayStation 2 scaffold
+//   N64/        — Nintendo 64 (VR4300, RSP/RDP FieldDie wave)
+//   Dreamcast/  — Sega Dreamcast (SH-4, PowerVR2 FieldDie wave)
+//   PS2/        — PlayStation 2 (EE/IOP, GS FieldDie wave)
 //   Xbox360/    — Microsoft Xbox 360 (Xenon + Xenos FieldDie wave)
 //   Amiga/      — Commodore Amiga 68000 + Paula + Denise/AGA
 

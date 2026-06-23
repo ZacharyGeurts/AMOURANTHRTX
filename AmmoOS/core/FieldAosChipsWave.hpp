@@ -3,9 +3,7 @@
 // AmouranthOS — CHIPS wave + Amiga Love launchers (avoids circular include with FieldAmouranthOs).
 
 #include "FieldAmmoAmiga.hpp"
-#include "FieldAmmoPs1.hpp"
-#include "FieldAmmoXbox360.hpp"
-#include "FieldStorage.hpp"
+#include "FieldEverything.hpp"
 
 #include <cstdint>
 #include <vector>
@@ -18,16 +16,12 @@ inline void seedAmigaKick() noexcept {
 }
 
 inline void openAmigaLove() noexcept {
-    seedAmigaKick();
     FieldAmiga::open(true);
+    seedAmigaKick();
 }
 
 inline void openLoveOfEverything() noexcept {
-    FieldStorage::enableEndGameMode(true);
-    seedAmigaKick();
-    FieldAmiga::open(true);
-    FieldPs1::open();
-    FieldXbox360::open();
+    FieldEverything::open();
 }
 
 } // namespace FieldAosChipsWave

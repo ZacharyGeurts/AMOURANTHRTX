@@ -40,6 +40,8 @@ def main() -> int:
     os.environ["AMOURANTHRTX_END_GAME"] = "1"
     os.environ.setdefault("AMOURANTHRTX_INFINITE", "1")
     os.environ.setdefault("AMOURANTHRTX_ALL_BREAKTHROUGHS", "1")
+    os.environ.setdefault("AMOURANTHRTX_EVERYTHING_EVERYWHERE", "1")
+    os.environ.setdefault("AMOURANTHRTX_FIELD_PERSIST", "1")
 
     if ensure_build() != 0:
         print("FAIL end_game build", file=sys.stderr)

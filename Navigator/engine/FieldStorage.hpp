@@ -59,6 +59,7 @@ inline SdfWave sdf{};
 inline bool teamDriveLive = false;
 inline bool infiniteMode = false;
 inline bool endGameActive = false;
+inline bool persistLoaded = false;
 inline std::string teamDriveDev = "/dev/nvme2n1";
 
 void enableInfiniteMode(bool on = true) noexcept;
@@ -96,5 +97,9 @@ bool ammoVfsBridgeRead(const char* dosPath, std::vector<std::uint8_t>& out) noex
 bool ammoVfsBridgeWrite(const char* dosPath, const std::uint8_t* data, std::size_t size) noexcept;
 bool vfsBridgeRead(const char* vfsPath, std::vector<std::uint8_t>& out) noexcept;
 bool vfsBridgeWrite(const char* vfsPath, const std::uint8_t* data, std::size_t size) noexcept;
+
+bool persistFieldState() noexcept;
+bool restoreFieldState() noexcept;
+bool fieldStatePersisted() noexcept;
 
 } // namespace FieldStorage

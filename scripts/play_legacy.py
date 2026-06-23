@@ -8,7 +8,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build"
-TARGETS = ("qa_amiga_test", "qa_xbox360_test", "qa_ps1_test")
+TARGETS = (
+    "qa_amiga_test",
+    "qa_xbox360_test",
+    "qa_ps1_test",
+    "qa_n64_test",
+    "qa_dreamcast_test",
+    "qa_ps2_test",
+    "qa_everything_test",
+)
 
 
 def main() -> int:

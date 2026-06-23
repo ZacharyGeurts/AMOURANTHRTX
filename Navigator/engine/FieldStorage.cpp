@@ -171,6 +171,11 @@ bool mountMultiFS(const char* projectRoot) noexcept {
     sdf.logicalBytes = sdfLogicalCapacity();
     const std::size_t liveCount = std::count_if(mounts.begin(), mounts.end(),
         [](const MountPoint& m) { return m.live; });
+    if (std::getenv("AMOURANTHRTX_FIELD_PERSIST")
+            || std::getenv("AMOURANTHRTX_EVERYTHING_EVERYWHERE")
+            || std::getenv("AMOURANTHRTX_END_GAME"))
+        restoreFieldState();
+
     std::fprintf(stderr, "[FieldStorage] mountMultiFS %zu mounts %zu live (resident cap %u MiB)\n",
         mounts.size(), liveCount, kResidentCapMiB);
     return liveCount >= 2u;
@@ -202,7 +207,89 @@ bool mountTeamDrive(const char* devPath, bool allowInit) noexcept {
     return teamDriveLive;
 }
 
+namespace {
+
+constexpr std::uint32_t kPersistMagic = 0x504C4446u; // 'FLDP'
+constexpr std::uint32_t kPersistVersion = 1u;
+
+struct PersistBlob {
+    std::uint32_t magic = kPersistMagic;
+    std::uint32_t version = kPersistVersion;
+    double sdfPhase = 0.0;
+    double sdfAmplitude = 1.0;
+    std::uint64_t sdfLogicalBase = 0u;
+    std::uint64_t foldedBlocks = 0u;
+    double boPhi = 1.0;
+    double boHarmonic = 1.0;
+    std::uint64_t boEntropyFold = 0u;
+    double hyperLeadIn = 0.0;
+    double hyperLeadOut = 0.0;
+    double hyperEntropy = 0.0;
+    double hyperScale = 1.0;
+    double resonanceCoupling = 0.22;
+};
+
+std::filesystem::path persistPath() { return storageRoot() / "field_wave.persist"; }
+
+} // namespace
+
+bool persistFieldState() noexcept {
+    std::error_code ec;
+    std::filesystem::create_directories(storageRoot(), ec);
+    PersistBlob b{};
+    b.sdfPhase = sdf.phase;
+    b.sdfAmplitude = sdf.amplitude;
+    b.sdfLogicalBase = sdf.logicalBase;
+    b.foldedBlocks = sdf.foldedBlocks;
+    b.boPhi = bo.phi;
+    b.boHarmonic = bo.harmonic;
+    b.boEntropyFold = bo.entropyFold;
+    b.hyperLeadIn = hyper.leadInPeak;
+    b.hyperLeadOut = hyper.leadOutPeak;
+    b.hyperEntropy = hyper.entropyFold;
+    b.hyperScale = hyper.fabricScale;
+    b.resonanceCoupling = hyper.resonanceCoupling;
+    std::ofstream out(persistPath(), std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    out.write(reinterpret_cast<const char*>(&b), sizeof b);
+    std::fprintf(stderr, "[FieldStorage] persist resonance hold phase=%.4f folded=%llu\n",
+        b.sdfPhase, static_cast<unsigned long long>(b.foldedBlocks));
+    return static_cast<bool>(out);
+}
+
+bool restoreFieldState() noexcept {
+    std::ifstream in(persistPath(), std::ios::binary);
+    if (!in) return false;
+    PersistBlob b{};
+    in.read(reinterpret_cast<char*>(&b), sizeof b);
+    if (!in || b.magic != kPersistMagic || b.version != kPersistVersion) return false;
+    sdf.phase = b.sdfPhase;
+    sdf.amplitude = b.sdfAmplitude;
+    sdf.logicalBase = b.sdfLogicalBase ? b.sdfLogicalBase : sdf.logicalBase;
+    sdf.foldedBlocks = b.foldedBlocks;
+    bo.phi = b.boPhi;
+    bo.harmonic = b.boHarmonic;
+    bo.entropyFold = b.boEntropyFold;
+    hyper.leadInPeak = b.hyperLeadIn;
+    hyper.leadOutPeak = b.hyperLeadOut;
+    hyper.entropyFold = b.hyperEntropy;
+    hyper.fabricScale = b.hyperScale;
+    hyper.resonanceCoupling = b.resonanceCoupling;
+    hyper.enabled = true;
+    sdf.logicalBytes = sdfLogicalCapacity();
+    persistLoaded = true;
+    std::fprintf(stderr, "[FieldStorage] restore resonance hold phase=%.4f logical=%.2f GiB\n",
+        sdf.phase, static_cast<double>(sdf.logicalBytes) / (1024.0 * 1024.0 * 1024.0));
+    return true;
+}
+
+bool fieldStatePersisted() noexcept { return persistLoaded; }
+
 void dismissAll() noexcept {
+    if (hyper.enabled || infiniteMode || endGameActive
+            || std::getenv("AMOURANTHRTX_FIELD_PERSIST")
+            || std::getenv("AMOURANTHRTX_EVERYTHING_EVERYWHERE"))
+        persistFieldState();
     mounts.clear();
     teamDriveLive = false;
     linuxCtx = {};

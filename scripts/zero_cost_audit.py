@@ -55,6 +55,11 @@ def main() -> int:
         return 0
 
     end_env = {"AMOURANTHRTX_END_GAME": "1"} if args.end_game else None
+    everything_env = {
+        **(end_env or {}),
+        "AMOURANTHRTX_EVERYTHING_EVERYWHERE": "1",
+        "AMOURANTHRTX_FIELD_PERSIST": "1",
+    }
 
     if args.end_game:
         suites: tuple[tuple[str, int, tuple[tuple[str, object], ...]], ...] = (
@@ -68,6 +73,13 @@ def main() -> int:
             ("qa_ps1_test", 30, (("ps1_gpu_wave", lambda v: v == "1"),)),
             ("qa_xbox360_test", 30, (("xbox360_gpu_wave", lambda v: v == "1"),)),
             ("qa_amiga_test", 30, (("amiga_love_score", lambda v: int(v) >= 10),)),
+            ("qa_n64_test", 30, (("n64_gpu_wave", lambda v: v == "1"),)),
+            ("qa_dreamcast_test", 30, (("dreamcast_gpu_wave", lambda v: v == "1"),)),
+            ("qa_ps2_test", 30, (("ps2_gpu_wave", lambda v: v == "1"),)),
+            ("qa_everything_test", 60, (
+                ("everything_active", lambda v: v == "1"),
+                ("field_persist_restored", lambda v: v == "1"),
+            )),
             ("qa_keen_host_test", 120, (
                 ("keen_ip_progress", lambda v: v == "1"),
                 ("keen_fb_nz", lambda v: int(v) >= 500),
@@ -86,7 +98,8 @@ def main() -> int:
         )
 
     for bin_name, timeout, metric_checks in suites:
-        rc, metrics = run_qa(bin_name, timeout=timeout, env=end_env)
+        env = everything_env if bin_name == "qa_everything_test" else end_env
+        rc, metrics = run_qa(bin_name, timeout=timeout, env=env)
         if rc != 0:
             print(f"FAIL {bin_name} exit={rc}", file=sys.stderr)
             return 1

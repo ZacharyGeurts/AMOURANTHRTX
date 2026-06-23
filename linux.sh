@@ -192,6 +192,8 @@ XBOX360=false
 ALL_BREAKTHROUGHS=false
 FIELD_EMULATOR=false
 END_GAME=false
+EVERYTHING_EVERYWHERE=false
+FIELD_PERSIST=false
 
 for arg in "$@"; do
     case "${arg,,}" in
@@ -213,6 +215,8 @@ for arg in "$@"; do
         xbox360|--xbox360) XBOX360=true; CHIPS_EXPANSION=true ;;
         field-emulator|--field-emulator) FIELD_EMULATOR=true ;;
         end-game|--end-game) END_GAME=true ;;
+        everything-everywhere|--everything-everywhere) END_GAME=true; EVERYTHING_EVERYWHERE=true; FIELD_PERSIST=true ;;
+        field-persist|--field-persist) FIELD_PERSIST=true ;;
         windows|release|web) ;; # already handled
         --help|-h|/h|/help|-help|help|"") show_help ;;
         *)          echo -e "${CORAL}UNKNOWN CURRENT: $arg${X}"; show_help ;;
@@ -275,6 +279,13 @@ if $END_GAME; then
     export AMOURANTHRTX_CHIPS_FABRIC=1
     export AMOURANTHRTX_FIELD_EMULATOR=1
     export TEAM_DRIVE_DEV="${TEAM_DRIVE_DEV:-/dev/nvme2n1}"
+fi
+if $EVERYTHING_EVERYWHERE; then
+    export AMOURANTHRTX_EVERYTHING_EVERYWHERE=1
+    export AMOURANTHRTX_FIELD_PERSIST=1
+fi
+if $FIELD_PERSIST; then
+    export AMOURANTHRTX_FIELD_PERSIST=1
 fi
 
 # ── CROSS-COMPILE / EMSCRIPTEN TOOLCHAIN CHECK ──────────────────────────────
