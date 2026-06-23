@@ -195,8 +195,8 @@ namespace Options::SDL3
         "assets/audio/splash.wav"
     };
 
-    inline int     DefaultWidth                 = 1920;
-    inline int     DefaultHeight                = 1080;
+    inline int     DefaultWidth                 = 3840;
+    inline int     DefaultHeight                = 2160;
     inline bool    StartFullscreen              = false;
     inline bool    PendingFullscreenApply       = false;
     inline bool    PendingFullscreenAfterLoad   = false;

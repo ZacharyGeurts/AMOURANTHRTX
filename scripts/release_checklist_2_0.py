@@ -50,7 +50,14 @@ def main() -> int:
         ("team_drive_test.py", ()),
         ("bench_storage.py", ()),
     )
-    bin_steps = ("qa_field_persist_test", "qa_rtx_density_test", "qa_love_demo_test")
+    bin_steps = (
+        "qa_field_persist_test",
+        "qa_rtx_density_test",
+        "qa_love_demo_test",
+        "qa_aos_gui_test",
+        "qa_taskbar_click_test",
+        "qa_amouranthos_test",
+    )
 
     for script, args in py_steps:
         if run_py(script, *args) != 0:

@@ -15,12 +15,12 @@ constexpr float TASKBAR_H_PX   = 56.f;
 constexpr float START_W_PX     = 156.f;
 constexpr float QUICK_BTN_W_PX = 44.f;
 constexpr float TAB_W_PX       = 40.f;
-constexpr float CLOCK_W_PX     = 168.f;
+constexpr float CLOCK_W_PX     = 200.f;
 constexpr int   QUICK_LAUNCH_N = 4;
 
 struct Layout {
-    float vpW = 1920.f;
-    float vpH = 1080.f;
+    float vpW = 3840.f;
+    float vpH = 2160.f;
     float scale = 1.f;
     float taskH = 56.f;
     float pad = 6.f;

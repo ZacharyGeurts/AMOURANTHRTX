@@ -49,7 +49,7 @@ AosTbLayout aosTbLayout(vec2 vp) {
     L.tabGap = 4.0 * L.scale;
     L.tabY = L.barY0 + 5.0 * L.scale;
     L.tabH = L.taskH - 10.0 * L.scale;
-    L.clockW = 168.0 * L.scale;
+    L.clockW = AOS_CLOCK_W * L.scale;
     L.clockX1 = vp.x - L.pad;
     L.clockX0 = L.clockX1 - L.clockW;
     return L;

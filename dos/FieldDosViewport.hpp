@@ -50,8 +50,8 @@ inline std::uint32_t popcountLayers(std::uint32_t mask) noexcept {
 inline bool panelFullscreen = false;
 inline bool panelStretch    = false;  /* false = postage stamp; true = fullscreen zoom */
 inline bool focused         = true;
-inline float winW           = 1280.f;
-inline float winH           = 720.f;
+inline float winW           = 3840.f;
+inline float winH           = 2160.f;
 inline float windowAspect   = 16.f / 9.f;
 inline float displayScale   = 1.f;
 inline std::uint8_t guestMode = 3u;
@@ -62,8 +62,8 @@ inline float panelOx        = 0.f;
 inline float panelOy        = 0.f;
 inline bool panelPositioned = false;
 
-inline float renderW        = 1280.f;
-inline float renderH        = 720.f;
+inline float renderW        = 3840.f;
+inline float renderH        = 2160.f;
 inline float fontScale      = 1.25f;
 inline bool crispFont       = true;
 inline bool scanlines       = false;

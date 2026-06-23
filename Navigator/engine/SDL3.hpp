@@ -371,7 +371,7 @@ inline void SDL3System::onResize() noexcept {
     int pixelW = 0, pixelH = 0;
     SDL_GetWindowSizeInPixels(window_, &pixelW, &pixelH);
     if (pixelW <= 0 || pixelH <= 0) return;
-    int dispW = 1920, dispH = 1080;
+    int dispW = 3840, dispH = 2160;
     const SDL_DisplayID did = SDL_GetDisplayForWindow(window_);
     SDL_Rect bounds{};
     if (did && SDL_GetDisplayBounds(did, &bounds) == 0) {

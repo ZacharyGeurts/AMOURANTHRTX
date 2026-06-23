@@ -2261,8 +2261,7 @@ inline void dispatch_canvas(VkCommandBuffer cmd, int width, int height, float to
             Options::Canvas::ControlFlags &= ~Options::Canvas::ControlDosPanelStretch;
 
         const bool aosChrome = FieldAmouranthOs::shellChromeActive();
-        const bool aosMouse = aosChrome
-            && (FieldAmouranthOs::panelVisible || FieldAmouranthOs::active);
+        const bool aosMouse = aosChrome && Options::AmouranthOs::EnableTaskbar;
         const bool dosFocus = FieldDosViewport::focused;
         const bool pollMouse = dosFocus || aosMouse;
         const bool pollKeys = dosFocus

@@ -80,8 +80,9 @@ namespace FieldAmouranthOs {
 constexpr float TASKBAR_H   = 56.f;
 constexpr float START_W     = 156.f;
 constexpr float FOLDER_BTN_W = 44.f;
-constexpr float TAB_W       = 148.f;
-constexpr float CLOCK_W     = 200.f;
+constexpr float TAB_W       = FieldTaskbarLayout::TAB_W_PX;
+constexpr float CLOCK_W     = FieldTaskbarLayout::CLOCK_W_PX;
+constexpr float AOS_UI_REF_W  = 3840.f;
 constexpr float MENU_ROW_H  = 50.f;
 constexpr float MENU_HEADER_H = 28.f;
 constexpr float MENU_PAD    = 6.f;
@@ -169,7 +170,7 @@ inline bool pendingEmptyPanel = false;
 inline int  nextProgId = 1;
 inline AppId focusedApp = AppId::None;
 inline int  focusedProgId = 0;
-inline int  winW = 1920, winH = 1080;
+inline int  winW = 3840, winH = 2160;
 inline HitZone hover = HitZone::None;
 inline int taskHoverTab = -1;
 inline bool filesBtnHover = false;
@@ -950,18 +951,18 @@ inline bool pointIn(float px, float py, float x, float y, float fw, float fh) no
     return px >= x && py >= y && px < x + fw && py < y + fh;
 }
 
-// Match aosUiScale() in x86.comp — max(w/1920, 0.75) * 1.35.
+// Match aosUiScale() in shaders — max(w/3840, 0.75) * 1.35.
 inline float chromeLayoutW() noexcept {
     if (FieldDosChrome::chromeUsesRenderSpace()) return FieldDosViewport::renderW;
     if (FieldDosViewport::winW > 0.f) return FieldDosViewport::winW;
-    return static_cast<float>(winW > 0 ? winW : 1920);
+    return static_cast<float>(winW > 0 ? winW : static_cast<int>(AOS_UI_REF_W));
 }
 
 inline float chromeLayoutH() noexcept {
     if (FieldDosChrome::chromeUsesRenderSpace()) return FieldDosViewport::renderH;
     if (winH > 0) return static_cast<float>(winH);
     if (FieldDosViewport::winH > 0.f) return FieldDosViewport::winH;
-    return 1080.f;
+    return 2160.f;
 }
 
 // Match shader aosViewport() when chrome is live-synced; else AmouranthOS win metrics.
@@ -970,7 +971,7 @@ inline float chromeViewportW() noexcept {
         return FieldDosViewport::renderW;
     if (winW > 0) return static_cast<float>(winW);
     if (FieldDosViewport::winW > 1.f) return FieldDosViewport::winW;
-    return 1920.f;
+    return AOS_UI_REF_W;
 }
 
 inline float chromeViewportH() noexcept {
@@ -978,11 +979,11 @@ inline float chromeViewportH() noexcept {
         return FieldDosViewport::renderH;
     if (winH > 0) return static_cast<float>(winH);
     if (FieldDosViewport::winH > 1.f) return FieldDosViewport::winH;
-    return 1080.f;
+    return 2160.f;
 }
 
 inline float uiScale() noexcept {
-    const float base = chromeViewportW() / 1920.f;
+    const float base = chromeViewportW() / AOS_UI_REF_W;
     return std::max(base, 0.75f) * UI_BOOST;
 }
 
@@ -1156,7 +1157,7 @@ inline float scaledFilesPanelTop() noexcept {
     return btnY0 - scaledFilesPanelH() - 6.f * uiScale();
 }
 
-constexpr float TASKBAR_HIT_SLOP = 6.f;
+constexpr float TASKBAR_HIT_SLOP = 8.f;
 
 // Start/quick-launch buttons extend above the taskbar strip (shader lift); test full bounds.
 inline HitZone hitTaskbarButtons(float mx, float my, float slop = 0.f) noexcept {

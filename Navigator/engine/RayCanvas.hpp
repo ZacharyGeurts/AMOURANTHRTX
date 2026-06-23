@@ -295,6 +295,13 @@ public:
                 if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                     syncChromeInputLayout();
                     ensureX86ChromeTextureBindings();
+                    if (window_ && FieldAmouranthOs::shellChromeActive()) {
+                        float pmx = 0.f, pmy = 0.f;
+                        FieldDosChrome::chromePointerPixels(window_, ev.button.x, ev.button.y,
+                            pmx, pmy);
+                        const Uint32 btnSt = SDL_GetMouseState(nullptr, nullptr);
+                        FieldDosChrome::storePointer(pmx, pmy, btnSt);
+                    }
                 }
                 if (ev.type == SDL_EVENT_MOUSE_MOTION) {
                     syncChromeInputLayout();
@@ -1170,7 +1177,7 @@ private:
         window_width_  = actualW;
         window_height_ = actualH;
         if (window_) {
-            int dispW = 1920, dispH = 1080;
+            int dispW = 3840, dispH = 2160;
             const SDL_DisplayID did = SDL_GetDisplayForWindow(window_);
             SDL_Rect bounds{};
             if (did && SDL_GetDisplayBounds(did, &bounds) == 0) {
@@ -1609,6 +1616,15 @@ void clearFieldImages() noexcept {
         updateRenderResolution();
         syncChromeViewport();
         FieldAmouranthOs::tick(render_width_, render_height_);
+        FieldAmouranthInfo::refreshClock();
+        if (Pipeline::fieldX86DieMapped) {
+            if (auto* gr = FieldDos::guestRam(
+                    static_cast<std::uint8_t*>(Pipeline::fieldX86DieMapped),
+                    Pipeline::FIELD_X86_DIE_HEADER_BYTES))
+                FieldAmouranthOs::packDataBus(Options::Canvas::DataBus, gr);
+        } else {
+            FieldAmouranthInfo::packDataBus(Options::Canvas::DataBus);
+        }
     }
 
     // Bind chrome textures when views appear or descriptor set is recreated — never write null views.

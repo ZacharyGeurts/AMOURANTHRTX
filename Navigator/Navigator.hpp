@@ -132,9 +132,9 @@ inline int navigator_main(int argc, char* argv[]) {
 
     if (Options::SDL3::HeadlessMode) {
         if (!std::getenv("AMOURANTHRTX_BENCH_W"))
-            Options::SDL3::DefaultWidth = 1920;
+            Options::SDL3::DefaultWidth = 3840;
         if (!std::getenv("AMOURANTHRTX_BENCH_H"))
-            Options::SDL3::DefaultHeight = 1080;
+            Options::SDL3::DefaultHeight = 2160;
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
         SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
         LOG_INFO_CAT("MAIN", "HEADLESS/DEBUG mode detected — forcing offscreen/dummy hints + hidden window + offscreen dispatch path (no swap waits). Accountant + fabric will still run N frames.");

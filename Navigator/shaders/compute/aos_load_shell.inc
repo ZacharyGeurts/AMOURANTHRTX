@@ -8,6 +8,7 @@ struct ThemePal {
 
 const float AOS_START_BTN_W = 156.0;
 const float AOS_QUICK_BTN_W = 44.0;
+const float AOS_CLOCK_W = 200.0;
 const int AOS_QUICK_LAUNCH_N = 4;
 const float AOS_MENU_W = 196.0;
 const float AOS_MENU_ROW_H = 50.0;
@@ -48,8 +49,10 @@ vec2 aosViewport(vec2 storageImg) {
     return storageImg;
 }
 
+const float AOS_UI_REF_W = 3840.0;
+
 float aosUiScale(vec2 img) {
-    return max(img.x / 1920.0, 0.75) * 1.35;
+    return max(img.x / AOS_UI_REF_W, 0.75) * 1.35;
 }
 
 #include "aos_taskbar_layout.inc"

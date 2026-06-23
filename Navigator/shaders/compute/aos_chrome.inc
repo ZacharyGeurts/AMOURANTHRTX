@@ -264,8 +264,10 @@ vec2 aosViewport(vec2 storageImg) {
     return storageImg;
 }
 
+const float AOS_UI_REF_W = 3840.0;
+
 float aosUiScale(vec2 img) {
-    return max(img.x / 1920.0, 0.75) * 1.35;
+    return max(img.x / AOS_UI_REF_W, 0.75) * 1.35;
 }
 
 #include "aos_taskbar_layout.inc"
@@ -759,7 +761,7 @@ vec3 aosLayerChrome(vec3 base, vec2 pix, vec2 vp, ThemePal th) {
     vec3 menu = menuOpen ? aosStartMenu(pix, vp, taskH, th) : vec3(-1.0);
     vec3 search = menuOpen ? aosSearchFlyout(pix, vp, taskH, th) : vec3(-1.0);
     vec3 files = filesOpen ? aosFilesMenu(pix, vp, taskH, th) : vec3(-1.0);
-    return aosChromeComposite(base,
+    vec3 color = aosChromeComposite(base,
         aosTaskbarStrip(pix, vp, th),
         aosQuickLaunchStrip(pix, vp, th),
         menu,
@@ -769,4 +771,7 @@ vec3 aosLayerChrome(vec3 base, vec2 pix, vec2 vp, ThemePal th) {
         vec3(-1.0),
         aosStartButtonPanel(pix, vp, th, menuOpen),
         aosExitConfirmModal(pix, vp, taskH, th));
+    vec3 clk = aosTaskbarClock(pix, vp, th);
+    if (clk.x >= 0.0) color = clk;
+    return color;
 }

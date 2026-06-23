@@ -16,8 +16,8 @@ inline int pixelH = 0;
 inline int logicalW = 0;
 inline int logicalH = 0;
 inline float displayScale = 1.f;
-inline int displayPixelW = 1920;
-inline int displayPixelH = 1080;
+inline int displayPixelW = 3840;
+inline int displayPixelH = 2160;
 
 inline void setWindowMetrics(int w, int h, float scale, int dispW, int dispH,
                              int logW = 0, int logH = 0) noexcept {
