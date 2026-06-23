@@ -52,7 +52,7 @@ def main() -> int:
         return 0
 
     checks = (
-        ("qa_fieldstorage_test", "vfs_bridge_ok", lambda v: v == "1", 60),
+        ("qa_fieldstorage_test", "hyper_breakthroughs", lambda v: v == "1", 60),
         ("qa_ps1_test", "ps1_gpu_wave", lambda v: v == "1", 30),
         ("qa_xbox360_test", "xbox360_gpu_wave", lambda v: v == "1", 30),
         ("qa_amiga_test", "amiga_love_score", lambda v: int(v) >= 10, 30),

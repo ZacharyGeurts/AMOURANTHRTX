@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FieldPs1Types.hpp"
+#include "../Common/FieldChipFabricScale.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -33,7 +34,7 @@ inline void gpuDieWaveStep(State& s, std::uint32_t busCycles) noexcept {
 inline void gpuQueueGp0(State& s, std::uint32_t cmd) noexcept {
     s.gpu.gp0 = cmd;
     if ((cmd & 0xFF000000u) == 0x02000000u)
-        gpuDieWaveStep(s, 8192u);
+        gpuDieWaveStep(s, FieldChips::scaledDieCycles(8192u));
 }
 
 inline int gpuCopyFb(const State& s, std::uint8_t* out, int maxBytes) noexcept {

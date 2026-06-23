@@ -105,6 +105,8 @@ show_help() {
                               → infinite SDF wave + CHIPS PS1 GPU die emulation
   ./linux.sh run --chips-all --amiga-love --xbox360
                               → Love of EVERYTHING: PS1+N64 tier+Xbox360+Amiga canvas
+  ./linux.sh run --all-breakthroughs --extended-field --infinite
+                              → hyper physics 1-4 + phi-thermo fabric + infinite SDF
   ./linux.sh win31            → Windows 3.1 MCSE+I setup checklist
   ./linux.sh win31 --stage    → stage incoming/win31 + rebuild C:
   ./linux.sh os               → full KILROY Field OS (engine + kernel + rootfs + boot ISO)
@@ -181,6 +183,7 @@ CHIPS_PS1=false
 CHIPS_ALL=false
 AMIGA_LOVE=false
 XBOX360=false
+ALL_BREAKTHROUGHS=false
 FIELD_EMULATOR=false
 
 for arg in "$@"; do
@@ -190,7 +193,8 @@ for arg in "$@"; do
         gdb)        ACTION="run"; LAUNCH_MODE="gdb" ;;
         clean)      clean_all ;;
         ninja|--ninja) GENERATOR="Ninja" ;;
-        extended-field|--extended-field) EXTENDED_FIELD=true ;;
+        extended-field|--extended-field) EXTENDED_FIELD=true; ALL_BREAKTHROUGHS=true ;;
+        all-breakthroughs|--all-breakthroughs) ALL_BREAKTHROUGHS=true; EXTENDED_FIELD=true ;;
         dual|--dual|dual-host|--dual-host) DUAL_HOST=true ;;
         team-drive|--team-drive) TEAM_DRIVE=true ;;
         field-storage|--field-storage|field-storage-v2|--field-storage-v2) FIELD_STORAGE_V2=true ;;
@@ -240,6 +244,12 @@ if $AMIGA_LOVE; then
 fi
 if $XBOX360; then
     export AMOURANTHRTX_XBOX360=1
+fi
+if $ALL_BREAKTHROUGHS; then
+    export AMOURANTHRTX_ALL_BREAKTHROUGHS=1
+fi
+if $CHIPS_ALL || $EXTENDED_FIELD; then
+    export AMOURANTHRTX_CHIPS_FABRIC=1
 fi
 
 # ── CROSS-COMPILE / EMSCRIPTEN TOOLCHAIN CHECK ──────────────────────────────

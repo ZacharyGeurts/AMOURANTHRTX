@@ -20,6 +20,8 @@ param(
     [switch]$ChipsAll      # All CHIPS expansion tier
     [switch]$AmigaLove     # Amiga Love of EVERYTHING canvas
     [switch]$Xbox360       # Xbox 360 Xenos die wave
+    [switch]$AllBreakthroughs # Hyper physics breakthroughs 1-4
+    [switch]$Infinite      # Infinite SDF wave
 )
 
 Write-Host ""
@@ -117,6 +119,8 @@ if (Test-Path $Binary) {
     if ($ChipsAll) { $env:AMOURANTHRTX_CHIPS_ALL = "1"; $env:AMOURANTHRTX_CHIPS = "1" }
     if ($AmigaLove) { $env:AMOURANTHRTX_AMIGA_LOVE = "1" }
     if ($Xbox360) { $env:AMOURANTHRTX_XBOX360 = "1" }
+    if ($AllBreakthroughs) { $env:AMOURANTHRTX_ALL_BREAKTHROUGHS = "1"; $env:AMOURANTHRTX_EXTENDED_FIELD = "1" }
+    if ($Infinite) { $env:AMOURANTHRTX_INFINITE = "1" }
 
     if ($TeamDrive) {
         Write-Host "TEAM drive harness (non-destructive)..." -ForegroundColor Cyan

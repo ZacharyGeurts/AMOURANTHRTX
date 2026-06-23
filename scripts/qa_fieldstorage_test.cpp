@@ -66,6 +66,18 @@ int main() {
     }
     std::printf("METRIC vfs_bridge_ok=1\n");
 
+    FieldStorage::enableAllBreakthroughs(true);
+    FieldStorage::sdfFoldBlock(42u);
+    std::printf("METRIC hyper_breakthroughs=%d\n", FieldStorage::hyperEnabled() ? 1 : 0);
+    std::printf("METRIC hyper_lead_in=%.4f\n", FieldStorage::hyperLeadInPeak());
+    std::printf("METRIC hyper_lead_out=%.4f\n", FieldStorage::hyperLeadOutPeak());
+    std::printf("METRIC hyper_entropy_fold=%.4f\n", FieldStorage::hyperEntropyFold());
+    std::printf("METRIC hyper_fabric_scale=%.4f\n", FieldStorage::chipsFabricScale());
+    if (!FieldStorage::hyperEnabled() || FieldStorage::chipsFabricScale() < 1.0) {
+        std::fprintf(stderr, "FAIL hyper breakthroughs not active\n");
+        return 1;
+    }
+
     if (FieldStorage::sdf.logicalBytes < 2ull * 1024u * 1024u * 1024u) {
         std::fprintf(stderr, "FAIL sdf logical below 2GB anchor\n");
         return 1;

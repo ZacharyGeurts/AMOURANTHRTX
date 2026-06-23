@@ -1,6 +1,8 @@
 #pragma once
 
 #include "FieldAmigaTypes.hpp"
+#include "../Common/FieldChipFabricScale.hpp"
+
 
 #include <algorithm>
 #include <cmath>
@@ -40,8 +42,12 @@ inline void denisePaint(State& s) noexcept {
 
 inline void paulaLoveBeat(State& s) noexcept {
     s.paula.loveBeat++;
-    s.paula.level = std::clamp(std::sin(static_cast<float>(s.paula.loveBeat) * 0.1f) * 0.5f + 0.5f, 0.f, 1.f);
-    s.loveScore = std::min(100, s.paula.loveBeat / 2);
+    const float resonance = FieldStorage::hyperEnabled()
+        ? static_cast<float>(FieldStorage::hyperLeadOutPeak() * 0.22f)
+        : 0.f;
+    s.paula.level = std::clamp(
+        std::sin(static_cast<float>(s.paula.loveBeat) * 0.1f) * 0.5f + 0.5f + resonance, 0.f, 1.f);
+    s.loveScore = std::min(100, s.paula.loveBeat / 2 + static_cast<int>(resonance * 40.f));
 }
 
 inline void runFrame(State& s) noexcept {

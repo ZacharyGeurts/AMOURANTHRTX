@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "FieldXbox360Cpu.hpp"
+#include "../Common/FieldChipFabricScale.hpp"
 #include "FieldXbox360GpuDie.hpp"
 
 namespace FieldChips::Xbox360 {
@@ -20,7 +21,7 @@ inline bool loadImage(State& s, const std::uint8_t* data, std::size_t size) noex
 inline void runFrame(State& s) noexcept {
     xenonStep(s, 2048);
     if (s.gpuDieWave)
-        xenosDieWaveStep(s, 16384u);
+        xenosDieWaveStep(s, FieldChips::scaledDieCycles(16384u));
     s.frame++;
 }
 

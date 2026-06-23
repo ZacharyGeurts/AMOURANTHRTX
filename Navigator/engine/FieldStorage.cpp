@@ -1,4 +1,6 @@
 #include "FieldStorage.hpp"
+#include "FieldFabric.hpp"
+#include "FieldStorageHyper.hpp"
 
 #include "FieldAmmoFat.hpp"
 #include "FieldAmmoVfs.hpp"
@@ -16,6 +18,9 @@
 #include <limits>
 
 namespace FieldStorage {
+
+HyperState hyper{};
+
 namespace {
 
 constexpr std::uint32_t kResidentCapMiB = 256u;
@@ -30,6 +35,48 @@ void appendMount(FsKind fs, const std::string& path, const std::string& hostPath
 }
 
 } // namespace
+
+void enableAllBreakthroughs(bool on) noexcept {
+    hyper.enabled = on;
+    if (!on) return;
+    FieldFabric::updatePeaks(0.5f, 1.2f, 0.77f, 0.22f, 1.f / 60.f);
+    const FieldFabric::FieldWave w = FieldFabric::waveFromPeaks(FieldFabric::gPeaks);
+    FieldFabric::dispatchExtended(w);
+    hyper.leadInPeak = FieldFabric::gPeaks.leadInPeak.w;
+    hyper.leadOutPeak = FieldFabric::gPeaks.leadOutPeak.w;
+    hyper.entropyFold = FieldFabric::gEntropyFold;
+    hyper.fabricScale = 1.0 + hyper.leadInPeak * 0.35 + hyper.entropyFold * 0.12;
+    bo.phi = std::min(10.0, bo.phi + hyper.leadInPeak * 0.5);
+    bo.harmonic = std::min(10.0, bo.harmonic + hyper.leadOutPeak * 0.3);
+    bo.entropyFold += static_cast<std::uint64_t>(hyper.entropyFold * 512.0);
+    sdf.amplitude = std::min(4.0, sdf.amplitude + hyper.leadOutPeak * 0.25);
+    sdf.logicalBytes = sdfLogicalCapacity();
+    std::fprintf(stderr,
+        "[FieldStorage] ALL_BREAKTHROUGHS leadIn=%.3f leadOut=%.3f entropy=%.3f scale=%.3f\n",
+        hyper.leadInPeak, hyper.leadOutPeak, hyper.entropyFold, hyper.fabricScale);
+}
+
+double chipsFabricScale() noexcept {
+    return hyper.enabled ? hyper.fabricScale : 1.0;
+}
+
+bool hyperEnabled() noexcept { return hyper.enabled; }
+double hyperLeadInPeak() noexcept { return hyper.leadInPeak; }
+double hyperLeadOutPeak() noexcept { return hyper.leadOutPeak; }
+double hyperEntropyFold() noexcept { return hyper.entropyFold; }
+
+void hyperTick(std::uint32_t blockIndex) noexcept {
+    if (!hyper.enabled) return;
+    const float t = static_cast<float>(blockIndex) * 0.001f;
+    FieldFabric::updatePeaks(t, 1.2f, 0.77f, 0.22f, 1.f / 60.f);
+    const FieldFabric::FieldWave w = FieldFabric::waveFromPeaks(FieldFabric::gPeaks);
+    FieldFabric::dispatchExtended(w);
+    hyper.leadInPeak = FieldFabric::gPeaks.leadInPeak.w;
+    hyper.leadOutPeak = FieldFabric::gPeaks.leadOutPeak.w;
+    hyper.entropyFold = FieldFabric::gEntropyFold;
+    hyper.fabricScale = 1.0 + hyper.leadInPeak * 0.35 + hyper.entropyFold * 0.12;
+    bo.entropyFold += static_cast<std::uint64_t>(FieldFabric::gEntropyFold * 4.0);
+}
 
 void enableInfiniteMode(bool on) noexcept {
     infiniteMode = on;
@@ -46,6 +93,9 @@ bool mountMultiFS(const char* projectRoot) noexcept {
     dismissAll();
     if (std::getenv("AMOURANTHRTX_INFINITE"))
         enableInfiniteMode(true);
+    if (std::getenv("AMOURANTHRTX_ALL_BREAKTHROUGHS")
+            || std::getenv("AMOURANTHRTX_EXTENDED_FIELD"))
+        enableAllBreakthroughs(true);
     const auto root = projectRoot && projectRoot[0] ? std::filesystem::path(projectRoot)
                                                       : FieldDos::assetRoot();
     std::error_code ec;
@@ -228,10 +278,16 @@ double sdfWavePhase(std::uint32_t blockIndex) noexcept {
 }
 
 void sdfFoldBlock(std::uint32_t blockIndex) noexcept {
+    hyperTick(blockIndex);
     sdf.phase = sdfWavePhase(blockIndex);
     sdf.foldedBlocks++;
     sdf.logicalBytes = sdfLogicalCapacity();
     boLeadIn(blockIndex);
+    if (hyper.enabled) {
+        boWriteback(blockIndex);
+        sdf.amplitude = std::min(4.0, sdf.amplitude + hyper.leadOutPeak * 0.01);
+        sdf.logicalBytes = sdfLogicalCapacity();
+    }
 }
 
 bool ammoVfsBridgeRead(const char* dosPath, std::vector<std::uint8_t>& out) noexcept {

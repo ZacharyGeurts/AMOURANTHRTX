@@ -61,6 +61,12 @@ inline bool infiniteMode = false;
 inline std::string teamDriveDev = "/dev/nvme2n1";
 
 void enableInfiniteMode(bool on = true) noexcept;
+void enableAllBreakthroughs(bool on = true) noexcept;
+double chipsFabricScale() noexcept;
+bool hyperEnabled() noexcept;
+double hyperLeadInPeak() noexcept;
+double hyperLeadOutPeak() noexcept;
+double hyperEntropyFold() noexcept;
 bool mountMultiFS(const char* projectRoot = ".") noexcept;
 bool mountTeamDrive(const char* devPath, bool allowInit = false) noexcept;
 void dismissAll() noexcept;
