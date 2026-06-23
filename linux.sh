@@ -33,6 +33,12 @@ for arg in "$@"; do
         team-drive|team_drive)
             exec python3 "$PROJECT_ROOT/scripts/team_drive_test.py" "${@:2}"
             ;;
+        brain|field-brain|field_brain)
+            exec python3 "$PROJECT_ROOT/scripts/field_brain_memory.py" "${@:2}"
+            ;;
+        super|superintel|field-super)
+            exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" "${@:2}"
+            ;;
         field-storage|field_storage)
             exec python3 "$PROJECT_ROOT/scripts/bench_storage.py" "${@:2}"
             ;;
