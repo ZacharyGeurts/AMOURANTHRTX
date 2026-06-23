@@ -3,6 +3,24 @@
 #ifndef AOS_SDF_CHROME_INC
 #define AOS_SDF_CHROME_INC
 
+vec4 aosTaskbarTimePack(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc) {
+    vec4 pack = vec4(0.0);
+    float x = x0;
+    pack = max(pack, fontGlyphPack(48u + (hr / 10u) % 10u, pix, x, rowY, cell));
+    pack = max(pack, fontGlyphPack(48u + hr % 10u, pix, x + cell.x, rowY, cell));
+    x += cell.x * 2.0 + cell.x * 0.3;
+    pack = max(pack, fontGlyphPack(58u, pix, x, rowY, cell));
+    x += cell.x;
+    pack = max(pack, fontGlyphPack(48u + (mn / 10u) % 10u, pix, x, rowY, cell));
+    pack = max(pack, fontGlyphPack(48u + mn % 10u, pix, x + cell.x, rowY, cell));
+    x += cell.x * 2.0 + cell.x * 0.3;
+    pack = max(pack, fontGlyphPack(58u, pix, x, rowY, cell));
+    x += cell.x;
+    pack = max(pack, fontGlyphPack(48u + (sc / 10u) % 10u, pix, x, rowY, cell));
+    pack = max(pack, fontGlyphPack(48u + sc % 10u, pix, x + cell.x, rowY, cell));
+    return pack;
+}
+
 vec3 aosSdfTaskbarRail(vec2 pix, AosTbLayout L, ThemePal th) {
     if (!aosTbOnStrip(pix, L)) return vec3(-1.0);
     vec2 b0 = vec2(0.0, L.barY0);

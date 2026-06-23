@@ -334,36 +334,6 @@ float aosTaskbarClockWidth(float scale) {
     return AOS_CLOCK_W * scale;
 }
 
-vec4 aosTaskbarTimePack(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc) {
-    vec4 pack = vec4(0.0);
-    float x = x0;
-    pack = max(pack, fontGlyphPack(48u + (hr / 10u) % 10u, pix, x, rowY, cell));
-    pack = max(pack, fontGlyphPack(48u + hr % 10u, pix, x + cell.x, rowY, cell));
-    x += cell.x * 2.0 + cell.x * 0.3;
-    pack = max(pack, fontGlyphPack(58u, pix, x, rowY, cell));
-    x += cell.x;
-    pack = max(pack, fontGlyphPack(48u + (mn / 10u) % 10u, pix, x, rowY, cell));
-    pack = max(pack, fontGlyphPack(48u + mn % 10u, pix, x + cell.x, rowY, cell));
-    x += cell.x * 2.0 + cell.x * 0.3;
-    pack = max(pack, fontGlyphPack(58u, pix, x, rowY, cell));
-    x += cell.x;
-    pack = max(pack, fontGlyphPack(48u + (sc / 10u) % 10u, pix, x, rowY, cell));
-    pack = max(pack, fontGlyphPack(48u + sc % 10u, pix, x + cell.x, rowY, cell));
-    return pack;
-}
-
-vec3 aosTaskbarTimeInkGeom(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc,
-        out float inkB) {
-    vec4 pack = aosTaskbarTimePack(pix, x0, rowY, cell, hr, mn, sc);
-    inkB = pack.w;
-    return pack.xyz;
-}
-
-float aosTaskbarTimeInk(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc,
-        out float inkB) {
-    return aosTaskbarTimeInkGeom(pix, x0, rowY, cell, hr, mn, sc, inkB).x;
-}
-
 vec4 sampleAmmoPortraitRgba(vec2 pix, vec2 box0, vec2 boxSize) {
     ivec2 dim = imageSize(ammoTex);
     if (dim.x <= 0 || dim.y <= 0) return vec4(-1.0);
@@ -386,6 +356,18 @@ vec2 aosHudTextCell(float sc) { return vec2(8.0 * sc, 16.0 * sc); }
 vec2 aosHudTextCellSm(float sc) { return vec2(8.0 * sc, 14.0 * sc); }
 
 #include "aos_sdf_chrome.inc"
+
+vec3 aosTaskbarTimeInkGeom(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc,
+        out float inkB) {
+    vec4 pack = aosTaskbarTimePack(pix, x0, rowY, cell, hr, mn, sc);
+    inkB = pack.w;
+    return pack.xyz;
+}
+
+float aosTaskbarTimeInk(vec2 pix, float x0, float rowY, vec2 cell, uint hr, uint mn, uint sc,
+        out float inkB) {
+    return aosTaskbarTimeInkGeom(pix, x0, rowY, cell, hr, mn, sc, inkB).x;
+}
 
 float aosQuickLaunchStripW(float scale) {
     return float(AOS_QUICK_LAUNCH_N) * AOS_QUICK_BTN_W * scale
