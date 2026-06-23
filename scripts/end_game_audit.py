@@ -56,7 +56,7 @@ def main() -> int:
     if run_py("zero_cost_audit.py", *audit_args) != 0:
         return 1
 
-    for script in ("play_legacy.py", "team_drive_test.py", "bench_storage.py"):
+    for script in ("play_legacy.py", "team_drive_test.py", "bench_storage.py", "bench_mame_compare.py"):
         if run_py(script) != 0:
             print(f"FAIL end_game {script}", file=sys.stderr)
             return 1

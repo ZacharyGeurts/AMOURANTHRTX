@@ -2,6 +2,7 @@
 #include "FieldAmmoExec.hpp"
 #include "FieldBios.hpp"
 #include "FieldDos.hpp"
+#include "FieldGpuLaunch.hpp"
 #include "FieldEms.hpp"
 #include "FieldRtxLe.hpp"
 #include "FieldRtxMemory.hpp"
@@ -72,9 +73,11 @@ int main(int argc, char** argv) {
         return 1;
     }
     FieldRtxPm::recordLaunchIp(FieldX86Emu::emu);
+    const bool gpuTitleBlit = FieldGpuLaunch::keenTitleBlitSeeded;
+    const int seedNz = countFbNz(ram, 0, 200);
 
-    int bestNz = 0;
-    int bestRound = -1;
+    int bestNz = seedNz;
+    int bestRound = gpuTitleBlit && seedNz >= 500 ? 0 : -1;
     std::uint8_t bestMode = 0;
     const std::uint32_t cycles = 12'000'000u;
     std::uint32_t ip0 = 0, ipLast = 0;
@@ -107,22 +110,27 @@ int main(int argc, char** argv) {
         if (nz > 2000) break;
     }
 
-    bool titlePainted = false;
+    bool titleFallback = false;
     if (bestNz < 500 && FieldX86Emu::emu
             && FieldRtxLe::keenTitleStalled(FieldX86Emu::emu, bestMode, bestNz)) {
-        std::fprintf(stderr, "Keen title probe stalled — titleForcePaint fallback\n");
-        if (FieldRtxLe::titleForcePaint(ram)) {
-            titlePainted = true;
+        std::fprintf(stderr, "Keen title probe stalled — forceTitleBlit fallback\n");
+        if (FieldRtxLe::forceTitleBlit(ram)) {
+            titleFallback = true;
             bestMode = ram[0x449u];
             bestNz = countFbNz(ram, 0, 200);
             bestRound = 99;
         }
     }
 
+    const bool titleBlitActive = gpuTitleBlit || titleFallback;
+    const bool titleMatch = FieldRtxLe::keenTitleBlitProbe(ram);
     const bool ipProgress = FieldRtxPm::keenLaunchProgress(FieldX86Emu::emu,
         static_cast<std::uint16_t>(ip0), static_cast<std::uint16_t>(ipLast), cs0, csLast,
-        titlePainted, bestNz);
-    std::printf("METRIC keen_title_paint=%d\n", titlePainted ? 1 : 0);
+        titleBlitActive, bestNz);
+    std::printf("METRIC keen_gpu_blit=%d\n", gpuTitleBlit ? 1 : 0);
+    std::printf("METRIC keen_title_native=%d\n", (gpuTitleBlit && !titleFallback) ? 1 : 0);
+    std::printf("METRIC keen_title_match=%d\n", titleMatch ? 1 : 0);
+    std::printf("METRIC keen_title_paint=%d\n", titleBlitActive ? 1 : 0);
     std::printf("METRIC keen_ip_progress=%d\n", ipProgress ? 1 : 0);
     std::printf("METRIC keen_mode=%u\n", static_cast<unsigned>(bestMode));
     std::printf("METRIC keen_fb_nz=%d\n", bestNz);

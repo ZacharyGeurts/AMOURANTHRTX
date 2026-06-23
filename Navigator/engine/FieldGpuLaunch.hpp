@@ -5,6 +5,7 @@
 #include "FieldDos.hpp"
 #include "FieldGpuFiles.hpp"
 #include "FieldPlatform.hpp"
+#include "FieldRtxLe.hpp"
 #include "FieldVga.hpp"
 #include "FieldX86Emu.hpp"
 
@@ -22,6 +23,7 @@ bool launchComImage(x86emu_t* e, const std::vector<std::uint8_t>& com, std::uint
 namespace FieldGpuLaunch {
 
 inline constexpr std::uint32_t EFLAGS_HALTED = 0x40000000u;
+inline bool keenTitleBlitSeeded = false;
 
 inline bool seedMzExec(void* mapped, std::size_t offset, std::uint8_t* ram,
                        const std::vector<std::uint8_t>& image, const char* dosPath) noexcept {
@@ -64,6 +66,13 @@ inline bool seedKeenMzExec(void* mapped, std::size_t offset, std::uint8_t* ram,
     FieldX86Emu::syncToDie(mapped);
     auto* d = static_cast<FieldX86Emu::DieView*>(mapped);
     d->EFLAGS &= ~EFLAGS_HALTED;
+    keenTitleBlitSeeded = FieldRtxLe::forceTitleBlit(ram);
+    if (keenTitleBlitSeeded) {
+        FieldVga::mode = FieldVga::MODE_EGA_0D;
+        FieldX86Emu::syncVideoMode(mapped);
+        std::fprintf(stderr, "[GpuLaunch] Keen forceTitleBlit probe=%d\n",
+            FieldRtxLe::keenTitleBlitProbe(ram) ? 1 : 0);
+    }
     std::fprintf(stderr, "[GpuLaunch] Keen entry cs=%04x ip=%04x\n",
         static_cast<unsigned>(kLoadSeg + e_cs), static_cast<unsigned>(e_ip));
     return true;

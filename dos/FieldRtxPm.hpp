@@ -37,11 +37,11 @@ inline bool ipProgressProbe(x86emu_t* e, std::uint16_t roundIp0, std::uint16_t r
     return linearIp(roundCsLast, roundIpLast) != linearIp(launchSeedCs, launchSeedIp);
 }
 
-// Keen P1 — CPU IP motion OR titleForcePaint / painted framebuffer counts as GPU-CPU progress.
+// Keen P1 — CPU IP motion OR GpuLaunch title blit / painted framebuffer = GPU-CPU progress.
 inline bool keenLaunchProgress(x86emu_t* e, std::uint16_t roundIp0, std::uint16_t roundIpLast,
                                std::uint16_t roundCs0, std::uint16_t roundCsLast,
-                               bool titlePainted, int fbNonZero) noexcept {
-    if (titlePainted || fbNonZero >= 500) return true;
+                               bool titleBlitActive, int fbNonZero) noexcept {
+    if (titleBlitActive || fbNonZero >= 500) return true;
     return ipProgressProbe(e, roundIp0, roundIpLast, roundCs0, roundCsLast);
 }
 

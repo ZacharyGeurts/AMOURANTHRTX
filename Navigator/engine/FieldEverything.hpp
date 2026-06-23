@@ -55,12 +55,15 @@ inline void open() noexcept {
     FieldPs2::open();
     seedChips();
     active = true;
+    FieldStorage::fabricPersist.everythingActive = true;
+    FieldStorage::fabricPersist.everythingTicks = tickCount;
     std::fprintf(stderr, "[FieldEverything] all systems live — no load, fabric resident\n");
 }
 
 inline void tick(std::uint8_t* guestRam) noexcept {
     if (!active || !guestRam) return;
     ++tickCount;
+    FieldStorage::fabricPersist.everythingTicks = tickCount;
     if (FieldPs1::active) FieldPs1::tick(guestRam, nullptr);
     if (FieldXbox360::active) FieldXbox360::tick(guestRam, nullptr);
     if (FieldN64::active) FieldN64::tick(guestRam, nullptr);
@@ -71,6 +74,7 @@ inline void tick(std::uint8_t* guestRam) noexcept {
 
 inline void powerOff() noexcept {
     if (!active) return;
+    FieldStorage::fabricPersist.everythingActive = false;
     FieldStorage::persistFieldState();
     active = false;
 }

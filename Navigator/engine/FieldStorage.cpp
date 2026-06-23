@@ -210,7 +210,7 @@ bool mountTeamDrive(const char* devPath, bool allowInit) noexcept {
 namespace {
 
 constexpr std::uint32_t kPersistMagic = 0x504C4446u; // 'FLDP'
-constexpr std::uint32_t kPersistVersion = 1u;
+constexpr std::uint32_t kPersistVersion = 2u;
 
 struct PersistBlob {
     std::uint32_t magic = kPersistMagic;
@@ -227,6 +227,10 @@ struct PersistBlob {
     double hyperEntropy = 0.0;
     double hyperScale = 1.0;
     double resonanceCoupling = 0.22;
+    std::uint32_t everythingTicks = 0u;
+    std::uint8_t everythingActive = 0u;
+    std::uint32_t mountLive = 0u;
+    std::uint64_t fabricChecksum = 0u;
 };
 
 std::filesystem::path persistPath() { return storageRoot() / "field_wave.persist"; }
@@ -249,12 +253,21 @@ bool persistFieldState() noexcept {
     b.hyperEntropy = hyper.entropyFold;
     b.hyperScale = hyper.fabricScale;
     b.resonanceCoupling = hyper.resonanceCoupling;
-    std::ofstream out(persistPath(), std::ios::binary | std::ios::trunc);
+    b.everythingTicks = fabricPersist.everythingTicks;
+    b.everythingActive = fabricPersist.everythingActive ? 1u : 0u;
+    b.mountLive = static_cast<std::uint32_t>(std::count_if(mounts.begin(), mounts.end(),
+        [](const MountPoint& m) { return m.live; }));
+    b.fabricChecksum = b.foldedBlocks ^ static_cast<std::uint64_t>(b.everythingTicks)
+        ^ (static_cast<std::uint64_t>(b.mountLive) << 32);
+    const auto tmp = persistPath().string() + ".tmp";
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
     if (!out) return false;
     out.write(reinterpret_cast<const char*>(&b), sizeof b);
-    std::fprintf(stderr, "[FieldStorage] persist resonance hold phase=%.4f folded=%llu\n",
-        b.sdfPhase, static_cast<unsigned long long>(b.foldedBlocks));
-    return static_cast<bool>(out);
+    out.close();
+    std::filesystem::rename(tmp, persistPath(), ec);
+    std::fprintf(stderr, "[FieldStorage] persist resonance hold phase=%.4f folded=%llu fabric=%u\n",
+        b.sdfPhase, static_cast<unsigned long long>(b.foldedBlocks), b.everythingTicks);
+    return !ec;
 }
 
 bool restoreFieldState() noexcept {
@@ -262,7 +275,8 @@ bool restoreFieldState() noexcept {
     if (!in) return false;
     PersistBlob b{};
     in.read(reinterpret_cast<char*>(&b), sizeof b);
-    if (!in || b.magic != kPersistMagic || b.version != kPersistVersion) return false;
+    if (!in || b.magic != kPersistMagic
+            || (b.version != kPersistVersion && b.version != 1u)) return false;
     sdf.phase = b.sdfPhase;
     sdf.amplitude = b.sdfAmplitude;
     sdf.logicalBase = b.sdfLogicalBase ? b.sdfLogicalBase : sdf.logicalBase;
@@ -276,6 +290,10 @@ bool restoreFieldState() noexcept {
     hyper.fabricScale = b.hyperScale;
     hyper.resonanceCoupling = b.resonanceCoupling;
     hyper.enabled = true;
+    if (b.version >= 2u) {
+        fabricPersist.everythingTicks = b.everythingTicks;
+        fabricPersist.everythingActive = b.everythingActive != 0u;
+    }
     sdf.logicalBytes = sdfLogicalCapacity();
     persistLoaded = true;
     std::fprintf(stderr, "[FieldStorage] restore resonance hold phase=%.4f logical=%.2f GiB\n",

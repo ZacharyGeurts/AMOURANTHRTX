@@ -12,6 +12,11 @@ BUILD = ROOT / "build"
 
 
 def run_target(target: str) -> tuple[int, dict[str, str]]:
+    import os
+    if target == "qa_everything_test":
+        os.environ.setdefault("AMOURANTHRTX_EVERYTHING_EVERYWHERE", "1")
+        os.environ.setdefault("AMOURANTHRTX_FIELD_PERSIST", "1")
+        os.environ.setdefault("AMOURANTHRTX_END_GAME", "1")
     subprocess.run(
         ["cmake", "--build", str(BUILD), "--target", target, "-j", "8"],
         cwd=ROOT, check=True,
@@ -33,6 +38,10 @@ def main() -> int:
         ("qa_ps1_test", "ps1_gpu_wave", lambda v: v == "1"),
         ("qa_xbox360_test", "xbox360_gpu_wave", lambda v: v == "1"),
         ("qa_amiga_test", "amiga_love_score", lambda v: int(v) >= 10),
+        ("qa_n64_test", "n64_gpu_wave", lambda v: v == "1"),
+        ("qa_dreamcast_test", "dreamcast_gpu_wave", lambda v: v == "1"),
+        ("qa_ps2_test", "ps2_gpu_wave", lambda v: v == "1"),
+        ("qa_everything_test", "everything_active", lambda v: v == "1"),
         ("qa_nes_cpu_test", None, None),
         ("qa_snes_test", None, None),
     ]

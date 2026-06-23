@@ -39,6 +39,9 @@ for arg in "$@"; do
         end-game|end_game)
             exec python3 "$PROJECT_ROOT/scripts/end_game_audit.py" "${@:2}"
             ;;
+        release-2.0|release_2_0|release)
+            exec python3 "$PROJECT_ROOT/scripts/release_checklist_2_0.py" "${@:2}"
+            ;;
         win31)
             exec python3 "$PROJECT_ROOT/scripts/setup_win31.py" "${@:2}"
             ;;

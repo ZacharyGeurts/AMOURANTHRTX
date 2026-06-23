@@ -5,6 +5,8 @@ from __future__ import annotations
 
 PRODUCT = "RTX-DOS"
 VERSION = "7.0"
+AMOURANTHRTX_VERSION = "2.0"
+AMOURANTHRTX_CODENAME = "Field Everything"
 VERSION_FULL = f"{PRODUCT} {VERSION}"
 CODENAME = "Field Die"
 LINEAGE = "Microsoft MS-DOS MIT (v2/v4) -> RTX-DOS 7.0 Modern DOS — 3.x–6.x program compatible"

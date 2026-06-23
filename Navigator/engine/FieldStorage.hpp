@@ -62,6 +62,12 @@ inline bool endGameActive = false;
 inline bool persistLoaded = false;
 inline std::string teamDriveDev = "/dev/nvme2n1";
 
+struct FabricPersist {
+    std::uint32_t everythingTicks = 0u;
+    bool everythingActive = false;
+};
+inline FabricPersist fabricPersist{};
+
 void enableInfiniteMode(bool on = true) noexcept;
 void enableAllBreakthroughs(bool on = true) noexcept;
 void enableEndGameMode(bool on = true) noexcept;

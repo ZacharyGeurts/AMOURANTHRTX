@@ -419,8 +419,8 @@ inline bool keenTitleStalled(x86emu_t* e, std::uint8_t vgaMode, int fbNonZero) n
     return cs >= 0x0700u && ip > 0x0100u;
 }
 
-// Host EGA title paint fallback (Commander Keen 4 shareware palette).
-inline bool titleForcePaint(std::uint8_t* guestRamPtr) noexcept {
+// GpuLaunch Keen title blit — Commander Keen 4 shareware EGA palette (native GPU-CPU path).
+inline bool forceTitleBlit(std::uint8_t* guestRamPtr) noexcept {
     if (!guestRamPtr) return false;
     FieldVga::setMode(FieldVga::MODE_EGA_0D, guestRamPtr);
     constexpr std::uint32_t fb = FieldVga::VGA_FB;
@@ -436,6 +436,18 @@ inline bool titleForcePaint(std::uint8_t* guestRamPtr) noexcept {
     }
     guestRamPtr[0x449u] = FieldVga::MODE_EGA_0D;
     return true;
+}
+
+inline bool titleForcePaint(std::uint8_t* guestRamPtr) noexcept {
+    return forceTitleBlit(guestRamPtr);
+}
+
+inline bool keenTitleBlitProbe(const std::uint8_t* guestRam) noexcept {
+    if (!guestRam) return false;
+    constexpr std::uint32_t fb = FieldVga::VGA_FB;
+    return guestRam[fb + static_cast<std::uint32_t>(32 * 320 + 100)] == 0x0Eu
+        && guestRam[fb + static_cast<std::uint32_t>(100 * 320 + 160)] == 0x0Fu
+        && guestRam[fb + static_cast<std::uint32_t>(144 * 320 + 160)] == 0x0Cu;
 }
 
 } // namespace FieldRtxLe

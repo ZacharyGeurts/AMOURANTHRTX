@@ -80,8 +80,16 @@ def main() -> int:
                 ("everything_active", lambda v: v == "1"),
                 ("field_persist_restored", lambda v: v == "1"),
             )),
+            ("qa_field_persist_test", 60, (
+                ("field_data_intact", lambda v: v == "1"),
+                ("field_persist_restored", lambda v: v == "1"),
+            )),
+            ("qa_rtx_density_test", 30, (("rtx_density_ok", lambda v: v == "1"),)),
+            ("qa_love_demo_test", 60, (("love_demo_complete", lambda v: v == "1"),)),
             ("qa_keen_host_test", 120, (
                 ("keen_ip_progress", lambda v: v == "1"),
+                ("keen_title_native", lambda v: v == "1"),
+                ("keen_title_match", lambda v: v == "1"),
                 ("keen_fb_nz", lambda v: int(v) >= 500),
             )),
         )
