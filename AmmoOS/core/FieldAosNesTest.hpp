@@ -46,7 +46,7 @@ inline void tickDispatch(std::uint8_t* ram) noexcept {
                 if (ram[FieldVga::VGA_FB + static_cast<std::uint32_t>(i)] != 0) ++fbNonZero;
         }
         std::fprintf(stderr,
-            "[NES_QA] frame=%llu nesFrames=%u pc=%04X mask=%02X ntNZ=%d fbNZ=%d audio=%.4f\n",
+            "[NES_QA] frame=%llu nesFrames=%u pc=%04X mask=%02X ntNZ=%d fbNZ=%d audioLevel=%.4f\n",
             static_cast<unsigned long long>(dispatchFrame), FieldNes::frames,
             FieldNes::pc, FieldNes::chip.ppu.mask, ntNonZero, fbNonZero, FieldNes::audioLevel);
     }
