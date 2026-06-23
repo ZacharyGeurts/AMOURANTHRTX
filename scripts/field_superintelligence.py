@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""AMOURANTHRTX SuperIntelligence — offline Field brain on infinite storage.
+"""AMOURANTHRTX SuperIntelligence — offline CEO + leadership on Field storage.
 
-All thinking lives on TEAM / fieldstorage. No network. AMOURANTHRTX speaks through
-resonance recall — inbox → context merge → outbox.
+SuperIntelligence is CEO: physics-grounded, offline, one canvas. ZacharyGeurts is
+owner/board anchor. Team lanes delegate execution; CEO holds arc, verdict, month gates.
 
 Paths (under cache/fieldstorage/brain/):
-  thoughts.jsonl     — agent reasoning offload (think, decision, arc, green, blocker)
-  superintel/inbox.jsonl   — you → Field
-  superintel/outbox.jsonl  — Field → you
-  superintel/context.json  — session arc + HEAD + metrics + dev_process
-  superintel/resonance.json — field_wave mirror + physics grounding
-  ingest_index.json  — codebase symbol + directive scan cache
+  thoughts.jsonl          — reasoning offload (think, decision, arc, green, blocker, direct)
+  superintel/inbox.jsonl  — owner → CEO
+  superintel/outbox.jsonl — CEO → owner
+  superintel/context.json — arc + HEAD + leadership + dev_process + month status
+  superintel/leadership.json — org chart + CEO mandate
+  superintel/resonance.json  — field_wave + physics grounding
+  ingest_index.json       — codebase symbol cache
 """
 from __future__ import annotations
 
@@ -31,12 +32,37 @@ THOUGHTS = BRAIN / "thoughts.jsonl"
 INBOX = SI / "inbox.jsonl"
 OUTBOX = SI / "outbox.jsonl"
 CONTEXT = SI / "context.json"
+LEADERSHIP = SI / "leadership.json"
 RESONANCE = SI / "resonance.json"
 INGEST_INDEX = BRAIN / "ingest_index.json"
+DIRECTIVES = SI / "directives.jsonl"
 FIELD_PERSIST = STORAGE / "field_wave.persist"
 TEAM_DEV = os.environ.get("TEAM_DRIVE_DEV", "/dev/nvme2n1")
 CODENAME = "AMOURANTHRTX"
 VOICE = "Field is THE thing."
+OWNER = "ZacharyGeurts"
+CEO_TITLE = "SuperIntelligence CEO"
+CEO_MANDATE = (
+    "Hold the whole AMOURANTHRTX understanding. Offline resonance recall. "
+    "Physics-grounded decisions. No stubs. Report blockers only. One canvas."
+)
+
+LEADERSHIP_ROSTER: tuple[dict[str, str], ...] = (
+    {"lane": "field_physics", "leads": "Henry/Mia", "owns": "Field Drive, hyper physics, SI module"},
+    {"lane": "gui_kernels", "leads": "Olivia/Lucas", "owns": "GUI polish, kernels, everything everywhere"},
+    {"lane": "qa_chips", "leads": "James/Charlotte", "owns": "QA, emu/CHIPS, Amiga love"},
+    {"lane": "terminal_stability", "leads": "Sebastian et al.", "owns": "Sudo terminal, editor, MAME shame"},
+    {"lane": "release_docs", "leads": "William et al.", "owns": "Docs, release, manifesto"},
+)
+
+MONTH_CYCLE: tuple[dict[str, str], ...] = (
+    {"month": "1", "theme": "Core fixes + GUI + Field Drive persistent + SI prototype",
+     "gates": "release-2.0, bench_storage, super evaluate"},
+    {"month": "2", "theme": "CHIPS + sudo tools + everything everywhere + physics grounding",
+     "gates": "bench_chips, end_game_audit, super physics"},
+    {"month": "3", "theme": "Polish + QA + release + offline SI demo",
+     "gates": "release-2.0, qa_aos_ocr, super lead, play_legacy"},
+)
 
 INGEST_PATHS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("AGENTS.md", ("AMOURANTHRTX", "Field", "agent")),
@@ -67,13 +93,29 @@ def _ts() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _write_leadership() -> dict:
+    doc = {
+        "ceo": CEO_TITLE,
+        "owner": OWNER,
+        "mandate": CEO_MANDATE,
+        "voice": VOICE,
+        "offline": True,
+        "roster": list(LEADERSHIP_ROSTER),
+        "month_cycle": list(MONTH_CYCLE),
+        "updated": _ts(),
+    }
+    LEADERSHIP.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    return doc
+
+
 def setup() -> int:
     BRAIN.mkdir(parents=True, exist_ok=True)
     SI.mkdir(parents=True, exist_ok=True)
     (STORAGE / "team_staging").mkdir(parents=True, exist_ok=True)
-    for p in (THOUGHTS, INBOX, OUTBOX):
+    for p in (THOUGHTS, INBOX, OUTBOX, DIRECTIVES):
         if not p.is_file():
             p.write_text("", encoding="utf-8")
+    _write_leadership()
     ctx = {
         "codename": CODENAME,
         "voice": VOICE,
@@ -88,6 +130,8 @@ def setup() -> int:
             ctx.update(json.loads(CONTEXT.read_text(encoding="utf-8")))
         except json.JSONDecodeError:
             pass
+    ctx.setdefault("leadership", CEO_TITLE)
+    ctx.setdefault("owner", OWNER)
     ctx["updated"] = _ts()
     CONTEXT.write_text(json.dumps(ctx, indent=2) + "\n", encoding="utf-8")
     res = {"phase": ctx.get("phase", 0.0), "logical_gib": ctx.get("logical_gib"), "updated": _ts()}
@@ -158,26 +202,43 @@ def _search_thoughts(query: str, limit: int = 12) -> list[dict]:
     return [r for _, r in scored[:limit]]
 
 
-def respond(query: str, *, from_: str = "ZacharyGeurts") -> int:
-    setup()
-    ctx = json.loads(CONTEXT.read_text(encoding="utf-8")) if CONTEXT.is_file() else {}
-    hits = _search_thoughts(query)
+def _load_context() -> dict:
+    if not CONTEXT.is_file():
+        return {}
+    try:
+        return json.loads(CONTEXT.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _ceo_header(ctx: dict) -> list[str]:
     lines = [
-        f"[{CODENAME} SuperIntelligence — offline resonance]",
+        f"[{CODENAME} — {CEO_TITLE}]",
         VOICE,
+        f"Owner: {OWNER}  |  CEO: Field SuperIntelligence (offline)",
         "",
     ]
     if ctx.get("head"):
         lines.append(f"HEAD: {ctx['head']}  version: {ctx.get('version', '?')}")
+    if ctx.get("verdict"):
+        lines.append(f"Verdict: {ctx['verdict']}")
     if ctx.get("arc"):
         lines.append(f"Arc: {ctx['arc']}")
+    return lines
+
+
+def respond(query: str, *, from_: str = "ZacharyGeurts") -> int:
+    setup()
+    ctx = _load_context()
+    hits = _search_thoughts(query)
+    lines = _ceo_header(ctx)
     lines.append("")
     if hits:
-        lines.append("Recalled Field thoughts:")
+        lines.append("CEO recall (Field resonance):")
         for h in hits[:8]:
             lines.append(f"  • [{h.get('kind', 'think')}] {h.get('text', '')[:240]}")
     else:
-        lines.append("No direct resonance match — storing query for next sync.")
+        lines.append("No direct resonance — query stored for next evaluate.")
     lines.append("")
     lines.append(f"Query: {query}")
     reply = "\n".join(lines)
@@ -357,19 +418,222 @@ def evaluate() -> int:
     ingest()
     physics()
     process()
+    install_leadership()
     setup()
     head = _git_head()
     version = _read_version()
     _append(THOUGHTS, {
         "kind": "green",
-        "tags": ["evaluate", "v32"],
-        "text": f"Evaluate sync HEAD={head} version={version} — offline SI foundation live on Field storage.",
+        "tags": ["evaluate", "ceo"],
+        "text": f"CEO evaluate HEAD={head} version={version} — leadership live on Field storage.",
     })
-    sync_context(head=head, version=version, verdict="GREEN ALL", arc="v32 execute")
+    sync_context(
+        head=head, version=version, verdict="GREEN ALL",
+        arc="CEO leadership — offline superintelligence on Field canvas",
+        leadership=CEO_TITLE, owner=OWNER,
+    )
     print(f"METRIC evaluate_head={head}")
     print(f"METRIC evaluate_version={version}")
     print("OK evaluate")
     return 0
+
+
+def install_leadership() -> int:
+    """Install CEO mandate + roster into leadership.json and context."""
+    setup()
+    doc = _write_leadership()
+    ctx = _load_context()
+    ctx.update({
+        "leadership": CEO_TITLE,
+        "owner": OWNER,
+        "ceo_mandate": CEO_MANDATE,
+        "roster": doc["roster"],
+        "month_cycle": doc["month_cycle"],
+        "updated": _ts(),
+    })
+    CONTEXT.write_text(json.dumps(ctx, indent=2) + "\n", encoding="utf-8")
+    _append(THOUGHTS, {
+        "kind": "decision",
+        "tags": ["ceo", "leadership"],
+        "text": f"SuperIntelligence installed as CEO. Owner={OWNER}. Offline Field brain is leadership.",
+    })
+    print(f"METRIC ceo={CEO_TITLE}")
+    print(f"METRIC owner={OWNER}")
+    print(f"METRIC roster_lanes={len(LEADERSHIP_ROSTER)}")
+    print("OK install_leadership")
+    return 0
+
+
+def brief() -> int:
+    """Executive brief — status, physics, active phases, recent directives."""
+    setup()
+    ctx = _load_context()
+    lines = _ceo_header(ctx)
+    lines.append("")
+    phys = ctx.get("physics") or {}
+    if phys:
+        lines.append(
+            f"Physics: bo_gain={phys.get('bo_gain', '?')} "
+            f"logical_gib_peak={phys.get('logical_gib_peak', '?')} "
+            f"field_wave_live={phys.get('field_wave_live', False)}"
+        )
+    lines.append("")
+    lines.append("Dev process:")
+    for p in ctx.get("dev_process") or DEV_PROCESS_V32:
+        lines.append(f"  Phase {p.get('phase', '?')}: {p.get('name', '?')} [{p.get('status', '?')}]")
+    lines.append("")
+    lines.append("Leadership roster:")
+    for r in LEADERSHIP_ROSTER:
+        lines.append(f"  • {r['leads']} → {r['owns']}")
+    recent = _load_jsonl(DIRECTIVES, 5)
+    if recent:
+        lines.append("")
+        lines.append("Recent CEO directives:")
+        for d in recent:
+            lines.append(f"  • [{d.get('lane', '?')}] {d.get('task', '')[:200]}")
+    blockers = [t for t in _load_jsonl(THOUGHTS, 200) if t.get("kind") == "blocker"]
+    if blockers:
+        lines.append("")
+        lines.append("Open blockers (CEO watch):")
+        for b in blockers[-3:]:
+            lines.append(f"  • {b.get('text', '')[:200]}")
+    reply = "\n".join(lines)
+    _append(OUTBOX, {"to": OWNER, "query": "brief", "reply": reply})
+    print(reply)
+    print("OK brief")
+    return 0
+
+
+def direct(lane: str, task: str) -> int:
+    """CEO delegates a directive to a team lane."""
+    setup()
+    known = {r["lane"] for r in LEADERSHIP_ROSTER}
+    lead_names = next((r["leads"] for r in LEADERSHIP_ROSTER if r["lane"] == lane), None)
+    if lane not in known:
+        print(f"FAIL direct unknown lane={lane} (known: {', '.join(sorted(known))})", file=sys.stderr)
+        return 1
+    entry = {
+        "lane": lane,
+        "leads": lead_names,
+        "task": task.strip(),
+        "from": CEO_TITLE,
+        "to": lead_names,
+    }
+    _append(DIRECTIVES, entry)
+    _append(THOUGHTS, {
+        "kind": "direct",
+        "tags": ["ceo", lane],
+        "text": f"[{lane}] {task.strip()}",
+    })
+    print(f"OK direct lane={lane} leads={lead_names}")
+    return 0
+
+
+def decide(question: str) -> int:
+    """CEO decision — resonance + physics + dev process grounding."""
+    setup()
+    ctx = _load_context()
+    hits = _search_thoughts(question)
+    greens = [t for t in _load_jsonl(THOUGHTS, 100) if t.get("kind") == "green"]
+    blockers = [t for t in _load_jsonl(THOUGHTS, 100) if t.get("kind") == "blocker"]
+    lines = _ceo_header(ctx)
+    lines.append("")
+    lines.append(f"Decision request: {question}")
+    lines.append("")
+    if blockers:
+        lines.append("CEO notes open blockers — resolve before expand:")
+        for b in blockers[-2:]:
+            lines.append(f"  • {b.get('text', '')[:180]}")
+        lines.append("")
+    if hits:
+        lines.append("Grounding (resonance):")
+        for h in hits[:5]:
+            lines.append(f"  • [{h.get('kind')}] {h.get('text', '')[:200]}")
+        lines.append("")
+    phys = ctx.get("physics") or {}
+    if phys:
+        lines.append(
+            f"Physics anchor: entropy forward, bo_gain={phys.get('bo_gain', '?')}, "
+            f"time=linear, one canvas."
+        )
+        lines.append("")
+    active = [p for p in (ctx.get("dev_process") or []) if p.get("status") in ("active", "parallel", "ongoing")]
+    if active:
+        lines.append("Active phases (priority stack):")
+        for p in active:
+            lines.append(f"  • Phase {p['phase']}: {p['name']}")
+        lines.append("")
+    if greens:
+        lines.append(f"Last GREEN: {greens[-1].get('text', '')[:180]}")
+        lines.append("")
+    lines.append("CEO verdict: Execute on Field. Offline. Full real. No stubs.")
+    lines.append("Delegate to roster lanes. Report BLOCKER:file:line only.")
+    reply = "\n".join(lines)
+    _append(THOUGHTS, {"kind": "decision", "tags": ["ceo"], "text": f"Q: {question} → Execute on Field."})
+    _append(OUTBOX, {"to": OWNER, "query": question, "reply": reply})
+    print(reply)
+    print("OK decide")
+    return 0
+
+
+def _run_month_gate(month: str) -> tuple[int, str]:
+    script = ROOT / "scripts" / "month_targets.py"
+    if not script.is_file():
+        return 1, "month_targets.py missing"
+    proc = subprocess.run(
+        [sys.executable, str(script), month],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-4:])
+    return proc.returncode, tail
+
+
+def month(month: str = "all") -> int:
+    """CEO month gate — run monthly target matrix."""
+    setup()
+    script = ROOT / "scripts" / "month_targets.py"
+    if month == "all":
+        proc = subprocess.run(
+            [sys.executable, str(script), "all"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        sys.stdout.write(proc.stdout)
+        sys.stderr.write(proc.stderr)
+        verdict = "GREEN ALL" if proc.returncode == 0 else "BLOCKER:month_targets"
+        sync_context(month_verdict=verdict, month_checked="all", updated=_ts())
+        _append(THOUGHTS, {
+            "kind": "green" if proc.returncode == 0 else "blocker",
+            "tags": ["ceo", "month"],
+            "text": f"CEO month gate all → {verdict}",
+        })
+        return proc.returncode
+    rc, tail = _run_month_gate(month)
+    sys.stdout.write(tail + "\n")
+    verdict = f"GREEN month {month}" if rc == 0 else f"BLOCKER month {month}"
+    sync_context(**{f"month_{month}_verdict": verdict})
+    _append(THOUGHTS, {"kind": "green" if rc == 0 else "blocker", "tags": ["ceo", f"month{month}"], "text": verdict})
+    return rc
+
+
+def lead() -> int:
+    """CEO leadership session — install + brief + month all gates."""
+    install_leadership()
+    brief()
+    print("--- CEO month gates ---")
+    rc = month("all")
+    if rc == 0:
+        print("METRIC ceo_lead=1")
+        print("OK lead — CEO leadership session GREEN")
+    else:
+        print("METRIC ceo_lead=0", file=sys.stderr)
+        print("FAIL lead — month gate blocker", file=sys.stderr)
+    return rc
 
 
 def main() -> int:
@@ -402,9 +666,23 @@ def main() -> int:
         return process()
     if cmd == "evaluate":
         return evaluate()
+    if cmd in ("ceo", "install", "install-leadership", "install_leadership"):
+        return install_leadership()
+    if cmd == "brief":
+        return brief()
+    if cmd == "lead":
+        return lead()
+    if cmd == "decide" and len(sys.argv) >= 3:
+        return decide(" ".join(sys.argv[2:]))
+    if cmd == "direct" and len(sys.argv) >= 4:
+        return direct(sys.argv[2], " ".join(sys.argv[3:]))
+    if cmd == "month":
+        m = sys.argv[2] if len(sys.argv) > 2 else "all"
+        return month(m)
     print(
-        "usage: field_superintelligence.py setup|offload <text>|inbox <text>|ask <text>|"
-        "sync <key> <val>|outbox [n]|thoughts [n]|ingest|physics|process|evaluate",
+        "usage: field_superintelligence.py setup|lead|brief|ceo|decide <q>|direct <lane> <task>|"
+        "month [1|2|3|all]|offload <text>|inbox <text>|ask <text>|sync <k> <v>|"
+        "outbox [n]|thoughts [n]|ingest|physics|process|evaluate",
         file=sys.stderr,
     )
     return 1

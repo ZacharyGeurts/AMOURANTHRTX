@@ -39,6 +39,19 @@ for arg in "$@"; do
         super|superintel|field-super)
             exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" "${@:2}"
             ;;
+        ceo|leadership)
+            if [[ $# -lt 2 ]]; then
+                exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" ceo
+            else
+                exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" "${@:2}"
+            fi
+            ;;
+        lead|ceo-session)
+            exec python3 "$PROJECT_ROOT/scripts/field_superintelligence.py" lead "${@:2}"
+            ;;
+        month-targets|month_targets)
+            exec python3 "$PROJECT_ROOT/scripts/month_targets.py" "${@:2}"
+            ;;
         field-storage|field_storage)
             exec python3 "$PROJECT_ROOT/scripts/bench_storage.py" "${@:2}"
             ;;
